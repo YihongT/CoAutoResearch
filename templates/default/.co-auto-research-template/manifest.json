@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "templateVersion": "0.1.0",
+  "templateName": "default",
+  "createdBy": "CoAutoResearch",
+  "managedPaths": [
+    "AGENTS.md",
+    ".gitignore.template",
+    "instructions/",
+    "ui/",
+    "README.md",
+    ".env.example"
+  ],
+  "userOwnedPaths": [
+    "PROJECT.md",
+    "resources/",
+    "workspace/",
+    "research_trajectory/",
+    "manuscript/",
+    "archive/"
+  ]
+}

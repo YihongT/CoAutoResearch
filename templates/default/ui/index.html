@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CoAutoResearch</title>
+    <link rel="stylesheet" href="/styles.css?v=20260616-multi-project" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="rail" aria-label="CoAutoResearch navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">A</div>
+          <div>
+            <div class="brand-title">CoAutoResearch</div>
+            <div class="brand-subtitle">Research agent</div>
+          </div>
+        </div>
+
+        <section class="project-switcher" aria-label="Projects">
+          <div class="rail-section-label">Projects</div>
+          <div class="project-list" id="project-list">
+            <button class="project-switch is-active" type="button" disabled>
+              <span class="project-status-dot idle" aria-hidden="true"></span>
+              <span>
+                <strong>Project</strong>
+                <small>Loading...</small>
+              </span>
+            </button>
+          </div>
+        </section>
+
+        <nav class="rail-nav" aria-label="Views">
+          <div class="rail-section-label">Current project</div>
+          <button class="rail-action is-active" type="button" data-view="chat">Agents</button>
+          <button class="rail-action" type="button" data-view="workspace">Project files</button>
+          <button class="rail-action" type="button" data-view="resources">Resources</button>
+          <button class="rail-action" type="button" data-view="trials">Trials</button>
+          <button class="rail-action" type="button" data-view="reviews">Reviews</button>
+          <button class="rail-action" type="button" data-view="manuscript">Manuscript</button>
+        </nav>
+
+        <div class="rail-footer">
+          <button class="rail-settings-button" id="open-settings" type="button" aria-label="Open settings">
+            <span class="rail-settings-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Zm8.5 3.8c0-.5 0-1-.1-1.4l-2.2-.7a6.8 6.8 0 0 0-.7-1.6l1-2.1a9 9 0 0 0-2-2l-2.1 1a6.8 6.8 0 0 0-1.6-.7L12.1 2h-2.8l-.7 2.2a6.8 6.8 0 0 0-1.6.7l-2.1-1a9 9 0 0 0-2 2l1 2.1a6.8 6.8 0 0 0-.7 1.6l-2.2.7a9.2 9.2 0 0 0 0 2.8l2.2.7c.2.6.4 1.1.7 1.6l-1 2.1a9 9 0 0 0 2 2l2.1-1c.5.3 1 .5 1.6.7l.7 2.2h2.8l.7-2.2c.6-.2 1.1-.4 1.6-.7l2.1 1a9 9 0 0 0 2-2l-1-2.1c.3-.5.5-1 .7-1.6l2.2-.7c.1-.5.1-.9.1-1.4Z"/>
+              </svg>
+            </span>
+            <span>Settings</span>
+          </button>
+          <div class="rail-sync-row">
+            <span class="sync-dot" aria-hidden="true"></span>
+            <span id="sync-state">Reading files</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-stage">
+        <section class="workspace-view chat-view is-active" id="chat-view" aria-label="Codex chat">
+          <div class="chat-frame">
+            <header class="chat-header is-framing">
+              <div>
+                <p class="eyebrow" id="chat-eyebrow">Project framing</p>
+                <h1 id="chat-title"></h1>
+              </div>
+              <div class="header-tools">
+                <div class="session-pill" id="session-pill">No session</div>
+                <button class="secondary-button launch-header-action" id="open-launch-dialog" type="button" hidden>Start with /goal</button>
+                <div class="stage-strip" aria-label="Research workflow" hidden>
+                  <button class="stage-pill is-active" type="button" data-stage="1">
+                    <span>1</span>
+                    <strong>Prepare</strong>
+                  </button>
+                  <button class="stage-pill" type="button" data-stage="2">
+                    <span>2</span>
+                    <strong>Launch</strong>
+                  </button>
+                  <button class="stage-pill" type="button" data-stage="3">
+                    <span>3</span>
+                    <strong>Chat</strong>
+                  </button>
+                </div>
+              </div>
+            </header>
+            <div class="resume-command-bar" id="resume-command-bar" hidden>
+              <span>Resume in Codex CLI</span>
+              <code id="resume-command-text"></code>
+              <button class="copy-command-button" id="copy-resume-command" type="button">Copy</button>
+            </div>
+
+            <section class="cold-start-workspace" id="cold-start-workspace">
+              <section class="stage-panel is-active" data-stage-panel="1">
+                <section class="assistant-card cold-card">
+                  <div class="card-head">
+                    <div>
+                      <p class="eyebrow">Framing</p>
+                      <h2>Where should the research begin?</h2>
+                      <p class="setup-copy">Describe the research topic, problem, scope, and any data or materials the agent should use. A proposal or prior writeup is recommended.</p>
+                    </div>
+                  </div>
+
+                  <section class="framing-thread" id="framing-thread" aria-label="Project framing conversation"></section>
+                  <button class="scroll-bottom-button" id="framing-scroll-bottom" type="button" aria-label="Scroll to latest message" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 6-6m-6 6-6-6"/></svg>
+                  </button>
+
+                  <div class="compact-fields brief-context-fields">
+                    <label class="field">
+                      <span>Target venue / audience</span>
+                      <input id="target-venue" type="text" placeholder="Nature, NeurIPS, medicine, HCI, policy memo, benchmark report, internal review..." autocomplete="off" />
+                    </label>
+                  </div>
+
+                  <div class="file-strip">
+                    <div class="launch-files" id="launch-files"></div>
+                  </div>
+
+                  <div class="material-quick-actions" aria-label="Link or drop resources">
+                    <span class="material-actions-label">Link or drop resources</span>
+                    <button class="material-action-chip" type="button" data-material-type="ongoing_work">
+                      <span class="material-action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4.1c.7 0 1.3.3 1.8.8l1.1 1.2h4A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/></svg>
+                      </span>
+                      <span>Ongoing work</span>
+                    </button>
+                    <button class="material-action-chip" type="button" data-material-type="literature">
+                      <span class="material-action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false"><path d="M6 4.8A2.8 2.8 0 0 1 8.8 2h8.7v20H8.8A2.8 2.8 0 0 1 6 19.2V4.8Zm3 1.7h5.8M9 10h5.8M9 13.5h4"/></svg>
+                      </span>
+                      <span>Papers</span>
+                    </button>
+                    <button class="material-action-chip" type="button" data-material-type="proposals">
+                      <span class="material-action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false"><path d="M7 3h6.2L18 7.8V21H7V3Zm6 0v5h5M9.5 12h6M9.5 15h6M9.5 18h3.2"/></svg>
+                      </span>
+                      <span>Proposal</span>
+                    </button>
+                    <button class="material-action-chip" type="button" data-material-type="data_sources">
+                      <span class="material-action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false"><path d="M5 7c0-2 3.1-3.5 7-3.5S19 5 19 7s-3.1 3.5-7 3.5S5 9 5 7Zm0 0v5c0 2 3.1 3.5 7 3.5s7-1.5 7-3.5V7M5 12v5c0 2 3.1 3.5 7 3.5s7-1.5 7-3.5v-5"/></svg>
+                      </span>
+                      <span>Data</span>
+                    </button>
+                    <button class="material-action-chip" type="button" data-material-type="other">
+                      <span class="material-action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false"><path d="M5 5h6v6H5V5Zm8 0h6v6h-6V5ZM5 13h6v6H5v-6Zm8 0h6v6h-6v-6Z"/></svg>
+                      </span>
+                      <span>Other</span>
+                    </button>
+                  </div>
+
+                  <div id="brief-editor-anchor"></div>
+                  <section class="file-editor-shell brief-editor-shell" id="brief-editor-shell">
+                    <div class="file-tabs" id="cold-file-tabs" aria-label="Cold start files"></div>
+                    <div class="editor-pane">
+                      <div class="editor-head">
+                        <div>
+                          <div class="file-name" id="cold-editor-title">Research brief</div>
+                          <div class="source-path" id="cold-editor-path"></div>
+                        </div>
+                        <div class="autosave-status" id="cold-save-status">Autosaved</div>
+                      </div>
+	                      <div class="editor-workbench is-source" id="cold-editor-workbench">
+	                        <div class="attachment-tray" id="brief-attachment-tray" aria-live="polite"></div>
+	                        <div class="brief-composer-row" aria-label="Codex send settings">
+	                          <textarea id="cold-file-editor" spellcheck="false" aria-label="Research brief" placeholder="Research topic, problem, scope, and data or materials to use..."></textarea>
+	                          <div class="brief-run-controls">
+	                            <label>
+	                              <span>Model</span>
+	                              <select id="composer-model" aria-label="Codex model">
+	                                <option value="gpt-5.5">GPT-5.5</option>
+	                                <option value="gpt-5.4">GPT-5.4</option>
+	                                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+	                                <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
+	                                <option value="gpt-5.3-codex-spark">GPT-5.3 Spark</option>
+	                                <option value="gpt-5.2">GPT-5.2</option>
+	                              </select>
+	                            </label>
+	                            <label>
+	                              <span>Reasoning</span>
+	                              <select id="composer-reasoning" aria-label="Reasoning effort">
+	                                <option value="low">Low</option>
+	                                <option value="medium" selected>Medium</option>
+	                                <option value="high">High</option>
+	                                <option value="xhigh">Extra high</option>
+	                              </select>
+	                            </label>
+	                          </div>
+	                          <button class="primary-button brief-cold-start" id="prepare-cold-start" type="button" aria-label="Send" title="Send">
+	                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>
+	                          </button>
+	                        </div>
+	                        <div class="markdown-preview" id="cold-file-preview"></div>
+	                      </div>
+                      <div class="composer-suggestion-row" id="composer-suggestions" aria-label="Codex quick prompts" hidden>
+                        <span>Try</span>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal pause">Pause /goal</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal resume">Resume /goal</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal">Show goal</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/status">Status</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/ps">Processes</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/diff">Diff</button>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="project-draft-panel framing-project-panel" id="framing-project-panel" hidden>
+                    <div class="project-draft-head">
+                      <div>
+                        <p class="eyebrow">PROJECT.md</p>
+                        <h3>Project framing draft.</h3>
+                        <p>Edit this Markdown directly, or keep chatting to refine the scope before launch.</p>
+                      </div>
+                      <div class="project-draft-actions">
+                        <button class="secondary-button" id="save-project-draft" type="button">Save draft</button>
+                        <button class="primary-button" id="open-launch-dialog-inline" type="button">Start with /goal</button>
+                      </div>
+                    </div>
+                    <div class="project-draft-workbench">
+                      <textarea id="project-draft-editor" spellcheck="false" aria-label="PROJECT.md draft"></textarea>
+                      <div class="markdown-preview project-draft-preview" id="project-draft-preview"></div>
+                    </div>
+                  </section>
+
+                </section>
+              </section>
+
+              <section class="stage-panel session-stage" data-stage-panel="3" hidden>
+                <section class="assistant-card session-empty" aria-label="Session locked">
+                  <div class="session-empty-mark" aria-hidden="true">3</div>
+                  <div>
+                    <p class="eyebrow">Step 3</p>
+                    <h2>Chat opens after launch.</h2>
+                    <p class="setup-copy">Run cold start and launch the first Codex exec session before sending messages or slash commands.</p>
+                  </div>
+                  <button class="secondary-button" type="button" data-stage-link="2">Go to launch</button>
+                </section>
+
+                <section class="assistant-card thread" id="chat-thread" aria-label="Conversation">
+                  <div id="dynamic-messages"></div>
+                </section>
+
+                <section class="control-dock" aria-label="Codex controls">
+                  <details class="control-panel">
+                    <summary>
+                      <span>Slash commands</span>
+                      <span>sent to this session</span>
+                    </summary>
+
+                    <div class="command-area">
+                      <div class="command-row" aria-label="Slash commands">
+                        <button class="command-chip" type="button" data-command="/status">/status</button>
+                        <button class="command-chip" type="button" data-command="/ps">/ps</button>
+                        <button class="command-chip" type="button" data-command="/goal">/goal</button>
+                        <button class="command-chip" type="button" data-command="/goal pause">/goal pause</button>
+                        <button class="command-chip" type="button" data-command="/goal resume">/goal resume</button>
+                        <button class="command-chip" type="button" data-command="/goal clear">/goal clear</button>
+                        <button class="command-chip" type="button" data-command="/permissions">/permissions</button>
+                        <button class="command-chip" type="button" data-command="/model">/model</button>
+                        <button class="command-chip" type="button" data-command="/plan">/plan</button>
+                        <button class="command-chip" type="button" data-command="/diff">/diff</button>
+                      </div>
+                      <form id="goal-form" class="goal-form">
+                        <input name="goal" type="text" placeholder="Set a session goal..." autocomplete="off" />
+                        <button class="secondary-button" type="submit">Set goal</button>
+                      </form>
+                    </div>
+                  </details>
+
+                  <details class="session-panel" open>
+                    <summary>
+                      <span>Codex session</span>
+                      <span id="session-title">Idle</span>
+                    </summary>
+                    <div class="session-meta">
+                      <span id="session-settings">No settings applied yet.</span>
+                      <button class="text-button" id="stop-session" type="button">Stop</button>
+                    </div>
+                    <div class="source-path" id="session-command">No Codex exec run yet.</div>
+                    <details class="raw-log-panel">
+                      <summary>Raw JSON logs</summary>
+                      <pre class="session-log" id="session-log">Cold start creates the first real Codex exec session.</pre>
+                    </details>
+                  </details>
+                </section>
+
+                <form id="chat-form" class="composer assistant-card" aria-label="Send message to Codex session">
+                  <div class="attachment-tray" id="chat-attachment-tray" aria-live="polite"></div>
+                  <textarea name="message" rows="1" placeholder="Message the current Codex session..." disabled></textarea>
+                  <div class="composer-actions">
+                    <button class="secondary-button" id="continue-research" type="button" disabled>Continue</button>
+                    <button class="send-button" type="submit" aria-label="Send" disabled>Send</button>
+                  </div>
+                </form>
+              </section>
+            </section>
+          </div>
+        </section>
+
+        <section class="workspace-view material-view" id="material-view" aria-label="Project materials">
+          <header class="material-header">
+            <div>
+              <p class="eyebrow">Repository</p>
+              <h1 id="material-title">Resources</h1>
+            </div>
+          </header>
+          <div id="context-content" class="context-content"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="local-browser" id="resource-browser" aria-labelledby="resource-browser-title">
+      <section class="local-browser-shell">
+        <header class="local-browser-head">
+          <div>
+            <p class="eyebrow">Local browser</p>
+            <h2 id="resource-browser-title">Choose files or folders.</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-browser-close aria-label="Close local browser" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <section class="browser-resource-tools" aria-label="Attachment options">
+          <div>
+            <h3>Attach material</h3>
+            <p>Choose what this material is. Folders are symlinked when possible; files are copied into this repo.</p>
+          </div>
+          <div class="selected-material-type" id="selected-material-type">Material type: Ongoing work</div>
+          <div class="resource-selections" id="resource-selections" aria-live="polite">
+            <div class="resource-empty">No material attached yet.</div>
+          </div>
+        </section>
+        <div class="browser-roots" id="browser-roots" aria-label="Quick locations"></div>
+        <div class="browser-pathbar">
+          <button class="mini-button" id="browser-up" type="button">Up</button>
+          <code id="browser-current-path"></code>
+          <button class="secondary-button small-button" id="browser-add-current" type="button">Use this folder</button>
+        </div>
+        <label class="browser-search-field" aria-label="Search current folder">
+          <span aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z"/></svg>
+          </span>
+          <input id="browser-search" type="search" placeholder="Search this folder..." autocomplete="off" />
+        </label>
+        <div class="browser-note" id="browser-note">Choose a folder or file. Folders are symlinked when possible; files are copied into this repo.</div>
+        <div class="browser-entries" id="browser-entries"></div>
+      </section>
+    </dialog>
+
+    <dialog class="material-type-dialog" id="material-type-dialog" aria-labelledby="material-type-title">
+      <section class="material-type-shell">
+        <header>
+          <p class="eyebrow">Attach material</p>
+          <h2 id="material-type-title">What are you attaching?</h2>
+        </header>
+        <div class="material-type-grid" role="radiogroup" aria-label="Material type">
+          <button type="button" data-material-type="ongoing_work">
+            <strong>Ongoing work</strong>
+            <span>Repos, notebooks, scripts, old project folders.</span>
+          </button>
+          <button type="button" data-material-type="literature">
+            <strong>Papers</strong>
+            <span>PDFs, BibTeX, literature notes, reading folders.</span>
+          </button>
+          <button type="button" data-material-type="proposals">
+            <strong>Proposal</strong>
+            <span>Grant text, aims, prior project writeups.</span>
+          </button>
+          <button type="button" data-material-type="data_sources">
+            <strong>Data</strong>
+            <span>Datasets, exports, tables, benchmark inputs.</span>
+          </button>
+          <button type="button" data-material-type="other">
+            <strong>Other</strong>
+            <span>Mixed or miscellaneous material the agent should inspect.</span>
+          </button>
+        </div>
+        <button class="text-button" type="button" data-material-type-close>Cancel</button>
+      </section>
+    </dialog>
+
+    <dialog class="launch-dialog" id="launch-dialog" aria-labelledby="launch-dialog-title">
+      <section class="launch-dialog-shell">
+        <header class="launch-dialog-head">
+          <div>
+            <p class="eyebrow">Autoresearch loop</p>
+            <h2 id="launch-dialog-title">Start with /goal.</h2>
+            <p>Codex will continue this same session until the reviewer gate passes or you stop it.</p>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-launch-close aria-label="Close launch dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <form id="session-settings-form" class="settings-grid launch-settings-grid">
+          <label class="field">
+            <span>Model</span>
+            <select name="model">
+              <option value="gpt-5.5">GPT-5.5</option>
+              <option value="gpt-5.4">GPT-5.4</option>
+              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+              <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
+              <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
+              <option value="gpt-5.2">GPT-5.2</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Reasoning</span>
+            <select name="reasoningEffort">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+              <option value="xhigh">Extra high</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Permissions</span>
+            <select name="permissionPreset">
+              <option value="default">Default permissions</option>
+              <option value="auto-review">Auto-review</option>
+              <option value="full-access">Full access</option>
+            </select>
+          </label>
+          <label class="toggle-field">
+            <input name="webSearch" type="checkbox" />
+            <span>Live web search</span>
+          </label>
+          <label class="field wide">
+            <span>Advanced config</span>
+            <textarea name="extraConfig" rows="2" placeholder='model_verbosity="low"'></textarea>
+          </label>
+        </form>
+        <footer class="launch-dialog-actions">
+          <button class="secondary-button" type="button" data-launch-close>Cancel</button>
+          <button class="primary-button" id="launch-autoresearch" type="button">Start /goal</button>
+        </footer>
+      </section>
+    </dialog>
+
+    <dialog class="settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
+      <section class="settings-shell">
+        <aside class="settings-sidebar" aria-label="Settings sections">
+          <button class="settings-close" type="button" data-settings-close aria-label="Close settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+          <nav class="settings-nav">
+            <button class="settings-nav-button is-active" type="button" data-settings-tab="general">
+              <span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Zm8.5 3.8c0-.5 0-1-.1-1.4l-2.2-.7a6.8 6.8 0 0 0-.7-1.6l1-2.1a9 9 0 0 0-2-2l-2.1 1a6.8 6.8 0 0 0-1.6-.7L12.1 2h-2.8l-.7 2.2a6.8 6.8 0 0 0-1.6.7l-2.1-1a9 9 0 0 0-2 2l1 2.1a6.8 6.8 0 0 0-.7 1.6l-2.2.7a9.2 9.2 0 0 0 0 2.8l2.2.7c.2.6.4 1.1.7 1.6l-1 2.1a9 9 0 0 0 2 2l2.1-1c.5.3 1 .5 1.6.7l.7 2.2h2.8l.7-2.2c.6-.2 1.1-.4 1.6-.7l2.1 1a9 9 0 0 0 2-2l-1-2.1c.3-.5.5-1 .7-1.6l2.2-.7c.1-.5.1-.9.1-1.4Z"/></svg></span>
+              <strong>General</strong>
+            </button>
+            <button class="settings-nav-button" type="button" data-settings-tab="api">
+              <span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 12h8M7 7h.01M11 7h.01M15 7h.01M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z"/></svg></span>
+              <strong>Tokens & keys</strong>
+            </button>
+            <button class="settings-nav-button" type="button" data-settings-tab="codex">
+              <span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8-4 4 4 4m10-8 4 4-4 4M14 4l-4 16"/></svg></span>
+              <strong>Codex</strong>
+            </button>
+          </nav>
+        </aside>
+        <form class="settings-content" id="settings-form">
+          <header class="settings-titlebar">
+            <div>
+              <h2 id="settings-title">Settings</h2>
+              <p>Local configuration for CoAutoResearch and the Codex session runner.</p>
+            </div>
+            <button class="settings-save-button" type="submit">Save</button>
+          </header>
+
+          <section class="settings-panel is-active" data-settings-panel="general">
+            <div class="settings-row">
+              <div>
+                <h3>Runtime storage</h3>
+                <p>Settings and tokens are stored locally under <code>ui/.runtime/settings.json</code>, which is ignored by git.</p>
+              </div>
+              <span class="settings-value">Local only</span>
+            </div>
+            <div class="settings-row">
+              <div>
+                <h3>Secrets scope</h3>
+                <p>Saved keys are injected only into Codex subprocesses launched from this UI.</p>
+              </div>
+              <span class="settings-value">Codex exec</span>
+            </div>
+            <div class="settings-row">
+              <div>
+                <h3>Session continuity</h3>
+                <p>Chat, slash commands, raw JSON logs, and transcript entries continue on the same resumed session after launch.</p>
+              </div>
+              <span class="settings-value">Resume enabled</span>
+            </div>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="api">
+            <div class="settings-note">Add local tokens that Codex should pass to research scripts. Leave a field blank to keep the saved value.</div>
+            <div class="settings-secret-grid" id="settings-secret-grid"></div>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="codex">
+            <div class="settings-doc-callout">
+              <div>
+                <h3>Model and tool defaults</h3>
+                <p>Defaults used when this UI starts or resumes Codex exec sessions.</p>
+              </div>
+              <div class="settings-doc-links">
+                <a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">Models</a>
+                <a href="https://developers.openai.com/api/docs/guides/latest-model" target="_blank" rel="noreferrer">Latest model guide</a>
+              </div>
+            </div>
+            <div class="settings-grid modal-settings-grid">
+              <label class="field">
+                <span>Default model</span>
+                <select name="settingsModel">
+                  <option value="gpt-5.5">GPT-5.5</option>
+                  <option value="gpt-5.4">GPT-5.4</option>
+                  <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                  <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
+                  <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
+                  <option value="gpt-5.2">GPT-5.2</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Reasoning</span>
+                <select name="settingsReasoningEffort">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">Extra high</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Permissions</span>
+                <select name="settingsPermissionPreset">
+                  <option value="default">Default permissions</option>
+                  <option value="auto-review">Auto-review</option>
+                  <option value="full-access">Full access</option>
+                </select>
+              </label>
+              <label class="toggle-field">
+                <input name="settingsWebSearch" type="checkbox" />
+                <span>Live web search</span>
+              </label>
+              <label class="field wide">
+                <span>Advanced config</span>
+                <textarea name="settingsExtraConfig" rows="4" placeholder='model_verbosity="low"'></textarea>
+              </label>
+            </div>
+          </section>
+        </form>
+      </section>
+    </dialog>
+
+    <dialog class="file-viewer-dialog" id="file-viewer-dialog" aria-labelledby="file-viewer-title">
+      <section class="file-viewer-shell">
+        <header class="file-viewer-head">
+          <div>
+            <p class="eyebrow">File preview</p>
+            <h2 id="file-viewer-title">File</h2>
+          </div>
+          <button class="icon-button" type="button" data-file-viewer-close aria-label="Close fullscreen preview">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="file-viewer-body" id="file-viewer-body"></div>
+      </section>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="/app.js?v=20260616-multi-project"></script>
+  </body>
+</html>

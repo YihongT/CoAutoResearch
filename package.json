@@ -1,0 +1,38 @@
+{
+  "name": "co-auto-research",
+  "version": "0.1.0",
+  "description": "Human-centered AI research scaffolding with traceable evidence and steerable progress.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "co-auto-research": "./bin/auto-research.js",
+    "auto-research": "./bin/auto-research.js"
+  },
+  "files": [
+    ".npmignore",
+    "bin/",
+    "templates/",
+    "docs/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node scripts/verify-template.js && node scripts/smoke-test.js",
+    "verify": "node scripts/verify-template.js",
+    "smoke": "node scripts/smoke-test.js",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "keywords": [
+    "research",
+    "human-centered",
+    "codex",
+    "scaffold",
+    "template",
+    "agent"
+  ]
+}

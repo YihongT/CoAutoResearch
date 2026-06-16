@@ -1,0 +1,55 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+secrets/*
+!secrets/README.md
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local UI runtime state
+ui/.runtime/
+
+# Runtime, caches, and generated outputs
+.cache/
+tmp/
+temp/
+workspace/tmp/
+workspace/logs/
+workspace/cache/
+workspace/outputs/
+workspace/results/
+workspace/ckpts/
+workspace/models/
+*.tmp
+
+# Large local research artifacts should be managed intentionally.
+# Keep README/.gitkeep files tracked in resource folders.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+*.parquet
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+!resources/**/README.md
+!resources/**/.gitkeep
+!manuscript/**/.gitkeep
+!workspace/**/README.md
+!workspace/**/.gitkeep

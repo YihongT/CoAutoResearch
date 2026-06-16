@@ -1,0 +1,61 @@
+# Dependencies and package artifacts
+node_modules/
+*.tgz
+*.tar.gz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local secrets
+.env
+.env.*
+!.env.example
+secrets/*
+!secrets/README.md
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Runtime, caches, and build outputs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+coverage/
+dist/
+build/
+_site/
+docs/_site/
+.sass-cache/
+.jekyll-cache/
+ui/.runtime/
+
+# Generated local projects and manual test sandboxes
+tmp/
+temp/
+playground/
+sandbox/
+scratch/
+local-projects/
+generated-projects/
+test/
+test-project*/
+demo-project*/
+example-project*/
+my-project/
+auto-research-test*/
+
+# Large local research materials accidentally created while testing
+*.zip
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+*.parquet
+*.ckpt
+*.pt
+*.pth
+*.safetensors

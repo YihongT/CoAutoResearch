@@ -1,0 +1,100 @@
+# Conversion Protocol
+
+## Purpose
+
+Use this protocol to convert raw materials into the canonical project state.
+
+Raw materials may include old repositories, ongoing work, proposals, notes, literature, datasets, seed papers, or a short user brief.
+
+Conversion does not mean trusting old work. It means inspecting it, extracting what is useful, and recording what is current, tentative, deprecated, or unknown.
+
+---
+
+## Inputs
+
+Possible inputs:
+
+- `resources/user_input/INITIAL_BRIEF.md`
+- `resources/user_input/NOTES.md`
+- `resources/ongoing_work/`
+- `resources/proposals/`
+- `resources/literature/`
+- `resources/data_sources/`
+- `resources/target_venue/`
+
+These are raw materials. They are not current truth until reflected in `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report.
+
+---
+
+## Outputs
+
+Conversion should produce or update:
+
+- `PROJECT.md`
+- `research_trajectory/STATE.md`
+- `research_trajectory/CURRENT_FINDINGS.md`
+- `research_trajectory/trials/000000_project_conversion/PLAN.md`
+- `research_trajectory/trials/000000_project_conversion/REVIEW.md`
+- `research_trajectory/trials/000000_project_conversion/REPORT.md`
+- `manuscript/BLUEPRINT.md`, if enough information exists
+
+---
+
+## Conversion Trial
+
+Conversion itself is a trial:
+
+`research_trajectory/trials/000000_project_conversion/`
+
+The conversion `REPORT.md` should explain:
+
+- what raw materials were inspected;
+- what the prior or proposed project was trying to do;
+- what should be reused;
+- what should not be trusted;
+- what should be migrated into `workspace/`;
+- how `PROJECT.md` was derived;
+- how `STATE.md` was initialized;
+- whether any findings are already active, tentative, superseded, or rejected;
+- what the next trial should be.
+
+---
+
+## Handling Existing Repositories
+
+Do not treat an old repo as automatically current.
+
+Recommended pattern:
+
+1. keep the original snapshot under `resources/ongoing_work/`;
+2. inspect it as raw input;
+3. migrate only useful executable pieces to `workspace/`;
+4. record migration decisions in the conversion trial;
+5. record current method status in `STATE.md`;
+6. record accepted/tentative/rejected findings in `CURRENT_FINDINGS.md` only when evidence supports them.
+
+---
+
+## User Intent
+
+If the user provides a short natural-language input, preserve it in:
+
+`resources/user_input/INITIAL_BRIEF.md`
+
+Then convert it into a structured project definition in:
+
+`PROJECT.md`
+
+Do not overwrite raw user input unless explicitly asked.
+
+---
+
+## Consistency Requirements
+
+After conversion, check that:
+
+- `PROJECT.md` contains the canonical goal, scope, target venue/audience, and contribution expectation;
+- `STATE.md` contains the current action state, not raw findings;
+- `CURRENT_FINDINGS.md` contains current knowledge state, not raw logs;
+- trial artifacts or workspace paths are cited from `REPORT.md` when used as evidence;
+- manuscript files only contain manuscript-facing synthesis, not raw exploratory outputs.

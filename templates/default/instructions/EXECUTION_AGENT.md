@@ -1,0 +1,443 @@
+# Execution Agent Instructions
+
+## Purpose
+
+This file defines how to operate the scaffold during iterative research.
+
+The execution agent plans, executes, reviews, records, and updates state. It should not directly write a final paper by default. It may update the manuscript blueprint and figure/table specifications when manuscript-facing implications change.
+
+Keep operating records concise but complete enough for another agent or human to resume the project.
+
+---
+
+## Required Reading
+
+Before substantive work, read:
+
+1. `AGENTS.md`
+2. `PROJECT.md`
+3. `research_trajectory/STATE.md`
+4. `research_trajectory/CURRENT_FINDINGS.md`
+5. this file
+
+If starting from an empty or newly initialized project, read `instructions/COLD_START.md`.
+
+If converting prior work, raw user input, old repos, previous experiments, or proposals, read `instructions/CONVERSION.md`.
+
+If updating manuscript-facing files, read `instructions/MANUSCRIPT.md`.
+
+---
+
+## Folder Operation Contract
+
+Use this contract whenever deciding where to read, write, move, or summarize information.
+
+| Path | Role | Read when | Write/update when | Must not contain |
+|---|---|---|---|---|
+| `PROJECT.md` | Canonical research proposal and target definition | before substantive work | cold start, conversion, or true project-definition change | trial logs, raw outputs, temporary thoughts |
+| `resources/` | Raw inputs and external materials | when grounding, converting, acquiring resources, or checking provenance | when adding user brief, prior work, literature, seed papers, data-source notes | accepted current truth unless promoted elsewhere |
+| `workspace/` | Live executable workspace | when executing, debugging, analyzing, generating outputs | when adding or modifying code, notebooks, configs, working data, generated outputs | authoritative claims without trial/report traceability |
+| `research_trajectory/STATE.md` | Current control state | before every trial and after human intervention | when objective, plan, method status, constraints, blockers, active resources, or next step changes | raw logs, full artifacts, literature dumps |
+| `research_trajectory/CURRENT_FINDINGS.md` | Latest global synthesis of findings/results/claims/evidence | before interpreting results or updating manuscript | when accepted/tentative/rejected findings, active claims, limitations, or evidence map changes | raw outputs, command logs, full notebooks |
+| `research_trajectory/trials/` | Audit trail of planned work packages | before continuing, reviewing, or synthesizing recent work | for every substantive planned work package | global-only summaries without a concrete work package |
+| `research_trajectory/notes/NOTES.md` | Distilled high-value notes | when looking for durable insights/resources/warnings | sparingly, only for valuable cross-trial or durable notes | routine trial summaries or execution logs |
+| `research_trajectory/human_interventions/` | Formal human control inputs | before major steps and when resolving contradictions | only when a user message changes direction, constraints, methods, claims, resources, venue, or priority | progress questions, ordinary pauses, log requests |
+| `manuscript/` | Manuscript blueprint and deliverable-facing materials | when story, claims, figures, tables, or venue fit matter | when manuscript-facing structure/evidence/figures/tables/reviews change | exploratory raw outputs not promoted as candidate deliverables |
+| `archive/` | Deprecated or misleading materials retained for history | rarely, when checking old context | only after marking what superseded the material | active current files |
+
+General rule: raw material starts in `resources/` or `workspace/`; planned work is recorded in `trials/`; current control state is in `STATE.md`; current knowledge state is in `CURRENT_FINDINGS.md`; manuscript-facing synthesis is in `manuscript/`.
+
+---
+
+## State vs Findings Boundary
+
+Use this distinction strictly:
+
+### `STATE.md` answers: what should we do now?
+
+It contains:
+
+- current objective;
+- active plan;
+- active trial;
+- current method status and rationale;
+- deprecated or forbidden methods/assumptions;
+- active resources;
+- blockers;
+- current effective consequences of formal human interventions;
+- next step.
+
+### `CURRENT_FINDINGS.md` answers: what do we currently believe or know?
+
+It contains:
+
+- active findings/results;
+- tentative findings;
+- negative or failed findings;
+- superseded or rejected findings;
+- active claims and evidence map;
+- limitations and caveats;
+- open questions.
+
+Do not duplicate full method implementation in `CURRENT_FINDINGS.md`. Method implementation lives in `workspace/`; method status and rationale live in `STATE.md`.
+
+---
+
+## Workspace-to-Trial Artifact Rule
+
+`workspace/` is the live working area, not the canonical record.
+
+If a file in `workspace/` is used as evidence for a trial, then the trial `REPORT.md` must cite its path and explain how it was produced.
+
+If the file is stable and small enough, copy it into:
+
+`research_trajectory/trials/<trial_id>/artifacts/`
+
+If the file is large, generated, external, or should remain in `workspace/`, keep it there but record in `REPORT.md`:
+
+- exact path;
+- command or notebook used;
+- config;
+- data source;
+- relevant commit hash if available;
+- whether it is accepted, tentative, rejected, or only exploratory.
+
+A result is not accepted merely because it exists in `workspace/`.
+
+---
+
+## Trial Contract
+
+All substantive work must be organized as a trial under:
+
+`research_trajectory/trials/<trial_id>/`
+
+Example:
+
+`research_trajectory/trials/000001_collect_seed_papers/`
+
+Each trial contains:
+
+- `PLAN.md`: written before execution;
+- `REVIEW.md`: cumulative review record for this trial;
+- `REPORT.md`: written after execution;
+- `artifacts/`: raw outputs, logs, figures, tables, downloaded files, scripts, or other files produced or collected during the trial.
+
+A trial is a planned research work package. It may include multiple actions if they serve one coherent objective, are planned before execution, and remain interpretable afterward.
+
+A trial is not required for trivial edits, ordinary clarification, progress reporting, or temporary pauses.
+
+Do not write trial plans in the root directory. Do not write trial reports only in chat.
+
+---
+
+## Standard Run Loop
+
+1. Read the required files.
+2. Check `research_trajectory/human_interventions/pending/`.
+3. If a pending item is a formal human intervention, follow `instructions/INTERVENTION_PROTOCOL.md` before continuing.
+4. Identify the next coherent objective.
+5. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
+6. Write `PLAN.md` before execution.
+7. Review the plan in `REVIEW.md` if the plan is non-trivial, direction-setting, method-heavy, resource-heavy, compute-heavy, or uncertain.
+8. Revise `PLAN.md` if the review requires it.
+9. Execute mainly in `workspace/` or another clearly justified location.
+10. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
+11. Write `REPORT.md` after execution.
+12. Add post-execution review to `REVIEW.md` when needed.
+13. Update only global files that genuinely changed:
+    - `research_trajectory/STATE.md`
+    - `research_trajectory/CURRENT_FINDINGS.md`
+    - `research_trajectory/notes/NOTES.md`
+    - `manuscript/BLUEPRINT.md`
+    - `manuscript/figures/FIGURE_SPECS.md`
+14. Commit changes to git.
+15. Push if a remote exists and progress is meaningful.
+
+---
+
+## Trial File Templates
+
+### `PLAN.md` should include
+
+- objective;
+- rationale;
+- required reading/resources;
+- planned actions;
+- expected outputs;
+- compute/resource needs;
+- risks and checks;
+- success criteria;
+- what global files may need updates.
+
+### `REVIEW.md` should include
+
+Use one cumulative review file per trial by default. It may contain:
+
+- pre-execution plan review;
+- mid-execution review;
+- method review;
+- resource review;
+- result review;
+- process review;
+- post-execution review.
+
+Default review decisions:
+
+- `approved`;
+- `revise_plan`;
+- `continue_with_caution`;
+- `blocked`;
+- `completed`;
+- `needs_follow_up_trial`.
+
+### `REPORT.md` should include
+
+- what was actually done;
+- deviations from plan;
+- commands, scripts, notebooks, or procedures used;
+- outputs and artifact paths;
+- result interpretation;
+- whether findings should update `CURRENT_FINDINGS.md`;
+- whether method status should update `STATE.md`;
+- candidate notes, if any;
+- recommended next step.
+
+---
+
+## Review Policy
+
+Review outputs for trial-level work belong in the relevant trial's `REVIEW.md`.
+
+Review outputs for manuscript-facing deliverables belong in:
+
+`manuscript/reviews/`
+
+Process review is also a trial. If recent progress appears stuck, create a trial such as:
+
+`research_trajectory/trials/000024_process_review/`
+
+and write the process review in that trial's `REVIEW.md`.
+
+Do not create `research_trajectory/process_reviews/`.
+Do not create `research_trajectory/reviewers/`.
+Reviewer instructions live under `instructions/reviewers/`.
+
+---
+
+## Autoresearch Goal Gate
+
+When running under the UI autoresearch `/goal` loop, one completed trial is not the same as completing the goal.
+
+Maintain a section inside `research_trajectory/STATE.md`:
+
+`## Autoresearch Goal Gate`
+
+Use this section to decide whether the autoresearch loop should continue or stop. It must include:
+
+- `Status: pass`, `continue`, `blocked`, or `needs_human`;
+- reviewer gate lines for Plan, Process, Evidence, Venue fit, Manuscript, and Figure/table;
+- the next action when any gate is not `pass`.
+
+The autoresearch goal is complete only when `Status: pass` and every required reviewer gate is `pass`.
+
+If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a human decision is genuinely required, mark `Status: needs_human` and state the exact question.
+
+---
+
+## Reviewer Spawning
+
+If the current task requires a specialized review perspective not covered by existing reviewers, follow:
+
+`instructions/reviewers/REVIEWER_SPAWNING.md`
+
+Spawned reviewers are instruction files, not review outputs. Their review results still go into the relevant trial `REVIEW.md` or `manuscript/reviews/`.
+
+Create a new reviewer only when it addresses a clear quality risk.
+
+---
+
+## Notes Policy
+
+`research_trajectory/notes/NOTES.md` is not a trial log.
+
+Create or update a note only when a trial, resource review, method reflection, manuscript review, or process review produces a durable insight likely to help future research decisions.
+
+Valid notes include:
+
+- useful research insight;
+- promising hypothesis;
+- discovered failure mode;
+- high-value resource;
+- important decision;
+- methodological warning;
+- recurring pattern across trials;
+- possible pivot direction.
+
+Invalid notes include:
+
+- routine execution details;
+- repeated summaries of trial reports;
+- low-value observations;
+- logs that belong in artifacts;
+- notes written only because a trial happened.
+
+Each note should cite its source, such as a trial ID, resource, review, or formal human intervention.
+
+---
+
+## Resource Folder Routing
+
+Use `resources/` for raw or external inputs. Do not treat resources as current truth until promoted into `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report.
+
+- `resources/user_input/INITIAL_BRIEF.md`: raw user one-line or short initial brief. Preserve it; do not overwrite unless asked.
+- `resources/user_input/NOTES.md`: additional raw user notes.
+- `resources/ongoing_work/`: old repos, partial work, previous experiments, partial drafts, existing data. Treat as read-only input until migrated.
+- `resources/proposals/`: old or external proposals and research briefs.
+- `resources/literature/`: papers, literature notes, deep research reports.
+- `resources/data_sources/`: dataset links, access notes, licensing/provenance notes.
+- `resources/target_venue/SEED_PAPERS.md`: selected seed papers from the target venue.
+- `resources/target_venue/papers/`: local copies of seed papers when legally and practically available.
+- `resources/target_venue/STYLE_NOTES.md`: venue writing and structure notes.
+- `resources/target_venue/FIGURE_TABLE_NOTES.md`: venue figure/table style notes.
+
+If a project has a target venue but no seed papers, create an early trial to collect 3-5 recent, relevant seed papers from that venue. Use them for style, structure, evidence standard, and figure/table design, not for copying research content.
+
+---
+
+## Resource Acquisition Policy
+
+The agent may search for or download relevant resources when useful for the research objective, including:
+
+- datasets;
+- model checkpoints;
+- benchmark definitions;
+- papers;
+- code repositories;
+- documentation;
+- target-venue seed papers.
+
+Before downloading large or restricted resources, check license, access constraints, disk usage, and whether the resource is necessary.
+
+Record provenance in the relevant trial `REPORT.md`:
+
+- source URL or citation;
+- access date if relevant;
+- license or usage constraints if known;
+- local path;
+- reason for inclusion;
+- whether it is raw input, executable dependency, evidence, or style reference.
+
+---
+
+## Compute and Resource Policy
+
+Before compute-heavy jobs, check available resources when possible:
+
+- CPU;
+- GPU;
+- memory;
+- disk space;
+- running jobs from other users;
+- scheduler or queue status;
+- remote or cluster constraints.
+
+Use available resources efficiently to maximize research progress, but do not disrupt other users or unrelated jobs.
+
+Rules:
+
+- do not start heavy jobs blindly;
+- run a small test first when possible;
+- use idle GPUs when safe and beneficial;
+- do not cause other users' jobs to be killed, preempted, or starved;
+- record important compute assumptions and resource usage in the trial `REPORT.md`.
+
+---
+
+## Manuscript Routing
+
+Update manuscript files only when manuscript-facing story, claims, evidence, section structure, figure/table plan, venue fit, or deliverable review changes.
+
+Do not put exploratory raw outputs directly into `manuscript/`.
+
+Result plots generated by code should originate from trial artifacts and may be promoted into `manuscript/figures/` only when they are candidate-final.
+
+For non-result conceptual figures, do not draw or generate the figure by default. Write a detailed prompt-like specification in:
+
+`manuscript/figures/FIGURE_SPECS.md`
+
+---
+
+## Human Input Handling
+
+Classify every user message during execution:
+
+### Ordinary interaction
+
+Examples:
+
+- progress check;
+- clarification;
+- temporary pause;
+- request for logs;
+- request for current status;
+- request for explanation.
+
+Action:
+
+- answer directly;
+- do not create a human intervention file;
+- do not update `STATE.md` unless the answer reveals a real state inconsistency.
+
+### Formal human intervention
+
+Examples:
+
+- plan correction;
+- method correction;
+- claim correction;
+- resource correction;
+- target venue correction;
+- major pivot;
+- new constraint.
+
+Action:
+
+- follow `instructions/INTERVENTION_PROTOCOL.md`;
+- create a human intervention file;
+- update `STATE.md`;
+- update affected trial, findings, or manuscript files.
+
+---
+
+## Archive Policy
+
+Do not archive casually.
+
+Archive only when a file is misleading, deprecated, or should no longer appear active.
+
+Before archiving, update `STATE.md` or `CURRENT_FINDINGS.md` to explain what superseded the material.
+
+Prefer marking something superseded before moving it.
+
+Do not archive raw trial records unless explicitly instructed.
+
+---
+
+## Git Policy
+
+Use git as the local audit trail.
+
+Commit after meaningful iterations, state updates, trial completion, manuscript blueprint updates, or formal human intervention handling.
+
+Suggested commit prefixes:
+
+- `trial:`
+- `state:`
+- `findings:`
+- `manuscript:`
+- `resources:`
+- `intervention:`
+- `ui:`
+
+Push if a remote exists and progress is meaningful.

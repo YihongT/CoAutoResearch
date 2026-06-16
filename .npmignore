@@ -1,0 +1,10 @@
+node_modules/
+tmp/
+dist/
+*.tgz
+.env
+.env.*
+.DS_Store
+__pycache__/
+*.py[cod]
+.github/
