@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 from contextlib import contextmanager
+import errno
 import hashlib
 import json
 import mimetypes
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,7 +27,9 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 UI_DIR = Path(__file__).resolve().parent
 DEFAULT_PROJECT_ROOT = UI_DIR.parent
+PACKAGE_TEMPLATE_ROOT = Path(os.path.expanduser(os.environ.get("COAUTO_TEMPLATE_ROOT", ""))).resolve() if os.environ.get("COAUTO_TEMPLATE_ROOT") else None
 AUTORESEARCH_MAX_ITERATIONS = 50
+PORT_FALLBACK_ATTEMPTS = 50
 MAX_TEXT_BYTES = 500_000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 TEXT_PREVIEW_SUFFIXES = {
@@ -108,6 +112,18 @@ def read_project_metadata(root: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def write_project_metadata(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    metadata_dir = root / ".co-auto-research"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = metadata_dir / "project.json"
+    clean_payload = dict(payload)
+    clean_payload["schemaVersion"] = int(clean_payload.get("schemaVersion") or 1)
+    if not clean_payload.get("projectId"):
+        clean_payload["projectId"] = project_id_for_path(root)
+    metadata_path.write_text(f"{json.dumps(clean_payload, indent=2)}\n", encoding="utf-8")
+    return clean_payload
+
+
 def read_template_version(root: Path) -> str:
     manifest_path = root / ".co-auto-research-template" / "manifest.json"
     if not manifest_path.exists():
@@ -117,6 +133,121 @@ def read_template_version(root: Path) -> str:
     except (OSError, json.JSONDecodeError):
         return ""
     return str(payload.get("templateVersion") or "")
+
+
+WINDOWS_RESERVED_FILENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+
+def project_directory_slug(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("Project name is required.")
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip(" ._-")[:80] or "project"
+    if slug.upper() in WINDOWS_RESERVED_FILENAMES:
+        slug = f"{slug}_project"
+    return slug
+
+
+def template_copy_ignore(template_root: Path):
+    source = template_root.resolve()
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        ignored: set[str] = set()
+        directory_path = Path(directory).resolve()
+        try:
+            relative_parts = directory_path.relative_to(source).parts
+        except ValueError:
+            relative_parts = ()
+        for name in names:
+            if name in {".DS_Store", "__pycache__", ".git", "node_modules"}:
+                ignored.add(name)
+            if not relative_parts and name == ".co-auto-research":
+                ignored.add(name)
+            if relative_parts == ("ui",) and name == ".runtime":
+                ignored.add(name)
+        return ignored
+
+    return ignore
+
+
+def finalize_created_project(target: Path, display_name: str, template_root: Path) -> None:
+    template_gitignore = target / ".gitignore.template"
+    gitignore = target / ".gitignore"
+    if template_gitignore.exists():
+        if not gitignore.exists():
+            template_gitignore.rename(gitignore)
+        else:
+            template_gitignore.unlink()
+
+    manifest_path = template_root / ".co-auto-research-template" / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+
+    metadata_dir = target / ".co-auto-research"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = metadata_dir / "project.json"
+    if not metadata_path.exists():
+        payload = {
+            "schemaVersion": 1,
+            "projectId": str(uuid.uuid4()),
+            "displayName": display_name[:120],
+            "createdAt": f"{datetime.utcnow().isoformat(timespec='seconds')}Z",
+            "templateVersion": str(manifest.get("templateVersion") or "0.1.0"),
+        }
+        metadata_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+
+def template_root_for_project_creation() -> Path:
+    candidates = [PACKAGE_TEMPLATE_ROOT, DEFAULT_PROJECT_ROOT]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        root = candidate.resolve()
+        if (root / ".co-auto-research-template" / "manifest.json").exists() and not (root / ".co-auto-research" / "project.json").exists():
+            return root
+    raise ValueError(
+        "Clean package template is not available to this UI server. "
+        "Start the UI with `co-auto-research ui --projects-dir <dir>` or set COAUTO_TEMPLATE_ROOT."
+    )
+
+
+def create_generated_project(projects_dir: Path, payload: dict[str, Any], template_root: Path | None = None) -> Path:
+    if not projects_dir:
+        raise ValueError("Project creation requires dashboard mode.")
+    template_root = (template_root or template_root_for_project_creation()).resolve()
+    manifest_path = template_root / ".co-auto-research-template" / "manifest.json"
+    if not manifest_path.exists():
+        raise ValueError("Template manifest is missing; start the dashboard with the package CLI.")
+
+    display_name = str(payload.get("name") or payload.get("displayName") or "").strip()
+    directory_name = project_directory_slug(str(payload.get("directory") or display_name))
+    base = projects_dir.resolve()
+    target = (base / directory_name).resolve()
+    if target == base or base not in target.parents:
+        raise ValueError("Project path escapes the dashboard projects directory.")
+    if target.exists():
+        if not target.is_dir():
+            raise ValueError(f"Project target exists and is not a directory: {directory_name}")
+        try:
+            has_entries = any(target.iterdir())
+        except OSError as exc:
+            raise ValueError(f"Cannot inspect project target: {exc}") from exc
+        if has_entries:
+            raise ValueError(f"Project directory already exists: {directory_name}")
+
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(template_root, target, ignore=template_copy_ignore(template_root), dirs_exist_ok=True)
+    finalize_created_project(target, display_name or directory_name, template_root)
+    return target
 
 
 def is_project_root(root: Path) -> bool:
@@ -293,6 +424,77 @@ class ProjectRegistry:
 
     def summaries(self) -> list[dict[str, Any]]:
         return [self.contexts[project_id].summary() for project_id in self.order if project_id in self.contexts]
+
+    def ensure_managed_child_project(self, context: ProjectContext) -> None:
+        if not self.projects_dir:
+            raise ValueError("Project management requires dashboard mode.")
+        base = self.projects_dir.resolve()
+        root = context.root.resolve()
+        if root == base:
+            raise ValueError("Cannot rename or delete the dashboard root as a project.")
+        if base not in root.parents:
+            raise ValueError("Project is outside the dashboard projects directory.")
+
+    def create_project(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.projects_dir:
+            self.projects_dir = self.project_root.parent.resolve()
+        root = create_generated_project(self.projects_dir, payload)
+        self.refresh()
+        resolved = root.resolve()
+        for project_id in self.order:
+            context = self.contexts.get(project_id)
+            if context and context.root == resolved:
+                return context.summary()
+        raise ValueError("Project was created but could not be loaded.")
+
+    def rename_project(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project_id = str(payload.get("project") or payload.get("projectId") or "").strip()
+        display_name = str(payload.get("name") or payload.get("displayName") or "").strip()
+        if not project_id:
+            raise ValueError("Project id is required.")
+        if not display_name:
+            raise ValueError("Project name is required.")
+        context = self.context_for(project_id)
+        self.ensure_managed_child_project(context)
+        metadata = read_project_metadata(context.root)
+        metadata.update(
+            {
+                "schemaVersion": int(metadata.get("schemaVersion") or 1),
+                "projectId": context.id,
+                "displayName": display_name[:120],
+                "createdAt": metadata.get("createdAt") or context.created_at or f"{datetime.utcnow().isoformat(timespec='seconds')}Z",
+                "templateVersion": metadata.get("templateVersion") or context.template_version or read_template_version(context.root),
+            }
+        )
+        write_project_metadata(context.root, metadata)
+        self.refresh()
+        return self.context_for(project_id).summary()
+
+    def delete_project(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project_id = str(payload.get("project") or payload.get("projectId") or "").strip()
+        confirm = str(payload.get("confirm") or "").strip()
+        if not project_id:
+            raise ValueError("Project id is required.")
+        context = self.context_for(project_id)
+        self.ensure_managed_child_project(context)
+        expected = context.display_name
+        if confirm != expected:
+            raise ValueError(f"Type the project name to confirm deletion: {expected}")
+        with context.lock:
+            proc = context.session.get("process")
+            running = bool(proc and proc.poll() is None)
+        if running:
+            raise ValueError("Stop the active Codex run before deleting this project.")
+        root = context.root.resolve()
+        shutil.rmtree(root)
+        self.refresh()
+        projects = self.summaries()
+        return {
+            "deleted_project_id": project_id,
+            "active_project_id": projects[0]["id"] if projects else "",
+            "projects": projects,
+            "multi_project": self.multi_project,
+        }
 
 
 PROJECT_REGISTRY: ProjectRegistry | None = None
@@ -735,6 +937,59 @@ def codex_process_env() -> dict[str, str]:
     env = os.environ.copy()
     env.update(load_ui_settings().get("env", {}))
     return env
+
+
+def codex_executable_names(windows: bool | None = None) -> list[str]:
+    is_windows = os.name == "nt" if windows is None else windows
+    if is_windows:
+        return ["codex.cmd", "codex.exe", "codex.bat", "codex"]
+    return ["codex"]
+
+
+def resolve_codex_executable(env: dict[str, str] | None = None, windows: bool | None = None) -> str:
+    process_env = env if env is not None else os.environ
+    search_path = process_env.get("PATH") or None
+    configured = str(process_env.get("COAUTO_CODEX") or process_env.get("CODEX_BIN") or "").strip().strip('"')
+    if configured:
+        expanded = os.path.expandvars(os.path.expanduser(configured))
+        configured_path = Path(expanded)
+        if configured_path.is_file():
+            return str(configured_path)
+        found = shutil.which(expanded, path=search_path)
+        if found:
+            return found
+        raise FileNotFoundError(
+            f"Configured Codex executable was not found: {configured}. "
+            "Set COAUTO_CODEX to the full path of codex.cmd, codex.exe, or codex."
+        )
+
+    for name in codex_executable_names(windows):
+        found = shutil.which(name, path=search_path)
+        if found:
+            return found
+    names = ", ".join(codex_executable_names(windows))
+    raise FileNotFoundError(
+        f"Codex CLI executable not found on PATH. Tried: {names}. "
+        "Install Codex CLI, start the UI from a terminal where `codex --version` works, "
+        "or set COAUTO_CODEX to the full path of codex.cmd/codex."
+    )
+
+
+def codex_start_error_message(exc: OSError, command: list[str]) -> str:
+    executable = command[0] if command else "codex"
+    if isinstance(exc, FileNotFoundError) or getattr(exc, "winerror", None) == 2:
+        return (
+            "Failed to start Codex: executable not found. "
+            f"Tried `{executable}`. On Windows, npm installs Codex as `codex.cmd`; "
+            "start the UI from a terminal where `codex --version` works, or set "
+            "COAUTO_CODEX to the full path of codex.cmd."
+        )
+    return f"Failed to start Codex using `{executable}`: {exc}"
+
+
+def executable_requires_windows_shell(executable: str, windows: bool | None = None) -> bool:
+    is_windows = os.name == "nt" if windows is None else windows
+    return is_windows and Path(str(executable)).suffix.lower() in {".cmd", ".bat"}
 
 
 def transcript_entry(role: str, kind: str, title: str, content: str, raw_type: str = "", editable: bool = False) -> dict[str, Any]:
@@ -2405,14 +2660,15 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
 
 def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str]:
     session_id = str(RESEARCH_SESSION.get("session_id") or "")
+    codex = resolve_codex_executable()
     if resume:
         if not session_id:
             raise ValueError("No Codex exec session is active in this UI. Start project framing first.")
-        command = ["codex", "exec", "resume", *settings_to_codex_args(settings, resume=True), "--skip-git-repo-check", "--json"]
+        command = [codex, "exec", "resume", *settings_to_codex_args(settings, resume=True), "--skip-git-repo-check", "--json"]
         command.append(session_id)
         command.append("-")
         return command
-    return ["codex", "exec", *settings_to_codex_args(settings, resume=False), "--skip-git-repo-check", "--json", "-"]
+    return [codex, "exec", *settings_to_codex_args(settings, resume=False), "--skip-git-repo-check", "--json", "-"]
 
 
 def should_resume_research_session() -> bool:
@@ -2472,8 +2728,10 @@ def start_research_run(
     persist_research_session()
 
     try:
+        use_shell = executable_requires_windows_shell(command[0])
+        popen_command: str | list[str] = subprocess.list2cmdline(command) if use_shell else command
         proc = subprocess.Popen(
-            command,
+            popen_command,
             cwd=REPO_ROOT,
             env=codex_process_env(),
             stdin=subprocess.PIPE,
@@ -2481,13 +2739,14 @@ def start_research_run(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            shell=use_shell,
         )
         assert proc.stdin is not None
         proc.stdin.write(prompt)
         proc.stdin.write("\n")
         proc.stdin.close()
     except OSError as exc:
-        append_research_log(f"Failed to start Codex: {exc}")
+        append_research_log(codex_start_error_message(exc, command))
         finish_research_run(127)
         return research_session_snapshot()
 
@@ -3078,6 +3337,9 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                 "multi_project": bool(PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project),
             })
             return
+        if not parsed.path.startswith("/api/"):
+            self.serve_static(parsed.path)
+            return
         try:
             with using_project(self.request_project_id(parsed)):
                 if parsed.path == "/api/health":
@@ -3125,6 +3387,36 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         try:
             payload = self.read_json()
             parsed = urlparse(self.path)
+            if parsed.path == "/api/projects":
+                if not PROJECT_REGISTRY:
+                    raise ValueError("Project registry is not available.")
+                project = PROJECT_REGISTRY.create_project(payload)
+                self.send_json({
+                    "ok": True,
+                    "active_project_id": project["id"],
+                    "project": project,
+                    "projects": PROJECT_REGISTRY.summaries(),
+                    "multi_project": PROJECT_REGISTRY.multi_project,
+                }, status=201)
+                return
+            if parsed.path == "/api/projects/rename":
+                if not PROJECT_REGISTRY:
+                    raise ValueError("Project registry is not available.")
+                project = PROJECT_REGISTRY.rename_project(payload)
+                self.send_json({
+                    "ok": True,
+                    "active_project_id": project["id"],
+                    "project": project,
+                    "projects": PROJECT_REGISTRY.summaries(),
+                    "multi_project": PROJECT_REGISTRY.multi_project,
+                })
+                return
+            if parsed.path == "/api/projects/delete":
+                if not PROJECT_REGISTRY:
+                    raise ValueError("Project registry is not available.")
+                result = PROJECT_REGISTRY.delete_project(payload)
+                self.send_json({"ok": True, **result})
+                return
             with using_project(self.request_project_id(parsed, payload)):
                 if parsed.path == "/api/cold-start":
                     self.send_json({"ok": True, "result": write_cold_start(payload)})
@@ -3206,6 +3498,43 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+def is_port_in_use_error(exc: OSError) -> bool:
+    in_use_codes = {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", 10048)}
+    return getattr(exc, "errno", None) in in_use_codes
+
+
+def display_url_host(host: str) -> str:
+    if host in {"", "0.0.0.0", "::"}:
+        return "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
+def bind_http_server(host: str, requested_port: int) -> tuple[ThreadingHTTPServer, int]:
+    if requested_port == 0:
+        httpd = ThreadingHTTPServer((host, 0), ResearchUIHandler)
+        return httpd, int(httpd.server_address[1])
+
+    last_error: OSError | None = None
+    start_port = max(1, int(requested_port))
+    stop_port = min(65535, start_port + PORT_FALLBACK_ATTEMPTS)
+    for port in range(start_port, stop_port + 1):
+        try:
+            httpd = ThreadingHTTPServer((host, port), ResearchUIHandler)
+            return httpd, int(httpd.server_address[1])
+        except OSError as exc:
+            if not is_port_in_use_error(exc):
+                raise
+            last_error = exc
+    if last_error:
+        raise OSError(
+            last_error.errno,
+            f"No available port found from {start_port} to {stop_port} on {host}",
+        ) from last_error
+    raise OSError(f"No available port found from {start_port} to {stop_port} on {host}")
+
+
 def main() -> None:
     global PROJECT_REGISTRY
     parser = argparse.ArgumentParser(description="Run the CoAutoResearch local web UI.")
@@ -3218,20 +3547,23 @@ def main() -> None:
     project_root = Path(os.path.expanduser(args.project_root)).resolve() if args.project_root else DEFAULT_PROJECT_ROOT
     projects_dir = Path(os.path.expanduser(args.projects_dir)).resolve() if args.projects_dir else None
     PROJECT_REGISTRY = ProjectRegistry(project_root, projects_dir)
-    load_research_session_runtime()
-    httpd = ThreadingHTTPServer((args.host, args.port), ResearchUIHandler)
-    url = f"http://{args.host}:{args.port}"
+    if PROJECT_REGISTRY.order:
+        load_research_session_runtime()
+    httpd, bound_port = bind_http_server(args.host, args.port)
+    url = f"http://{display_url_host(args.host)}:{bound_port}"
+    if args.port != 0 and bound_port != args.port:
+        print(f"Port {args.port} is unavailable on {args.host}; using {bound_port}.", flush=True)
     if PROJECT_REGISTRY.multi_project:
-        print(f"CoAutoResearch UI serving projects from {projects_dir}")
+        print(f"CoAutoResearch UI serving projects from {projects_dir}", flush=True)
         for project in PROJECT_REGISTRY.summaries():
-            print(f"- {project['display_name']}: {project['root']}")
+            print(f"- {project['display_name']}: {project['root']}", flush=True)
     else:
-        print(f"CoAutoResearch UI serving {REPO_ROOT}")
-    print(f"Open {url}")
+        print(f"CoAutoResearch UI serving {REPO_ROOT}", flush=True)
+    print(f"Open {url}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping UI server.")
+        print("\nStopping UI server.", flush=True)
     finally:
         httpd.server_close()
 

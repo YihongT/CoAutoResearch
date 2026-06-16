@@ -24,7 +24,14 @@ commands in order:
 
 ## macOS And Linux
 
-The normal flow is:
+The simplest dashboard-first flow is:
+
+```bash
+co-auto-research ui
+```
+
+Open `http://127.0.0.1:8765`, then create projects from the sidebar. For a
+scripted command-line flow:
 
 ```bash
 co-auto-research init my-project
@@ -46,6 +53,13 @@ Windows `PATH`.
 PowerShell examples:
 
 ```powershell
+co-auto-research ui
+```
+
+Open `http://127.0.0.1:8765`, then create projects from the sidebar. For a
+scripted command-line flow:
+
+```powershell
 co-auto-research init my-project
 cd my-project
 co-auto-research ui
@@ -61,6 +75,30 @@ If `py -3` is unavailable but `python` works, use:
 
 ```powershell
 python ui/server.py --host 127.0.0.1 --port 8765
+```
+
+### Codex Executable Resolution
+
+The UI resolves Codex in this order:
+
+1. `COAUTO_CODEX`, if set.
+2. `CODEX_BIN`, if set.
+3. `codex.cmd`, `codex.exe`, `codex.bat`, then `codex` on `PATH`.
+
+This matters on Windows because npm global binaries are commonly installed as
+`.cmd` shims. If Codex fails to start, run:
+
+```powershell
+codex --version
+Get-Command codex
+```
+
+Then start `co-auto-research ui` from the same PowerShell session. If needed,
+pin the executable explicitly:
+
+```powershell
+$env:COAUTO_CODEX = (Get-Command codex).Source
+co-auto-research ui
 ```
 
 Codex also documents native Windows sandbox modes. If native sandbox setup is

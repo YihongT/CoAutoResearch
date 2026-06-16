@@ -25,6 +25,10 @@ From your local machine, forward that port:
 ssh -N -L 8765:127.0.0.1:8765 user@server
 ```
 
+If the server prints a different URL because port `8765` was already in use,
+forward that printed port instead, for example
+`ssh -N -L 8766:127.0.0.1:8766 user@server`.
+
 Then open:
 
 ```text

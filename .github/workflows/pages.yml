@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ !github.event.repository.private || vars.ENABLE_PRIVATE_PAGES == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,6 +37,7 @@ jobs:
           path: ./_site
 
   deploy:
+    if: ${{ !github.event.repository.private || vars.ENABLE_PRIVATE_PAGES == 'true' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

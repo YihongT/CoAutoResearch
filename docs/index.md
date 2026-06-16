@@ -12,12 +12,15 @@ defend, and revise the project.
 ## Start Here
 
 ```bash
-npx co-auto-research init my-project
-cd my-project
 co-auto-research ui
 ```
 
-If the default port is busy:
+Open `http://127.0.0.1:8765`, then click `+` in the left sidebar to create a
+project. If you run this outside a generated project, CoAutoResearch creates a
+local `local-projects/` dashboard folder for UI-created projects.
+
+If the default port is busy, CoAutoResearch automatically tries the next
+available port and prints the actual URL. To prefer a different starting port:
 
 ```bash
 co-auto-research ui --port 8780

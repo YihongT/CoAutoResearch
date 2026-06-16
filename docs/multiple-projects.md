@@ -5,12 +5,11 @@ Each project remains an independent working copy.
 
 ## Start A Dashboard
 
-From the parent folder that contains generated projects:
+From the parent folder that should contain generated projects:
 
 ```bash
-co-auto-research init test
-co-auto-research init paper-a
-co-auto-research ui --projects-dir .
+mkdir -p local-projects
+co-auto-research ui --projects-dir local-projects
 ```
 
 Open:
@@ -19,8 +18,23 @@ Open:
 http://127.0.0.1:8765
 ```
 
+Click `+` in the left sidebar to create a project from the immutable template.
+The new project appears in the sidebar and becomes the active project.
+
+You can also create projects from the CLI first:
+
+```bash
+co-auto-research init test
+co-auto-research init paper-a
+co-auto-research ui --projects-dir .
+```
+
 The left sidebar lists each generated project by folder name, such as `test` and
 `paper-a`.
+
+The UI-created project path is always inside the `--projects-dir` folder. If a
+folder with the same sanitized name already exists, creation fails instead of
+overwriting it.
 
 ## Isolation Model
 

@@ -50,6 +50,10 @@ npm --version
 codex --version
 ```
 
+On Windows, if the UI cannot start Codex but `codex --version` works in
+PowerShell, start `co-auto-research ui` from that same PowerShell session. You
+can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
+
 ## Documentation
 
 - [Documentation home](docs/index.md)
@@ -59,26 +63,31 @@ codex --version
 - [Remote server setup](docs/remote-server.md)
 - [Upgrading generated projects](docs/upgrading.md)
 
-When this repo is pushed to GitHub, the included GitHub Pages workflow can host
+When this repo is public on GitHub, the included GitHub Pages workflow can host
 the docs automatically from `docs/`. In the repository settings, set
-**Pages → Build and deployment → Source** to **GitHub Actions**. The workflow
+**Pages -> Build and deployment -> Source** to **GitHub Actions**. The workflow
 will publish on pushes to `main` that change `docs/**`.
+
+Private repositories do not deploy Pages by default in this scaffold, because
+GitHub Pages must be enabled/configured first and may depend on the account
+plan. To deploy docs from a private repo, enable Pages in repository settings
+and set the repository variable `ENABLE_PRIVATE_PAGES=true`.
 
 ## Quick Start
 
 From this repository checkout:
 
 ```bash
-node bin/auto-research.js init my-project
-cd my-project
-node ../bin/auto-research.js ui
+node bin/auto-research.js ui
 ```
+
+Open `http://127.0.0.1:8765`, then click `+` in the left sidebar to create a
+project. `local-projects/` is ignored by this repository, so projects created
+while testing the package are not pushed accidentally.
 
 After npm publication, the intended flow is:
 
 ```bash
-npx co-auto-research init my-project
-cd my-project
 co-auto-research ui
 ```
 
@@ -88,7 +97,8 @@ Open the UI at:
 http://127.0.0.1:8765
 ```
 
-If port `8765` is already in use, choose another port:
+If port `8765` is already in use, CoAutoResearch automatically tries the next
+available port and prints the actual URL. To prefer a different starting port:
 
 ```bash
 co-auto-research ui --port 8780
@@ -113,6 +123,10 @@ The left sidebar will list `test`, `paper-a`, and any other generated projects
 under that folder. Each project keeps its own files, runtime state, and Codex
 session.
 
+In dashboard mode, the sidebar `+` button can also create a new project from the
+same immutable template. This is the simplest path for normal use; `init`
+remains available for scripting.
+
 ## CLI
 
 ```bash
@@ -126,11 +140,13 @@ co-auto-research upgrade
 `auto-research` is kept as a command alias.
 
 - `init` copies `templates/default/` into a new empty project directory.
-- `ui` starts the Python standard-library UI server inside a generated project.
+- `ui` starts the Python standard-library UI server. Inside a generated project
+  it serves that project; otherwise it creates/serves `local-projects/` as a
+  dashboard where projects can be created from the UI.
 - `ui --projects-dir <dir>` starts one dashboard that can switch between all
-  generated projects directly inside `<dir>`.
-- `ui --port <port>` starts the server on a different local port when the
-  default `8765` is unavailable.
+  generated projects directly inside `<dir>` and create new ones from the UI.
+- `ui --port <port>` starts port selection from a different local port. If that
+  port is busy, the server automatically tries the next available port.
 - `doctor` checks local prerequisites and port availability.
 - `upgrade` is advisory in `0.1.0`; generated projects are independent working
   copies and automated upgrades are not implemented yet.

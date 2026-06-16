@@ -142,6 +142,46 @@ function commandAvailable(name, args = ["--version"]) {
   };
 }
 
+function executableNames(name) {
+  return process.platform === "win32" ? [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name] : [name];
+}
+
+function findOnPath(name, env = process.env) {
+  const pathValue = env.PATH || env.Path || env.path || "";
+  const entries = pathValue.split(path.delimiter).filter(Boolean);
+  for (const entry of entries) {
+    for (const candidateName of executableNames(name)) {
+      const candidate = path.join(entry, candidateName);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return "";
+}
+
+function findCodexCommand(env = process.env) {
+  const configured = (env.COAUTO_CODEX || env.CODEX_BIN || "").trim().replace(/^"|"$/g, "");
+  if (configured) {
+    const expanded = configured.replace(/^~(?=$|[\\/])/, process.env.HOME || process.env.USERPROFILE || "~");
+    if (fs.existsSync(expanded)) return expanded;
+    const configuredOnPath = findOnPath(expanded, env);
+    if (configuredOnPath) return configuredOnPath;
+    return expanded;
+  }
+  return findOnPath("codex", env) || "codex";
+}
+
+function codexAvailable() {
+  const command = findCodexCommand();
+  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  const result = spawnSync(command, ["--version"], { encoding: "utf8", shell });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    output: output.split(/\r?\n/)[0] || command
+  };
+}
+
 function pythonCandidates() {
   const candidates = [];
   const configured = (process.env.COAUTO_PYTHON || process.env.PYTHON || "").trim();
@@ -183,7 +223,7 @@ async function commandDoctor(args) {
     ["node", { ok: Number(process.versions.node.split(".")[0]) >= 18, output: process.version }],
     ["python", { ok: python.ok, output: python.output || python.label }],
     ["git", commandAvailable("git")],
-    ["codex", commandAvailable("codex")]
+    ["codex", codexAvailable()]
   ];
 
   for (const [name, result] of checks) {
@@ -206,11 +246,16 @@ function commandUi(args) {
   if (!python.ok) {
     throw new Error("No Python 3 executable found. Install Python 3 or set COAUTO_PYTHON to the Python executable path.");
   }
-  const projectsDir = options["projects-dir"] ? path.resolve(process.cwd(), options["projects-dir"]) : "";
+  let projectsDir = options["projects-dir"] ? path.resolve(process.cwd(), options["projects-dir"]) : "";
   const projectRoot = options.project ? path.resolve(process.cwd(), options.project) : process.cwd();
+  const projectServerPath = path.join(projectRoot, "ui", "server.py");
+  if (!projectsDir && !fs.existsSync(projectServerPath)) {
+    projectsDir = path.resolve(process.cwd(), "local-projects");
+    fs.mkdirSync(projectsDir, { recursive: true });
+  }
   const serverPath = projectsDir
     ? path.join(TEMPLATE_ROOT, "ui", "server.py")
-    : path.join(projectRoot, "ui", "server.py");
+    : projectServerPath;
   if (!fs.existsSync(serverPath)) {
     throw new Error("No ui/server.py found. Run this inside a generated CoAutoResearch project, or pass --projects-dir.");
   }
@@ -219,10 +264,24 @@ function commandUi(args) {
   else if (options.project) serverArgs.push("--project-root", projectRoot);
   const child = spawn(python.command, [...python.args, ...serverArgs], {
     cwd: projectsDir || projectRoot,
+    env: { ...process.env, COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT },
     stdio: "inherit"
   });
+  let shuttingDown = false;
+  function forwardSignal(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (!child.killed) child.kill(signal);
+    const timeout = setTimeout(() => {
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    }, 3000);
+    timeout.unref?.();
+  }
+  process.once("SIGINT", () => forwardSignal("SIGINT"));
+  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
   child.on("exit", (code, signal) => {
-    if (signal) process.kill(process.pid, signal);
+    if (signal === "SIGINT") process.exit(130);
+    if (signal === "SIGTERM") process.exit(143);
     process.exit(code ?? 0);
   });
 }

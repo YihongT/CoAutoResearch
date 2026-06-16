@@ -22,11 +22,19 @@ Optional host and port:
 python3 ui/server.py --host 127.0.0.1 --port 8780
 ```
 
+If the requested port is busy, the server automatically tries the next available
+port and prints the actual URL to open.
+
 On Windows, direct server use is usually:
 
 ```powershell
 py -3 ui/server.py --host 127.0.0.1 --port 8780
 ```
+
+If Codex fails to start on Windows, verify `codex --version` in the same
+PowerShell session used to launch the UI. The backend resolves `codex.cmd`,
+`codex.exe`, and `codex.bat`; set `COAUTO_CODEX` to `(Get-Command codex).Source`
+if your PATH differs between terminals.
 
 From the package CLI, a parent folder can be served as a multi-project
 dashboard:
@@ -34,6 +42,9 @@ dashboard:
 ```bash
 co-auto-research ui --projects-dir /path/to/projects
 ```
+
+In dashboard mode, click `+` in the left sidebar to create a new project inside
+that folder. The UI uses the same immutable template as `co-auto-research init`.
 
 No npm or pip install is required.
 
@@ -57,7 +68,8 @@ No npm or pip install is required.
 - Left sidebar: switches the main area between Agents, Resources, Trials, Reviews, and Manuscript.
 - Project switcher: in multi-project mode, the left sidebar switches between
   independent generated projects. Each project has its own files, UI runtime
-  state, settings, and Codex session.
+  state, settings, and Codex session. The `+` button creates another independent
+  project in the served parent folder.
 - Resources and Trials: shown as expandable file-browser views.
 - Markdown preview: shown beside editable Markdown in cold start and inline file views.
 - Source preview: shown inline at the file's own position and can save supported text files.

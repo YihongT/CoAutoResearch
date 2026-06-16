@@ -23,6 +23,10 @@ let editingFramingId = "";
 let projectRenderedScrollTop = 0;
 let overviewPollTimer = null;
 let lastFramingHtml = "";
+let initialProjectDialogOpened = false;
+let openProjectMenuId = "";
+let pendingRenameProject = null;
+let pendingDeleteProject = null;
 let selectedTrialIndex = 0;
 const localMessages = [];
 let activeResourceCategory = "ongoing_work";
@@ -422,6 +426,41 @@ function showToast(message, isError = false) {
   toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 3600);
 }
 
+function setButtonFeedback(button, state, label) {
+  if (!button) return;
+  if (!button.dataset.defaultLabel) button.dataset.defaultLabel = button.textContent.trim();
+  button.dataset.feedbackState = state;
+  button.setAttribute("aria-busy", state === "saving" ? "true" : "false");
+  if (label) button.textContent = label;
+}
+
+function restoreButtonFeedback(button, disabled) {
+  if (!button) return;
+  button.disabled = disabled;
+  button.textContent = button.dataset.defaultLabel || button.textContent;
+  button.removeAttribute("aria-busy");
+  delete button.dataset.feedbackState;
+}
+
+async function withButtonFeedback(button, task, labels = {}) {
+  if (!button) return task();
+  const originalDisabled = button.disabled;
+  clearTimeout(button._feedbackTimer);
+  button.disabled = true;
+  setButtonFeedback(button, "saving", labels.saving || "Saving...");
+  try {
+    const result = await task();
+    setButtonFeedback(button, "saved", labels.saved || "Saved");
+    await new Promise((resolve) => setTimeout(resolve, labels.settleMs ?? 350));
+    button._feedbackTimer = setTimeout(() => restoreButtonFeedback(button, originalDisabled), 1000);
+    return result;
+  } catch (error) {
+    setButtonFeedback(button, "failed", labels.failed || "Failed");
+    button._feedbackTimer = setTimeout(() => restoreButtonFeedback(button, originalDisabled), 1400);
+    throw error;
+  }
+}
+
 function setColdSaveStatus(message, tone = "") {
   const status = $("#cold-save-status");
   if (!status) return;
@@ -534,12 +573,85 @@ function currentProjectName() {
   return String(project.display_name || project.title || "Project").trim();
 }
 
+function projectById(projectId) {
+  const id = String(projectId || "");
+  const projects = Array.isArray(appState?.projects) ? appState.projects : [];
+  return projects.find((project) => String(project.id || "") === id) || null;
+}
+
+function hasActiveProject() {
+  const projects = Array.isArray(appState?.projects) ? appState.projects : [];
+  return Boolean(activeProjectId && projects.some((project) => String(project.id || "") === String(activeProjectId)));
+}
+
+function hasNoProject() {
+  return Boolean(appState?.multi_project && !hasActiveProject());
+}
+
+function renderProjectAvailability() {
+  const noProject = hasNoProject();
+  document.body.classList.toggle("has-no-project", noProject);
+  const controls = [
+    "#cold-file-editor",
+    "#prepare-cold-start",
+    "#target-venue",
+    "#composer-model",
+    "#composer-reasoning",
+  ];
+  controls.forEach((selector) => {
+    const element = $(selector);
+    if (element) element.disabled = noProject;
+  });
+  $$(".material-action-chip, .composer-suggestion-chip").forEach((button) => {
+    button.disabled = noProject;
+    button.setAttribute("aria-disabled", noProject ? "true" : "false");
+  });
+  if (!noProject) return;
+  const editor = $("#cold-file-editor");
+  if (editor) {
+    editor.value = "";
+    editor.placeholder = "Create a project first...";
+  }
+  const eyebrow = $("#chat-eyebrow");
+  if (eyebrow) eyebrow.textContent = "Projects";
+  const title = $("#chat-title");
+  if (title) title.textContent = "Create your first research project.";
+  $("#session-pill")?.toggleAttribute("hidden", true);
+  $("#resume-command-bar")?.toggleAttribute("hidden", true);
+  $("#composer-suggestions")?.toggleAttribute("hidden", true);
+}
+
+function maybeOpenInitialProjectDialog() {
+  const projects = Array.isArray(appState?.projects) ? appState.projects : [];
+  if (initialProjectDialogOpened || !appState?.multi_project || projects.length) return;
+  initialProjectDialogOpened = true;
+  window.setTimeout(() => {
+    const dialog = $("#project-dialog");
+    if (dialog?.open) return;
+    openProjectCreateDialog();
+  }, 120);
+}
+
+function renderProjectCreateButton() {
+  const button = $("#open-project-create");
+  if (!button) return;
+  button.hidden = false;
+}
+
+function closeProjectMenu() {
+  openProjectMenuId = "";
+  renderProjectList();
+}
+
 function renderProjectList() {
   const target = $("#project-list");
   if (!target) return;
   const projects = Array.isArray(appState?.projects) ? appState.projects : [];
+  renderProjectCreateButton();
   if (!projects.length) {
-    target.innerHTML = `<div class="project-empty">No projects found.</div>`;
+    target.innerHTML = `<div class="project-empty">No projects yet. Use + to create one.</div>`;
+    renderRailVisibility();
+    renderProjectAvailability();
     return;
   }
   target.innerHTML = projects
@@ -547,17 +659,35 @@ function renderProjectList() {
       const selected = String(project.id || "") === String(activeProjectId || appState?.active_project_id || "");
       const statusClass = projectStatusClass(project);
       const label = projectStatusLabel(project);
+      const menuOpen = String(project.id || "") === String(openProjectMenuId || "");
       return `
-        <button class="project-switch ${selected ? "is-active" : ""}" type="button" data-project-switch="${escapeHtml(project.id)}">
-          <span class="project-status-dot ${escapeHtml(statusClass)}" aria-hidden="true"></span>
-          <span>
-            <strong>${escapeHtml(project.display_name || project.title || "Project")}</strong>
-            <small>${escapeHtml(label)}${project.session_id ? ` · ${escapeHtml(String(project.session_id).slice(0, 8))}` : ""}</small>
-          </span>
-        </button>
+        <div class="project-switch-row ${selected ? "is-active" : ""}" data-project-row="${escapeHtml(project.id)}">
+          <button class="project-switch" type="button" data-project-switch="${escapeHtml(project.id)}">
+            <span class="project-status-dot ${escapeHtml(statusClass)}" aria-hidden="true"></span>
+            <span>
+              <strong>${escapeHtml(project.display_name || project.title || "Project")}</strong>
+              <small>${escapeHtml(label)}${project.session_id ? ` · ${escapeHtml(String(project.session_id).slice(0, 8))}` : ""}</small>
+            </span>
+          </button>
+          <button class="project-menu-button" type="button" data-project-menu="${escapeHtml(project.id)}" aria-label="Project options" aria-haspopup="menu" aria-expanded="${menuOpen ? "true" : "false"}">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
+          </button>
+          <div class="project-menu-popover" role="menu" data-project-menu-panel="${escapeHtml(project.id)}" ${menuOpen ? "" : "hidden"}>
+            <button type="button" role="menuitem" data-project-rename="${escapeHtml(project.id)}">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Zm11-13 2 2"/></svg>
+              <span>Rename</span>
+            </button>
+            <button class="is-danger" type="button" role="menuitem" data-project-delete="${escapeHtml(project.id)}">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg>
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
       `;
     })
     .join("");
+  renderRailVisibility();
+  renderProjectAvailability();
 }
 
 function clearObject(object) {
@@ -606,12 +736,253 @@ async function loadProjects() {
   if (!activeProjectId || !known.has(activeProjectId)) {
     activeProjectId = String(payload.active_project_id || projects[0]?.id || "");
     if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+    else localStorage.removeItem("coAutoResearchActiveProject");
   }
   appState = { ...(appState || {}), projects, active_project_id: activeProjectId, multi_project: Boolean(payload.multi_project) };
   renderProjectList();
+  renderProjectAvailability();
+  maybeOpenInitialProjectDialog();
+}
+
+function openProjectCreateDialog() {
+  const form = $("#project-create-form");
+  const dialog = $("#project-dialog");
+  const note = $("#project-create-note");
+  form?.reset();
+  if (note) {
+    note.textContent = appState?.multi_project
+      ? "Creates a separate project inside the served projects folder."
+      : "Creates a sibling project next to the current project, then switches this UI into a multi-project dashboard.";
+    note.dataset.tone = "";
+  }
+  if (dialog?.showModal) dialog.showModal();
+  else dialog?.setAttribute("open", "");
+  requestAnimationFrame(() => $("#project-name")?.focus());
+}
+
+function closeProjectCreateDialog() {
+  const dialog = $("#project-dialog");
+  if (!dialog) return;
+  if (dialog.close) dialog.close();
+  else dialog.removeAttribute("open");
+}
+
+function openProjectRenameDialog(projectId) {
+  const project = projectById(projectId);
+  if (!project) return;
+  pendingRenameProject = project;
+  closeProjectMenu();
+  const form = $("#project-rename-form");
+  const input = $("#project-rename-name");
+  const note = $("#project-rename-note");
+  form?.reset();
+  if (input) input.value = project.display_name || project.title || "";
+  if (note) {
+    note.textContent = "Renaming changes the dashboard label only. It does not move or rename the project folder.";
+    note.dataset.tone = "";
+  }
+  const dialog = $("#project-rename-dialog");
+  if (dialog?.showModal) dialog.showModal();
+  else dialog?.setAttribute("open", "");
+  requestAnimationFrame(() => input?.focus());
+}
+
+function closeProjectRenameDialog() {
+  pendingRenameProject = null;
+  const dialog = $("#project-rename-dialog");
+  if (!dialog) return;
+  if (dialog.close) dialog.close();
+  else dialog.removeAttribute("open");
+}
+
+async function renameProjectFromDialog(event) {
+  event.preventDefault();
+  if (!pendingRenameProject) return;
+  const form = event.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  const name = String(new FormData(form).get("projectName") || "").trim();
+  if (!name) {
+    showToast("Project name is required.", true);
+    return;
+  }
+  submit.disabled = true;
+  try {
+    const payload = await api("/api/projects/rename", {
+      method: "POST",
+      body: JSON.stringify({ project: pendingRenameProject.id, name }),
+    });
+    activeProjectId = String(payload.active_project_id || payload.project?.id || activeProjectId || "");
+    if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+    appState = {
+      ...(appState || {}),
+      projects: Array.isArray(payload.projects) ? payload.projects : [],
+      active_project_id: activeProjectId,
+      multi_project: Boolean(payload.multi_project),
+    };
+    closeProjectRenameDialog();
+    renderProjectList();
+    renderChatState();
+    showToast("Project renamed.");
+  } catch (error) {
+    const note = $("#project-rename-note");
+    if (note) {
+      note.textContent = error.message;
+      note.dataset.tone = "error";
+    }
+    showToast(error.message, true);
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function updateDeleteSubmitState() {
+  const input = $("#project-delete-confirm");
+  const button = $("#project-delete-submit");
+  const expected = String(pendingDeleteProject?.display_name || "").trim();
+  const matches = Boolean(expected && String(input?.value || "").trim() === expected);
+  if (button) button.disabled = !matches;
+}
+
+function openProjectDeleteDialog(projectId) {
+  const project = projectById(projectId);
+  if (!project) return;
+  pendingDeleteProject = project;
+  closeProjectMenu();
+  const form = $("#project-delete-form");
+  const input = $("#project-delete-confirm");
+  const name = project.display_name || project.title || "Project";
+  const nameTarget = $("#project-delete-name");
+  const note = $("#project-delete-note");
+  form?.reset();
+  if (nameTarget) nameTarget.textContent = name;
+  if (input) {
+    input.value = "";
+    input.placeholder = name;
+  }
+  if (note) {
+    note.textContent = "Deletion is disabled until the project name matches exactly.";
+    note.dataset.tone = "";
+  }
+  updateDeleteSubmitState();
+  const dialog = $("#project-delete-dialog");
+  if (dialog?.showModal) dialog.showModal();
+  else dialog?.setAttribute("open", "");
+  requestAnimationFrame(() => input?.focus());
+}
+
+function closeProjectDeleteDialog() {
+  pendingDeleteProject = null;
+  const dialog = $("#project-delete-dialog");
+  if (!dialog) return;
+  if (dialog.close) dialog.close();
+  else dialog.removeAttribute("open");
+}
+
+async function deleteProjectFromDialog(event) {
+  event.preventDefault();
+  if (!pendingDeleteProject) return;
+  const form = event.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  const confirm = String(new FormData(form).get("confirmName") || "").trim();
+  const expected = String(pendingDeleteProject.display_name || "").trim();
+  if (confirm !== expected) {
+    showToast("Project name does not match.", true);
+    return;
+  }
+  submit.disabled = true;
+  try {
+    const deletingActive = String(pendingDeleteProject.id || "") === String(activeProjectId || "");
+    const payload = await api("/api/projects/delete", {
+      method: "POST",
+      body: JSON.stringify({ project: pendingDeleteProject.id, confirm }),
+    });
+    activeProjectId = String(payload.active_project_id || "");
+    if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+    else localStorage.removeItem("coAutoResearchActiveProject");
+    if (deletingActive) resetProjectClientState();
+    appState = {
+      ...(appState || {}),
+      projects: Array.isArray(payload.projects) ? payload.projects : [],
+      active_project_id: activeProjectId,
+      multi_project: Boolean(payload.multi_project),
+    };
+    closeProjectDeleteDialog();
+    renderProjectList();
+    if (activeProjectId) {
+      await loadOverview(true);
+    } else {
+      renderProjectAvailability();
+      maybeOpenInitialProjectDialog();
+    }
+    showToast("Project deleted.");
+  } catch (error) {
+    const note = $("#project-delete-note");
+    if (note) {
+      note.textContent = error.message;
+      note.dataset.tone = "error";
+    }
+    showToast(error.message, true);
+  } finally {
+    submit.disabled = false;
+    updateDeleteSubmitState();
+  }
+}
+
+async function createProjectFromDialog(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  const name = String(new FormData(form).get("projectName") || "").trim();
+  if (!name) {
+    showToast("Project name is required.", true);
+    return;
+  }
+  submit.disabled = true;
+  try {
+    $("#project-create-note")?.removeAttribute("data-tone");
+    const payload = await api("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    const project = payload.project || {};
+    activeProjectId = String(project.id || payload.active_project_id || "");
+    if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+    resetProjectClientState();
+    appState = {
+      ...(appState || {}),
+      projects: Array.isArray(payload.projects) ? payload.projects : [],
+      active_project_id: activeProjectId,
+      multi_project: Boolean(payload.multi_project),
+    };
+    closeProjectCreateDialog();
+    renderProjectList();
+    $("#target-venue").value = scopedGet("autoResearchTargetVenue", "");
+    restoreSessionSettings();
+    restoreResourceSelections();
+    await loadUiSettings();
+    await loadOverview(true);
+    scheduleOverviewPoll(1000);
+    showToast(`Created ${project.display_name || name}.`);
+  } catch (error) {
+    const note = $("#project-create-note");
+    if (note) {
+      note.textContent = error.message;
+      note.dataset.tone = "error";
+    }
+    showToast(error.message, true);
+  } finally {
+    submit.disabled = false;
+  }
 }
 
 async function loadOverview(silent = false) {
+  if (!activeProjectId && appState?.multi_project) {
+    $("#sync-state").textContent = "Create a project";
+    renderProjectList();
+    renderProjectAvailability();
+    maybeOpenInitialProjectDialog();
+    return;
+  }
   try {
     const holdMaterialTree = activeView === "materials";
     appState = await api("/api/overview");
@@ -644,7 +1015,8 @@ async function loadOverview(silent = false) {
 function scheduleOverviewPoll(delay) {
   clearTimeout(overviewPollTimer);
   overviewPollTimer = setTimeout(async () => {
-    await loadOverview(true);
+    if (activeProjectId) await loadOverview(true);
+    else await loadProjects().catch((error) => showToast(error.message, true));
     scheduleOverviewPoll(isSessionRunning() || framingDraftPending ? 1000 : 3500);
   }, delay);
 }
@@ -704,6 +1076,18 @@ function visiblePanels() {
 }
 
 function renderRailVisibility() {
+  const nav = $(".rail-nav");
+  if (nav) nav.hidden = !hasActiveProject();
+  if (!hasActiveProject()) {
+    $$(".rail-action").forEach((button) => {
+      button.classList.remove("is-active");
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
+    });
+    $("#chat-view").classList.add("is-active");
+    $("#material-view").classList.remove("is-active");
+    return;
+  }
   const visible = visiblePanels();
   $$(".rail-action").forEach((button) => {
     const view = button.dataset.view;
@@ -1606,23 +1990,30 @@ async function loadUiSettings() {
 
 async function saveUiSettings(event) {
   event.preventDefault();
-  const form = $("#settings-form");
-  const env = {};
-  const clearEnv = [];
-  const keys = settingsSecretKeys.length ? settingsSecretKeys : Object.keys(secretKeyLabels);
-  keys.forEach((key) => {
-    const value = String(form.elements[`env_${key}`]?.value || "").trim();
-    if (value) env[key] = value;
-  });
-  const payload = await api("/api/settings", {
-    method: "POST",
-    body: JSON.stringify({ codex: codexSettingsFromModal(), env, clear_env: clearEnv }),
-  });
-  uiSettings = payload.settings || {};
-  settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
-  hydrateSettingsDialog(uiSettings);
-  applySessionSettings(uiSettings.codex || defaultSessionSettings, true);
-  showToast("Settings saved locally.");
+  const submit = event.submitter || event.currentTarget.querySelector('button[type="submit"]');
+  try {
+    await withButtonFeedback(submit, async () => {
+      const form = $("#settings-form");
+      const env = {};
+      const clearEnv = [];
+      const keys = settingsSecretKeys.length ? settingsSecretKeys : Object.keys(secretKeyLabels);
+      keys.forEach((key) => {
+        const value = String(form.elements[`env_${key}`]?.value || "").trim();
+        if (value) env[key] = value;
+      });
+      const payload = await api("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({ codex: codexSettingsFromModal(), env, clear_env: clearEnv }),
+      });
+      uiSettings = payload.settings || {};
+      settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
+      hydrateSettingsDialog(uiSettings);
+      applySessionSettings(uiSettings.codex || defaultSessionSettings, true);
+      showToast("Settings saved locally.");
+    });
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 async function clearSavedSecret(key) {
@@ -3292,16 +3683,19 @@ async function saveInlineFile(path, root = document) {
   const scopedEditor = root?.querySelector?.(`[data-inline-editor="${CSS.escape(path)}"]`);
   const editor = scopedEditor || document.querySelector(`[data-inline-editor="${CSS.escape(path)}"]`);
   if (!editor) return;
+  const saveButton = root?.querySelector?.(`[data-inline-save="${CSS.escape(path)}"]`) || document.querySelector(`[data-inline-save="${CSS.escape(path)}"]`);
   try {
-    const payload = await api("/api/file/save", {
-      method: "POST",
-      body: JSON.stringify({ path, text: editor.value }),
-    });
-    const file = payload.file || {};
-    inlineFiles[file.path || path] = file.text || editor.value || "";
-    inlineFilePayloads[file.path || path] = file;
-    showToast("File saved and noted for Codex.");
-    await loadOverview(true);
+    await withButtonFeedback(saveButton, async () => {
+      const payload = await api("/api/file/save", {
+        method: "POST",
+        body: JSON.stringify({ path, text: editor.value }),
+      });
+      const file = payload.file || {};
+      inlineFiles[file.path || path] = file.text || editor.value || "";
+      inlineFilePayloads[file.path || path] = file;
+      showToast("File saved and noted for Codex.");
+      await loadOverview(true);
+    }, { saved: "Saved & noted" });
   } catch (error) {
     showToast(error.message, true);
   }
@@ -3513,6 +3907,11 @@ async function openLaunchDialog() {
 }
 
 async function launchAutoresearch() {
+  if (!hasActiveProject()) {
+    openProjectCreateDialog();
+    showToast("Create a project first.", true);
+    return;
+  }
   if (isSessionRunning()) {
     showToast("Autoresearch is already running.", true);
     return;
@@ -3556,6 +3955,11 @@ async function launchAutoresearch() {
 }
 
 async function sendSessionComposerMessage(message) {
+  if (!hasActiveProject()) {
+    openProjectCreateDialog();
+    showToast("Create a project first.", true);
+    return;
+  }
   const text = String(message || "").trim();
   if (!text && !selectedUploadItems.length) return;
   const localControl = canSendLocalSlashControl(text);
@@ -3576,6 +3980,7 @@ async function sendSessionComposerMessage(message) {
 }
 
 async function startFramingRun(brief) {
+  if (!hasActiveProject()) throw new Error("Create a project first.");
   const text = String(brief || "").trim();
   if (!text) throw new Error("Research brief is required.");
   if (activeColdPath) coldFiles[activeColdPath] = text;
@@ -3602,6 +4007,11 @@ async function startFramingRun(brief) {
 }
 
 async function coldStartFromPrepare() {
+  if (!hasActiveProject()) {
+    openProjectCreateDialog();
+    showToast("Create a project first.", true);
+    return;
+  }
   const input = String($("#cold-file-editor")?.value || "").trim();
   if (!input) {
     showToast(hasProjectDraftReady() ? "Write a message to refine the project." : "Write a research brief before framing.", true);
@@ -3831,6 +4241,26 @@ function bindEvents() {
   $$(".rail-action").forEach((button) => {
     button.addEventListener("click", () => setPanel(button.dataset.view));
   });
+  $("#open-project-create")?.addEventListener("click", openProjectCreateDialog);
+  $("#project-create-form")?.addEventListener("submit", createProjectFromDialog);
+  $$("[data-project-close]").forEach((button) => {
+    button.addEventListener("click", closeProjectCreateDialog);
+  });
+  $("#project-rename-form")?.addEventListener("submit", renameProjectFromDialog);
+  $$("[data-project-rename-close]").forEach((button) => {
+    button.addEventListener("click", closeProjectRenameDialog);
+  });
+  $("#project-rename-dialog")?.addEventListener("close", () => {
+    pendingRenameProject = null;
+  });
+  $("#project-delete-form")?.addEventListener("submit", deleteProjectFromDialog);
+  $("#project-delete-confirm")?.addEventListener("input", updateDeleteSubmitState);
+  $$("[data-project-delete-close]").forEach((button) => {
+    button.addEventListener("click", closeProjectDeleteDialog);
+  });
+  $("#project-delete-dialog")?.addEventListener("close", () => {
+    pendingDeleteProject = null;
+  });
   $("#open-settings").addEventListener("click", async () => {
     await loadUiSettings();
     switchSettingsTab("general");
@@ -3854,7 +4284,10 @@ function bindEvents() {
     button.addEventListener("click", () => $("#launch-dialog").close());
   });
   $("#prepare-cold-start").addEventListener("click", coldStartFromPrepare);
-  $("#save-project-draft").addEventListener("click", () => saveProjectDraft().catch((error) => showToast(error.message, true)));
+  $("#save-project-draft").addEventListener("click", (event) => {
+    withButtonFeedback(event.currentTarget, () => saveProjectDraft(), { saved: "Draft saved" })
+      .catch((error) => showToast(error.message, true));
+  });
   $("#project-draft-editor").addEventListener("input", () => {
     projectDraftDirty = true;
     updateProjectDraftPreview();
@@ -3924,6 +4357,27 @@ function bindEvents() {
   document.addEventListener("drop", handleAttachmentDrop);
 
   document.body.addEventListener("click", (event) => {
+    const projectMenuButton = event.target.closest("[data-project-menu]");
+    if (projectMenuButton) {
+      const projectId = projectMenuButton.dataset.projectMenu;
+      openProjectMenuId = openProjectMenuId === projectId ? "" : projectId;
+      renderProjectList();
+      return;
+    }
+    const projectRename = event.target.closest("[data-project-rename]");
+    if (projectRename) {
+      openProjectRenameDialog(projectRename.dataset.projectRename);
+      return;
+    }
+    const projectDelete = event.target.closest("[data-project-delete]");
+    if (projectDelete) {
+      openProjectDeleteDialog(projectDelete.dataset.projectDelete);
+      return;
+    }
+    if (openProjectMenuId && !event.target.closest(".project-menu-popover")) {
+      openProjectMenuId = "";
+      renderProjectList();
+    }
     const projectSwitch = event.target.closest("[data-project-switch]");
     if (projectSwitch) {
       switchProject(projectSwitch.dataset.projectSwitch).catch((error) => showToast(error.message, true));
@@ -4090,7 +4544,7 @@ function bindEvents() {
         updateLatestProjectDraftMessage(inlineEditor.value);
         projectDraftDirty = true;
         updateProjectDraftPreview();
-        saveProjectDraft()
+        withButtonFeedback(projectEditSave, () => saveProjectDraft())
           .then(() => {
             projectDraftEditMode = false;
             renderFramingConversation();
@@ -4174,13 +4628,20 @@ async function init() {
   bindEvents();
   setResourceCategory(activeResourceCategory);
   await loadProjects().catch((error) => showToast(error.message, true));
+  if (!activeProjectId && appState?.multi_project) {
+    $("#sync-state").textContent = "Create a project";
+    renderProjectAvailability();
+    maybeOpenInitialProjectDialog();
+    scheduleOverviewPoll(3500);
+    return;
+  }
   $("#target-venue").value = scopedGet("autoResearchTargetVenue", "");
   restoreSessionSettings();
   await loadUiSettings();
   restoreResourceSelections();
   resizeComposer();
   resizeColdEditor();
-  loadOverview(true);
+  await loadOverview(true);
   scheduleOverviewPoll(1000);
 }
 

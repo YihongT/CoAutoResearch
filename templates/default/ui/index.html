@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CoAutoResearch</title>
-    <link rel="stylesheet" href="/styles.css?v=20260616-multi-project" />
+    <link rel="stylesheet" href="/styles.css?v=20260616-empty-project" />
   </head>
   <body>
     <div class="app-shell">
@@ -18,7 +18,12 @@
         </div>
 
         <section class="project-switcher" aria-label="Projects">
-          <div class="rail-section-label">Projects</div>
+          <div class="project-switcher-head">
+            <div class="rail-section-label">Projects</div>
+            <button class="project-create-button" id="open-project-create" type="button" aria-label="Create project" title="Create project" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
           <div class="project-list" id="project-list">
             <button class="project-switch is-active" type="button" disabled>
               <span class="project-status-dot idle" aria-hidden="true"></span>
@@ -30,7 +35,7 @@
           </div>
         </section>
 
-        <nav class="rail-nav" aria-label="Views">
+        <nav class="rail-nav" aria-label="Views" hidden>
           <div class="rail-section-label">Current project</div>
           <button class="rail-action is-active" type="button" data-view="chat">Agents</button>
           <button class="rail-action" type="button" data-view="workspace">Project files</button>
@@ -310,6 +315,79 @@
       </main>
     </div>
 
+    <dialog class="project-dialog" id="project-dialog" aria-labelledby="project-dialog-title">
+      <form class="project-dialog-shell" id="project-create-form" method="dialog">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">New project</p>
+            <h2 id="project-dialog-title">Create a research project.</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-project-close aria-label="Close project dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <label class="field">
+          <span>Project name</span>
+          <input id="project-name" name="projectName" type="text" placeholder="paper-a, dissertation-chapter, benchmark-study..." autocomplete="off" required />
+        </label>
+        <p class="project-dialog-note" id="project-create-note">Creates a separate project from the clean template.</p>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-project-close>Cancel</button>
+          <button class="primary-button" type="submit">Create project</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog class="project-dialog" id="project-rename-dialog" aria-labelledby="project-rename-title">
+      <form class="project-dialog-shell" id="project-rename-form" method="dialog">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Rename project</p>
+            <h2 id="project-rename-title">Rename this project.</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-project-rename-close aria-label="Close rename dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <label class="field">
+          <span>Project name</span>
+          <input id="project-rename-name" name="projectName" type="text" autocomplete="off" required />
+        </label>
+        <p class="project-dialog-note" id="project-rename-note">Renaming changes the dashboard label only. It does not move or rename the project folder.</p>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-project-rename-close>Cancel</button>
+          <button class="primary-button" type="submit">Rename</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog class="project-dialog project-delete-dialog" id="project-delete-dialog" aria-labelledby="project-delete-title">
+      <form class="project-dialog-shell" id="project-delete-form" method="dialog">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Delete project</p>
+            <h2 id="project-delete-title">Delete this project?</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-project-delete-close aria-label="Close delete dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="delete-warning">
+          <strong id="project-delete-name">Project</strong>
+          <p>This permanently deletes the project folder, including PROJECT.md, resources, workspace files, UI runtime state, Codex session logs, research trajectory, and manuscript files. This cannot be undone from CoAutoResearch.</p>
+        </div>
+        <label class="field">
+          <span>Type the project name to confirm</span>
+          <input id="project-delete-confirm" name="confirmName" type="text" autocomplete="off" required />
+        </label>
+        <p class="project-dialog-note" id="project-delete-note">Deletion is disabled until the project name matches exactly.</p>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-project-delete-close>Cancel</button>
+          <button class="danger-button" id="project-delete-submit" type="submit" disabled>Delete project</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog class="local-browser" id="resource-browser" aria-labelledby="resource-browser-title">
       <section class="local-browser-shell">
         <header class="local-browser-head">
@@ -567,6 +645,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260616-multi-project"></script>
+    <script src="/app.js?v=20260616-empty-project"></script>
   </body>
 </html>
