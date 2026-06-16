@@ -3788,6 +3788,22 @@ function closeInlineFullscreen() {
   }
 }
 
+function filesFromApiResponse(payload) {
+  return payload?.result?.files || payload?.files || payload?.result?.result?.files || {};
+}
+
+function notifyResourceHandlingFromResponse(payload) {
+  const files = filesFromApiResponse(payload);
+  const links = Array.isArray(files.resource_links) ? files.resource_links : [];
+  const autoLinks = links.filter((item) => item?.auto_detected === true || item?.auto_detected === "true");
+  if (autoLinks.length) {
+    showToast(`Attached ${autoLinks.length} typed ${autoLinks.length === 1 ? "resource" : "resources"}.`);
+    return;
+  }
+  const metadataFiles = Array.isArray(files.metadata_files) ? files.metadata_files : [];
+  if (metadataFiles.length) showToast("Resource references noted in manifest.");
+}
+
 function collectResourceLinks() {
   const links = [
     ...selectedResourceItems,
@@ -3986,6 +4002,7 @@ async function launchAutoresearch() {
       body: JSON.stringify({ confirmLaunch: true, brief, targetVenue, fileEdits, resourceLinks: collectResourceLinks(), files, settings: settingsFromForm() }),
     });
     mergeSessionFromApiResponse(response);
+    notifyResourceHandlingFromResponse(response);
     framingDraftPending = false;
     $("#launch-dialog")?.close();
     coldDirty = false;
@@ -4020,6 +4037,7 @@ async function sendSessionComposerMessage(message) {
     : { message: text, files, resourceLinks: collectResourceLinks(), settings: settingsFromForm() };
   const response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
   mergeSessionFromApiResponse(response);
+  notifyResourceHandlingFromResponse(response);
   renderFramingConversation();
   if (!text.startsWith("/")) selectedUploadItems.splice(0);
   renderSelectedResources();
@@ -4049,6 +4067,7 @@ async function startFramingRun(brief) {
   const session = response?.result?.session;
   if (appState && session) appState.research_session = session;
   mergeSessionFromApiResponse(response);
+  notifyResourceHandlingFromResponse(response);
   return response;
 }
 
@@ -4191,6 +4210,7 @@ async function handleChat(event) {
       : { message, files, resourceLinks: collectResourceLinks(), settings: settingsFromForm() };
     const response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
     mergeSessionFromApiResponse(response);
+    notifyResourceHandlingFromResponse(response);
     if (!message.startsWith("/")) selectedUploadItems.splice(0);
     renderSelectedResources();
     form.reset();

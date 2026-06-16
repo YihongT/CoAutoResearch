@@ -234,6 +234,46 @@ try {
     throw new Error(`Python Codex resolver returned ${resolverOutput}`);
   }
 
+  const externalRepo = path.join(tempRoot, "LLMShopper-TBS-Test");
+  await fsp.mkdir(externalRepo, { recursive: true });
+  await fsp.writeFile(path.join(externalRepo, "README.md"), "external repo material\n", "utf8");
+  const resourceResolverScript = [
+    "import importlib.util, json, os, pathlib",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "module._CONTEXT.project = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+    "payload = module.prepare_payload_resources({'resourceLinks': []}, [os.environ['COAUTO_RESOURCE_TEXT']])",
+    "links = payload.get('resourceLinks', [])",
+    "assert len(links) == 1, links",
+    "assert pathlib.Path(links[0]['path']).name == 'LLMShopper-TBS-Test', links",
+    "saved = module.save_resource_links(payload)",
+    "module.write_ui_metadata(payload)",
+    "assert saved and pathlib.Path(saved[0]['path']).parts[0] == 'resources', saved",
+    "manifest = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'resources/user_input/RESOURCE_MANIFEST.md'",
+    "text = manifest.read_text(encoding='utf-8')",
+    "assert 'auto-detected' in text and 'LLMShopper-TBS-Test' in text, text",
+    "print(json.dumps({'link': links[0]['path'], 'saved': saved[0]['path']}))"
+  ].join("\n");
+  const resourceResolverOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    resourceResolverScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir,
+      COAUTO_RESOURCE_TEXT: 'please continue in "E:\\Github\\LLMShopper-TBS-Test" repo'
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!resourceResolverOutput.includes("LLMShopper-TBS-Test")) {
+    throw new Error(`resource resolver did not report the external repo: ${resourceResolverOutput}`);
+  }
+
   const occupied = await reservePort();
   const fallbackServer = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(occupied.port), "--no-open"], {
     cwd: root,

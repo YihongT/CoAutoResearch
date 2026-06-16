@@ -32,6 +32,23 @@ AUTORESEARCH_MAX_ITERATIONS = 50
 PORT_FALLBACK_ATTEMPTS = 50
 MAX_TEXT_BYTES = 500_000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+AUTO_RESOURCE_SEARCH_MAX_RESULTS = 8
+AUTO_RESOURCE_SEARCH_MAX_DIRS = 2500
+AUTO_RESOURCE_SEARCH_MAX_DEPTH = 5
+AUTO_RESOURCE_SKIP_DIRS = {
+    ".cache",
+    ".codex",
+    ".git",
+    ".hg",
+    ".next",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "Library",
+    "node_modules",
+    "site-packages",
+    "venv",
+}
 TEXT_PREVIEW_SUFFIXES = {
     ".md",
     ".markdown",
@@ -1999,6 +2016,295 @@ def infer_resource_category(source: Path) -> str:
     return "ongoing_work"
 
 
+def normalize_resource_reference(raw: str) -> str:
+    value = str(raw or "").strip()
+    value = value.strip("`\"'“”‘’()[]{}<>")
+    value = re.sub(r"[\s,;。．.!?！？:：]+$", "", value)
+    return value.strip()
+
+
+def basename_hint(raw: str) -> str:
+    value = normalize_resource_reference(raw).replace("\\", "/").rstrip("/")
+    if not value:
+        return ""
+    return value.rsplit("/", 1)[-1].strip()
+
+
+def basename_search_hints(raw: str) -> list[str]:
+    base = basename_hint(raw)
+    hints: list[str] = []
+
+    def add(value: str) -> None:
+        value = normalize_resource_reference(value)
+        if len(value) < 3:
+            return
+        lower = value.lower()
+        if lower in {hint.lower() for hint in hints}:
+            return
+        hints.append(value)
+
+    add(base)
+    add(re.sub(r"\s+(repo|repository|folder|directory|project)$", "", base, flags=re.IGNORECASE))
+    cjk_prefix = re.split(r"[\u3400-\u9fff]", base, 1)[0].strip()
+    add(cjk_prefix)
+    add(re.sub(r"\s+(repo|repository|folder|directory|project)$", "", cjk_prefix, flags=re.IGNORECASE))
+    return hints
+
+
+def candidate_paths_for_reference(raw: str) -> list[Path]:
+    value = normalize_resource_reference(raw)
+    if not value:
+        return []
+    expanded = os.path.expandvars(os.path.expanduser(value))
+    candidates: list[Path] = []
+    raw_path = Path(expanded)
+    candidates.append(raw_path)
+    if not raw_path.is_absolute():
+        candidates.extend([
+            REPO_ROOT / expanded,
+            REPO_ROOT.parent / expanded,
+            Path.home() / expanded,
+        ])
+    if re.match(r"^[A-Za-z]:[\\/]", expanded):
+        # On non-Windows machines this cannot be opened directly, but the final
+        # component is often enough to locate the copied/mounted repo.
+        name = basename_hint(expanded)
+        if name:
+            candidates.extend([REPO_ROOT.parent / name, Path.home() / name])
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def path_exists_resolved(path: Path) -> Path | None:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        try:
+            resolved = path.expanduser().absolute()
+        except OSError:
+            return None
+    try:
+        if resolved.exists():
+            return resolved
+    except OSError:
+        return None
+    return None
+
+
+def path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def resource_search_roots() -> list[Path]:
+    roots = [REPO_ROOT.parent, REPO_ROOT, Path.home()]
+    if PROJECT_REGISTRY and PROJECT_REGISTRY.projects_dir:
+        roots.insert(0, PROJECT_REGISTRY.projects_dir)
+    if os.name == "nt":
+        roots.extend(Path(f"{chr(code)}:/") for code in range(ord("A"), ord("Z") + 1))
+    else:
+        roots.extend([Path("/Volumes"), Path("/mnt")])
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        resolved = path_exists_resolved(root)
+        if not resolved or not resolved.is_dir():
+            continue
+        key = str(resolved).lower() if os.name == "nt" else str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(resolved)
+    return unique
+
+
+def search_resource_by_name(name: str) -> list[Path]:
+    target = basename_hint(name).lower()
+    if len(target) < 3:
+        return []
+    results: list[tuple[int, str, Path]] = []
+    visited_dirs = 0
+    for root in resource_search_roots():
+        stack: list[tuple[Path, int]] = [(root, 0)]
+        while stack and len(results) < AUTO_RESOURCE_SEARCH_MAX_RESULTS and visited_dirs < AUTO_RESOURCE_SEARCH_MAX_DIRS:
+            current, depth = stack.pop()
+            visited_dirs += 1
+            try:
+                children = list(current.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                child_name = child.name
+                if child_name in AUTO_RESOURCE_SKIP_DIRS or child_name.startswith("."):
+                    continue
+                lower_name = child_name.lower()
+                score: int | None = None
+                if lower_name == target:
+                    score = 0
+                elif target in lower_name:
+                    score = 3
+                if score is not None:
+                    results.append((score, str(child).lower(), child))
+                    if len(results) >= AUTO_RESOURCE_SEARCH_MAX_RESULTS:
+                        break
+                if depth < AUTO_RESOURCE_SEARCH_MAX_DEPTH:
+                    try:
+                        if child.is_dir():
+                            stack.append((child, depth + 1))
+                    except OSError:
+                        continue
+    results.sort(key=lambda item: (item[0], len(str(item[2])), item[1]))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for _, _, path in results:
+        resolved = path_exists_resolved(path)
+        if not resolved:
+            continue
+        key = str(resolved).lower() if os.name == "nt" else str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(resolved)
+    return unique
+
+
+def extract_resource_references(text: str) -> list[str]:
+    value = str(text or "")
+    references: list[str] = []
+    patterns = [
+        r"`([^`\n]{3,260})`",
+        r"\"([^\"\n]{3,260})\"",
+        r"'([^'\n]{3,260})'",
+        r"([A-Za-z]:[\\/][^\n\r,;，；`\"'“”‘’]+)",
+        r"(~[\\/][^\n\r,;，；`\"'“”‘’]+)",
+        r"((?:\.\.?)[\\/][^\n\r,;，；`\"'“”‘’]+)",
+        r"(/[^\n\r,;，；`\"'“”‘’]+)",
+        r"((?:[A-Za-z0-9_.-]+[\\/]){1,}[A-Za-z0-9_. -]+)",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, value):
+            references.append(match.group(1))
+
+    for match in re.finditer(r"\b([A-Za-z0-9][A-Za-z0-9_.-]{2,80})\s+(?:repo|repository|folder|directory|project)\b", value, re.IGNORECASE):
+        references.append(match.group(1))
+    for match in re.finditer(r"\b(?:repo|repository|folder|directory|project)\s+([A-Za-z0-9][A-Za-z0-9_.-]{2,80})\b", value, re.IGNORECASE):
+        references.append(match.group(1))
+
+    clean: list[str] = []
+    seen: set[str] = set()
+    for reference in references:
+        normalized = normalize_resource_reference(reference)
+        if not normalized:
+            continue
+        lower = normalized.lower()
+        if lower in {"project.md", "state.md", "readme.md", "/goal", "/status", "/diff", "/stop", "/help"}:
+            continue
+        if lower in seen:
+            continue
+        seen.add(lower)
+        clean.append(normalized)
+    return clean[:20]
+
+
+def payload_resource_texts(payload: dict[str, Any], *extra_texts: str) -> list[str]:
+    texts = [str(text or "") for text in extra_texts]
+    for key in ("brief", "message", "targetVenue", "ongoingWorkPath", "datasetModelHints"):
+        value = str(payload.get(key, "")).strip()
+        if value:
+            texts.append(value)
+    file_edits = payload.get("fileEdits", [])
+    if isinstance(file_edits, list):
+        for item in file_edits:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path", "")).strip()
+            text = str(item.get("text", "")).strip()
+            if text and path in {
+                "resources/user_input/INITIAL_BRIEF.md",
+                "resources/user_input/NOTES.md",
+                "resources/target_venue/TARGET_VENUE.md",
+            }:
+                texts.append(text)
+    return texts
+
+
+def resolve_resource_reference(raw: str) -> dict[str, Any]:
+    reference = normalize_resource_reference(raw)
+    for candidate in candidate_paths_for_reference(reference):
+        resolved = path_exists_resolved(candidate)
+        if resolved:
+            return {"reference": reference, "path": resolved, "status": "resolved", "candidates": []}
+
+    last_matches: list[Path] = []
+    for hint in basename_search_hints(reference):
+        matches = search_resource_by_name(hint)
+        last_matches = matches or last_matches
+        if len(matches) == 1:
+            return {"reference": reference, "path": matches[0], "status": "found_by_name", "candidates": []}
+        if len(matches) > 1:
+            exact = [match for match in matches if match.name.lower() == hint.lower()]
+            if len(exact) == 1:
+                return {"reference": reference, "path": exact[0], "status": "found_by_exact_name", "candidates": []}
+            return {"reference": reference, "path": None, "status": "ambiguous", "candidates": matches[:AUTO_RESOURCE_SEARCH_MAX_RESULTS]}
+    if last_matches:
+        return {"reference": reference, "path": None, "status": "ambiguous", "candidates": last_matches[:AUTO_RESOURCE_SEARCH_MAX_RESULTS]}
+    return {"reference": reference, "path": None, "status": "missing", "candidates": []}
+
+
+def prepare_payload_resources(payload: dict[str, Any], texts: list[str]) -> dict[str, Any]:
+    enriched = dict(payload)
+    if enriched.get("_resourceResolutionPrepared"):
+        return enriched
+    links = [item for item in enriched.get("resourceLinks", []) if isinstance(item, dict)]
+    seen = {str(item.get("path", "")).strip() for item in links if str(item.get("path", "")).strip()}
+    resolutions: list[dict[str, Any]] = []
+
+    for text in texts:
+        for reference in extract_resource_references(text):
+            resolution = resolve_resource_reference(reference)
+            resolutions.append(resolution)
+            resolved_path = resolution.get("path")
+            if not isinstance(resolved_path, Path):
+                continue
+            if path_is_within(resolved_path, REPO_ROOT):
+                continue
+            path_text = str(resolved_path)
+            if path_text in seen:
+                continue
+            seen.add(path_text)
+            links.append({
+                "path": path_text,
+                "category": infer_resource_category(resolved_path),
+                "autoDetected": True,
+                "sourceText": resolution.get("reference", reference),
+                "resolutionStatus": resolution.get("status", "resolved"),
+            })
+
+    enriched["resourceLinks"] = links
+    enriched["_resourceResolutionPrepared"] = True
+    if resolutions:
+        enriched["_resourceResolution"] = [
+            {
+                "reference": item.get("reference", ""),
+                "status": item.get("status", ""),
+                "path": str(item["path"]) if isinstance(item.get("path"), Path) else "",
+                "candidates": [str(candidate) for candidate in item.get("candidates", [])],
+            }
+            for item in resolutions
+        ]
+    return enriched
+
+
 def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
     saved: list[dict[str, str]] = []
     links = payload.get("resourceLinks", [])
@@ -2011,8 +2317,15 @@ def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
         source_text = str(item.get("path", "")).strip()
         if not source_text:
             continue
-        source = Path(os.path.expanduser(source_text)).resolve()
-        if not source.exists():
+        source = path_exists_resolved(Path(os.path.expandvars(os.path.expanduser(source_text))))
+        if not source:
+            resolution = resolve_resource_reference(source_text)
+            resolved_path = resolution.get("path")
+            if isinstance(resolved_path, Path):
+                source = resolved_path
+        if not source:
+            if item.get("autoDetected"):
+                continue
             raise ValueError(f"Resource path does not exist: {source_text}")
         category = str(item.get("category", "")).strip() or infer_resource_category(source)
         target = RESOURCE_LINK_TARGETS.get(category)
@@ -2033,7 +2346,15 @@ def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
         else:
             mode = "copy"
             shutil.copy2(source, destination)
-        saved.append({"mode": mode, "category": category, "source": str(source), "path": rel_path(destination)})
+        saved.append({
+            "mode": mode,
+            "category": category,
+            "source": str(source),
+            "path": rel_path(destination),
+            "auto_detected": "true" if item.get("autoDetected") else "false",
+            "source_text": str(item.get("sourceText", "")).strip(),
+            "resolution_status": str(item.get("resolutionStatus", "")).strip(),
+        })
     return saved
 
 
@@ -2173,7 +2494,33 @@ def write_ui_metadata(payload: dict[str, Any]) -> list[str]:
             if not path:
                 continue
             category = str(item.get("category", "")).strip() or "unclassified"
-            resource_lines.append(f"- `{category}`: `{path}`")
+            details = []
+            if item.get("autoDetected"):
+                details.append("auto-detected")
+            source_text = str(item.get("sourceText", "")).strip()
+            if source_text and source_text != path:
+                details.append(f"from `{source_text}`")
+            suffix = f" ({'; '.join(details)})" if details else ""
+            resource_lines.append(f"- `{category}`: `{path}`{suffix}")
+        resource_lines.append("")
+    resolutions = payload.get("_resourceResolution", [])
+    if isinstance(resolutions, list) and resolutions:
+        resource_lines.extend(["## Resource References Detected In User Text", ""])
+        for item in resolutions:
+            if not isinstance(item, dict):
+                continue
+            reference = str(item.get("reference", "")).strip()
+            status = str(item.get("status", "")).strip() or "unknown"
+            path = str(item.get("path", "")).strip()
+            candidates = item.get("candidates", [])
+            if path:
+                resource_lines.append(f"- `{status}`: `{reference}` -> `{path}`")
+                continue
+            if isinstance(candidates, list) and candidates:
+                limited = ", ".join(f"`{candidate}`" for candidate in candidates[:5])
+                resource_lines.append(f"- `{status}`: `{reference}`; candidates: {limited}")
+            elif reference:
+                resource_lines.append(f"- `{status}`: `{reference}`")
         resource_lines.append("")
     if isinstance(uploads, list) and uploads:
         resource_lines.extend(["## Uploaded / Dropped Files", ""])
@@ -2881,7 +3228,7 @@ Follow AGENTS.md and research_trajectory/STATE.md. Check pending interventions, 
 
 
 def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(payload)
+    payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload))
     file_edits = payload.get("fileEdits", [])
     saved_edits = []
     if isinstance(file_edits, list):
@@ -2910,7 +3257,7 @@ def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(payload)
+    payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload))
     if payload.get("confirmLaunch") is not True:
         raise ValueError("Launch must be confirmed from Step 2 before starting Codex.")
     payload["runConversion"] = False
@@ -2950,6 +3297,7 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def start_research_go(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload))
     message = str(payload.get("message", "")).strip()
     display = message or "Continue autoresearch."
     return {
@@ -2964,16 +3312,39 @@ def start_research_go(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str, dict[str, Any]]:
+    payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload, message))
     saved_files = save_uploads(payload)
     linked_resources = save_resource_links(payload)
-    if not saved_files and not linked_resources:
-        return message, {"saved_files": [], "resource_links": []}
-    lines = ["", "", "Attached resources for this message:"]
+    metadata_files = write_ui_metadata(payload)
+    resolutions = payload.get("_resourceResolution", [])
+    if not saved_files and not linked_resources and not resolutions:
+        return message, {"saved_files": [], "resource_links": [], "metadata_files": []}
+    lines = ["", "", "Resource handling for this message:"]
     for path in saved_files:
         lines.append(f"- uploaded file: {path}")
     for item in linked_resources:
         lines.append(f"- {item.get('mode', 'linked')} {item.get('category', 'resource')}: {item.get('path')} (source: {item.get('source')})")
-    return f"{message}{chr(10).join(lines)}", {"saved_files": saved_files, "resource_links": linked_resources}
+    if isinstance(resolutions, list):
+        for item in resolutions:
+            if not isinstance(item, dict):
+                continue
+            reference = str(item.get("reference", "")).strip()
+            status = str(item.get("status", "")).strip()
+            path = str(item.get("path", "")).strip()
+            candidates = item.get("candidates", [])
+            if path:
+                lines.append(f"- resolved typed reference `{reference}` to `{path}`")
+            elif isinstance(candidates, list) and candidates:
+                lines.append(f"- typed reference `{reference}` was ambiguous; inspect RESOURCE_MANIFEST.md")
+            elif reference:
+                lines.append(f"- typed reference `{reference}` was not found; inspect RESOURCE_MANIFEST.md")
+    for path in metadata_files:
+        lines.append(f"- resource manifest updated: {path}")
+    return f"{message}{chr(10).join(lines)}", {
+        "saved_files": saved_files,
+        "resource_links": linked_resources,
+        "metadata_files": metadata_files,
+    }
 
 
 def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
