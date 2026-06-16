@@ -12,7 +12,8 @@ mkdir -p local-projects
 co-auto-research ui --projects-dir local-projects
 ```
 
-Open:
+The CLI opens the UI automatically on local machines. If it cannot, open the
+printed URL manually:
 
 ```text
 http://127.0.0.1:8765

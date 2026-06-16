@@ -165,9 +165,33 @@ try {
   if (!stylesCss.includes(".rail-nav[hidden]")) {
     throw new Error("rail navigation hidden state must not be overridden by display styles");
   }
+  if (
+    !stylesCss.includes("--framing-column-width: 900px") ||
+    !stylesCss.includes(".brief-editor-shell.is-framing-dock") ||
+    !stylesCss.includes(".framing-message.user") ||
+    !stylesCss.includes("justify-self: center !important")
+  ) {
+    throw new Error("framing composer and CoAutoResearch returns must share a centered column");
+  }
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   if (!appJs.includes("maybeOpenInitialProjectDialog") || !appJs.includes("Create a project first.")) {
     throw new Error("empty dashboard must auto-open project creation and block composer submission");
+  }
+  if (
+    appJs.includes('nextMessages.push(normalizeFramingMessage({ role: "user", text: brief }))') ||
+    !appJs.includes("isHiddenUiTranscript") ||
+    !appJs.includes("record: false") ||
+    !appJs.includes('event.key === "Enter" && (event.metaKey || event.ctrlKey)')
+  ) {
+    throw new Error("autosaved brief/file edits must not render as sent chat messages");
+  }
+  if (
+    !appJs.includes("projectCards") ||
+    !appJs.includes("[messages, sessionTranscript, pending, projectCards]") ||
+    !appJs.includes('details class="framing-progress-row is-collapsible') ||
+    !appJs.includes("localSessionActivityHtml")
+  ) {
+    throw new Error("framing interactions must render above the final PROJECT.md card with tool details collapsed");
   }
   const upgradeOutput = execFileSync("node", [cli, "upgrade"], { cwd: projectDir, encoding: "utf8" });
   if (!upgradeOutput.includes("Automated upgrades are not implemented")) {
@@ -211,7 +235,7 @@ try {
   }
 
   const occupied = await reservePort();
-  const fallbackServer = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(occupied.port)], {
+  const fallbackServer = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(occupied.port), "--no-open"], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -234,7 +258,7 @@ try {
   }
 
   const singlePort = await freePort();
-  const singleServer = spawn("node", [cli, "ui", "--project", projectDir, "--host", "127.0.0.1", "--port", String(singlePort)], {
+  const singleServer = spawn("node", [cli, "ui", "--project", projectDir, "--host", "127.0.0.1", "--port", String(singlePort), "--no-open"], {
     cwd: root,
     stdio: "ignore"
   });
@@ -260,7 +284,7 @@ try {
   const defaultPort = await freePort();
   const defaultCwd = path.join(tempRoot, "default-dashboard");
   await fsp.mkdir(defaultCwd);
-  const defaultServer = spawn("node", [cli, "ui", "--host", "127.0.0.1", "--port", String(defaultPort)], {
+  const defaultServer = spawn("node", [cli, "ui", "--host", "127.0.0.1", "--port", String(defaultPort), "--no-open"], {
     cwd: defaultCwd,
     stdio: "ignore"
   });
@@ -284,7 +308,7 @@ try {
   }
 
   const port = await freePort();
-  const server = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(port)], {
+  const server = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(port), "--no-open"], {
     cwd: root,
     stdio: "ignore"
   });

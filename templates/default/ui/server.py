@@ -3450,7 +3450,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     if not path:
                         raise ValueError("File path is required.")
                     file_payload = write_text_file(path, str(payload.get("text", "")))
-                    record_ui_file_edit(file_payload.get("path") or path)
+                    if payload.get("record") is not False:
+                        record_ui_file_edit(file_payload.get("path") or path)
                     self.send_json({"ok": True, "file": file_payload})
                     return
             self.send_json({"error": "Unknown API route"}, status=404)

@@ -81,9 +81,10 @@ From this repository checkout:
 node bin/auto-research.js ui
 ```
 
-Open `http://127.0.0.1:8765`, then click `+` in the left sidebar to create a
-project. `local-projects/` is ignored by this repository, so projects created
-while testing the package are not pushed accidentally.
+The CLI opens the UI in your browser after the server starts. If your terminal
+cannot open a browser, open the printed URL manually. Then click `+` in the left
+sidebar to create a project. `local-projects/` is ignored by this repository, so
+projects created while testing the package are not pushed accidentally.
 
 After npm publication, the intended flow is:
 
@@ -91,7 +92,8 @@ After npm publication, the intended flow is:
 co-auto-research ui
 ```
 
-Open the UI at:
+The CLI opens the UI automatically on local machines. The printed URL will look
+like:
 
 ```text
 http://127.0.0.1:8765
@@ -108,6 +110,12 @@ Then open:
 
 ```text
 http://127.0.0.1:8780
+```
+
+To suppress browser launch, for example on a remote server:
+
+```bash
+co-auto-research ui --no-open
 ```
 
 To watch several generated research projects from one UI, start the dashboard
@@ -131,8 +139,8 @@ remains available for scripting.
 
 ```bash
 co-auto-research init <dir>
-co-auto-research ui [--host 127.0.0.1] [--port 8765]
-co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765]
+co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
+co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
 co-auto-research doctor [--host 127.0.0.1] [--port 8765]
 co-auto-research upgrade
 ```
@@ -147,6 +155,8 @@ co-auto-research upgrade
   generated projects directly inside `<dir>` and create new ones from the UI.
 - `ui --port <port>` starts port selection from a different local port. If that
   port is busy, the server automatically tries the next available port.
+- `ui --open` forces browser launch; `ui --no-open` disables it. Browser launch
+  is skipped automatically in CI and SSH sessions unless `--open` is passed.
 - `doctor` checks local prerequisites and port availability.
 - `upgrade` is advisory in `0.1.0`; generated projects are independent working
   copies and automated upgrades are not implemented yet.

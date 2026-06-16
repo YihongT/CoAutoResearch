@@ -3223,6 +3223,19 @@ body.is-dragging-file .composer {
   background: rgba(255, 253, 247, 0.58);
 }
 
+.framing-progress-row > summary {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  cursor: pointer;
+  list-style: none;
+}
+
+.framing-progress-row > summary::-webkit-details-marker {
+  display: none;
+}
+
 .framing-progress-row span {
   color: rgba(83, 104, 93, 0.9);
   font-size: 11px;
@@ -3242,6 +3255,33 @@ body.is-dragging-file .composer {
 .framing-progress-row.tool,
 .framing-progress-row.command {
   background: rgba(228, 236, 230, 0.42);
+}
+
+.framing-progress-row.is-collapsible {
+  display: block;
+}
+
+.framing-progress-row.is-collapsible > summary span::before {
+  content: "+";
+  display: inline-block;
+  width: 12px;
+  margin-right: 4px;
+  color: rgba(32, 31, 27, 0.42);
+}
+
+.framing-progress-row.is-collapsible[open] > summary span::before {
+  content: "-";
+}
+
+.framing-progress-row.is-collapsible pre {
+  margin: 9px 0 0;
+  padding: 10px;
+  border-top: 1px solid rgba(32, 31, 27, 0.08);
+  color: rgba(32, 31, 27, 0.62);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 @keyframes thinkingPulse {
@@ -8248,5 +8288,71 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   .inline-editor-actions {
     width: 100%;
     justify-content: space-between;
+  }
+}
+
+/* Final ChatGPT-like framing column: composer and CoAutoResearch returns share one centered width. */
+:root {
+  --framing-column-width: 900px;
+  --framing-column-gutter: 48px;
+}
+
+.framing-thread,
+#cold-start-workspace.has-framing-thread .framing-thread {
+  width: min(var(--framing-column-width), calc(100% - var(--framing-column-gutter))) !important;
+  margin-inline: auto !important;
+}
+
+.stage-panel[data-stage-panel="1"] .brief-editor-shell,
+.brief-editor-shell + .resource-drawer {
+  width: min(var(--framing-column-width), calc(100% - var(--framing-column-gutter))) !important;
+}
+
+.framing-message {
+  width: min(var(--framing-column-width), 100%);
+  max-width: min(var(--framing-column-width), 100%);
+}
+
+.framing-message.user {
+  justify-self: end;
+  width: fit-content;
+  max-width: min(620px, 78%);
+}
+
+.framing-message.assistant,
+.framing-message.project-draft-message,
+.transcript-timeline.with-axis,
+.trial-history-card,
+.trial-report-card,
+.current-run-card,
+.transcript-message.assistant,
+.transcript-message.final,
+.transcript-message.tool,
+.transcript-message.command,
+.transcript-message.is-status-card {
+  justify-self: center !important;
+  width: min(var(--framing-column-width), 100%) !important;
+  max-width: min(var(--framing-column-width), 100%) !important;
+}
+
+.framing-message.assistant .transcript-body,
+.project-draft-bubble,
+.thinking-bubble,
+.transcript-timeline.with-axis {
+  width: 100%;
+}
+
+.brief-editor-shell.is-framing-dock {
+  width: var(--brief-dock-width, min(var(--framing-column-width), calc(100vw - var(--framing-column-gutter)))) !important;
+  max-width: min(var(--framing-column-width), calc(100vw - var(--framing-column-gutter))) !important;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --framing-column-gutter: 24px;
+  }
+
+  .framing-message.user {
+    max-width: min(92%, 620px);
   }
 }

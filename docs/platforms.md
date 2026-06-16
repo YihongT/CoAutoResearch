@@ -30,8 +30,9 @@ The simplest dashboard-first flow is:
 co-auto-research ui
 ```
 
-Open `http://127.0.0.1:8765`, then create projects from the sidebar. For a
-scripted command-line flow:
+The CLI opens the UI in your browser after the server starts. If that is not
+available, open the printed URL manually, then create projects from the sidebar.
+For a scripted command-line flow:
 
 ```bash
 co-auto-research init my-project
@@ -56,8 +57,9 @@ PowerShell examples:
 co-auto-research ui
 ```
 
-Open `http://127.0.0.1:8765`, then create projects from the sidebar. For a
-scripted command-line flow:
+The CLI opens the UI in your browser after the server starts. If that is not
+available, open the printed URL manually, then create projects from the sidebar.
+For a scripted command-line flow:
 
 ```powershell
 co-auto-research init my-project

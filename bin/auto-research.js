@@ -21,8 +21,8 @@ function usage() {
 
 Usage:
   co-auto-research init <dir>
-  co-auto-research ui [--host 127.0.0.1] [--port 8765]
-  co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765]
+  co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
+  co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
   co-auto-research upgrade
   co-auto-research help
@@ -44,6 +44,10 @@ function parseOptions(args) {
       }
       options[arg.slice(2)] = value;
       index += 1;
+      continue;
+    }
+    if (arg === "--open" || arg === "--no-open") {
+      options[arg.slice(2)] = true;
       continue;
     }
     rest.push(arg);
@@ -214,6 +218,63 @@ function checkPort(host, port) {
   });
 }
 
+function shouldAutoOpenBrowser(options) {
+  if (options["no-open"] || process.env.COAUTO_NO_OPEN) return false;
+  if (options.open) return true;
+  if (process.env.CI) return false;
+  if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) return false;
+  return Boolean(process.stdout.isTTY);
+}
+
+function openBrowser(url) {
+  let command = "";
+  let args = [];
+  if (process.platform === "darwin") {
+    command = "open";
+    args = [url];
+  } else if (process.platform === "win32") {
+    command = "cmd";
+    args = ["/c", "start", "", url];
+  } else {
+    command = "xdg-open";
+    args = [url];
+  }
+  try {
+    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+      console.log(`Could not open a browser automatically. Open ${url} manually.`);
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function attachServerOutput(child, options) {
+  const autoOpen = shouldAutoOpenBrowser(options);
+  let opened = false;
+  let buffered = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    process.stdout.write(chunk);
+    if (!autoOpen || opened) return;
+
+    buffered += chunk;
+    const lines = buffered.split(/\r?\n/);
+    buffered = lines.pop() || "";
+    for (const line of lines) {
+      const match = line.match(/^Open\s+(https?:\/\/\S+)/);
+      if (!match) continue;
+      opened = true;
+      const ok = openBrowser(match[1]);
+      if (ok) console.log(`Opened ${match[1]} in your browser.`);
+      else console.log(`Could not open a browser automatically. Open ${match[1]} manually.`);
+      break;
+    }
+  });
+}
+
 async function commandDoctor(args) {
   const { options } = parseOptions(args);
   const host = options.host || DEFAULT_HOST;
@@ -265,8 +326,9 @@ function commandUi(args) {
   const child = spawn(python.command, [...python.args, ...serverArgs], {
     cwd: projectsDir || projectRoot,
     env: { ...process.env, COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT },
-    stdio: "inherit"
+    stdio: ["inherit", "pipe", "inherit"]
   });
+  attachServerOutput(child, options);
   let shuttingDown = false;
   function forwardSignal(signal) {
     if (shuttingDown) return;

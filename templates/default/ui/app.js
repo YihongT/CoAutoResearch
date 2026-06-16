@@ -1218,6 +1218,11 @@ function isUiLocalTranscript(entry) {
   return rawType.startsWith("ui.command") || rawType === "ui.file_edit";
 }
 
+function isHiddenUiTranscript(entry) {
+  const rawType = String(entry?.raw_type || "").toLowerCase();
+  return rawType === "ui.cold_start" || rawType === "ui.file_edit";
+}
+
 function prepareFingerprint() {
   const paths = (appState?.cold_start_files || []).map((file) => file.path);
   const knownPaths = paths.length ? paths : Object.keys(coldFiles);
@@ -1311,7 +1316,7 @@ async function saveProjectDraft(options = {}) {
   if (!text) throw new Error("Project draft is empty.");
   await api("/api/file/save", {
     method: "POST",
-    body: JSON.stringify({ path: "PROJECT.md", text }),
+    body: JSON.stringify({ path: "PROJECT.md", text, record: false }),
   });
   projectDraftDirty = false;
   if (!silent) showToast("PROJECT.md draft saved.");
@@ -1387,11 +1392,23 @@ function restoreFramingMessages() {
   const nextMessages = [];
   const serverMessages = appState?.framing?.messages || [];
   let shouldPersist = false;
+  const savedBrief = String(coldFiles["resources/user_input/INITIAL_BRIEF.md"] || "").trim();
+  const session = sessionState();
+  const visibleSessionTranscript = Array.isArray(session.transcript)
+    ? session.transcript.filter((entry) => !isHiddenUiTranscript(entry))
+    : [];
+  const hasStartedSession = hasSession() || Boolean(session.mode) || !["", "idle"].includes(String(session.status || "").toLowerCase());
+  const hasOnlyOrphanLocalUserMessage =
+    Array.isArray(serverMessages) &&
+    serverMessages.length === 1 &&
+    String(serverMessages[0]?.role || "") === "user" &&
+    !hasStartedSession &&
+    visibleSessionTranscript.length === 0;
   if (Array.isArray(serverMessages)) {
     for (const rawMessage of serverMessages) {
       const message = normalizeFramingMessage(rawMessage);
       if (!message) continue;
-      if (message.role === "user" && isDefaultBriefTemplate(message.text)) {
+      if (message.role === "user" && (isDefaultBriefTemplate(message.text) || hasOnlyOrphanLocalUserMessage)) {
         shouldPersist = true;
         continue;
       }
@@ -1436,16 +1453,9 @@ function restoreFramingMessages() {
       shouldPersist = true;
     }
   }
-  if (!nextMessages.length) {
-    const brief = String(coldFiles["resources/user_input/INITIAL_BRIEF.md"] || "").trim();
-    if (brief && !isDefaultBriefTemplate(brief)) {
-      nextMessages.push(normalizeFramingMessage({ role: "user", text: brief }));
-      shouldPersist = true;
-    }
-  }
   replaceFramingMessagesIfChanged(nextMessages);
   const lastUser = [...localMessages].reverse().find((message) => message.role === "user");
-  const brief = String(coldFiles["resources/user_input/INITIAL_BRIEF.md"] || "").trim();
+  const brief = savedBrief;
   const hasMessageAttachments = localMessages.some((message) => Array.isArray(message.attachments) && message.attachments.length);
   if (lastUser && brief && String(lastUser.text || "").trim() === brief && selectedResourceItems.length && !hasMessageAttachments) {
     lastUser.attachments = currentComposerAttachments();
@@ -1608,8 +1618,21 @@ function framingProgressHtml() {
         .map((entry) => {
           const title = framingProgressTitle(entry);
           const content = framingProgressContent(entry);
+          const role = transcriptRole(entry);
+          const collapsible = ["Command", "Tool", "File change"].includes(title) || role === "command" || role === "tool";
+          if (collapsible) {
+            return `
+              <details class="framing-progress-row is-collapsible ${escapeHtml(role)}">
+                <summary>
+                  <span>${escapeHtml(title)}</span>
+                  <p>${escapeHtml(content)}</p>
+                </summary>
+                <pre>${escapeHtml(String(entry?.content || "").trim())}</pre>
+              </details>
+            `;
+          }
           return `
-            <div class="framing-progress-row ${escapeHtml(transcriptRole(entry))}">
+            <div class="framing-progress-row ${escapeHtml(role)}">
               <span>${escapeHtml(title)}</span>
               <p>${escapeHtml(content)}</p>
             </div>
@@ -1660,7 +1683,10 @@ function renderFramingConversation() {
   const thread = $("#framing-thread");
   if (!thread) return;
   const wasNearBottom = isPageNearBottom();
-  const messages = localMessages.map(framingMessageHtml).join("");
+  const interactionMessages = localMessages.filter((message) => !(message.kind === "project" && message.artifact?.text));
+  const projectMessages = localMessages.filter((message) => message.kind === "project" && message.artifact?.text);
+  const messages = interactionMessages.map(framingMessageHtml).join("");
+  const projectCards = projectMessages.map(framingMessageHtml).join("");
   const transcriptEntries = sessionTranscriptEntries();
   const hasLocalTranscript = transcriptEntries.some(isUiLocalTranscript);
   const sessionTranscript = hasLaunched() || hasLocalTranscript
@@ -1668,8 +1694,8 @@ function renderFramingConversation() {
     : "";
   const shouldShowPending = (framingDraftPending || isSessionRunning()) && !sessionTranscript;
   const pending = shouldShowPending ? framingThinkingHtml() : "";
-  const hasThreadContent = Boolean(messages || sessionTranscript || pending);
-  const nextHtml = [messages, sessionTranscript, pending].filter(Boolean).join("");
+  const hasThreadContent = Boolean(messages || sessionTranscript || pending || projectCards);
+  const nextHtml = [messages, sessionTranscript, pending, projectCards].filter(Boolean).join("");
   if (nextHtml !== lastFramingHtml) {
     const renderedDraft = document.querySelector(".project-rendered");
     if (renderedDraft) projectRenderedScrollTop = renderedDraft.scrollTop;
@@ -2206,7 +2232,10 @@ async function saveColdFiles(options = {}) {
   const { silent = false, refresh = true, markPrepared = true } = options;
   if (activeColdPath) coldFiles[activeColdPath] = $("#cold-file-editor").value;
   const edits = Object.entries(coldFiles).map(([path, text]) => ({ path, text }));
-  await Promise.all(edits.map((edit) => api("/api/file/save", { method: "POST", body: JSON.stringify(edit) })));
+  await Promise.all(edits.map((edit) => api("/api/file/save", {
+    method: "POST",
+    body: JSON.stringify({ ...edit, record: false }),
+  })));
   coldDirty = false;
   if (markPrepared) markPrepareSaved(true);
   if (!silent) showToast("Brief saved.");
@@ -2464,7 +2493,7 @@ function sessionTranscriptEntries() {
     const content = String(entry?.content || "").trim();
     if (!content) return;
     const originalRawType = String(entry?.raw_type || "");
-    if (originalRawType === "ui.cold_start") return;
+    if (isHiddenUiTranscript(entry)) return;
     if (isLegacySyntheticUiCommand(entry)) {
       previousIncludedWasUserCommand = false;
       return;
@@ -2629,9 +2658,8 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData) {
 
 function currentRunActivityHtml(entries) {
   if (!entries.length && !isSessionRunning()) return "";
-  const open = isSessionRunning();
   return `
-    <details class="current-run-card" ${open ? "open" : ""}>
+    <details class="current-run-card">
       <summary>
         <div>
           <strong>${escapeHtml(isSessionRunning() ? "Current session activity" : "Latest session activity")}</strong>
@@ -2641,6 +2669,24 @@ function currentRunActivityHtml(entries) {
       </summary>
       <div class="current-run-events">
         ${entries.length ? transcriptEntriesHtml(entries) : `<div class="run-waiting">Codex is working. Live events will appear here.</div>`}
+      </div>
+    </details>
+  `;
+}
+
+function localSessionActivityHtml(blocks) {
+  if (!blocks.length) return "";
+  return `
+    <details class="current-run-card local-run-card">
+      <summary>
+        <div>
+          <strong>Codex framing activity</strong>
+          <span>${escapeHtml(blocks.length)} event${blocks.length === 1 ? "" : "s"}</span>
+        </div>
+        <p>Commands, tool calls, and intermediate Codex events. Expand only when debugging the run.</p>
+      </summary>
+      <div class="current-run-events">
+        ${blocks.join("")}
       </div>
     </details>
   `;
@@ -2682,7 +2728,7 @@ function sessionTimelineHtml(entries) {
     <section class="transcript-timeline with-axis" aria-label="Codex transcript">
       ${trialHistoryHtml(trials, activeTrial, activeTrialData)}
       ${currentRunActivityHtml(liveActivityEntries)}
-      ${localBlocks.join("")}
+      ${localSessionActivityHtml(localBlocks)}
     </section>
   `;
 }
@@ -4338,7 +4384,7 @@ function bindEvents() {
     }
   });
   $("#cold-file-editor").addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       coldStartFromPrepare();
     }

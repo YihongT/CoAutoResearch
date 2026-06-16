@@ -16,7 +16,7 @@ For a dashboard over several projects on the server:
 
 ```bash
 cd /path/to/projects
-co-auto-research ui --projects-dir . --host 127.0.0.1 --port 8765
+co-auto-research ui --projects-dir . --host 127.0.0.1 --port 8765 --no-open
 ```
 
 From your local machine, forward that port:
@@ -34,6 +34,10 @@ Then open:
 ```text
 http://127.0.0.1:8765
 ```
+
+The CLI skips automatic browser launch in SSH sessions by default. `--no-open`
+makes this explicit and keeps the remote server from trying to open a browser on
+the server machine.
 
 ## File Access Semantics
 

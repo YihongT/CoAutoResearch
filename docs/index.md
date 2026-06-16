@@ -15,9 +15,11 @@ defend, and revise the project.
 co-auto-research ui
 ```
 
-Open `http://127.0.0.1:8765`, then click `+` in the left sidebar to create a
-project. If you run this outside a generated project, CoAutoResearch creates a
-local `local-projects/` dashboard folder for UI-created projects.
+The CLI opens the UI in your browser after the server starts. If browser launch
+is unavailable, open the printed URL manually, then click `+` in the left
+sidebar to create a project. If you run this outside a generated project,
+CoAutoResearch creates a local `local-projects/` dashboard folder for UI-created
+projects.
 
 If the default port is busy, CoAutoResearch automatically tries the next
 available port and prints the actual URL. To prefer a different starting port:
@@ -25,6 +27,9 @@ available port and prints the actual URL. To prefer a different starting port:
 ```bash
 co-auto-research ui --port 8780
 ```
+
+Use `--no-open` on remote servers or when you want to open the printed URL
+yourself.
 
 ## Guides
 
