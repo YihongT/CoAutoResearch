@@ -22,7 +22,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node scripts/verify-template.js && node scripts/smoke-test.js",
+    "test": "node scripts/verify-template.js && node scripts/ui-flow-test.js && node scripts/smoke-test.js",
     "verify": "node scripts/verify-template.js",
     "smoke": "node scripts/smoke-test.js",
     "pack:dry-run": "npm pack --dry-run"

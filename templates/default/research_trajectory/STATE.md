@@ -57,9 +57,19 @@ This section records only current method status and rationale.
 
 ## Current Resource Status
 
+Resource intake status: <pending / pass / blocked / not_needed>
+
 Active resources:
 
 - <resource and path>
+
+Missing or ambiguous resources:
+
+- <resource clue and required user action>
+
+Next intake action:
+
+- <next resource intake step or none>
 
 Deprecated resources:
 

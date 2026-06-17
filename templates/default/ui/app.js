@@ -3,6 +3,7 @@ let activeProjectId = new URLSearchParams(window.location.search).get("project")
 let activeView = "chat";
 let activePanel = "resources";
 let activeStage = "1";
+const FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection";
 let activeColdPath = "";
 let toastTimer = null;
 let coldAutosaveTimer = null;
@@ -18,11 +19,16 @@ let uiSettings = null;
 let settingsSecretKeys = [];
 let projectDraftDirty = false;
 let framingDraftPending = false;
+let framingReplyPending = false;
+let pendingFramingUserMessageId = "";
+let framingPendingSince = 0;
 let projectDraftEditMode = false;
 let editingFramingId = "";
 let projectRenderedScrollTop = 0;
 let overviewPollTimer = null;
 let lastFramingHtml = "";
+let framingMessagesPersisting = false;
+let framingMessagesSaveVersion = 0;
 let initialProjectDialogOpened = false;
 let openProjectMenuId = "";
 let pendingRenameProject = null;
@@ -55,6 +61,9 @@ const defaultSessionSettings = {
   webSearch: true,
   extraConfig: "",
 };
+
+const allowedThemeModes = new Set(["light", "night"]);
+let currentThemeMode = normalizeThemeMode(localStorage.getItem("coAutoResearchTheme") || document.documentElement.dataset.theme || "light");
 
 const resourceCategories = {
   ongoing_work: "Ongoing work",
@@ -100,6 +109,7 @@ const secretKeyHelp = {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+applyThemeMode(currentThemeMode);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -230,7 +240,7 @@ function newMessageId(prefix = "m") {
 
 function normalizeFramingMessage(message) {
   if (!message || !["user", "assistant"].includes(message.role)) return null;
-  const allowedKinds = new Set(["text", "project", "goal-launch"]);
+  const allowedKinds = new Set(["text", "project", "goal-launch", "command"]);
   const kind = allowedKinds.has(message.kind) ? message.kind : "text";
   const artifact = message.artifact && typeof message.artifact === "object"
     ? {
@@ -238,9 +248,6 @@ function normalizeFramingMessage(message) {
         text: String(message.artifact.text || "").trim(),
       }
     : null;
-  const text = String(message.text || "").trim();
-  if (kind === "project" && (!artifact?.text || isPlaceholderProject(artifact.text))) return null;
-  if (!text && !(artifact?.path && artifact?.text)) return null;
   const attachments = Array.isArray(message.attachments)
     ? message.attachments
         .map((item) => {
@@ -265,23 +272,42 @@ function normalizeFramingMessage(message) {
         })
         .filter(Boolean)
     : [];
+  const text = String(message.text || "").trim() || (message.role === "user" && attachments.length ? attachmentOnlyMessage(attachments) : "");
+  if (kind === "project" && (!artifact?.text || isPlaceholderProject(artifact.text))) return null;
+  if (!text && !(artifact?.path && artifact?.text)) return null;
   return {
     id: String(message.id || newMessageId()).trim(),
     role: message.role,
     kind,
     text,
     created_at: String(message.created_at || new Date().toISOString()),
+    ...(String(message.edited_at || "").trim() ? { edited_at: String(message.edited_at || "").trim() } : {}),
     ...(artifact?.path && artifact?.text ? { artifact } : {}),
     ...(attachments.length ? { attachments } : {}),
   };
 }
 
-function latestProjectMessage() {
-  for (let index = localMessages.length - 1; index >= 0; index -= 1) {
-    const message = localMessages[index];
-    if (message?.role === "assistant" && message.kind === "project" && message.artifact?.path === "PROJECT.md") return message;
+function attachmentOnlyMessage(attachments = []) {
+  const count = Array.isArray(attachments) ? attachments.length : 0;
+  return count ? `Attached ${count} ${count === 1 ? "resource" : "resources"}.` : "";
+}
+
+function isProjectDraftMessage(message) {
+  return message?.role === "assistant" && message.kind === "project" && message.artifact?.path === "PROJECT.md" && message.artifact?.text;
+}
+
+function latestProjectMessage(messages = localMessages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isProjectDraftMessage(message)) return message;
   }
   return null;
+}
+
+function collapseProjectDraftMessages(messages) {
+  const latest = latestProjectMessage(messages);
+  if (!latest) return messages;
+  return messages.filter((message) => !isProjectDraftMessage(message) || message.id === latest.id);
 }
 
 function setHiddenProjectDraft(text) {
@@ -290,8 +316,23 @@ function setHiddenProjectDraft(text) {
   updateProjectDraftPreview();
 }
 
+function markdownLinkHtml(label, href) {
+  const text = String(label || "").trim();
+  const target = String(href || "").trim();
+  if (!text || !target) return escapeHtml(text || target);
+  if (/^(https?:\/\/|mailto:)/i.test(target)) {
+    return `<a href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+  }
+  const path = repoRelativePath(target);
+  if (path && !path.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/i.test(path)) {
+    return `<button class="markdown-file-link" type="button" data-inline-fullscreen="${escapeHtml(path)}">${escapeHtml(text)}</button>`;
+  }
+  return escapeHtml(text);
+}
+
 function inlineMarkup(text) {
   return escapeHtml(text)
+    .replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, label, href) => markdownLinkHtml(label, href))
     .replaceAll(/`([^`]+)`/g, "<code>$1</code>")
     .replaceAll(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
@@ -509,6 +550,26 @@ function scopedRemove(key) {
   localStorage.removeItem(scopedStorageKey(key));
 }
 
+function normalizeThemeMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return allowedThemeModes.has(mode) ? mode : "light";
+}
+
+function applyThemeMode(value, options = {}) {
+  const mode = normalizeThemeMode(value);
+  currentThemeMode = mode;
+  document.documentElement.dataset.theme = mode;
+  if (options.persist !== false) localStorage.setItem("coAutoResearchTheme", mode);
+  hydrateThemeControls();
+  return mode;
+}
+
+function hydrateThemeControls() {
+  $$('[data-theme-option]').forEach((input) => {
+    input.checked = input.value === currentThemeMode;
+  });
+}
+
 function apiPath(path) {
   if (!path.startsWith("/api/") || path.startsWith("/api/projects")) return path;
   if (!activeProjectId) return path;
@@ -704,6 +765,11 @@ function resetProjectClientState() {
   editingFramingId = "";
   editingTranscriptId = "";
   lastFramingHtml = "";
+  framingMessagesSaveVersion += 1;
+  framingMessagesPersisting = false;
+  framingReplyPending = false;
+  pendingFramingUserMessageId = "";
+  framingPendingSince = 0;
   selectedTrialIndex = 0;
   localMessages.splice(0);
   selectedResourceItems.splice(0);
@@ -993,6 +1059,7 @@ async function loadOverview(silent = false) {
     const session = appState.research_session || {};
     if (framingDraftPending && session.mode === "framing" && !["running", "stopping"].includes(session.status)) {
       framingDraftPending = false;
+      reconcileFramingPending(localMessages);
     }
     $("#sync-state").textContent = `Synced ${new Date(appState.generated_at).toLocaleTimeString()}`;
     renderProjectList();
@@ -1017,7 +1084,7 @@ function scheduleOverviewPoll(delay) {
   overviewPollTimer = setTimeout(async () => {
     if (activeProjectId) await loadOverview(true);
     else await loadProjects().catch((error) => showToast(error.message, true));
-    scheduleOverviewPoll(isSessionRunning() || framingDraftPending ? 1000 : 3500);
+    scheduleOverviewPoll(isSessionRunning() || framingDraftPending || framingReplyPending ? 1000 : 3500);
   }, delay);
 }
 
@@ -1123,7 +1190,12 @@ function sessionState() {
 }
 
 function isSessionRunning() {
+  if (isGoalPassed()) return false;
   return ["running", "stopping"].includes(sessionState().status);
+}
+
+function isSessionInterrupted() {
+  return String(sessionState().status || "").toLowerCase() === "interrupted";
 }
 
 function isFramingRunning() {
@@ -1197,8 +1269,37 @@ function hasGoalStarted() {
   return ["goal", "research"].includes(mode) || Boolean(session.loop_active) || Number(session.loop_iteration || 0) > 0;
 }
 
+function isGoalPassed() {
+  const gate = sessionState().gate || {};
+  const status = String(gate.status || gate.raw_status || "").trim().toLowerCase();
+  return status === "pass" || status === "passed";
+}
+
+function isLiveGoalSession() {
+  return isSessionRunning() && hasGoalStarted() && !isGoalPassed();
+}
+
+function isTrialReported(report) {
+  return cleanText(report?.status, "").toLowerCase() === "reported";
+}
+
+function isTrialLive(iteration, report = null) {
+  const liveIteration = Number(sessionState().loop_iteration || 0);
+  return isLiveGoalSession() && liveIteration > 0 && Number(iteration) === liveIteration && !isTrialReported(report);
+}
+
 function canMessage() {
   return hasLaunched() && hasSession() && !isSessionRunning();
+}
+
+function canChatWithFramingDraft() {
+  const session = sessionState();
+  const mode = String(session.mode || "").toLowerCase();
+  return mode === "framing" && hasProjectDraftReady() && hasSession() && !isSessionRunning();
+}
+
+function canSendSessionComposerMessage() {
+  return canMessage() || canChatWithFramingDraft();
 }
 
 function isLocalSlashControl(text) {
@@ -1323,9 +1424,17 @@ async function saveProjectDraft(options = {}) {
 }
 
 async function saveFramingMessages() {
-  await api("/api/framing/messages", {
+  return api("/api/framing/messages", {
     method: "POST",
-    body: JSON.stringify({ messages: localMessages.slice(-80) }),
+    body: JSON.stringify({ clientVersion: FRAMING_MESSAGES_CLIENT_VERSION, messages: localMessages.slice(-80) }),
+  });
+}
+
+function persistFramingMessages() {
+  const version = ++framingMessagesSaveVersion;
+  framingMessagesPersisting = true;
+  return saveFramingMessages().finally(() => {
+    if (version === framingMessagesSaveVersion) framingMessagesPersisting = false;
   });
 }
 
@@ -1350,16 +1459,236 @@ function replaceFramingMessagesIfChanged(nextMessages) {
   return true;
 }
 
-function latestProjectIndex(messages = localMessages) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.kind === "project") return index;
-  }
-  return -1;
+function framingMessageDedupeKey(message) {
+  return [
+    String(message?.role || ""),
+    String(message?.text || "").trim(),
+    String(message?.artifact?.path || ""),
+    String(message?.artifact?.text || "").trim(),
+  ].join("\n");
 }
 
-function latestUserIndex(messages = localMessages) {
+function framingMessageTime(message, fallback) {
+  const value = Date.parse(String(message?.created_at || ""));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function beginFramingPending(messageId = "") {
+  framingPendingSince = Date.now();
+  if (messageId) pendingFramingUserMessageId = messageId;
+}
+
+function messageHasAssistantAfter(messageId, messages = localMessages) {
+  const index = messages.findIndex((message) => message?.id === messageId && message.role === "user");
+  if (index < 0) return false;
+  const nextUserIndex = messages.findIndex((message, itemIndex) => itemIndex > index && message?.role === "user");
+  const endIndex = nextUserIndex < 0 ? messages.length : nextUserIndex;
+  return messages.slice(index + 1, endIndex).some((message) => message?.role === "assistant" && message.kind !== "project");
+}
+
+function isControlFramingMessage(message) {
+  const text = String(message?.text || "").trim();
+  return message?.kind === "command" || message?.kind === "goal-launch" || text.startsWith("/") || isGoalLaunchMessage(message);
+}
+
+function latestUnansweredUserMessage(messages = localMessages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === "user") return index;
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    if (isControlFramingMessage(message)) continue;
+    const hasReply = messages.slice(index + 1).some((item) => item?.role === "assistant" && item.kind !== "project");
+    return hasReply ? null : message;
+  }
+  return null;
+}
+
+function reconcileFramingPending(messages = localMessages) {
+  if (framingReplyPending && pendingFramingUserMessageId && messageHasAssistantAfter(pendingFramingUserMessageId, messages)) {
+    framingReplyPending = false;
+    pendingFramingUserMessageId = "";
+  }
+  if (framingReplyPending && !latestUnansweredUserMessage(messages)) {
+    framingReplyPending = false;
+    pendingFramingUserMessageId = "";
+  }
+  if (!framingReplyPending && !framingDraftPending && !isSessionRunning()) {
+    framingPendingSince = 0;
+  }
+}
+
+function editedTranscriptCutWindows(messages) {
+  return messages
+    .filter((message) => message?.role === "user" && message.edited_at)
+    .map((message) => {
+      const start = Date.parse(String(message.created_at || ""));
+      const end = Date.parse(String(message.edited_at || ""));
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      return { start, end };
+    })
+    .filter(Boolean);
+}
+
+function transcriptEntryTime(entry) {
+  const value = Date.parse(String(entry?.created_at || ""));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function isEntryInsideEditedCut(entry, windows) {
+  const value = transcriptEntryTime(entry);
+  return Boolean(value && windows.some((window) => value >= window.start && value < window.end));
+}
+
+function mergePendingLocalFramingMessages(nextMessages) {
+  if (!localMessages.length || !(framingMessagesPersisting || framingDraftPending || framingReplyPending || isSessionRunning())) {
+    return nextMessages;
+  }
+  const nextIds = new Set(nextMessages.map((message) => String(message?.id || "")).filter(Boolean));
+  const nextKeys = new Set(nextMessages.map(framingMessageDedupeKey));
+  const pending = localMessages.filter((message) => {
+    if (!message || message.role !== "user") return false;
+    if (isDefaultBriefTemplate(message.text)) return false;
+    const id = String(message.id || "");
+    if (id && nextIds.has(id)) return false;
+    return !nextKeys.has(framingMessageDedupeKey(message));
+  });
+  if (!pending.length) return nextMessages;
+  return [...nextMessages, ...pending].sort((a, b) => framingMessageTime(a, 0) - framingMessageTime(b, 0));
+}
+
+function isFramingThreadUserTranscript(entry) {
+  const rawType = String(entry?.raw_type || "").toLowerCase();
+  const role = String(entry?.role || "").toLowerCase();
+  const text = String(entry?.content || "").trim();
+  return ["ui.framing", "ui.chat"].includes(rawType) && role === "user" && text && !isDefaultBriefTemplate(text);
+}
+
+function transcriptFramingMessageId(entry) {
+  const id = String(entry?.id || "").trim();
+  return id ? `framing-${id.slice(0, 80)}` : "";
+}
+
+function isAssistantReplyCandidate(entry, cutWindows) {
+  const rawType = String(entry?.raw_type || "").toLowerCase();
+  const role = String(entry?.role || "").toLowerCase();
+  const content = String(entry?.content || "").trim();
+  return (
+    content &&
+    !isEntryInsideEditedCut(entry, cutWindows) &&
+    ["assistant", "final"].includes(role) &&
+    ["item.completed", "turn.completed"].includes(rawType)
+  );
+}
+
+function transcriptReplyWindows(cutWindows) {
+  const transcript = Array.isArray(sessionState().transcript) ? sessionState().transcript : [];
+  const runStarts = transcript
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => transcriptRunStart(entry) && !isEntryInsideEditedCut(entry, cutWindows));
+  return runStarts.flatMap(({ entry, index }, itemIndex) => {
+    if (!isFramingThreadUserTranscript(entry)) return [];
+    const nextUserIndex = runStarts[itemIndex + 1]?.index ?? transcript.length;
+    const completed = nextUserIndex < transcript.length || !isSessionRunning();
+    const candidates = transcript.slice(index + 1, nextUserIndex).filter((candidate) => isAssistantReplyCandidate(candidate, cutWindows));
+    return [{
+      entry,
+      index,
+      nextUserIndex,
+      completed,
+      candidates,
+      finalEntry: completed && candidates.length ? candidates[candidates.length - 1] : null,
+    }];
+  });
+}
+
+function pruneNonFinalRecoveredAssistantMessages(messages) {
+  const cutWindows = editedTranscriptCutWindows(messages);
+  const windows = transcriptReplyWindows(cutWindows);
+  const finalIds = new Set(windows.map((window) => transcriptFramingMessageId(window.finalEntry)).filter(Boolean));
+  const finalTexts = new Set(windows.map((window) => normalizedTranscriptText(window.finalEntry?.content)).filter(Boolean));
+  const staleIds = new Set();
+  const staleTexts = new Set();
+  windows.forEach((window) => {
+    const finalId = transcriptFramingMessageId(window.finalEntry);
+    const finalText = normalizedTranscriptText(window.finalEntry?.content);
+    window.candidates.forEach((candidate) => {
+      const id = transcriptFramingMessageId(candidate);
+      const text = normalizedTranscriptText(candidate?.content);
+      if (id && id !== finalId) staleIds.add(id);
+      if (text && text !== finalText) staleTexts.add(text);
+    });
+  });
+  if (!staleIds.size && !staleTexts.size) return messages;
+  return messages.filter((message) => {
+    const id = String(message?.id || "");
+    if (message.role !== "assistant" || message.kind === "project") return true;
+    if (finalIds.has(id)) return true;
+    if (staleIds.has(id)) return false;
+    const text = normalizedTranscriptText(message.text);
+    return !(staleTexts.has(text) && !finalTexts.has(text));
+  });
+}
+
+function recoveredFramingMessagesFromSession(existingMessages) {
+  const transcript = Array.isArray(sessionState().transcript) ? sessionState().transcript : [];
+  if (!transcript.length) return [];
+  const existingKeys = new Set(existingMessages.map(framingMessageDedupeKey));
+  const existingIds = new Set(existingMessages.map((message) => String(message?.id || "")).filter(Boolean));
+  const cutWindows = editedTranscriptCutWindows(existingMessages);
+  const messagesWithRecovered = existingMessages.slice();
+  const recovered = transcript
+    .map((entry) => {
+      const text = String(entry?.content || "").trim();
+      if (!isFramingThreadUserTranscript(entry)) return null;
+      if (isEntryInsideEditedCut(entry, cutWindows)) return null;
+      const message = normalizeFramingMessage({
+        id: transcriptFramingMessageId(entry) || newMessageId("user"),
+        role: "user",
+        kind: "text",
+        text,
+        created_at: String(entry?.created_at || new Date().toISOString()),
+      });
+      if (!message || existingIds.has(message.id) || existingKeys.has(framingMessageDedupeKey(message))) return null;
+      existingIds.add(message.id);
+      existingKeys.add(framingMessageDedupeKey(message));
+      messagesWithRecovered.push(message);
+      return message;
+    })
+    .filter(Boolean);
+  transcriptReplyWindows(cutWindows).forEach(({ entry, finalEntry }) => {
+    const text = String(entry?.content || "").trim();
+    if (!text || !finalEntry) return;
+    if (finalEntry) {
+      const message = normalizeFramingMessage({
+        id: transcriptFramingMessageId(finalEntry) || newMessageId("assistant"),
+        role: "assistant",
+        kind: "text",
+        text: String(finalEntry.content || "").trim(),
+        created_at: String(finalEntry?.created_at || new Date().toISOString()),
+      });
+      if (message && !existingIds.has(message.id) && !existingKeys.has(framingMessageDedupeKey(message))) {
+        existingIds.add(message.id);
+        existingKeys.add(framingMessageDedupeKey(message));
+        messagesWithRecovered.push(message);
+        recovered.push(message);
+      }
+    }
+  });
+  return recovered;
+}
+
+function sortFramingMessagesByTime(messages) {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const delta = framingMessageTime(a.message, a.index) - framingMessageTime(b.message, b.index);
+      return delta || a.index - b.index;
+    })
+    .map((item) => item.message);
+}
+
+function latestProjectIndex(messages = localMessages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (isProjectDraftMessage(messages[index])) return index;
   }
   return -1;
 }
@@ -1368,6 +1697,8 @@ function isGoalLaunchMessage(message) {
   const text = String(message?.text || "").trim().toLowerCase();
   return message?.role === "user" && (
     message.kind === "goal-launch" ||
+    text === "start autoresearch." ||
+    text === "start autoresearch" ||
     text === "start autoresearch with /goal." ||
     text === "start autoresearch with /goal" ||
     text === "/goal"
@@ -1383,45 +1714,42 @@ function goalLaunchMessage() {
     id: newMessageId("goal-launch"),
     role: "user",
     kind: "goal-launch",
-    text: "Start autoresearch with /goal.",
+    text: "Start autoresearch.",
     created_at: new Date().toISOString(),
   });
 }
 
 function restoreFramingMessages() {
-  const nextMessages = [];
+  let nextMessages = [];
   const serverMessages = appState?.framing?.messages || [];
   let shouldPersist = false;
   const savedBrief = String(coldFiles["resources/user_input/INITIAL_BRIEF.md"] || "").trim();
-  const session = sessionState();
-  const visibleSessionTranscript = Array.isArray(session.transcript)
-    ? session.transcript.filter((entry) => !isHiddenUiTranscript(entry))
-    : [];
-  const hasStartedSession = hasSession() || Boolean(session.mode) || !["", "idle"].includes(String(session.status || "").toLowerCase());
-  const hasOnlyOrphanLocalUserMessage =
-    Array.isArray(serverMessages) &&
-    serverMessages.length === 1 &&
-    String(serverMessages[0]?.role || "") === "user" &&
-    !hasStartedSession &&
-    visibleSessionTranscript.length === 0;
   if (Array.isArray(serverMessages)) {
     for (const rawMessage of serverMessages) {
       const message = normalizeFramingMessage(rawMessage);
       if (!message) continue;
-      if (message.role === "user" && (isDefaultBriefTemplate(message.text) || hasOnlyOrphanLocalUserMessage)) {
+      if (message.role === "user" && isDefaultBriefTemplate(message.text)) {
         shouldPersist = true;
         continue;
       }
       nextMessages.push(message);
     }
   }
+  const prunedMessages = pruneNonFinalRecoveredAssistantMessages(nextMessages);
+  if (prunedMessages.length !== nextMessages.length) {
+    nextMessages = prunedMessages;
+    shouldPersist = true;
+  }
+  const recoveredMessages = recoveredFramingMessagesFromSession(nextMessages);
+  if (recoveredMessages.length) {
+    nextMessages.push(...recoveredMessages);
+    shouldPersist = true;
+  }
   const projectText = String(appState?.files?.project?.text || "").trim();
   const framingInProgress = framingDraftPending || isFramingRunning();
   if (!framingInProgress && projectText && !isPlaceholderProject(projectText) && appState?.framing?.project_ready) {
     const projectIndex = latestProjectIndex(nextMessages);
-    const userIndex = latestUserIndex(nextMessages);
-    const projectBelongsAfterLatestUser = projectIndex >= 0 && projectIndex > userIndex;
-    if (projectBelongsAfterLatestUser) {
+    if (projectIndex >= 0) {
       const existing = nextMessages[projectIndex];
       if (existing.artifact?.text !== projectText) {
         nextMessages[projectIndex] = {
@@ -1436,9 +1764,7 @@ function restoreFramingMessages() {
         id: newMessageId("project"),
         role: "assistant",
         kind: "project",
-        text: projectIndex >= 0
-          ? "I updated PROJECT.md. Review the new draft here, edit it directly, or keep chatting to refine the framing."
-          : "I drafted PROJECT.md. Review it here, edit it directly, or keep chatting to refine the framing.",
+        text: "I drafted PROJECT.md. Review it here, edit it directly, or keep chatting to refine the framing.",
         created_at: new Date().toISOString(),
         artifact: { path: "PROJECT.md", text: projectText },
       });
@@ -1453,7 +1779,11 @@ function restoreFramingMessages() {
       shouldPersist = true;
     }
   }
-  replaceFramingMessagesIfChanged(nextMessages);
+  const sortedMessages = sortFramingMessagesByTime(mergePendingLocalFramingMessages(nextMessages));
+  const restoredMessages = collapseProjectDraftMessages(sortedMessages);
+  if (restoredMessages.length !== sortedMessages.length) shouldPersist = true;
+  replaceFramingMessagesIfChanged(restoredMessages);
+  reconcileFramingPending(localMessages);
   const lastUser = [...localMessages].reverse().find((message) => message.role === "user");
   const brief = savedBrief;
   const hasMessageAttachments = localMessages.some((message) => Array.isArray(message.attachments) && message.attachments.length);
@@ -1463,9 +1793,9 @@ function restoreFramingMessages() {
     selectedResourceItems.splice(0);
     saveResourceSelections();
     renderSelectedResources();
-    saveFramingMessages().catch(() => {});
+    persistFramingMessages().catch(() => {});
   }
-  if (shouldPersist) saveFramingMessages().catch(() => {});
+  if (shouldPersist) persistFramingMessages().catch(() => {});
   const projectMessage = latestProjectMessage();
   setHiddenProjectDraft(projectMessage?.artifact?.text || "");
 }
@@ -1475,7 +1805,7 @@ function appendFramingMessage(role, text, extras = {}) {
   if (!message) return null;
   localMessages.push(message);
   lastFramingHtml = "";
-  saveFramingMessages().catch((error) => showToast(error.message, true));
+  persistFramingMessages().catch((error) => showToast(error.message, true));
   renderFramingConversation();
   return message;
 }
@@ -1498,13 +1828,59 @@ function updateLatestProjectDraftMessage(text) {
     message.artifact = { path: "PROJECT.md", text: draft };
     message.text = "I updated PROJECT.md. Review the new draft here, edit it directly, or keep chatting to refine the framing.";
     lastFramingHtml = "";
-    saveFramingMessages().catch((error) => showToast(error.message, true));
+    persistFramingMessages().catch((error) => showToast(error.message, true));
   }
   setHiddenProjectDraft(draft);
 }
 
+function latestAssistantTextMessage(messages = localMessages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "assistant" && message.kind !== "project" && String(message.text || "").trim()) return message;
+  }
+  return null;
+}
+
+function canLaunchAutoresearchFromAssistant(message) {
+  const latest = latestAssistantTextMessage();
+  return Boolean(
+    message?.id &&
+    latest?.id === message.id &&
+    hasProjectDraftReady() &&
+    !hasGoalStarted() &&
+    !isSessionRunning()
+  );
+}
+
+function framingControlMessageHtml(message) {
+  const text = String(message?.text || "").trim();
+  const { label, value } = controlMessageDisplay(message, text);
+  return `
+    <article class="framing-message control" data-framing-id="${escapeHtml(message.id)}" data-role="control" data-kind="${escapeHtml(message.kind || "command")}">
+      <div class="framing-control-pill">
+        <span>${escapeHtml(label)}</span>
+        <code>${escapeHtml(value || "command")}</code>
+      </div>
+    </article>
+  `;
+}
+
+function controlMessageDisplay(message, text = String(message?.text || "").trim()) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (isGoalLaunchMessage(message)) return { label: "Autoresearch", value: "Start autoresearch" };
+  if (normalized === "/goal resume") return { label: "Autoresearch", value: "Resume autoresearch" };
+  if (normalized === "/goal pause") return { label: "Autoresearch", value: "Pause autoresearch" };
+  if (normalized === "/goal clear") return { label: "Autoresearch", value: "Clear autoresearch state" };
+  if (normalized === "/goal") return { label: "Autoresearch", value: "Show autoresearch" };
+  if (normalized === "/status") return { label: "Session", value: "Show status" };
+  if (normalized === "/ps") return { label: "Session", value: "Show processes" };
+  if (normalized === "/diff") return { label: "Session", value: "Show diff" };
+  return { label: "Command", value: text || "Command sent" };
+}
+
 function framingMessageHtml(message) {
   if (message.kind === "project" && message.artifact?.text) return projectDraftCardHtml(message);
+  if (isControlFramingMessage(message)) return framingControlMessageHtml(message);
   const role = message.role === "user" ? "user" : "assistant";
   const title = role === "user" ? "You" : "CoAutoResearch";
   if (role === "user" && editingFramingId === message.id) {
@@ -1522,16 +1898,17 @@ function framingMessageHtml(message) {
       </article>
     `;
   }
+  const actions = role === "user"
+    ? `<div class="framing-actions"><button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button></div>`
+    : canLaunchAutoresearchFromAssistant(message)
+      ? `<div class="framing-actions"><button class="primary-button small-button" type="button" data-project-launch>Start autoresearch</button></div>`
+      : "";
   return `
     <article class="framing-message ${role}" data-framing-id="${escapeHtml(message.id)}">
       <div class="transcript-meta">${title}</div>
       ${messageAttachmentsHtml(message)}
-      <div class="transcript-body">${transcriptContentHtml(message.text)}</div>
-      ${
-        role === "user"
-          ? `<div class="framing-actions"><button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button></div>`
-          : ""
-      }
+      <div class="transcript-body">${transcriptContentHtml(message.text, { markdown: role === "assistant" })}</div>
+      ${actions}
     </article>
   `;
 }
@@ -1552,7 +1929,7 @@ function framingThinkingHtml() {
           <span class="thinking-dot"></span>
           <strong>${escapeHtml(status)}</strong>
         </div>
-        ${framingProgressHtml()}
+        ${framingProgressDetailsHtml()}
       </div>
     </article>
   `;
@@ -1590,14 +1967,29 @@ function framingProgressContent(entry) {
   return compactText(content.replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, ""), 220);
 }
 
-function framingProgressHtml() {
+function currentProgressStartTime(transcript) {
+  const sessionStarted = entryTimeValue({ created_at: sessionState().started_at });
+  const latestRunStart = transcript.reduce((latest, entry) => {
+    if (!transcriptRunStart(entry)) return latest;
+    return Math.max(latest, entryTimeValue(entry));
+  }, 0);
+  const pendingSince = Number(framingPendingSince || 0);
+  return Math.max(sessionStarted, latestRunStart, pendingSince);
+}
+
+function currentProgressEntries() {
   const session = sessionState();
   const transcript = Array.isArray(session.transcript) ? session.transcript : [];
-  const entries = transcript
+  const progressStart = currentProgressStartTime(transcript);
+  return transcript
     .filter((entry) => {
       const role = transcriptRole(entry);
       const content = String(entry?.content || "").trim();
       const rawType = String(entry?.raw_type || "").toLowerCase();
+      if (progressStart) {
+        const createdAt = entryTimeValue(entry);
+        if (createdAt && createdAt < progressStart - 1000) return false;
+      }
       return content && role !== "user" && rawType !== "turn.completed";
     })
     .reduceRight((items, entry) => {
@@ -1609,6 +2001,9 @@ function framingProgressHtml() {
       return items;
     }, { seen: new Set(), entries: [] }).entries
     .slice(-6);
+}
+
+function framingProgressRowsHtml(entries) {
   if (!entries.length) {
     return `<div class="framing-progress is-empty">Waiting for Codex events...</div>`;
   }
@@ -1643,6 +2038,20 @@ function framingProgressHtml() {
   `;
 }
 
+function framingProgressDetailsHtml() {
+  const entries = currentProgressEntries();
+  const count = entries.length;
+  return `
+    <details class="framing-progress-details">
+      <summary>
+        <span>Current run activity</span>
+        <strong>${escapeHtml(count ? `${count} event${count === 1 ? "" : "s"}` : "waiting")}</strong>
+      </summary>
+      ${framingProgressRowsHtml(entries)}
+    </details>
+  `;
+}
+
 function projectDraftCardHtml(message) {
   const latest = latestProjectMessage();
   const isLatest = latest && latest.id === message.id;
@@ -1660,7 +2069,7 @@ function projectDraftCardHtml(message) {
       <div class="project-rendered markdown-preview">${markdownToHtml(draft)}</div>
       <div class="project-card-actions" ${isLatest ? "" : "hidden"}>
         <button class="secondary-button small-button" type="button" data-project-edit> Edit Markdown</button>
-        ${canStartGoal ? '<button class="primary-button small-button" type="button" data-project-launch>Start with /goal</button>' : ""}
+        ${canStartGoal ? '<button class="primary-button small-button" type="button" data-project-launch>Start autoresearch</button>' : ""}
       </div>
     `;
   return `
@@ -1683,19 +2092,26 @@ function renderFramingConversation() {
   const thread = $("#framing-thread");
   if (!thread) return;
   const wasNearBottom = isPageNearBottom();
-  const interactionMessages = localMessages.filter((message) => !(message.kind === "project" && message.artifact?.text));
-  const projectMessages = localMessages.filter((message) => message.kind === "project" && message.artifact?.text);
-  const messages = interactionMessages.map(framingMessageHtml).join("");
-  const projectCards = projectMessages.map(framingMessageHtml).join("");
+  const visibleMessages = collapseProjectDraftMessages(localMessages);
   const transcriptEntries = sessionTranscriptEntries();
+  const activity = buildFramingActivityByMessage(visibleMessages, transcriptEntries);
+  const messages = visibleMessages
+    .map((message) => `${activity.htmlBeforeMessageId.get(message.id) || ""}${framingMessageHtml(message)}`)
+    .join("");
   const hasLocalTranscript = transcriptEntries.some(isUiLocalTranscript);
-  const sessionTranscript = hasLaunched() || hasLocalTranscript
-    ? sessionTimelineHtml(transcriptEntries)
+  const unansweredUser = latestUnansweredUserMessage(visibleMessages);
+  const inferredReplyPending = Boolean(unansweredUser && (framingReplyPending || framingMessagesPersisting || isSessionRunning()));
+  if (inferredReplyPending && !framingPendingSince) {
+    framingPendingSince = framingMessageTime(unansweredUser, Date.now());
+  }
+  const localPending = framingDraftPending || framingReplyPending || inferredReplyPending;
+  const sessionTranscript = !localPending && (hasLaunched() || hasLocalTranscript)
+    ? sessionTimelineHtml(transcriptEntries, { omittedEntryIds: activity.omittedEntryIds, omitLocal: true })
     : "";
-  const shouldShowPending = (framingDraftPending || isSessionRunning()) && !sessionTranscript;
+  const shouldShowPending = localPending || (isSessionRunning() && !sessionTranscript);
   const pending = shouldShowPending ? framingThinkingHtml() : "";
-  const hasThreadContent = Boolean(messages || sessionTranscript || pending || projectCards);
-  const nextHtml = [messages, sessionTranscript, pending, projectCards].filter(Boolean).join("");
+  const hasThreadContent = Boolean(messages || sessionTranscript || pending);
+  const nextHtml = [messages, pending, sessionTranscript].filter(Boolean).join("");
   if (nextHtml !== lastFramingHtml) {
     const renderedDraft = document.querySelector(".project-rendered");
     if (renderedDraft) projectRenderedScrollTop = renderedDraft.scrollTop;
@@ -1967,6 +2383,7 @@ function codexSettingsFromModal() {
 function hydrateSettingsDialog(settings) {
   const form = $("#settings-form");
   const codex = normalizeSessionSettings(settings?.codex || {});
+  hydrateThemeControls();
   form.elements.settingsModel.value = codex.model || "";
   form.elements.settingsReasoningEffort.value = codex.reasoningEffort;
   form.elements.settingsPermissionPreset.value = codex.permissionPreset;
@@ -2008,8 +2425,6 @@ async function loadUiSettings() {
     hydrateSettingsDialog(uiSettings);
     applySessionSettings(uiSettings.codex || defaultSessionSettings, true);
   } catch (error) {
-    framingDraftPending = false;
-    renderFramingConversation();
     showToast(error.message, true);
   }
 }
@@ -2022,6 +2437,7 @@ async function saveUiSettings(event) {
       const form = $("#settings-form");
       const env = {};
       const clearEnv = [];
+      applyThemeMode(form.elements.themeMode?.value || currentThemeMode);
       const keys = settingsSecretKeys.length ? settingsSecretKeys : Object.keys(secretKeyLabels);
       keys.forEach((key) => {
         const value = String(form.elements[`env_${key}`]?.value || "").trim();
@@ -2088,7 +2504,7 @@ function setStage(stage) {
 
 function stageTitle() {
   if (activeStage === "1") return "Where should the research begin?";
-  if (activeStage === "2") return "Start with /goal.";
+  if (activeStage === "2") return "Start autoresearch.";
   if (activeStage === "3") return hasLaunched() ? "Continue the research thread." : "Message session after launch.";
   return "";
 }
@@ -2116,11 +2532,11 @@ function renderStage() {
     const locked = !prepareSaved && (!draft.trim() || isPlaceholderProject(draft));
     const gatePassed = sessionState()?.gate?.status === "pass";
     launchButton.disabled = locked || isSessionRunning() || gatePassed;
-    launchButton.textContent = gatePassed ? "Reviewer gates passed" : launched ? "Continue /goal" : "Start /goal";
+    launchButton.textContent = gatePassed ? "Reviewer gates passed" : launched ? "Continue autoresearch" : "Start autoresearch";
     launchButton.title = gatePassed
       ? "All reviewer gates have passed."
       : locked
-        ? "Finish PROJECT.md before starting /goal."
+        ? "Finish PROJECT.md before starting autoresearch."
         : "Run the autoresearch loop until reviewer gates pass.";
   }
   renderFramingConversation();
@@ -2180,7 +2596,7 @@ function renderColdStartEditor() {
     ? "Drafted from existing PROJECT.md. Edit before launch."
     : "Saved to resources/user_input/INITIAL_BRIEF.md";
   const editor = $("#cold-file-editor");
-  const hasFramingThread = localMessages.length > 0 || framingDraftPending;
+  const hasFramingThread = localMessages.length > 0 || framingDraftPending || framingReplyPending;
   const nextEditorValue = hasFramingThread ? "" : coldFiles[activeColdPath] ?? "";
   editor.placeholder = hasFramingThread
     ? "Ask Codex to revise PROJECT.md, narrow the scope, change the target venue, or add constraints..."
@@ -2528,17 +2944,18 @@ function reportForIteration(iteration) {
   return visibleTrialReports()[index] || null;
 }
 
-function currentTrialIndex(reports = visibleTrialReports()) {
+function currentTrialIndex(trials = visibleTrialReports()) {
   const loopIteration = Number(sessionState().loop_iteration || 0);
-  if (isSessionRunning() && loopIteration > 0) return Math.min(Math.max(loopIteration, 1), Math.max(reports.length, 1));
-  return Math.max(reports.length, 1);
+  const count = Array.isArray(trials) ? trials.length : Number(trials || 0);
+  if (isLiveGoalSession() && loopIteration > 0) return Math.min(Math.max(loopIteration, 1), Math.max(count, loopIteration, 1));
+  return Math.max(count, 1);
 }
 
-function selectedTrial(reports = visibleTrialReports()) {
-  if (!reports.length) return 0;
-  const fallback = currentTrialIndex(reports);
+function selectedTrial(trials = visibleTrialReports()) {
+  if (!trials.length) return 0;
+  const fallback = currentTrialIndex(trials);
   const value = Number(selectedTrialIndex || 0);
-  return Math.min(Math.max(value || fallback, 1), reports.length);
+  return Math.min(Math.max(value || fallback, 1), trials.length);
 }
 
 function startsGoalIteration(entry) {
@@ -2570,26 +2987,26 @@ function effectiveIteration(entry, currentIteration) {
 
 function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const report = reportOverride || reportForIteration(iteration);
-  if (!report) return "";
   const finalEntry = [...entries].reverse().find((entry) => ["final", "assistant"].includes(transcriptRole(entry)) && String(entry.content || "").trim());
   const fallback = finalEntry ? compactText(finalEntry.content, 260) : "";
-  const reportSummary = cleanText(report.report_summary, "");
-  const summary = reportSummary || fallback || "Summary is not available yet.";
-  const running = isSessionRunning() && Number(sessionState().loop_iteration || 0) === Number(iteration);
-  const status = running ? "running" : "completed";
+  const reportSummary = cleanText(report?.report_summary, "");
+  const summary = reportSummary || fallback || (report ? "Summary is not available yet." : "Report is not available yet. Codex activity for this trial is shown below.");
+  const reportStatus = cleanText(report?.status, "");
+  const running = isTrialLive(iteration, report);
+  const status = running ? "running" : reportStatus === "reported" ? "completed" : reportStatus || (report ? "completed" : "active");
   return `
-    <article class="trial-report-card ${running ? "is-running" : "is-complete"}" data-trial-panel="${escapeHtml(iteration)}">
+    <article class="trial-report-card ${running ? "is-running" : report ? "is-complete" : "is-pending"}" data-trial-panel="${escapeHtml(iteration)}">
       <div class="trial-report-head">
         <div>
           <strong>Trial ${escapeHtml(iteration)}</strong>
           <em>${escapeHtml(status)}</em>
         </div>
-        <span>${escapeHtml(report.id)} / ${escapeHtml(report.report_path)}</span>
+        <span>${report ? `${escapeHtml(report.id)} / ${escapeHtml(report.report_path)}` : "Report pending"}</span>
       </div>
       <p>${escapeHtml(summary)}</p>
       <div class="trial-report-actions">
-        ${report.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : ""}
-        ${report.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : ""}
+        ${report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : ""}
+        ${report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : ""}
       </div>
       ${
         entries.length
@@ -2606,6 +3023,50 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   `;
 }
 
+function latestTrialProgressEntry(entries) {
+  return [...(entries || [])].reverse().find((entry) => {
+    const role = transcriptRole(entry);
+    const rawType = String(entry?.raw_type || "").toLowerCase();
+    return role !== "user" && rawType !== "turn.completed" && String(entry?.content || "").trim();
+  });
+}
+
+function runningTrialStatusHtml(trial) {
+  const iteration = Number(trial?.iteration || sessionState().loop_iteration || 0);
+  if (!iteration || !isTrialLive(iteration, trial?.report)) return "";
+  const entries = Array.isArray(trial?.entries) ? trial.entries : [];
+  const latestEntry = latestTrialProgressEntry(entries);
+  const latestText = latestEntry
+    ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
+    : "Waiting for Codex events...";
+  const eventLabel = entries.length ? `${entries.length} event${entries.length === 1 ? "" : "s"}` : "waiting";
+  return `
+    <section class="trial-live-status" aria-live="polite">
+      <div class="trial-live-status-head">
+        <div class="thinking-status-row trial-live-status-title">
+          <span class="thinking-dot"></span>
+          <span class="thinking-dot"></span>
+          <span class="thinking-dot"></span>
+          <strong>Trial ${escapeHtml(iteration)} is running</strong>
+        </div>
+        <span>${escapeHtml(eventLabel)}</span>
+      </div>
+      <p>${escapeHtml(compactText(latestText, 240))}</p>
+      ${
+        entries.length
+          ? `<details class="trial-live-details">
+              <summary>
+                <span>Live trial activity</span>
+                <strong>${escapeHtml(eventLabel)}</strong>
+              </summary>
+              <div class="trial-detail-events">${transcriptEntriesHtml(entries)}</div>
+            </details>`
+          : ""
+      }
+    </section>
+  `;
+}
+
 function iterationNavHtml(trials, activeTrial) {
   if (!trials.length) return "";
   return `
@@ -2615,8 +3076,9 @@ function iterationNavHtml(trials, activeTrial) {
       <div class="trial-strip-scroll">
         ${trials
           .map(({ iteration, entries, report }) => {
-            const running = isSessionRunning() && Number(sessionState().loop_iteration || 0) === Number(iteration);
-            const label = running ? "Running" : "Done";
+            const reportStatus = cleanText(report?.status, "");
+            const running = isTrialLive(iteration, report);
+            const label = running ? "Running" : reportStatus === "reported" ? "Done" : reportStatus || (report ? "Done" : "Active");
             const title = report ? cleanText(report.id, `Trial ${iteration}`) : `Trial ${iteration}`;
             const active = Number(iteration) === Number(activeTrial);
             const summary = report ? cleanText(report.report_summary, title) : title;
@@ -2634,9 +3096,11 @@ function iterationNavHtml(trials, activeTrial) {
   `;
 }
 
-function trialHistoryHtml(trials, activeTrial, activeTrialData) {
+function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData = null) {
   if (!trials.length) return "";
   const selectedLabel = activeTrial ? `Trial ${activeTrial}` : "No trial selected";
+  const reportedCount = trials.filter((trial) => trial.report?.report_path).length;
+  const countLabel = `${trials.length} trial${trials.length === 1 ? "" : "s"}${reportedCount ? ` · ${reportedCount} reported` : ""}`;
   const latest = trials[trials.length - 1];
   const latestReport = latest?.report?.id ? cleanText(latest.report.id, "") : "";
   return `
@@ -2644,66 +3108,146 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData) {
       <header class="trial-history-head">
         <div>
           <strong>Trials</strong>
-          <span>${escapeHtml(trials.length)} reported · ${escapeHtml(selectedLabel)}</span>
+          <span>${escapeHtml(countLabel)} · ${escapeHtml(selectedLabel)}</span>
+          <button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>
         </div>
         ${latestReport ? `<p>Latest: ${escapeHtml(latestReport)}</p>` : ""}
       </header>
       <div class="trial-history-body">
         ${iterationNavHtml(trials, activeTrial)}
+        ${runningTrialData ? runningTrialStatusHtml(runningTrialData) : ""}
         ${activeTrialData ? trialReportSummaryHtml(activeTrialData.iteration, activeTrialData.entries, activeTrialData.report) : ""}
       </div>
     </section>
   `;
 }
 
-function currentRunActivityHtml(entries) {
-  if (!entries.length && !isSessionRunning()) return "";
+function entryTimeValue(entry) {
+  const value = Date.parse(String(entry?.created_at || ""));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function formatWorkedDuration(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds) || 0));
+  if (value < 60) return `${value || 1}s`;
+  const minutes = Math.floor(value / 60);
+  const remainingSeconds = value % 60;
+  if (minutes < 60) return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function workedDurationLabel(userEntry, entries) {
+  const start = entryTimeValue(userEntry);
+  const end = entries.reduce((latest, entry) => Math.max(latest, entryTimeValue(entry)), start);
+  if (!start || !end || end < start) return "Worked";
+  return `Worked for ${formatWorkedDuration((end - start) / 1000)}`;
+}
+
+function inlineRunActivityHtml(userEntry, entries) {
+  if (!entries.length) return "";
+  const label = workedDurationLabel(userEntry, entries);
   return `
-    <details class="current-run-card">
-      <summary>
-        <div>
-          <strong>${escapeHtml(isSessionRunning() ? "Current session activity" : "Latest session activity")}</strong>
-          <span>${escapeHtml(entries.length)} event${entries.length === 1 ? "" : "s"}</span>
-        </div>
-        <p>Live Codex messages and grouped tool calls from the active session. These are not separate trial reports.</p>
+    <details class="framing-run-activity">
+      <summary aria-label="${escapeHtml(`${label}, ${entries.length} event${entries.length === 1 ? "" : "s"}`)}">
+        <span>${escapeHtml(label)}</span>
       </summary>
       <div class="current-run-events">
-        ${entries.length ? transcriptEntriesHtml(entries) : `<div class="run-waiting">Codex is working. Live events will appear here.</div>`}
+        ${transcriptEntriesHtml(entries)}
       </div>
     </details>
   `;
 }
 
-function localSessionActivityHtml(blocks) {
-  if (!blocks.length) return "";
-  return `
-    <details class="current-run-card local-run-card">
-      <summary>
-        <div>
-          <strong>Codex framing activity</strong>
-          <span>${escapeHtml(blocks.length)} event${blocks.length === 1 ? "" : "s"}</span>
-        </div>
-        <p>Commands, tool calls, and intermediate Codex events. Expand only when debugging the run.</p>
-      </summary>
-      <div class="current-run-events">
-        ${blocks.join("")}
-      </div>
-    </details>
-  `;
+function transcriptRunStart(entry) {
+  const rawType = String(entry?.raw_type || "").toLowerCase();
+  const role = String(entry?.role || "").toLowerCase();
+  return role === "user" && ["ui.framing", "ui.chat", "ui.research", "ui.goal"].includes(rawType);
 }
 
-function sessionTimelineHtml(entries) {
+function normalizedTranscriptText(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function transcriptRunGroups(entries) {
+  const groups = [];
+  let current = null;
+  entries.forEach((entry) => {
+    if (transcriptRunStart(entry)) {
+      current = { userEntry: entry, entries: [] };
+      groups.push(current);
+      return;
+    }
+    if (current) current.entries.push(entry);
+  });
+  return groups.filter((group) => group.userEntry && group.entries.length);
+}
+
+function buildFramingActivityByMessage(messages, entries) {
+  const htmlBeforeMessageId = new Map();
+  const omittedEntryIds = new Set();
+  const usedUserIndexes = new Set();
+  const cutWindows = editedTranscriptCutWindows(messages);
+  const visibleEntries = entries.filter((entry) => !isEntryInsideEditedCut(entry, cutWindows));
+  transcriptRunGroups(visibleEntries).forEach((group) => {
+    const prompt = normalizedTranscriptText(group.userEntry?.content);
+    if (!prompt) return;
+    const finalEntry = [...group.entries].reverse().find((entry) => {
+      const role = transcriptRole(entry);
+      return ["assistant", "final"].includes(role) && normalizedTranscriptText(entry?.content);
+    });
+    const finalText = normalizedTranscriptText(finalEntry?.content);
+    const userIndex = messages.findIndex((message, index) => {
+      if (usedUserIndexes.has(index)) return false;
+      return message?.role === "user" && normalizedTranscriptText(message.text) === prompt;
+    });
+    if (userIndex < 0) return;
+    usedUserIndexes.add(userIndex);
+    const nextUserIndex = messages.findIndex((message, index) => index > userIndex && message?.role === "user");
+    const endIndex = nextUserIndex < 0 ? messages.length : nextUserIndex;
+    let attachIndex = -1;
+    const renderedAssistantTexts = new Set();
+    for (let index = userIndex + 1; index < endIndex; index += 1) {
+      if (messages[index]?.role !== "assistant") continue;
+      const messageText = normalizedTranscriptText(messages[index].text);
+      if (attachIndex < 0 || (finalText && messageText === finalText)) attachIndex = index;
+      if (messages[index].kind !== "project") {
+        renderedAssistantTexts.add(messageText);
+      }
+    }
+    if (attachIndex < 0) return;
+    const attachMessage = messages[attachIndex];
+    if (!attachMessage?.id) return;
+    const activityEntries = group.entries.filter((entry) => {
+      if (entry === finalEntry || (finalEntry?.id && entry?.id === finalEntry.id)) return false;
+      const role = transcriptRole(entry);
+      if (!["assistant", "final"].includes(role)) return true;
+      return !renderedAssistantTexts.has(normalizedTranscriptText(entry?.content));
+    });
+    if (activityEntries.length) {
+      htmlBeforeMessageId.set(attachMessage.id, inlineRunActivityHtml(group.userEntry, activityEntries));
+    }
+    if (group.userEntry?.id) omittedEntryIds.add(String(group.userEntry.id));
+    group.entries.forEach((entry) => {
+      if (entry?.id) omittedEntryIds.add(String(entry.id));
+    });
+  });
+  return { htmlBeforeMessageId, omittedEntryIds };
+}
+
+function sessionTimelineHtml(entries, options = {}) {
   if (!entries.length && !visibleTrialReports().length) return "";
-  const localBlocks = [];
+  const omittedEntryIds = options.omittedEntryIds || new Set();
   const trialGroups = new Map();
   let currentIteration = 0;
   const hasTrialContext = hasLaunched() || hasGoalStarted() || visibleTrialReports().length > 0;
   entries.forEach((entry) => {
+    if (entry?.id && omittedEntryIds.has(String(entry.id))) return;
     const nextIteration = effectiveIteration(entry, currentIteration);
     const belongsToGoal = nextIteration > 0 && hasTrialContext;
     if (!belongsToGoal) {
       if (!isUiLocalTranscript(entry)) currentIteration = 0;
-      localBlocks.push(transcriptEntryHtml(entry));
       return;
     }
     currentIteration = nextIteration;
@@ -2713,22 +3257,22 @@ function sessionTimelineHtml(entries) {
   });
 
   const reports = visibleTrialReports();
-  const maxTrial = Math.max(reports.length, ...Array.from(trialGroups.keys()), 0);
+  const liveIteration = isLiveGoalSession() ? Number(sessionState().loop_iteration || 0) : 0;
+  const maxTrial = Math.max(reports.length, ...Array.from(trialGroups.keys()), liveIteration, 0);
   const trials = [];
   for (let index = 1; index <= maxTrial; index += 1) {
     const trialEntries = trialGroups.get(index) || [];
     const report = reports[index - 1] || null;
     trials.push({ iteration: index, entries: trialEntries, report });
   }
-  const activeTrial = selectedTrial(reports);
+  const activeTrial = selectedTrial(trials);
   const activeTrialData = trials.find((trial) => Number(trial.iteration) === Number(activeTrial));
-  const liveTrial = isSessionRunning() ? currentTrialIndex(reports) : 0;
-  const liveActivityEntries = liveTrial ? trialGroups.get(liveTrial) || [] : [];
+  const runningTrialData = liveIteration ? trials.find((trial) => isTrialLive(trial.iteration, trial.report)) : null;
+  const trialHistory = trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData);
+  if (!trialHistory) return "";
   return `
     <section class="transcript-timeline with-axis" aria-label="Codex transcript">
-      ${trialHistoryHtml(trials, activeTrial, activeTrialData)}
-      ${currentRunActivityHtml(liveActivityEntries)}
-      ${localSessionActivityHtml(localBlocks)}
+      ${trialHistory}
     </section>
   `;
 }
@@ -2941,11 +3485,12 @@ function previewButton(path, label = "Preview") {
 function renderTree(node, depth = 0) {
   if (!node) return empty("No files here yet.");
   if (node.type === "file") {
+    const fileMeta = node.is_symlink ? `${node.path} · linked` : node.path;
     if (!node.previewable) {
       return `
         <div class="tree-file is-disabled">
           <span>${escapeHtml(node.name)}</span>
-          <small>${escapeHtml(node.path)}</small>
+          <small>${escapeHtml(fileMeta)}</small>
         </div>
       `;
     }
@@ -2953,7 +3498,7 @@ function renderTree(node, depth = 0) {
       <details class="tree-file-node" data-file-details="${escapeHtml(node.path)}">
         <summary>
           <span>${escapeHtml(node.name)}</span>
-          <small>${escapeHtml(node.path)}</small>
+          <small>${escapeHtml(fileMeta)}</small>
         </summary>
         <div class="inline-file" data-inline-file="${escapeHtml(node.path)}">
           <div class="tree-empty">Open to load file.</div>
@@ -2964,11 +3509,12 @@ function renderTree(node, depth = 0) {
   const children = node.children || [];
   const body = children.length ? children.map((child) => renderTree(child, depth + 1)).join("") : `<div class="tree-empty">Empty</div>`;
   const itemLabel = children.length === 1 ? "item" : "items";
+  const folderMeta = `${children.length} ${itemLabel}${node.is_symlink ? " · linked folder" : ""}`;
   return `
-    <details class="tree-folder" ${depth <= 1 ? "open" : ""}>
+    <details class="tree-folder ${node.is_symlink ? "is-symlink" : ""}" ${depth <= 1 ? "open" : ""}>
       <summary>
         <span>${escapeHtml(node.name)}</span>
-        <small>${children.length} ${itemLabel}</small>
+        <small>${escapeHtml(folderMeta)}</small>
       </summary>
       <div class="tree-children">${body}</div>
     </details>
@@ -3153,19 +3699,110 @@ function sectionList(sections, emptyText) {
     .join("")}</ul>`;
 }
 
+const figureSpecFieldLabels = new Set([
+  "Status",
+  "Figure type",
+  "Purpose",
+  "Content",
+  "Visual style",
+  "Detailed generation-style prompt",
+  "Caption draft",
+  "Evidence / conceptual basis",
+  "Notes",
+]);
+
+function figureSpecFields(body) {
+  const fields = {};
+  let current = "";
+  String(body || "")
+    .replaceAll(/\r\n/g, "\n")
+    .split("\n")
+    .forEach((line) => {
+      const label = line.trim().replace(/:$/, "");
+      if (line.trim().endsWith(":") && figureSpecFieldLabels.has(label)) {
+        current = label;
+        fields[current] = "";
+        return;
+      }
+      if (!current) return;
+      fields[current] = `${fields[current]}${fields[current] ? "\n" : ""}${line}`;
+    });
+  Object.keys(fields).forEach((key) => {
+    fields[key] = fields[key].trim();
+  });
+  return fields;
+}
+
+function figureSpecStatusClass(status) {
+  const text = String(status || "").toLowerCase();
+  if (/unused|candidate|needs|review/.test(text)) return "is-caution";
+  if (/generated|referenced|active|pass/.test(text)) return "is-ready";
+  return "";
+}
+
+function figureSpecExcerpt(value, limit = 320) {
+  return compactText(cleanText(value, ""), limit);
+}
+
+function figureSpecDetail(label, value, limit = 320) {
+  const text = figureSpecExcerpt(value, limit);
+  if (!text) return "";
+  return `
+    <div class="figure-spec-detail">
+      <strong>${escapeHtml(label)}</strong>
+      <div class="markdown-preview">${markdownToHtml(text)}</div>
+    </div>
+  `;
+}
+
+function figureSpecCardsHtml(specs) {
+  const values = (specs || []).filter((section) => sectionHasRealContent(section));
+  if (!values.length) return empty("No figure descriptions recorded yet.");
+  return `
+    <div class="figure-spec-grid">
+      ${values
+        .map((section) => {
+          const fields = figureSpecFields(section.body);
+          const status = figureSpecExcerpt(fields.Status, 90);
+          const type = figureSpecExcerpt(fields["Figure type"], 120);
+          const caption = figureSpecExcerpt(fields["Caption draft"], 280);
+          return `
+            <article class="figure-spec-card">
+              <header class="figure-spec-head">
+                <div>
+                  <p>Figure description</p>
+                  <h4>${escapeHtml(cleanText(section.title, "Untitled figure"))}</h4>
+                </div>
+                ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(status)}</span>` : ""}
+              </header>
+              ${type ? `<p class="figure-type">${escapeHtml(type)}</p>` : ""}
+              ${figureSpecDetail("Purpose", fields.Purpose)}
+              ${figureSpecDetail("Content", fields.Content, 300)}
+              ${caption ? `<blockquote class="figure-caption">${inlineMarkup(caption)}</blockquote>` : ""}
+              ${figureSpecDetail("Evidence / conceptual basis", fields["Evidence / conceptual basis"], 260)}
+              ${figureSpecDetail("Notes", fields.Notes, 220)}
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function renderManuscriptPanel() {
-  const manuscript = appState.summaries.manuscript;
+  const manuscript = appState.summaries?.manuscript || {};
   const blueprintViewer = `
     <div class="card-inline-file is-open" data-inline-file="manuscript/BLUEPRINT.md" data-autoload-file="manuscript/BLUEPRINT.md" data-compact-inline="true">
       <div class="tree-empty">Loading blueprint...</div>
     </div>
   `;
   return [
-    contextCard("Blueprint", blueprintViewer),
+    contextCard("Current manuscript", blueprintViewer, "Latest manuscript blueprint synthesized from accepted findings and trial reports.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
     contextCard("Story", `<p>${escapeHtml(cleanText(manuscript.core_story, "No manuscript story yet."))}</p>`),
     contextCard("Claims", sectionList(manuscript.claims, "No claims yet.")),
     contextCard("Sections", sectionList(manuscript.section_blueprint, "No section plan yet.")),
-    contextCard("Figures", sectionList([...(manuscript.figures || []), ...(manuscript.figure_specs || [])], "No figure plan yet."), "", previewButton("manuscript/figures/FIGURE_SPECS.md", "Specs")),
+    contextCard("Figure descriptions", figureSpecCardsHtml(manuscript.figure_specs), "Detailed figure plan from FIGURE_SPECS.md.", previewButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
+    contextCard("Figure plan", sectionList(manuscript.figures, "No figure plan yet.")),
     contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
   ].join("");
 }
@@ -3794,10 +4431,16 @@ function filesFromApiResponse(payload) {
 
 function notifyResourceHandlingFromResponse(payload) {
   const files = filesFromApiResponse(payload);
+  const savedFiles = Array.isArray(files.saved_files) ? files.saved_files : [];
   const links = Array.isArray(files.resource_links) ? files.resource_links : [];
-  const autoLinks = links.filter((item) => item?.auto_detected === true || item?.auto_detected === "true");
-  if (autoLinks.length) {
-    showToast(`Attached ${autoLinks.length} typed ${autoLinks.length === 1 ? "resource" : "resources"}.`);
+  const clues = Array.isArray(files.resource_clues) ? files.resource_clues : [];
+  if (savedFiles.length || links.length) {
+    const count = savedFiles.length + links.length;
+    showToast(`Attached ${count} explicit ${count === 1 ? "resource" : "resources"}.`);
+    return;
+  }
+  if (clues.length) {
+    showToast(`${clues.length} resource ${clues.length === 1 ? "clue" : "clues"} noted for Codex intake.`);
     return;
   }
   const metadataFiles = Array.isArray(files.metadata_files) ? files.metadata_files : [];
@@ -3880,6 +4523,17 @@ function clearFramingComposerAttachments() {
   renderSelectedResources();
 }
 
+function clearFramingComposerText(expectedText = "") {
+  const editor = $("#cold-file-editor");
+  if (!editor) return;
+  const current = String(editor.value || "");
+  if (expectedText && current.trim() !== String(expectedText || "").trim()) return;
+  editor.value = "";
+  if (activeColdPath && hasProjectDraftReady()) coldFiles[activeColdPath] = "";
+  resizeColdEditor();
+  renderColdPreview();
+}
+
 function currentBriefText() {
   const editorValue = String($("#cold-file-editor")?.value || "");
   if (activeColdPath && (!hasProjectDraftReady() || editorValue.trim())) coldFiles[activeColdPath] = editorValue;
@@ -3894,12 +4548,38 @@ function insertComposerPrompt(prompt) {
   if (!editor) return;
   const text = String(prompt || "").trim();
   if (!text) return;
-  const current = String(editor.value || "").trim();
-  editor.value = current ? `${current}\n${text}` : text;
+  editor.value = composerPromptNextValue(editor.value, text);
   editor.dispatchEvent(new Event("input", { bubbles: true }));
   editor.focus();
   const end = editor.value.length;
   editor.setSelectionRange(end, end);
+}
+
+function isComposerCommandLine(line) {
+  const normalized = String(line || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized.startsWith("/")) return false;
+  if (isLocalSlashControl(normalized)) return true;
+  return /^\/(?:permissions|model|plan)(?:\s+.*)?$/.test(normalized);
+}
+
+function composerPromptNextValue(currentValue, prompt) {
+  const promptText = String(prompt || "").trim();
+  if (!promptText) return String(currentValue || "");
+  const current = String(currentValue || "").trimEnd();
+  if (!current.trim()) return promptText;
+  const lines = current.split(/\r?\n/);
+  if (lines.some((line) => line.trim() === promptText)) return current;
+  const lastNonEmptyIndex = (() => {
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (lines[index].trim()) return index;
+    }
+    return -1;
+  })();
+  if (promptText.startsWith("/") && lastNonEmptyIndex >= 0 && isComposerCommandLine(lines[lastNonEmptyIndex])) {
+    lines[lastNonEmptyIndex] = promptText;
+    return lines.join("\n").trimEnd();
+  }
+  return `${current}\n${promptText}`;
 }
 
 function renderComposerSuggestions() {
@@ -3910,34 +4590,40 @@ function renderComposerSuggestions() {
   row.hidden = !show;
   if (!show) return;
   const running = isSessionRunning();
+  const interrupted = isSessionInterrupted();
   const loopActive = Boolean(session.loop_active);
   const gateStatus = String(session.gate?.status || session.gate?.raw_status || "").toLowerCase();
   const chips = [];
   const addChip = (label, prompt) => chips.push(`<button class="composer-suggestion-chip" type="button" data-composer-prompt="${escapeHtml(prompt)}">${escapeHtml(label)}</button>`);
 
   if (gateStatus === "pass") {
-    addChip("Show /goal", "/goal");
+    addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
     addChip("Diff", "/diff");
   } else if (running) {
-    if (loopActive) addChip("Pause /goal", "/goal pause");
-    addChip("Show /goal", "/goal");
+    if (loopActive) addChip("Pause autoresearch", "/goal pause");
+    addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
     addChip("Processes", "/ps");
+  } else if (interrupted) {
+    addChip("Resume autoresearch", "/goal resume");
+    addChip("Show autoresearch", "/goal");
+    addChip("Status", "/status");
+    addChip("Diff", "/diff");
   } else {
     if (loopActive) {
-      addChip("Pause /goal", "/goal pause");
+      addChip("Pause autoresearch", "/goal pause");
     } else {
-      addChip("Resume /goal", "/goal resume");
+      addChip("Resume autoresearch", "/goal resume");
     }
-    addChip("Show /goal", "/goal");
+    addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
     if (running) addChip("Processes", "/ps");
     else addChip("Diff", "/diff");
   }
 
   row.classList.toggle("is-running", running);
-  const label = gateStatus === "pass" ? "Goal passed" : running ? "Running" : loopActive ? "Goal active" : "Goal paused";
+  const label = gateStatus === "pass" ? "Goal passed" : running ? "Running" : interrupted ? "Goal interrupted" : loopActive ? "Goal active" : "Goal paused";
   row.innerHTML = `<span>${label}</span>${chips.join("")}`;
   requestAnimationFrame(() => {
     updateBriefDockGeometry();
@@ -3951,7 +4637,7 @@ function wait(ms) {
 
 async function openLaunchDialog() {
   if (hasGoalStarted()) {
-    showToast("Autoresearch /goal has already started for this session.", true);
+    showToast("Autoresearch has already started for this session.", true);
     return;
   }
   const draft = currentProjectDraft().trim();
@@ -3991,10 +4677,13 @@ async function launchAutoresearch() {
   fileEdits.push({ path: "PROJECT.md", text: currentProjectDraft() });
   const targetVenue = String($("#target-venue")?.value || "").trim();
   try {
-    if (!hasGoalLaunchMessage()) appendFramingMessage("user", "Start autoresearch with /goal.", { kind: "goal-launch" });
     framingDraftPending = true;
+    beginFramingPending();
+    if (!hasGoalLaunchMessage()) appendFramingMessage("user", "Start autoresearch.", { kind: "goal-launch" });
     renderFramingConversation();
     scrollFramingToBottomSoon();
+    $("#launch-dialog")?.close();
+    await persistFramingMessages();
     await saveProjectDraft({ silent: true });
     const files = await collectUploadFiles();
     const response = await api("/api/research/cold-start", {
@@ -4004,14 +4693,15 @@ async function launchAutoresearch() {
     mergeSessionFromApiResponse(response);
     notifyResourceHandlingFromResponse(response);
     framingDraftPending = false;
-    $("#launch-dialog")?.close();
+    reconcileFramingPending(localMessages);
     coldDirty = false;
-    showToast("Started autoresearch loop with /goal.");
+    showToast("Started autoresearch.");
     activeStage = "1";
     await loadOverview(true);
     scrollFramingToBottomSoon();
   } catch (error) {
     framingDraftPending = false;
+    reconcileFramingPending(localMessages);
     renderFramingConversation();
     showToast(error.message, true);
   }
@@ -4024,22 +4714,54 @@ async function sendSessionComposerMessage(message) {
     return;
   }
   const text = String(message || "").trim();
-  if (!text && !selectedUploadItems.length) return;
+  const attachments = currentComposerAttachments();
+  if (!text && !attachments.length) return;
   const localControl = canSendLocalSlashControl(text);
-  if (!canMessage() && !localControl) {
+  if (!canSendSessionComposerMessage() && !localControl) {
     showToast("Wait for the current Codex run to finish before sending another message.", true);
     return;
   }
-  const files = await collectUploadFiles();
-  const endpoint = text.startsWith("/") ? "/api/research/command" : "/api/research/chat";
-  const body = text.startsWith("/")
-    ? { command: text, settings: settingsFromForm() }
-    : { message: text, files, resourceLinks: collectResourceLinks(), settings: settingsFromForm() };
-  const response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+  const isCommand = text.startsWith("/");
+  const displayText = isCommand ? text : text || attachmentOnlyMessage(attachments);
+  let appendedMessage = null;
+  if (!isCommand) {
+    appendedMessage = appendFramingMessage("user", displayText, { attachments });
+    framingReplyPending = true;
+    beginFramingPending(appendedMessage?.id || "");
+    clearFramingComposerText(text || displayText);
+    clearFramingComposerAttachments();
+    renderFramingConversation();
+    scrollFramingToBottomSoon();
+  } else {
+    appendedMessage = appendFramingMessage("user", displayText, { kind: "command" });
+    framingReplyPending = true;
+    beginFramingPending(appendedMessage?.id || "");
+    clearFramingComposerText(text);
+    renderFramingConversation();
+    scrollFramingToBottomSoon();
+  }
+  const endpoint = isCommand ? "/api/research/command" : "/api/research/chat";
+  let response = null;
+  try {
+    const files = await collectUploadFiles();
+    const body = isCommand
+      ? { command: text, settings: settingsFromForm() }
+      : { message: text || displayText, files, resourceLinks: collectResourceLinks(), settings: settingsFromForm() };
+    if (appendedMessage) await persistFramingMessages();
+    response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+  } catch (error) {
+    if (appendedMessage) {
+      framingReplyPending = false;
+      if (pendingFramingUserMessageId === appendedMessage?.id) pendingFramingUserMessageId = "";
+      reconcileFramingPending(localMessages);
+      renderFramingConversation();
+    }
+    throw error;
+  }
   mergeSessionFromApiResponse(response);
   notifyResourceHandlingFromResponse(response);
+  reconcileFramingPending(localMessages);
   renderFramingConversation();
-  if (!text.startsWith("/")) selectedUploadItems.splice(0);
   renderSelectedResources();
 }
 
@@ -4078,12 +4800,14 @@ async function coldStartFromPrepare() {
     return;
   }
   const input = String($("#cold-file-editor")?.value || "").trim();
-  if (!input) {
+  const attachments = currentComposerAttachments();
+  if (!input && !attachments.length) {
     showToast(hasProjectDraftReady() ? "Write a message to refine the project." : "Write a research brief before framing.", true);
     setColdViewMode("source");
     $("#cold-file-editor")?.focus();
     return;
   }
+  const displayInput = input || attachmentOnlyMessage(attachments);
   try {
     if (canSendLocalSlashControl(input)) {
       await sendSessionComposerMessage(input);
@@ -4094,8 +4818,8 @@ async function coldStartFromPrepare() {
       scrollFramingToBottomSoon();
       return;
     }
-    if (hasLaunched()) {
-      await sendSessionComposerMessage(input);
+    if (hasLaunched() || canChatWithFramingDraft()) {
+      await sendSessionComposerMessage(displayInput);
       $("#cold-file-editor").value = "";
       clearFramingComposerAttachments();
       resizeColdEditor();
@@ -4108,15 +4832,18 @@ async function coldStartFromPrepare() {
       return;
     }
     const attachments = currentComposerAttachments();
-    appendFramingMessage("user", input, { attachments });
+    framingDraftPending = true;
+    const message = appendFramingMessage("user", displayInput, { attachments });
+    beginFramingPending(message?.id || "");
     $("#cold-file-editor").value = "";
     clearFramingComposerAttachments();
     resizeColdEditor();
-    framingDraftPending = true;
     renderFramingConversation();
     scrollFramingToBottomSoon();
-    await startFramingRun(input);
+    await persistFramingMessages();
+    await startFramingRun(displayInput);
     framingDraftPending = false;
+    reconcileFramingPending(localMessages);
     renderFramingConversation();
     scrollFramingToBottomSoon();
     markPrepareSaved(true);
@@ -4130,6 +4857,7 @@ async function coldStartFromPrepare() {
     scrollFramingToBottomSoon();
   } catch (error) {
     framingDraftPending = false;
+    reconcileFramingPending(localMessages);
     renderFramingConversation();
     showToast(error.message, true);
   }
@@ -4145,20 +4873,23 @@ async function resendFramingMessage(id, text) {
   }
   const index = localMessages.findIndex((item) => item.id === id);
   message.text = next;
+  message.edited_at = new Date().toISOString();
   editingFramingId = "";
   if (index >= 0) {
     localMessages.splice(index + 1, localMessages.length - index - 1);
   }
   setHiddenProjectDraft("");
   projectDraftDirty = false;
-  await saveFramingMessages();
+  await persistFramingMessages();
   renderFramingConversation();
   try {
     framingDraftPending = true;
+    beginFramingPending(id);
     renderFramingConversation();
     scrollFramingToBottomSoon();
     await startFramingRun(next);
     framingDraftPending = false;
+    reconcileFramingPending(localMessages);
     renderFramingConversation();
     scrollFramingToBottomSoon();
     showToast("Codex is reframing PROJECT.md.");
@@ -4166,6 +4897,7 @@ async function resendFramingMessage(id, text) {
     scrollFramingToBottomSoon();
   } catch (error) {
     framingDraftPending = false;
+    reconcileFramingPending(localMessages);
     renderFramingConversation();
     showToast(error.message, true);
   }
@@ -4195,26 +4927,11 @@ async function handleChat(event) {
   const form = event.currentTarget;
   const data = new FormData(form);
   const message = String(data.get("message") || "").trim();
-  if (!message && !selectedUploadItems.length) return;
-  const localControl = canSendLocalSlashControl(message);
-  if (!canMessage() && !localControl) {
-    showToast("Wait for the current Codex run to finish before sending another message.", true);
-    return;
-  }
-
+  if (!message && !currentComposerAttachments().length) return;
+  form.reset();
+  resizeComposer();
   try {
-    const files = await collectUploadFiles();
-    const endpoint = message.startsWith("/") ? "/api/research/command" : "/api/research/chat";
-    const body = message.startsWith("/")
-      ? { command: message, settings: settingsFromForm() }
-      : { message, files, resourceLinks: collectResourceLinks(), settings: settingsFromForm() };
-    const response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
-    mergeSessionFromApiResponse(response);
-    notifyResourceHandlingFromResponse(response);
-    if (!message.startsWith("/")) selectedUploadItems.splice(0);
-    renderSelectedResources();
-    form.reset();
-    resizeComposer();
+    await sendSessionComposerMessage(message);
     await loadOverview(true);
     scrollThread();
   } catch (error) {
@@ -4337,6 +5054,11 @@ function bindEvents() {
   });
   $$(".settings-nav-button").forEach((button) => {
     button.addEventListener("click", () => switchSettingsTab(button.dataset.settingsTab));
+  });
+  $$("[data-theme-option]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) applyThemeMode(input.value);
+    });
   });
   $("#settings-form").addEventListener("submit", saveUiSettings);
   $$(".stage-pill").forEach((button) => {

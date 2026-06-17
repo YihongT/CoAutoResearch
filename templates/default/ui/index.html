@@ -4,7 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CoAutoResearch</title>
-    <link rel="stylesheet" href="/styles.css?v=20260616-centered-thread" />
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem("coAutoResearchTheme");
+          document.documentElement.dataset.theme = theme === "night" ? "night" : "light";
+        } catch {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css?v=20260617-figure-cards" />
   </head>
   <body>
     <div class="app-shell">
@@ -71,7 +81,7 @@
               </div>
               <div class="header-tools">
                 <div class="session-pill" id="session-pill">No session</div>
-                <button class="secondary-button launch-header-action" id="open-launch-dialog" type="button" hidden>Start with /goal</button>
+                <button class="secondary-button launch-header-action" id="open-launch-dialog" type="button" hidden>Start autoresearch</button>
                 <div class="stage-strip" aria-label="Research workflow" hidden>
                   <button class="stage-pill is-active" type="button" data-stage="1">
                     <span>1</span>
@@ -200,9 +210,9 @@
 	                      </div>
                       <div class="composer-suggestion-row" id="composer-suggestions" aria-label="Codex quick prompts" hidden>
                         <span>Try</span>
-                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal pause">Pause /goal</button>
-                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal resume">Resume /goal</button>
-                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal">Show goal</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal pause">Pause autoresearch</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal resume">Resume autoresearch</button>
+                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal">Show autoresearch</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/status">Status</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/ps">Processes</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/diff">Diff</button>
@@ -219,7 +229,7 @@
                       </div>
                       <div class="project-draft-actions">
                         <button class="secondary-button" id="save-project-draft" type="button">Save draft</button>
-                        <button class="primary-button" id="open-launch-dialog-inline" type="button">Start with /goal</button>
+                        <button class="primary-button" id="open-launch-dialog-inline" type="button">Start autoresearch</button>
                       </div>
                     </div>
                     <div class="project-draft-workbench">
@@ -249,22 +259,22 @@
                 <section class="control-dock" aria-label="Codex controls">
                   <details class="control-panel">
                     <summary>
-                      <span>Slash commands</span>
+                      <span>Session controls</span>
                       <span>sent to this session</span>
                     </summary>
 
                     <div class="command-area">
                       <div class="command-row" aria-label="Slash commands">
-                        <button class="command-chip" type="button" data-command="/status">/status</button>
-                        <button class="command-chip" type="button" data-command="/ps">/ps</button>
-                        <button class="command-chip" type="button" data-command="/goal">/goal</button>
-                        <button class="command-chip" type="button" data-command="/goal pause">/goal pause</button>
-                        <button class="command-chip" type="button" data-command="/goal resume">/goal resume</button>
-                        <button class="command-chip" type="button" data-command="/goal clear">/goal clear</button>
-                        <button class="command-chip" type="button" data-command="/permissions">/permissions</button>
-                        <button class="command-chip" type="button" data-command="/model">/model</button>
-                        <button class="command-chip" type="button" data-command="/plan">/plan</button>
-                        <button class="command-chip" type="button" data-command="/diff">/diff</button>
+                        <button class="command-chip" type="button" data-command="/status">Status</button>
+                        <button class="command-chip" type="button" data-command="/ps">Processes</button>
+                        <button class="command-chip" type="button" data-command="/goal">Show autoresearch</button>
+                        <button class="command-chip" type="button" data-command="/goal pause">Pause autoresearch</button>
+                        <button class="command-chip" type="button" data-command="/goal resume">Resume autoresearch</button>
+                        <button class="command-chip" type="button" data-command="/goal clear">Clear autoresearch state</button>
+                        <button class="command-chip" type="button" data-command="/permissions">Permissions</button>
+                        <button class="command-chip" type="button" data-command="/model">Model</button>
+                        <button class="command-chip" type="button" data-command="/plan">Plan</button>
+                        <button class="command-chip" type="button" data-command="/diff">Diff</button>
                       </div>
                       <form id="goal-form" class="goal-form">
                         <input name="goal" type="text" placeholder="Set a session goal..." autocomplete="off" />
@@ -463,7 +473,7 @@
         <header class="launch-dialog-head">
           <div>
             <p class="eyebrow">Autoresearch loop</p>
-            <h2 id="launch-dialog-title">Start with /goal.</h2>
+            <h2 id="launch-dialog-title">Start autoresearch.</h2>
             <p>Codex will continue this same session until the reviewer gate passes or you stop it.</p>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-launch-close aria-label="Close launch dialog" title="Close">
@@ -510,7 +520,7 @@
         </form>
         <footer class="launch-dialog-actions">
           <button class="secondary-button" type="button" data-launch-close>Cancel</button>
-          <button class="primary-button" id="launch-autoresearch" type="button">Start /goal</button>
+          <button class="primary-button" id="launch-autoresearch" type="button">Start autoresearch</button>
         </footer>
       </section>
     </dialog>
@@ -546,6 +556,22 @@
           </header>
 
           <section class="settings-panel is-active" data-settings-panel="general">
+            <div class="settings-row">
+              <div>
+                <h3>Theme</h3>
+                <p>Switch the workspace appearance for the current browser.</p>
+              </div>
+              <fieldset class="theme-mode-control" aria-label="Theme mode">
+                <label>
+                  <input type="radio" name="themeMode" value="light" data-theme-option />
+                  <span>Light</span>
+                </label>
+                <label>
+                  <input type="radio" name="themeMode" value="night" data-theme-option />
+                  <span>Night</span>
+                </label>
+              </fieldset>
+            </div>
             <div class="settings-row">
               <div>
                 <h3>Runtime storage</h3>
@@ -645,6 +671,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260616-centered-thread"></script>
+    <script src="/app.js?v=20260617-figure-cards"></script>
   </body>
 </html>

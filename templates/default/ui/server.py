@@ -30,6 +30,7 @@ DEFAULT_PROJECT_ROOT = UI_DIR.parent
 PACKAGE_TEMPLATE_ROOT = Path(os.path.expanduser(os.environ.get("COAUTO_TEMPLATE_ROOT", ""))).resolve() if os.environ.get("COAUTO_TEMPLATE_ROOT") else None
 AUTORESEARCH_MAX_ITERATIONS = 50
 PORT_FALLBACK_ATTEMPTS = 50
+FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection"
 MAX_TEXT_BYTES = 500_000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 AUTO_RESOURCE_SEARCH_MAX_RESULTS = 8
@@ -859,7 +860,7 @@ def sanitize_framing_message(item: Any) -> dict[str, Any] | None:
     kind = str(item.get("kind") or "text").strip()
     if role not in {"user", "assistant"}:
         return None
-    if kind not in {"text", "project"}:
+    if kind not in {"text", "project", "goal-launch", "command"}:
         kind = "text"
     clean: dict[str, Any] = {
         "id": str(item.get("id") or "").strip()[:120],
@@ -868,6 +869,9 @@ def sanitize_framing_message(item: Any) -> dict[str, Any] | None:
         "text": text[:40_000],
         "created_at": str(item.get("created_at") or "").strip()[:80],
     }
+    edited_at = str(item.get("edited_at") or "").strip()
+    if edited_at:
+        clean["edited_at"] = edited_at[:80]
     artifact = item.get("artifact")
     if isinstance(artifact, dict):
         artifact_path = str(artifact.get("path") or "").strip()
@@ -906,6 +910,9 @@ def sanitize_framing_message(item: Any) -> dict[str, Any] | None:
                     })
         if clean_attachments:
             clean["attachments"] = clean_attachments
+            if role == "user" and not clean["text"]:
+                count = len(clean_attachments)
+                clean["text"] = f"Attached {count} {'resource' if count == 1 else 'resources'}."
     if not clean["text"] and not clean.get("artifact"):
         return None
     return {key: value for key, value in clean.items() if value is not None and value != ""}
@@ -944,6 +951,8 @@ def project_has_placeholders(text: str) -> bool:
 
 
 def update_framing_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(payload.get("clientVersion") or "").strip() != FRAMING_MESSAGES_CLIENT_VERSION:
+        raise ValueError("UI is out of date. Refresh the page and try again.")
     messages = payload.get("messages")
     if not isinstance(messages, list):
         raise ValueError("messages must be a list.")
@@ -1125,9 +1134,14 @@ def slugify(value: str, fallback: str = "item") -> str:
 
 def repo_path(relative_path: str | Path) -> Path:
     text = str(relative_path).replace("\\", "/").lstrip("/")
-    path = (REPO_ROOT / text).resolve()
+    lexical_path = (REPO_ROOT / text).absolute()
     root = REPO_ROOT.resolve()
-    if path != root and root not in path.parents:
+    try:
+        lexical_path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Path escapes repository root") from exc
+    path = lexical_path.resolve()
+    if path != root and root not in path.parents and not text.startswith("resources/"):
         raise ValueError("Path escapes repository root")
     return path
 
@@ -1183,6 +1197,7 @@ def file_raw_url(relative_path: str) -> str:
 
 
 def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str, Any]:
+    display_path = str(relative_path).replace("\\", "/").lstrip("/")
     try:
         path = repo_path(relative_path)
     except ValueError as exc:
@@ -1191,14 +1206,16 @@ def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str,
     if not path.exists():
         return {"path": relative_path, "exists": False, "text": ""}
     if path.is_dir():
-        return {"path": rel_path(path), "exists": True, "is_dir": True, "text": ""}
+        return {"path": display_path, "exists": True, "is_dir": True, "text": ""}
 
     try:
         stat = path.stat()
-        relative = rel_path(path)
+        relative = display_path
         kind = file_kind(path)
         previewable = path.suffix.lower() in PREVIEWABLE_SUFFIXES
-        editable = path.suffix.lower() in EDITABLE_SUFFIXES
+        root = REPO_ROOT.resolve()
+        resolved = path.resolve()
+        editable = path.suffix.lower() in EDITABLE_SUFFIXES and (resolved == root or root in resolved.parents)
         if kind in {"image", "pdf", "binary"}:
             return {
                 "path": relative,
@@ -1240,6 +1257,10 @@ def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str,
 
 def write_text_file(relative_path: str, text: str) -> dict[str, Any]:
     path = repo_path(relative_path)
+    root = REPO_ROOT.resolve()
+    resolved = path.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError("Linked external resources are read-only in the UI.")
     if path.suffix.lower() not in EDITABLE_SUFFIXES:
         raise ValueError(f"Unsupported editable file type: {path.suffix or path.name}")
     encoded = text.encode("utf-8")
@@ -1342,7 +1363,7 @@ def list_section_items(text: str) -> list[str]:
     return [item for item in items if item]
 
 
-def file_card(path: Path) -> dict[str, Any]:
+def file_card(path: Path, display_path: str = "") -> dict[str, Any]:
     stat = path.stat()
     text_preview = ""
     suffix = path.suffix.lower()
@@ -1352,7 +1373,7 @@ def file_card(path: Path) -> dict[str, Any]:
         text_preview = safe_read(path, 900)
     return {
         "name": path.name,
-        "path": rel_path(path),
+        "path": display_path or rel_path(path),
         "suffix": suffix,
         "size": stat.st_size,
         "mtime": stat.st_mtime,
@@ -1360,8 +1381,9 @@ def file_card(path: Path) -> dict[str, Any]:
         "kind": kind,
         "mime": file_mime(path),
         "previewable": previewable,
-        "editable": suffix in EDITABLE_SUFFIXES,
+        "editable": suffix in EDITABLE_SUFFIXES and (REPO_ROOT.resolve() == path.resolve() or REPO_ROOT.resolve() in path.resolve().parents),
         "preview": text_preview,
+        "is_symlink": path.is_symlink(),
     }
 
 
@@ -1387,13 +1409,69 @@ def is_duplicate_resource_copy(path: Path) -> bool:
     return source_stat.st_size == canonical_stat.st_size and int(source_stat.st_mtime) == int(canonical_stat.st_mtime)
 
 
+def is_resources_relative_path(relative_path: str) -> bool:
+    normalized = relative_path.replace("\\", "/").strip("/")
+    return normalized == "resources" or normalized.startswith("resources/")
+
+
+def iter_tree_paths(
+    root_path: Path,
+    relative_dir: str,
+    recursive: bool = True,
+    max_depth: int | None = None,
+    exclude_names: set[str] | None = None,
+    follow_symlink_dirs: bool = False,
+):
+    excluded = {".DS_Store", ".gitkeep", ".git", "__pycache__", *list(exclude_names or set())}
+    seen_dirs: set[str] = set()
+
+    def visit(directory: Path, virtual_relative: str, depth: int):
+        try:
+            entries = sorted(directory.iterdir(), key=lambda item: item.name.lower())
+        except OSError:
+            return
+        for child in entries:
+            if child.name in excluded:
+                continue
+            child_virtual = f"{virtual_relative.rstrip('/')}/{child.name}" if virtual_relative else child.name
+            if any(part in excluded for part in Path(child_virtual).parts):
+                continue
+            if max_depth is not None and depth + 1 > max_depth:
+                continue
+            try:
+                is_dir = child.is_dir()
+            except OSError:
+                continue
+            if max_depth is not None and depth + 1 == max_depth and is_dir:
+                continue
+            yield child, child_virtual, depth + 1
+            if not recursive or not is_dir:
+                continue
+            if child.is_symlink() and not follow_symlink_dirs:
+                continue
+            try:
+                resolved = str(child.resolve())
+            except OSError:
+                continue
+            if resolved in seen_dirs:
+                continue
+            seen_dirs.add(resolved)
+            yield from visit(child, child_virtual, depth + 1)
+
+    try:
+        seen_dirs.add(str(root_path.resolve()))
+    except OSError:
+        pass
+    yield from visit(root_path, relative_dir, 0)
+
+
 def list_files(relative_dir: str, recursive: bool = True) -> list[dict[str, Any]]:
     directory = repo_path(relative_dir)
     if not directory.exists() or not directory.is_dir():
         return []
-    iterator = directory.rglob("*") if recursive else directory.iterdir()
+    follow_symlinks = is_resources_relative_path(relative_dir)
     files: list[dict[str, Any]] = []
-    for path in iterator:
+    for path, virtual_path, _depth in iter_tree_paths(directory, relative_dir, recursive=recursive, follow_symlink_dirs=follow_symlinks):
         if not path.is_file():
             continue
         if path.name in {".gitkeep", ".DS_Store"}:
@@ -1403,14 +1481,17 @@ def list_files(relative_dir: str, recursive: bool = True) -> list[dict[str, Any]
         if "__pycache__" in path.parts or ".git" in path.parts:
             continue
         try:
-            files.append(file_card(path))
+            files.append(file_card(path, virtual_path))
         except OSError:
             continue
     return sorted(files, key=lambda item: item["path"])
 
 
-def tree_node(name: str, path: str, node_type: str) -> dict[str, Any]:
-    return {"name": name, "path": path, "type": node_type, "children": []}
+def tree_node(name: str, path: str, node_type: str, is_symlink: bool = False) -> dict[str, Any]:
+    node = {"name": name, "path": path, "type": node_type, "children": []}
+    if is_symlink:
+        node["is_symlink"] = True
+    return node
 
 
 def directory_tree(relative_dir: str, max_depth: int | None = None, exclude_names: set[str] | None = None) -> dict[str, Any]:
@@ -1419,36 +1500,28 @@ def directory_tree(relative_dir: str, max_depth: int | None = None, exclude_name
     if not root_path.exists() or not root_path.is_dir():
         return root
 
-    excluded = {".DS_Store", ".gitkeep", ".git", "__pycache__", *list(exclude_names or set())}
     nodes: dict[str, dict[str, Any]] = {relative_dir: root}
-    for path in sorted(root_path.rglob("*")):
-        if path.name in excluded:
-            continue
+    follow_symlinks = is_resources_relative_path(relative_dir)
+    for path, relative, _depth in iter_tree_paths(
+        root_path,
+        relative_dir,
+        max_depth=max_depth,
+        exclude_names=exclude_names,
+        follow_symlink_dirs=follow_symlinks,
+    ):
         if is_duplicate_resource_copy(path):
             continue
-        if any(part in excluded for part in path.parts):
-            continue
-        if max_depth is not None:
-            try:
-                depth = len(path.relative_to(root_path).parts)
-            except ValueError:
-                continue
-            if depth > max_depth:
-                continue
-            if depth == max_depth and path.is_dir():
-                continue
-        if "__pycache__" in path.parts or ".git" in path.parts:
-            continue
-        relative = rel_path(path)
-        parent_relative = rel_path(path.parent)
+        parent_relative = str(Path(relative).parent).replace("\\", "/")
+        if parent_relative == ".":
+            parent_relative = relative_dir
         parent = nodes.get(parent_relative)
         if not parent:
             continue
         node_type = "directory" if path.is_dir() else "file"
-        node = tree_node(path.name, relative, node_type)
+        node = tree_node(path.name, relative, node_type, path.is_symlink())
         if path.is_file():
             try:
-                node.update(file_card(path))
+                node.update(file_card(path, relative))
             except OSError:
                 continue
         nodes[relative] = node
@@ -2098,14 +2171,6 @@ def path_exists_resolved(path: Path) -> Path | None:
     return None
 
 
-def path_is_within(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except (OSError, ValueError):
-        return False
-
-
 def resource_search_roots() -> list[Path]:
     roots = [REPO_ROOT.parent, REPO_ROOT, Path.home()]
     if PROJECT_REGISTRY and PROJECT_REGISTRY.projects_dir:
@@ -2213,7 +2278,16 @@ def extract_resource_references(text: str) -> list[str]:
             continue
         seen.add(lower)
         clean.append(normalized)
-    return clean[:20]
+    filtered: list[str] = []
+    normalized_paths = [(item, item.replace("\\", "/").strip("/").lower()) for item in clean]
+    for item, normalized_path in normalized_paths:
+        if any(
+            normalized_path != other_path and other_path.endswith(normalized_path)
+            for _, other_path in normalized_paths
+        ):
+            continue
+        filtered.append(item)
+    return filtered[:20]
 
 
 def payload_resource_texts(payload: dict[str, Any], *extra_texts: str) -> list[str]:
@@ -2265,32 +2339,13 @@ def prepare_payload_resources(payload: dict[str, Any], texts: list[str]) -> dict
     enriched = dict(payload)
     if enriched.get("_resourceResolutionPrepared"):
         return enriched
-    links = [item for item in enriched.get("resourceLinks", []) if isinstance(item, dict)]
-    seen = {str(item.get("path", "")).strip() for item in links if str(item.get("path", "")).strip()}
     resolutions: list[dict[str, Any]] = []
 
     for text in texts:
         for reference in extract_resource_references(text):
             resolution = resolve_resource_reference(reference)
             resolutions.append(resolution)
-            resolved_path = resolution.get("path")
-            if not isinstance(resolved_path, Path):
-                continue
-            if path_is_within(resolved_path, REPO_ROOT):
-                continue
-            path_text = str(resolved_path)
-            if path_text in seen:
-                continue
-            seen.add(path_text)
-            links.append({
-                "path": path_text,
-                "category": infer_resource_category(resolved_path),
-                "autoDetected": True,
-                "sourceText": resolution.get("reference", reference),
-                "resolutionStatus": resolution.get("status", "resolved"),
-            })
 
-    enriched["resourceLinks"] = links
     enriched["_resourceResolutionPrepared"] = True
     if resolutions:
         enriched["_resourceResolution"] = [
@@ -2314,18 +2369,13 @@ def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
     for item in links:
         if not isinstance(item, dict):
             continue
+        if item.get("autoDetected"):
+            continue
         source_text = str(item.get("path", "")).strip()
         if not source_text:
             continue
         source = path_exists_resolved(Path(os.path.expandvars(os.path.expanduser(source_text))))
         if not source:
-            resolution = resolve_resource_reference(source_text)
-            resolved_path = resolution.get("path")
-            if isinstance(resolved_path, Path):
-                source = resolved_path
-        if not source:
-            if item.get("autoDetected"):
-                continue
             raise ValueError(f"Resource path does not exist: {source_text}")
         category = str(item.get("category", "")).strip() or infer_resource_category(source)
         target = RESOURCE_LINK_TARGETS.get(category)
@@ -2474,7 +2524,11 @@ def browse_local_path(raw_path: str = "", search_query: str = "") -> dict[str, A
     }
 
 
-def write_ui_metadata(payload: dict[str, Any]) -> list[str]:
+def write_ui_metadata(
+    payload: dict[str, Any],
+    saved_files: list[str] | None = None,
+    linked_resources: list[dict[str, str]] | None = None,
+) -> list[str]:
     written = []
     target_venue = str(payload.get("targetVenue", "")).strip()
     if target_venue:
@@ -2482,30 +2536,51 @@ def write_ui_metadata(payload: dict[str, Any]) -> list[str]:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(f"# Target Venue / Audience\n\n{target_venue}\n", encoding="utf-8")
         written.append(rel_path(target_path))
-    resource_lines = ["# UI Resource Manifest", "", "Initial UI-side resource filing. Treat this as a hint, not ground truth.", ""]
+    resource_lines = [
+        "# Resource Manifest",
+        "",
+        "This is a raw intake record for user-provided and inferred resources.",
+        "",
+        "It is not current research truth until promoted into `PROJECT.md`, `research_trajectory/STATE.md`, `research_trajectory/CURRENT_FINDINGS.md`, or a trial report.",
+        "",
+    ]
     links = payload.get("resourceLinks", [])
     uploads = payload.get("files", [])
+    saved_files = saved_files or []
+    linked_resources = linked_resources or []
+
+    resource_lines.extend(["## Explicit UI Resources", ""])
+    explicit_count = 0
     if isinstance(links, list) and links:
-        resource_lines.extend(["## Linked Local Resources", ""])
         for item in links:
             if not isinstance(item, dict):
+                continue
+            if item.get("autoDetected"):
                 continue
             path = str(item.get("path", "")).strip()
             if not path:
                 continue
             category = str(item.get("category", "")).strip() or "unclassified"
-            details = []
-            if item.get("autoDetected"):
-                details.append("auto-detected")
-            source_text = str(item.get("sourceText", "")).strip()
-            if source_text and source_text != path:
-                details.append(f"from `{source_text}`")
-            suffix = f" ({'; '.join(details)})" if details else ""
-            resource_lines.append(f"- `{category}`: `{path}`{suffix}")
-        resource_lines.append("")
+            resource_lines.append(f"- `{category}` local selection: `{path}`")
+            explicit_count += 1
+    if isinstance(uploads, list) and uploads:
+        for item in uploads:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("relativePath") or "").strip()
+            if not name:
+                continue
+            category = str(item.get("category", "")).strip() or "unclassified"
+            resource_lines.append(f"- `{category}` upload: `{name}`")
+            explicit_count += 1
+    if explicit_count == 0:
+        resource_lines.append("- <none recorded>")
+    resource_lines.append("")
+
     resolutions = payload.get("_resourceResolution", [])
+    resource_lines.extend(["## Inferred Resource References", ""])
+    inferred_count = 0
     if isinstance(resolutions, list) and resolutions:
-        resource_lines.extend(["## Resource References Detected In User Text", ""])
         for item in resolutions:
             if not isinstance(item, dict):
                 continue
@@ -2514,26 +2589,64 @@ def write_ui_metadata(payload: dict[str, Any]) -> list[str]:
             path = str(item.get("path", "")).strip()
             candidates = item.get("candidates", [])
             if path:
-                resource_lines.append(f"- `{status}`: `{reference}` -> `{path}`")
+                resource_lines.append(f"- `{status}` clue: `{reference}`; candidate: `{path}`")
+                inferred_count += 1
                 continue
             if isinstance(candidates, list) and candidates:
                 limited = ", ".join(f"`{candidate}`" for candidate in candidates[:5])
-                resource_lines.append(f"- `{status}`: `{reference}`; candidates: {limited}")
+                resource_lines.append(f"- `{status}` clue: `{reference}`; candidates: {limited}")
+                inferred_count += 1
             elif reference:
-                resource_lines.append(f"- `{status}`: `{reference}`")
-        resource_lines.append("")
-    if isinstance(uploads, list) and uploads:
-        resource_lines.extend(["## Uploaded / Dropped Files", ""])
-        for item in uploads:
+                resource_lines.append(f"- `{status}` clue: `{reference}`")
+                inferred_count += 1
+    if inferred_count == 0:
+        resource_lines.append("- <none recorded>")
+    resource_lines.append("")
+
+    resource_lines.extend(["## Attached Resources", ""])
+    attached_count = 0
+    for item in linked_resources:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category", "")).strip() or "unclassified"
+        mode = str(item.get("mode", "")).strip() or "linked"
+        source = str(item.get("source", "")).strip()
+        path = str(item.get("path", "")).strip()
+        if path:
+            resource_lines.append(f"- `{category}` {mode}: `{path}` from `{source}`")
+            attached_count += 1
+    for path in saved_files:
+        if path:
+            resource_lines.append(f"- upload copied: `{path}`")
+            attached_count += 1
+    if attached_count == 0:
+        resource_lines.append("- <none recorded>")
+    resource_lines.append("")
+
+    resource_lines.extend(["## Unresolved Or Ambiguous Resources", ""])
+    unresolved_count = 0
+    if isinstance(resolutions, list):
+        for item in resolutions:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("name") or item.get("relativePath") or "").strip()
-            if not name:
-                continue
-            category = str(item.get("category", "")).strip() or "unclassified"
-            resource_lines.append(f"- `{category}`: `{name}`")
-        resource_lines.append("")
-    if len(resource_lines) > 4:
+            reference = str(item.get("reference", "")).strip()
+            status = str(item.get("status", "")).strip()
+            if reference and status in {"ambiguous", "missing"}:
+                resource_lines.append(f"- `{status}`: `{reference}`")
+                unresolved_count += 1
+    if unresolved_count == 0:
+        resource_lines.append("- <none recorded>")
+    resource_lines.append("")
+
+    resource_lines.extend(["## Intake Decisions", ""])
+    if inferred_count:
+        resource_lines.append("- Inferred text references are resource clues for Codex resource intake; they were not attached automatically by the UI server.")
+    if explicit_count:
+        resource_lines.append("- Explicit UI resources were filed as raw inputs before research reasoning.")
+    if not inferred_count and not explicit_count:
+        resource_lines.append("- <none recorded>")
+
+    if target_venue or explicit_count or inferred_count or attached_count or unresolved_count:
         manifest_path = REPO_ROOT / "resources/user_input/RESOURCE_MANIFEST.md"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text("\n".join(resource_lines).rstrip() + "\n", encoding="utf-8")
@@ -2583,11 +2696,14 @@ def write_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
 """
     initial_brief_path.write_text(body, encoding="utf-8")
 
+    saved_files = save_uploads(payload)
+    linked_resources = save_resource_links(payload)
     return {
         "initial_brief": rel_path(initial_brief_path),
-        "saved_files": save_uploads(payload),
-        "resource_links": save_resource_links(payload),
-        "metadata_files": write_ui_metadata(payload),
+        "saved_files": saved_files,
+        "resource_links": linked_resources,
+        "resource_clues": payload.get("_resourceResolution", []),
+        "metadata_files": write_ui_metadata(payload, saved_files, linked_resources),
     }
 
 
@@ -3109,7 +3225,7 @@ def start_research_run(
 def cold_start_prompt(payload: dict[str, Any]) -> str:
     brief = str(payload.get("brief", "")).strip()
     target_venue = str(payload.get("targetVenue", "")).strip()
-    return f"""Run the cold-start / conversion process for this CoAutoResearch scaffold.
+    return f"""Run adaptive intake triage for this CoAutoResearch scaffold, then cold start or conversion only as appropriate.
 
 User brief:
 {brief}
@@ -3133,11 +3249,13 @@ note the corrected role in PROJECT.md / STATE.md and move or reference it approp
 Use the repository instructions:
 - read AGENTS.md
 - read instructions/COLD_START.md
+- read instructions/RESOURCE_INTAKE.md
 - read instructions/CONVERSION.md
 - read resources/user_input/INITIAL_BRIEF.md
 - read resources/user_input/RESOURCE_MANIFEST.md if present
 - inspect relevant resources
-- initialize or update PROJECT.md, research_trajectory/STATE.md, the conversion trial, and manuscript/BLUEPRINT.md as appropriate
+- if RESOURCE_MANIFEST.md contains inferred resource references, unresolved resources, or ambiguous resources, complete or block Resource Intake before treating those materials as available
+- initialize or update PROJECT.md, research_trajectory/STATE.md, the conversion trial, and manuscript/BLUEPRINT.md only as appropriate under the adaptive intake router
 
 Continue until the cold-start state is genuinely reflected in repository files. Be concise in your final response."""
 
@@ -3165,9 +3283,11 @@ Use the repository instructions and inspect only the files needed to write a use
 
 Your task:
 - read AGENTS.md
+- read instructions/RESOURCE_INTAKE.md
 - read instructions/COLD_START.md and instructions/CONVERSION.md only as needed
 - read resources/user_input/INITIAL_BRIEF.md
 - read resources/user_input/RESOURCE_MANIFEST.md if present
+- if RESOURCE_MANIFEST.md contains inferred, unresolved, or ambiguous resource clues, run Resource Intake first and do not treat those clues as attached resources until they are filed or explicitly blocked
 - inspect attached resources enough to understand the research direction
 - write or update PROJECT.md as a concrete, user-reviewable research framing document
 
@@ -3221,10 +3341,12 @@ def continue_research_prompt(message: str = "") -> str:
 User instruction:
 {extra}
 
-Follow AGENTS.md and research_trajectory/STATE.md. Update repository files as needed and report what changed."""
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached.
+
+If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
     return """Continue the next coherent CoAutoResearch iteration in this same Codex exec session.
 
-Follow AGENTS.md and research_trajectory/STATE.md. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 
 
 def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3238,10 +3360,13 @@ def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
             path = str(item.get("path", "")).strip()
             if path and path != "PROJECT.md":
                 saved_edits.append(write_text_file(path, str(item.get("text", ""))))
+    saved_files = save_uploads(payload)
+    linked_resources = save_resource_links(payload)
     result = {
-        "saved_files": save_uploads(payload),
-        "resource_links": save_resource_links(payload),
-        "metadata_files": write_ui_metadata(payload),
+        "saved_files": saved_files,
+        "resource_links": linked_resources,
+        "resource_clues": payload.get("_resourceResolution", []),
+        "metadata_files": write_ui_metadata(payload, saved_files, linked_resources),
         "file_edits": [item["path"] for item in saved_edits],
     }
     with RESEARCH_LOCK:
@@ -3271,10 +3396,13 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
             if not path:
                 continue
             saved_edits.append(write_text_file(path, str(item.get("text", ""))))
+        saved_files = save_uploads(payload)
+        linked_resources = save_resource_links(payload)
         result = {
-            "saved_files": save_uploads(payload),
-            "resource_links": save_resource_links(payload),
-            "metadata_files": write_ui_metadata(payload),
+            "saved_files": saved_files,
+            "resource_links": linked_resources,
+            "resource_clues": payload.get("_resourceResolution", []),
+            "metadata_files": write_ui_metadata(payload, saved_files, linked_resources),
             "file_edits": [item["path"] for item in saved_edits],
         }
     else:
@@ -3315,7 +3443,7 @@ def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str
     payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload, message))
     saved_files = save_uploads(payload)
     linked_resources = save_resource_links(payload)
-    metadata_files = write_ui_metadata(payload)
+    metadata_files = write_ui_metadata(payload, saved_files, linked_resources)
     resolutions = payload.get("_resourceResolution", [])
     if not saved_files and not linked_resources and not resolutions:
         return message, {"saved_files": [], "resource_links": [], "metadata_files": []}
@@ -3333,7 +3461,7 @@ def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str
             path = str(item.get("path", "")).strip()
             candidates = item.get("candidates", [])
             if path:
-                lines.append(f"- resolved typed reference `{reference}` to `{path}`")
+                lines.append(f"- inferred resource clue `{reference}` has candidate `{path}`; run Resource Intake before treating it as attached")
             elif isinstance(candidates, list) and candidates:
                 lines.append(f"- typed reference `{reference}` was ambiguous; inspect RESOURCE_MANIFEST.md")
             elif reference:
@@ -3343,6 +3471,7 @@ def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str
     return f"{message}{chr(10).join(lines)}", {
         "saved_files": saved_files,
         "resource_links": linked_resources,
+        "resource_clues": resolutions if isinstance(resolutions, list) else [],
         "metadata_files": metadata_files,
     }
 
@@ -3353,6 +3482,8 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
         return start_research_command({"command": message, "settings": payload.get("settings")})
     display_message = message
     message, attachments = attach_message_resources(payload, message)
+    if not display_message and any(attachments.get(key) for key in ("saved_files", "resource_links", "resource_clues", "metadata_files")):
+        display_message = "Attached resources."
     return {
         "files": attachments,
         "session": start_research_run(

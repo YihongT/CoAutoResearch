@@ -32,6 +32,10 @@ If the project is empty or newly initialized, also read:
 
 - `instructions/COLD_START.md`
 
+If the latest user message or UI submission mentions files, folders, repositories, papers, datasets, proposals, prior work, reviews, or target-venue materials, also read:
+
+- `instructions/RESOURCE_INTAKE.md`
+
 If the project starts from existing work, old repos, notes, proposals, or raw user input, also read:
 
 - `instructions/CONVERSION.md`
@@ -67,20 +71,23 @@ Detailed folder rules are in `instructions/EXECUTION_AGENT.md` under **Folder Op
 
 ## Iterative Workflow
 
+Before choosing the next research action, perform adaptive intake triage. Explicit UI uploads, drag-and-drop files, and local-browser file or folder selections are authoritative raw resources: file them under `resources/` and record them before framing, conversion, or research reasoning. Natural-language paths, repository names, papers, datasets, or prior-work references are resource clues: follow `instructions/RESOURCE_INTAKE.md` before treating them as available context.
+
 Research proceeds as a loop:
 
 1. read the required files;
-2. check pending formal human interventions;
-3. choose one coherent next research objective;
-4. create a trial under `research_trajectory/trials/<trial_id>/`;
-5. write `PLAN.md` before execution;
-6. review the plan in `REVIEW.md` when appropriate;
-7. execute mainly in `workspace/`;
-8. record outputs in or from the trial `artifacts/`;
-9. write `REPORT.md` after execution;
-10. update only the global files whose current state genuinely changed;
-11. commit changes to git;
-12. push if a remote exists and the progress is meaningful.
+2. perform adaptive intake triage;
+3. check pending formal human interventions;
+4. choose one coherent next research objective;
+5. create a trial under `research_trajectory/trials/<trial_id>/`;
+6. write `PLAN.md` before execution;
+7. review the plan in `REVIEW.md` when appropriate;
+8. execute mainly in `workspace/`;
+9. record outputs in or from the trial `artifacts/`;
+10. write `REPORT.md` after execution;
+11. update only the global files whose current state genuinely changed;
+12. commit changes to git;
+13. push if a remote exists and the progress is meaningful.
 
 Process review is also a trial. If progress is stuck, create a trial such as `000024_process_review/` and review recent work there.
 

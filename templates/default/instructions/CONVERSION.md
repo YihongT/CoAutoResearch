@@ -6,7 +6,22 @@ Use this protocol to convert raw materials into the canonical project state.
 
 Raw materials may include old repositories, ongoing work, proposals, notes, literature, datasets, seed papers, or a short user brief.
 
-Conversion does not mean trusting old work. It means inspecting it, extracting what is useful, and recording what is current, tentative, deprecated, or unknown.
+Conversion does not acquire resources. It reinterprets filed raw materials into canonical project state. Conversion does not mean trusting old work; it means inspecting it, extracting what is useful, and recording what is current, tentative, deprecated, or unknown.
+
+Before conversion, run `instructions/RESOURCE_INTAKE.md` unless the relevant materials are already filed in `resources/` and listed in `resources/user_input/RESOURCE_MANIFEST.md`.
+
+---
+
+## When To Run Conversion
+
+Run conversion only when canonical project state needs to be built or reinterpreted, such as:
+
+- newly filed resources materially affect `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or manuscript direction;
+- a formal human intervention changes the research goal, method, target venue, claim, priority, or resource use;
+- a plan-level correction makes the active plan or current project framing invalid;
+- an imported or newly created project does not yet have coherent `PROJECT.md`, `STATE.md`, and `CURRENT_FINDINGS.md`.
+
+Do not run conversion for ordinary progress questions, simple continuation of the current plan, small attachments that do not affect project definition, documentation or UI edits, or a normal next trial inside an already coherent project.
 
 ---
 
@@ -23,6 +38,12 @@ Possible inputs:
 - `resources/target_venue/`
 
 These are raw materials. They are not current truth until reflected in `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report.
+
+Also inspect `resources/user_input/RESOURCE_MANIFEST.md` before conversion. Resolve, defer, or explicitly record any unresolved or ambiguous resource entries that affect project state.
+
+When converting an ongoing-work bundle, verify that `instructions/RESOURCE_INTAKE.md` has surfaced embedded bibliographies, literature, venue materials, and data-source artifacts into the appropriate `resources/` subfolders. If the embedded scan has not happened, do it before deriving canonical state. Conversion may inspect nested files directly, but later evidence, venue, and manuscript steps should not depend on rediscovering hidden files inside `ongoing_work/`.
+
+Do not interpret an empty `resources/target_venue/papers/` folder as proof that no literature exists. It only means no local selected target-venue seed-paper copies are stored there. General manuscript references from ongoing work belong in `resources/literature/` unless deliberately selected as seed papers.
 
 ---
 

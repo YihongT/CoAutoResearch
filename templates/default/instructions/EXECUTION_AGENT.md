@@ -22,9 +22,27 @@ Before substantive work, read:
 
 If starting from an empty or newly initialized project, read `instructions/COLD_START.md`.
 
+If acquiring, filing, resolving, or interpreting user-provided resources, read `instructions/RESOURCE_INTAKE.md`.
+
 If converting prior work, raw user input, old repos, previous experiments, or proposals, read `instructions/CONVERSION.md`.
 
 If updating manuscript-facing files, read `instructions/MANUSCRIPT.md`.
+
+---
+
+## Adaptive Intake Router
+
+Before framing, conversion, or normal research execution, route the latest user message and UI payload:
+
+1. If explicit UI resources are present, file them under `resources/` and update `resources/user_input/RESOURCE_MANIFEST.md` first.
+2. If unattached resource clues are present, follow `instructions/RESOURCE_INTAKE.md`.
+3. If newly filed resources materially affect `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or manuscript direction, run `instructions/CONVERSION.md`.
+4. If a formal human intervention changes direction, follow `instructions/INTERVENTION_PROTOCOL.md`, then run conversion only if canonical state needs reinterpretation.
+5. If a plan-level correction makes the active plan or project framing invalid, update the active plan and `STATE.md`; run conversion only if canonical project state is no longer valid.
+6. If there are no prior materials or the user explicitly starts from scratch, use `instructions/COLD_START.md`.
+7. Otherwise continue the normal execution loop.
+
+Do not create or revise `PROJECT.md` from a user message that names prior work, a repo, dataset, papers, or files until resource intake is complete, blocked with a clear user question, or explicitly not needed.
 
 ---
 
@@ -301,11 +319,17 @@ Use `resources/` for raw or external inputs. Do not treat resources as current t
 - `resources/target_venue/STYLE_NOTES.md`: venue writing and structure notes.
 - `resources/target_venue/FIGURE_TABLE_NOTES.md`: venue figure/table style notes.
 
+When an ongoing-work, proposal, or mixed bundle contains embedded bibliographies, reference exports, literature PDFs, target-venue materials, or data artifacts, surface those nested resources into the matching resource folder before using them for planning, evidence review, venue review, or manuscript synthesis. Preserve the original bundle as raw input and record the surfaced path in `resources/user_input/RESOURCE_MANIFEST.md`.
+
+A manuscript `references.bib` or bibliography inside `resources/ongoing_work/` is literature grounding, not a target-venue seed-paper archive. It should be surfaced under `resources/literature/`. `resources/target_venue/papers/` is reserved for local copies of selected seed papers from the target venue or target style.
+
 If a project has a target venue but no seed papers, create an early trial to collect 3-5 recent, relevant seed papers from that venue. Use them for style, structure, evidence standard, and figure/table design, not for copying research content.
 
 ---
 
 ## Resource Acquisition Policy
+
+For user-provided or inferred resources, follow `instructions/RESOURCE_INTAKE.md` first. This policy covers agent-initiated acquisition during research after intake routing is complete.
 
 The agent may search for or download relevant resources when useful for the research objective, including:
 
