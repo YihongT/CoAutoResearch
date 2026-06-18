@@ -4,6 +4,18 @@
   "description": "Human-centered AI research scaffolding with traceable evidence and steerable progress.",
   "license": "Apache-2.0",
   "type": "module",
+  "packageManager": "npm@11.9.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YihongT/CoAutoResearch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YihongT/CoAutoResearch/issues"
+  },
+  "homepage": "https://yihongt.github.io/CoAutoResearch/",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "co-auto-research": "./bin/auto-research.js",
     "auto-research": "./bin/auto-research.js"

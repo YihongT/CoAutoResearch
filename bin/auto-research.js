@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
+const PACKAGE_MANIFEST_PATH = path.join(PACKAGE_ROOT, "package.json");
 const TEMPLATE_ROOT = path.join(PACKAGE_ROOT, "templates", "default");
 const MANIFEST_PATH = path.join(TEMPLATE_ROOT, ".co-auto-research-template", "manifest.json");
 const DEFAULT_HOST = "127.0.0.1";
@@ -28,6 +29,7 @@ Usage:
   co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
   co-auto-research upgrade
+  co-auto-research version
   co-auto-research help
 
 Alias:
@@ -87,13 +89,25 @@ function readJsonSync(target) {
   return JSON.parse(fs.readFileSync(target, "utf8"));
 }
 
+function packageMetadata() {
+  try {
+    return readJsonSync(PACKAGE_MANIFEST_PATH);
+  } catch {
+    return {};
+  }
+}
+
+function packageVersion() {
+  return String(packageMetadata().version || "unknown");
+}
+
 function isProjectRootSync(root) {
   return (
-    fs.existsSync(path.join(root, "ui", "server.py")) &&
-    (
-      fs.existsSync(path.join(root, ".co-auto-research-template", "manifest.json")) ||
-      (fs.existsSync(path.join(root, "AGENTS.md")) && fs.existsSync(path.join(root, "PROJECT.md")))
-    )
+    fs.existsSync(path.join(root, ".co-auto-research", "project.json")) ||
+    fs.existsSync(path.join(root, ".co-auto-research-template", "manifest.json")) ||
+    (fs.existsSync(path.join(root, "AGENTS.md")) &&
+      fs.existsSync(path.join(root, "PROJECT.md")) &&
+      fs.existsSync(path.join(root, "research_trajectory")))
   );
 }
 
@@ -557,8 +571,11 @@ async function commandDoctor(args) {
   const portCheck = await checkPort(host, port);
   console.log(`${(portCheck.ok ? "ok" : "warn").padEnd(7)} port ${host}:${port}${portCheck.error ? ` - ${portCheck.error}` : ""}`);
 
+  const packageUi = path.join(TEMPLATE_ROOT, "ui", "server.py");
+  console.log(`${fs.existsSync(packageUi) ? "ok" : "missing"}  package ui/server.py${fs.existsSync(packageUi) ? ` - package-managed runtime ${packageVersion()}` : ""}`);
+  console.log(`${isProjectRootSync(process.cwd()) ? "ok" : "warn"}      current directory${isProjectRootSync(process.cwd()) ? " is a CoAutoResearch project" : " is not a CoAutoResearch project"}`);
   const projectUi = path.join(process.cwd(), "ui", "server.py");
-  console.log(`${fs.existsSync(projectUi) ? "ok" : "warn"}      project ui/server.py${fs.existsSync(projectUi) ? "" : " not found in current directory"}`);
+  console.log(`${fs.existsSync(projectUi) ? "ok" : "warn"}      legacy project ui/server.py${fs.existsSync(projectUi) ? " present as fallback" : " not found in current directory"}`);
 }
 
 function commandUi(args) {
@@ -571,16 +588,23 @@ function commandUi(args) {
   }
   let projectsDir = options["projects-dir"] ? path.resolve(process.cwd(), options["projects-dir"]) : "";
   const projectRoot = options.project ? path.resolve(process.cwd(), options.project) : process.cwd();
+  const packageServerPath = path.join(TEMPLATE_ROOT, "ui", "server.py");
   const projectServerPath = path.join(projectRoot, "ui", "server.py");
-  if (!projectsDir && !fs.existsSync(projectServerPath)) {
+  const projectMode = !projectsDir && (Boolean(options.project) || isProjectRootSync(projectRoot));
+  if (!projectsDir && !projectMode) {
     projectsDir = path.resolve(process.cwd(), "local-projects");
     fs.mkdirSync(projectsDir, { recursive: true });
   }
-  const serverPath = projectsDir
-    ? path.join(TEMPLATE_ROOT, "ui", "server.py")
-    : projectServerPath;
+  let serverPath = packageServerPath;
+  let usingPackageServer = fs.existsSync(packageServerPath);
+  if (!usingPackageServer && projectMode && fs.existsSync(projectServerPath)) {
+    serverPath = projectServerPath;
+  }
   if (!fs.existsSync(serverPath)) {
-    throw new Error("No ui/server.py found. Run this inside a generated CoAutoResearch project, or pass --projects-dir.");
+    throw new Error("No package UI server found. Reinstall co-auto-research or run from a generated project with a legacy ui/server.py.");
+  }
+  if (projectMode && usingPackageServer && fs.existsSync(projectServerPath)) {
+    console.log(`Using package UI runtime ${packageVersion()} for ${projectRoot}`);
   }
   if (options.remote) {
     console.log("Remote mode enabled: CoAutoResearch will not try to open a browser on this server.");
@@ -593,7 +617,17 @@ function commandUi(args) {
   }
   const serverArgs = [serverPath, "--host", host, "--port", String(port)];
   if (projectsDir) serverArgs.push("--projects-dir", projectsDir);
-  else if (options.project) serverArgs.push("--project-root", projectRoot);
+  else if (projectMode) serverArgs.push("--project-root", projectRoot);
+  if (process.env.COAUTO_PRINT_UI_INVOCATION) {
+    console.log(JSON.stringify({
+      serverPath,
+      projectRoot: projectMode ? projectRoot : "",
+      projectsDir,
+      usingPackageServer,
+      packageVersion: packageVersion()
+    }));
+    return;
+  }
   const child = spawn(python.command, [...python.args, ...serverArgs], {
     cwd: projectsDir || projectRoot,
     env: { ...process.env, COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT },
@@ -628,6 +662,7 @@ async function findProjectManifest() {
 async function commandUpgrade() {
   const packageManifest = await readJson(MANIFEST_PATH);
   const projectManifestPath = await findProjectManifest();
+  console.log(`CoAutoResearch CLI version: ${packageVersion()}`);
   console.log(`Available template version: ${packageManifest.templateVersion}`);
   if (projectManifestPath) {
     const projectManifest = await readJson(projectManifestPath);
@@ -635,7 +670,15 @@ async function commandUpgrade() {
   } else {
     console.log("Current project template version: not detected in this directory.");
   }
-  console.log("Automated upgrades are not implemented in 0.1.0. Generated projects are independent working copies.");
+  console.log("");
+  console.log("To update the installed CLI and package-managed UI runtime, run:");
+  console.log("  npm install -g co-auto-research@latest");
+  console.log("");
+  console.log("Generated project research files are not rewritten automatically.");
+}
+
+function commandVersion() {
+  console.log(packageVersion());
 }
 
 async function main() {
@@ -644,6 +687,7 @@ async function main() {
     console.log(usage());
     return;
   }
+  if (command === "version" || command === "--version" || command === "-v") return commandVersion();
   if (command === "init") return commandInit(args);
   if (command === "ls" || command === "list") return commandList(args);
   if (command === "attach") return commandAttach(args);

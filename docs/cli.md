@@ -7,30 +7,19 @@ co-auto-research
 auto-research
 ```
 
-These commands are available after installing the package. From a new machine:
+These commands are available after installing the npm package:
 
 ```bash
-git clone https://github.com/YihongT/CoAutoResearch.git
-cd CoAutoResearch
-npm install -g .
+npm install -g co-auto-research
 ```
 
-Without a global install, run the same entrypoint from the repository:
+To update:
 
 ```bash
-node bin/auto-research.js <command>
+npm install -g co-auto-research@latest
 ```
 
-To update a clone-based install:
-
-```bash
-cd CoAutoResearch
-git pull
-npm install -g .
-```
-
-Use `npm link` instead of `npm install -g .` if you want the global command to
-track this checkout while you develop or pull frequent updates.
+Source-checkout development commands are covered in the contributor guide.
 
 ## Commands
 
@@ -42,7 +31,8 @@ track this checkout while you develop or pull frequent updates.
 | `ui` | Start the local web UI. |
 | `ui --projects-dir <dir>` | Start a dashboard over several generated projects. |
 | `doctor` | Check local prerequisites and port availability. |
-| `upgrade` | Report template version information. Automated upgrades are not implemented in `0.1.0`. |
+| `upgrade` | Print installed version, detected project template version, and npm update command. |
+| `version` | Print the installed CLI package version. |
 
 ## Start the UI
 
@@ -50,8 +40,9 @@ track this checkout while you develop or pull frequent updates.
 co-auto-research ui
 ```
 
-Inside a generated project, this serves that project. Outside a generated
-project, it creates or serves `local-projects/` as a dashboard.
+Inside a generated project, this serves that project using the package-managed
+UI runtime. Outside a generated project, it creates or serves `local-projects/`
+as a dashboard.
 
 ## Project Dashboard
 

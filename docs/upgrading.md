@@ -1,6 +1,16 @@
 # Upgrading
 
-Version `0.1.0` treats generated projects as independent working copies.
+Update the installed CLI and package-managed UI runtime with npm:
+
+```bash
+npm install -g co-auto-research@latest
+```
+
+Check the installed version:
+
+```bash
+co-auto-research version
+```
 
 Each generated project includes:
 
@@ -8,10 +18,10 @@ Each generated project includes:
 .co-auto-research-template/manifest.json
 ```
 
-The manifest records the template version used to create the project. In
-`0.1.0`, `co-auto-research upgrade` only reports this information and explains
-that automated upgrades are not implemented yet.
+The manifest records the template version used to create the project.
+`co-auto-research upgrade` reports the installed CLI version, the detected
+project template version, and the npm update command.
 
-For now, treat each generated project as its own working copy. Keep using
-`co-auto-research attach <project>` or `co-auto-research ui` to continue the
-project you already created.
+Updating the npm package updates the CLI, dashboard, and default UI runtime used
+by `co-auto-research ui` and `co-auto-research attach`. Existing project
+research files are not rewritten automatically.

@@ -67,12 +67,10 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 
 ## Quick Start
 
-Clone the repository and install the CLI command once:
+Install the CLI:
 
 ```bash
-git clone https://github.com/YihongT/CoAutoResearch.git
-cd CoAutoResearch
-npm install -g .
+npm install -g co-auto-research
 ```
 
 Then start the dashboard:
@@ -86,24 +84,16 @@ cannot open a browser, open the printed URL manually. Then click `+` in the left
 sidebar to create a project. Dashboard-created projects live in
 `local-projects/`.
 
-If you do not want to install a global command, run the same CLI entrypoint
-directly from the repository:
+To update the CLI and package-managed UI runtime later:
 
 ```bash
-node bin/auto-research.js ui
+npm install -g co-auto-research@latest
 ```
 
-To update a clone-based install later:
+If you are developing from a source checkout, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-```bash
-cd CoAutoResearch
-git pull
-npm install -g .
-```
-
-If you update the checkout often, use `npm link` once instead of reinstalling
-after each pull. It keeps the global `co-auto-research` command pointed at this
-checkout.
+Updating the npm package updates the CLI, dashboard, and default UI runtime. It
+does not rewrite existing project research files.
 
 The printed URL will look like:
 
@@ -180,6 +170,7 @@ co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--rem
 co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
 co-auto-research doctor [--host 127.0.0.1] [--port 8765]
 co-auto-research upgrade
+co-auto-research version
 ```
 
 `auto-research` is kept as a command alias.
@@ -189,9 +180,9 @@ co-auto-research upgrade
   plus `local-projects/` when present. `list` is an alias.
 - `attach [project-name-or-path]` starts the UI for an existing generated
   project. Use this when returning to work after closing the terminal/browser.
-- `ui` starts the Python standard-library UI server. Inside a generated project
-  it serves that project; otherwise it creates/serves `local-projects/` as a
-  dashboard where projects can be created from the UI.
+- `ui` starts the package-managed Python standard-library UI server. Inside a
+  generated project it serves that project; otherwise it creates/serves
+  `local-projects/` as a dashboard where projects can be created from the UI.
 - `ui --projects-dir <dir>` starts one dashboard that can switch between all
   generated projects directly inside `<dir>` and create new ones from the UI.
 - `ui --port <port>` starts port selection from a different local port. If that
@@ -200,9 +191,12 @@ co-auto-research upgrade
 - `ui --remote` is the recommended server mode. It disables browser launch on
   the server and prints SSH port-forwarding instructions for opening the UI
   from your local browser.
-- `doctor` checks local prerequisites and port availability.
-- `upgrade` is advisory in `0.1.0`; generated projects are independent working
-  copies and automated upgrades are not implemented yet.
+- `doctor` checks local prerequisites, port availability, and the package UI
+  runtime.
+- `upgrade` prints the installed CLI version, detected project template version,
+  and the npm update command. Existing project research files are not rewritten
+  automatically.
+- `version` prints the installed CLI package version.
 
 ## Project Model
 

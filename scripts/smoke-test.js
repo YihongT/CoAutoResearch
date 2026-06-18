@@ -85,6 +85,7 @@ async function writeFakeCodexBin(directory) {
 try {
   execFileSync("node", [cli, "init", projectDir], { cwd: root, stdio: "pipe" });
   execFileSync("node", [cli, "init", projectTwoDir], { cwd: root, stdio: "pipe" });
+  const realProjectDir = await fsp.realpath(projectDir);
   await fsp.access(path.join(projectDir, "AGENTS.md"));
   await fsp.access(path.join(projectDir, "ui", "server.py"));
   await fsp.access(path.join(projectDir, ".co-auto-research", "project.json"));
@@ -117,10 +118,40 @@ try {
   if (!ambiguousAttachFailed || !ambiguousAttachOutput.includes("Multiple CoAutoResearch projects found")) {
     throw new Error(`attach should ask the user to choose when several projects exist:\n${ambiguousAttachOutput}`);
   }
+  const packageServerPath = path.join(root, "templates", "default", "ui", "server.py");
+  const attachProbeOutput = execFileSync("node", [cli, "attach", "project", "--projects-dir", tempRoot, "--no-open"], {
+    cwd: root,
+    env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
+    encoding: "utf8"
+  }).trim();
+  const attachProbe = JSON.parse(attachProbeOutput.split(/\r?\n/).at(-1));
+  const attachProbeProjectRoot = await fsp.realpath(attachProbe.projectRoot);
+  if (
+    attachProbe.serverPath !== packageServerPath ||
+    attachProbeProjectRoot !== realProjectDir ||
+    attachProbe.usingPackageServer !== true
+  ) {
+    throw new Error(`attach should use the package-managed UI server for existing projects:\n${attachProbeOutput}`);
+  }
+  const projectUiProbeOutput = execFileSync("node", [cli, "ui", "--no-open"], {
+    cwd: projectDir,
+    env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
+    encoding: "utf8"
+  }).trim();
+  const projectUiProbe = JSON.parse(projectUiProbeOutput.split(/\r?\n/).at(-1));
+  const projectUiProbeProjectRoot = await fsp.realpath(projectUiProbe.projectRoot);
+  if (
+    projectUiProbe.serverPath !== packageServerPath ||
+    projectUiProbeProjectRoot !== realProjectDir ||
+    projectUiProbe.usingPackageServer !== true
+  ) {
+    throw new Error(`ui from a project directory should use the package-managed UI server:\n${projectUiProbeOutput}`);
+  }
   const manifest = JSON.parse(await fsp.readFile(path.join(projectDir, ".co-auto-research-template", "manifest.json"), "utf8"));
   if (manifest.templateVersion !== "0.1.0") {
     throw new Error(`unexpected template version ${manifest.templateVersion}`);
   }
+  const packageManifest = JSON.parse(await fsp.readFile(path.join(root, "package.json"), "utf8"));
   const resourceIntakeInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "RESOURCE_INTAKE.md"), "utf8");
   const conversionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "CONVERSION.md"), "utf8");
   const executionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "EXECUTION_AGENT.md"), "utf8");
@@ -167,24 +198,31 @@ try {
     !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
     pagesWorkflow.includes("jekyll-build-pages") ||
     pagesWorkflow.includes("ENABLE_PRIVATE_PAGES") ||
-    !readme.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
-    !docsIndex.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
-    !gettingStartedDocs.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
-    !cliDocs.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
-    !readme.includes("npm install -g .") ||
-    !docsIndex.includes("npm install -g .") ||
-    !gettingStartedDocs.includes("npm install -g .") ||
-    !cliDocs.includes("npm install -g .") ||
-    !readme.includes("git pull") ||
-    !docsIndex.includes("git pull") ||
-    !gettingStartedDocs.includes("git pull") ||
-    !cliDocs.includes("git pull") ||
-    !gettingStartedDocs.includes("npm link") ||
+    packageManifest.name !== "co-auto-research" ||
+    packageManifest.repository?.url !== "git+https://github.com/YihongT/CoAutoResearch.git" ||
+    packageManifest.homepage !== "https://yihongt.github.io/CoAutoResearch/" ||
+    packageManifest.publishConfig?.access !== "public" ||
+    !packageManifest.packageManager?.startsWith("npm@") ||
+    !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
+    !readme.includes("npm install -g co-auto-research") ||
+    !docsIndex.includes("npm install -g co-auto-research") ||
+    !gettingStartedDocs.includes("npm install -g co-auto-research") ||
+    !cliDocs.includes("npm install -g co-auto-research") ||
+    !readme.includes("npm install -g co-auto-research@latest") ||
+    !docsIndex.includes("npm install -g co-auto-research@latest") ||
+    !gettingStartedDocs.includes("npm install -g co-auto-research@latest") ||
+    !cliDocs.includes("npm install -g co-auto-research@latest") ||
+    readme.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
+    docsIndex.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
+    gettingStartedDocs.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
+    cliDocs.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
     !gettingStartedDocs.includes("co-auto-research upgrade") ||
     !contributingDocs.includes("npm publish --provenance") ||
+    !contributingDocs.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
+    !contributingDocs.includes("npm link") ||
     !contributingDocs.includes("npm install -g co-auto-research@latest") ||
-    !readme.includes("node bin/auto-research.js ui") ||
-    !gettingStartedDocs.includes("node bin/auto-research.js ui") ||
+    readme.includes("node bin/auto-research.js ui") ||
+    gettingStartedDocs.includes("node bin/auto-research.js ui") ||
     !gettingStartedDocs.includes("co-auto-research ui") ||
     !cliDocs.includes("COAUTO_REMOTE_TARGET") ||
     !helpOutput.includes("co-auto-research attach") ||
@@ -200,6 +238,15 @@ try {
     docsIndex.includes("hosting-docs")
   ) {
     throw new Error("CLI and public docs must explain remote browser access through the product docs template without hosting-instruction pages");
+  }
+  const releaseWorkflow = await fsp.readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
+  if (
+    !releaseWorkflow.includes('node-version: "24"') ||
+    !releaseWorkflow.includes("npm pack --dry-run") ||
+    !releaseWorkflow.includes("npm publish --provenance --access public") ||
+    releaseWorkflow.includes("npm-dry-run")
+  ) {
+    throw new Error("release workflow must publish the npm package with provenance after tests and package dry run");
   }
   if (!/<nav class="rail-nav"[^>]*hidden/.test(indexHtml)) {
     throw new Error("current project navigation must be hidden before a project is active");
@@ -478,8 +525,16 @@ try {
   ) {
     throw new Error("framing timeline must keep message order, collapse old PROJECT.md drafts, and keep tool details collapsed");
   }
+  const versionOutput = execFileSync("node", [cli, "--version"], { cwd: root, encoding: "utf8" }).trim();
+  if (versionOutput !== packageManifest.version) {
+    throw new Error(`version output did not match package.json: ${versionOutput}`);
+  }
   const upgradeOutput = execFileSync("node", [cli, "upgrade"], { cwd: projectDir, encoding: "utf8" });
-  if (!upgradeOutput.includes("Automated upgrades are not implemented")) {
+  if (
+    !upgradeOutput.includes(`CoAutoResearch CLI version: ${packageManifest.version}`) ||
+    !upgradeOutput.includes("npm install -g co-auto-research@latest") ||
+    !upgradeOutput.includes("Generated project research files are not rewritten automatically")
+  ) {
     throw new Error("upgrade advisory output did not match expectation");
   }
 
@@ -492,6 +547,37 @@ try {
   });
   if (!doctorOutput.includes("codex fake 0.0.0")) {
     throw new Error("doctor did not resolve fake Codex executable from PATH");
+  }
+  if (!doctorOutput.includes("package-managed runtime") || !doctorOutput.includes("legacy project ui/server.py")) {
+    throw new Error(`doctor should report package-managed UI runtime and legacy project UI fallback:\n${doctorOutput}`);
+  }
+
+  const packedName = execFileSync("npm", ["pack", "--pack-destination", tempRoot], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim().split(/\r?\n/).at(-1);
+  const packedTarball = path.join(tempRoot, packedName);
+  const npmPrefix = path.join(tempRoot, "npm-prefix");
+  execFileSync("npm", ["install", "--global", "--prefix", npmPrefix, packedTarball], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: "pipe"
+  });
+  const installedCli = process.platform === "win32"
+    ? path.join(npmPrefix, "co-auto-research.cmd")
+    : path.join(npmPrefix, "bin", "co-auto-research");
+  const installedVersion = execFileSync(installedCli, ["--version"], { encoding: "utf8" }).trim();
+  if (installedVersion !== packageManifest.version) {
+    throw new Error(`installed tarball CLI version did not match package.json: ${installedVersion}`);
+  }
+  const installedDoctorOutput = execFileSync(installedCli, ["doctor", "--port", String(await freePort())], {
+    cwd: root,
+    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    encoding: "utf8"
+  });
+  if (!installedDoctorOutput.includes("package-managed runtime") || !installedDoctorOutput.includes("codex fake 0.0.0")) {
+    throw new Error(`installed tarball CLI doctor output was not useful:\n${installedDoctorOutput}`);
   }
 
   const python = findPython();

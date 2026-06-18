@@ -5,6 +5,22 @@ usage belong in `README.md` and `docs/`.
 
 ## Local Checks
 
+Clone the repository for development:
+
+```bash
+git clone https://github.com/YihongT/CoAutoResearch.git
+cd CoAutoResearch
+```
+
+Install the local checkout as the global CLI while developing:
+
+```bash
+npm link
+```
+
+After that, `co-auto-research` points at this checkout. Pulling changes updates
+the command implementation without reinstalling the package.
+
 Run the same checks before opening or merging changes:
 
 ```bash
@@ -31,25 +47,31 @@ python -m http.server 4027 --directory /tmp/coauto-docs-site
 
 Do not add GitHub Pages setup instructions to the public docs navigation.
 
-## Release Dry Run
-
-The release workflow currently runs a package dry run. Publishing should only be
-enabled after npm trusted publishing or an equivalent token-based setup is
-configured for the repository.
-
 ## npm Publishing
 
 Before the first public npm release:
 
 1. Confirm the package name in `package.json` is available or choose a scoped
    package name.
-2. Configure npm trusted publishing for this GitHub repository, or add a
-   repository secret such as `NODE_AUTH_TOKEN`.
+2. Configure npm trusted publishing for this GitHub repository.
 3. Keep `npm test` and `npm run pack:dry-run` passing on all CI platforms.
 4. Bump `package.json` to a new version before each publish; npm versions are
    immutable once published.
-5. Replace the release workflow dry run with `npm publish --provenance` after
-   publishing credentials are configured.
+5. Publish a GitHub Release for the version. The release workflow runs tests,
+   performs a package dry run, then publishes with provenance.
+
+The workflow publish step is:
+
+```bash
+npm publish --provenance --access public
+```
+
+The trusted publisher settings should match:
+
+- owner: `YihongT`
+- repository: `CoAutoResearch`
+- workflow: `release.yml`
+- publish command: `npm publish`
 
 After publication, user-facing installation can become:
 

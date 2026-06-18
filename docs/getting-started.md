@@ -24,20 +24,13 @@ available.
 
 ## Install the CLI Command
 
-Clone the repository and install the command once:
+Install the command:
 
 ```bash
-git clone https://github.com/YihongT/CoAutoResearch.git
-cd CoAutoResearch
-npm install -g .
+npm install -g co-auto-research
 ```
 
-This makes `co-auto-research` available in your terminal. If you do not want a
-global command, you can run the repository entrypoint directly:
-
-```bash
-node bin/auto-research.js ui
-```
+This makes `co-auto-research` available in your terminal.
 
 ## Start the Dashboard
 
@@ -47,33 +40,22 @@ After installing the CLI command:
 co-auto-research ui
 ```
 
-If you skipped the global install, use the direct entrypoint instead:
-
-```bash
-node bin/auto-research.js ui
-```
-
 The UI opens in your browser. If browser launch is unavailable, open the printed
 URL manually.
 
-## Update a Clone-Based Install
+## Update the CLI
 
-If you installed from a cloned repository, pull the latest code and reinstall
-the global command:
+Update the CLI and package-managed UI runtime by reinstalling the latest npm
+package:
 
 ```bash
-cd CoAutoResearch
-git pull
-npm install -g .
+npm install -g co-auto-research@latest
 ```
 
-If you update the checkout often, use `npm link` once from the repository root.
-After that, the global command points at this checkout, so `git pull` updates
-the command implementation.
-
-Updating the CLI affects new projects and the dashboard command. Existing
-generated projects are independent working copies; `co-auto-research upgrade`
-currently reports version information but does not rewrite project files.
+Updating the npm package updates the CLI, dashboard, and default UI runtime.
+Existing project research files are not rewritten automatically. Use
+`co-auto-research upgrade` to print the installed version, detected project
+template version, and recommended update command.
 
 ## Create a Project
 

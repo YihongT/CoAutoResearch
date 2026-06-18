@@ -20,12 +20,10 @@ research trajectory you can actually use.
 
 ## Quick Start
 
-Clone the repository and install the CLI command:
+Install the CLI:
 
 ```bash
-git clone https://github.com/YihongT/CoAutoResearch.git
-cd CoAutoResearch
-npm install -g .
+npm install -g co-auto-research
 ```
 
 ```bash
@@ -36,12 +34,10 @@ The first command installs the `co-auto-research` executable. The second command
 opens a local dashboard. If you are not inside an existing generated project, it
 uses `local-projects/`, where you can create projects from the sidebar.
 
-To update a clone-based install later:
+To update later:
 
 ```bash
-cd CoAutoResearch
-git pull
-npm install -g .
+npm install -g co-auto-research@latest
 ```
 
 ```{toctree}
