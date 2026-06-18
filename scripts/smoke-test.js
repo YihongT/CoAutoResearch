@@ -84,6 +84,60 @@ function waitForOpenPort(child, timeoutMs = 8000) {
   });
 }
 
+async function waitForFallbackPort(child, requestedPort, timeoutMs = 20000) {
+  let output = "";
+  let exit = null;
+  const onData = (chunk) => {
+    output += chunk.toString();
+  };
+  const onExit = (code, signal) => {
+    exit = { code, signal };
+  };
+  child.stdout?.on("data", onData);
+  child.stderr?.on("data", onData);
+  child.once("exit", onExit);
+  const started = Date.now();
+  const firstFallbackPort = Math.min(65535, Number(requestedPort) + 1);
+  const lastFallbackPort = Math.min(65535, Number(requestedPort) + 50);
+  let lastError = null;
+  try {
+    while (Date.now() - started < timeoutMs) {
+      const match = output.match(/Open http:\/\/127\.0\.0\.1:(\d+)/);
+      if (match) return Number(match[1]);
+      for (let port = firstFallbackPort; port <= lastFallbackPort; port += 1) {
+        try {
+          const payload = await fetchJsonOnce(`http://127.0.0.1:${port}/api/projects`, 250);
+          if (payload?.ok && payload.multi_project) return port;
+          lastError = new Error(`Unexpected fallback payload on ${port}`);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (exit) {
+        throw new Error(`Server exited before binding fallback port, code ${exit.code ?? ""}${exit.signal ? ` signal ${exit.signal}` : ""}. Output:\n${output}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error(`Timed out waiting for fallback server. Tried ports ${firstFallbackPort}-${lastFallbackPort}. Last error: ${lastError?.message || "none"}. Output:\n${output}`);
+  } finally {
+    child.stdout?.off("data", onData);
+    child.stderr?.off("data", onData);
+    child.off("exit", onExit);
+  }
+}
+
+async function fetchJsonOnce(url, timeoutMs = 500) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function waitForJson(url, timeoutMs = 8000) {
   const started = Date.now();
   let lastError = null;
@@ -546,7 +600,7 @@ try {
     stdio: ["ignore", "pipe", "pipe"]
   });
   try {
-    const boundPort = await waitForOpenPort(fallbackServer);
+    const boundPort = await waitForFallbackPort(fallbackServer, occupied.port);
     if (boundPort === occupied.port) {
       throw new Error("UI did not move away from an occupied port");
     }
