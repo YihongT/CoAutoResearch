@@ -61,6 +61,7 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 - [Multiple projects](docs/multiple-projects.md)
 - [Platform support](docs/platforms.md)
 - [Remote server setup](docs/remote-server.md)
+- [Hosting the docs](docs/hosting-docs.md)
 - [Upgrading generated projects](docs/upgrading.md)
 
 When this repo is public on GitHub, the included GitHub Pages workflow can host
@@ -112,11 +113,23 @@ Then open:
 http://127.0.0.1:8780
 ```
 
-To suppress browser launch, for example on a remote server:
+To suppress browser launch:
 
 ```bash
 co-auto-research ui --no-open
 ```
+
+For remote servers, use remote mode:
+
+```bash
+co-auto-research ui --remote
+```
+
+Remote mode keeps the UI bound to server-local `127.0.0.1`, skips browser
+launch on the server, and prints the exact SSH tunnel command and local browser
+URL after startup. Keep that server command running, run the printed `ssh -L`
+command from your local machine, then open the printed local URL in your local
+browser.
 
 To watch several generated research projects from one UI, start the dashboard
 from their parent folder:
@@ -139,8 +152,8 @@ remains available for scripting.
 
 ```bash
 co-auto-research init <dir>
-co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
-co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
+co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
+co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
 co-auto-research doctor [--host 127.0.0.1] [--port 8765]
 co-auto-research upgrade
 ```
@@ -157,6 +170,9 @@ co-auto-research upgrade
   port is busy, the server automatically tries the next available port.
 - `ui --open` forces browser launch; `ui --no-open` disables it. Browser launch
   is skipped automatically in CI and SSH sessions unless `--open` is passed.
+- `ui --remote` is the recommended server mode. It disables browser launch on
+  the server and prints SSH port-forwarding instructions for opening the UI
+  from your local browser.
 - `doctor` checks local prerequisites and port availability.
 - `upgrade` is advisory in `0.1.0`; generated projects are independent working
   copies and automated upgrades are not implemented yet.

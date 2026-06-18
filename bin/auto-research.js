@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -21,8 +22,8 @@ function usage() {
 
 Usage:
   co-auto-research init <dir>
-  co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
-  co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open]
+  co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
+  co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
   co-auto-research upgrade
   co-auto-research help
@@ -46,7 +47,7 @@ function parseOptions(args) {
       index += 1;
       continue;
     }
-    if (arg === "--open" || arg === "--no-open") {
+    if (arg === "--open" || arg === "--no-open" || arg === "--remote") {
       options[arg.slice(2)] = true;
       continue;
     }
@@ -219,11 +220,50 @@ function checkPort(host, port) {
 }
 
 function shouldAutoOpenBrowser(options) {
+  if (options.remote) return false;
   if (options["no-open"] || process.env.COAUTO_NO_OPEN) return false;
   if (options.open) return true;
   if (process.env.CI) return false;
   if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) return false;
   return Boolean(process.stdout.isTTY);
+}
+
+function localhostHost(host) {
+  return ["", "127.0.0.1", "localhost", "::1"].includes(String(host || "").toLowerCase());
+}
+
+function remoteSshTarget() {
+  if (process.env.COAUTO_REMOTE_TARGET) return process.env.COAUTO_REMOTE_TARGET;
+  const user = process.env.USER || process.env.LOGNAME || process.env.USERNAME || os.userInfo().username || "user";
+  const host = process.env.HOSTNAME || os.hostname() || "server";
+  return `${user}@${host}`;
+}
+
+function printRemoteAccessHint(url, options) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    console.log(`Open from your local browser with an SSH tunnel to the printed URL: ${url}`);
+    return;
+  }
+  const port = parsed.port || DEFAULT_PORT;
+  const localUrl = `http://127.0.0.1:${port}`;
+  const target = remoteSshTarget();
+  console.log("");
+  console.log("Remote browser access");
+  console.log("Keep this server command running. In a terminal on your local machine, run:");
+  console.log(`  ssh -N -L ${port}:127.0.0.1:${port} ${target}`);
+  console.log("");
+  console.log("Then open this in your local browser:");
+  console.log(`  ${localUrl}`);
+  console.log("");
+  console.log("If the SSH target above is not the exact alias you used, replace it with the same server name from your ssh command.");
+  console.log("VS Code Remote, Cursor Remote, and Codespaces users can instead forward the printed port from the Ports panel.");
+  if (!localhostHost(options.host || DEFAULT_HOST)) {
+    console.log("");
+    console.log(`Warning: --remote is safest with --host 127.0.0.1. Current host is ${options.host}.`);
+  }
 }
 
 function openBrowser(url) {
@@ -254,11 +294,12 @@ function openBrowser(url) {
 function attachServerOutput(child, options) {
   const autoOpen = shouldAutoOpenBrowser(options);
   let opened = false;
+  let remoteHintShown = false;
   let buffered = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
     process.stdout.write(chunk);
-    if (!autoOpen || opened) return;
+    if ((!autoOpen || opened) && (!options.remote || remoteHintShown)) return;
 
     buffered += chunk;
     const lines = buffered.split(/\r?\n/);
@@ -266,10 +307,16 @@ function attachServerOutput(child, options) {
     for (const line of lines) {
       const match = line.match(/^Open\s+(https?:\/\/\S+)/);
       if (!match) continue;
-      opened = true;
-      const ok = openBrowser(match[1]);
-      if (ok) console.log(`Opened ${match[1]} in your browser.`);
-      else console.log(`Could not open a browser automatically. Open ${match[1]} manually.`);
+      if (options.remote && !remoteHintShown) {
+        remoteHintShown = true;
+        printRemoteAccessHint(match[1], options);
+      }
+      if (autoOpen && !opened) {
+        opened = true;
+        const ok = openBrowser(match[1]);
+        if (ok) console.log(`Opened ${match[1]} in your browser.`);
+        else console.log(`Could not open a browser automatically. Open ${match[1]} manually.`);
+      }
       break;
     }
   });
@@ -319,6 +366,15 @@ function commandUi(args) {
     : projectServerPath;
   if (!fs.existsSync(serverPath)) {
     throw new Error("No ui/server.py found. Run this inside a generated CoAutoResearch project, or pass --projects-dir.");
+  }
+  if (options.remote) {
+    console.log("Remote mode enabled: CoAutoResearch will not try to open a browser on this server.");
+    if (localhostHost(host)) {
+      console.log("The UI will stay bound to localhost; tunnel instructions will appear after startup.");
+    } else {
+      console.log(`The UI is configured with --host ${host}. Prefer --host 127.0.0.1 unless this server is protected by a VPN or firewall.`);
+    }
+    console.log("");
   }
   const serverArgs = [serverPath, "--host", host, "--port", String(port)];
   if (projectsDir) serverArgs.push("--projects-dir", projectsDir);

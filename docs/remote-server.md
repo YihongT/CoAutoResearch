@@ -5,11 +5,22 @@ title: Remote Server Use
 
 # Remote Server Use
 
-Run the UI on the remote server bound to localhost:
+Run the UI on the remote server in remote mode:
 
 ```bash
 cd my-project
-python3 ui/server.py --host 127.0.0.1 --port 8765
+co-auto-research ui --remote
+```
+
+Remote mode keeps the UI bound to `127.0.0.1`, skips browser launch on the
+server, and prints the SSH tunnel command plus local browser URL after the UI
+starts.
+
+Equivalent explicit command:
+
+```bash
+cd my-project
+co-auto-research ui --host 127.0.0.1 --port 8765 --no-open
 ```
 
 For a dashboard over several projects on the server:
@@ -19,7 +30,13 @@ cd /path/to/projects
 co-auto-research ui --projects-dir . --host 127.0.0.1 --port 8765 --no-open
 ```
 
-From your local machine, forward that port:
+Or, with the same remote-mode hints:
+
+```bash
+co-auto-research ui --projects-dir . --remote
+```
+
+From your local machine, forward the printed port:
 
 ```bash
 ssh -N -L 8765:127.0.0.1:8765 user@server
@@ -37,7 +54,8 @@ http://127.0.0.1:8765
 
 The CLI skips automatic browser launch in SSH sessions by default. `--no-open`
 makes this explicit and keeps the remote server from trying to open a browser on
-the server machine.
+the server machine. `--remote` does the same thing and also prints the local
+browser instructions.
 
 ## File Access Semantics
 

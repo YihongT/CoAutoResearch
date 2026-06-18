@@ -31,12 +31,21 @@ co-auto-research ui --port 8780
 Use `--no-open` on remote servers or when you want to open the printed URL
 yourself.
 
+For SSH-accessible servers, use:
+
+```bash
+co-auto-research ui --remote
+```
+
+Remote mode prints the SSH tunnel command and local browser URL after startup.
+
 ## Guides
 
 - [Conceptual framework](conceptual-framework.html)
 - [Multiple projects](multiple-projects.html)
 - [Platform support](platforms.html)
 - [Remote server setup](remote-server.html)
+- [Hosting the docs](hosting-docs.html)
 - [Upgrading generated projects](upgrading.html)
 
 ## Project Model

@@ -112,6 +112,25 @@ try {
     throw new Error("resource intake must surface embedded ongoing-work bibliographies without confusing them with target-venue seed papers");
   }
   const indexHtml = await fsp.readFile(path.join(root, "templates", "default", "ui", "index.html"), "utf8");
+  const readme = await fsp.readFile(path.join(root, "README.md"), "utf8");
+  const docsIndex = await fsp.readFile(path.join(root, "docs", "index.md"), "utf8");
+  const remoteDocs = await fsp.readFile(path.join(root, "docs", "remote-server.md"), "utf8");
+  const hostingDocs = await fsp.readFile(path.join(root, "docs", "hosting-docs.md"), "utf8");
+  const cliSource = await fsp.readFile(path.join(root, "bin", "auto-research.js"), "utf8");
+  const helpOutput = execFileSync("node", [cli, "help"], { cwd: root, encoding: "utf8" });
+  if (
+    !helpOutput.includes("[--remote]") ||
+    !cliSource.includes("function printRemoteAccessHint") ||
+    !cliSource.includes("ssh -N -L") ||
+    !cliSource.includes("Remote mode enabled") ||
+    !readme.includes("co-auto-research ui --remote") ||
+    !remoteDocs.includes("co-auto-research ui --remote") ||
+    !docsIndex.includes("hosting-docs.html") ||
+    !hostingDocs.includes("Build and deployment -> Source") ||
+    !hostingDocs.includes("ENABLE_PRIVATE_PAGES=true")
+  ) {
+    throw new Error("CLI and docs must explain remote browser access and GitHub Pages docs hosting");
+  }
   if (!/<nav class="rail-nav"[^>]*hidden/.test(indexHtml)) {
     throw new Error("current project navigation must be hidden before a project is active");
   }
