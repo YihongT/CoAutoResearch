@@ -67,7 +67,13 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 
 ## Quick Start
 
-After installing the CLI package, use:
+From a cloned repository, install the CLI command once:
+
+```bash
+npm install -g .
+```
+
+Then start the dashboard:
 
 ```bash
 co-auto-research ui
@@ -78,7 +84,8 @@ cannot open a browser, open the printed URL manually. Then click `+` in the left
 sidebar to create a project. Dashboard-created projects live in
 `local-projects/`.
 
-If you are running directly from a cloned repository before installing the CLI:
+If you do not want to install a global command, run the same CLI entrypoint
+directly from the repository:
 
 ```bash
 node bin/auto-research.js ui

@@ -20,13 +20,19 @@ research trajectory you can actually use.
 
 ## Quick Start
 
+From a cloned repository:
+
+```bash
+npm install -g .
+```
+
 ```bash
 co-auto-research ui
 ```
 
-The CLI opens a local dashboard. If you are not inside an existing generated
-project, it uses `local-projects/`, where you can create projects from the
-sidebar.
+The first command installs the `co-auto-research` executable. The second command
+opens a local dashboard. If you are not inside an existing generated project, it
+uses `local-projects/`, where you can create projects from the sidebar.
 
 ```{toctree}
 :caption: Get Started

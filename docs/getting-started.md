@@ -22,15 +22,30 @@ codex --version
 On Windows, use `python --version` or `py -3 --version` if `python3` is not
 available.
 
+## Install the CLI Command
+
+From a cloned repository, install the command once:
+
+```bash
+npm install -g .
+```
+
+This makes `co-auto-research` available in your terminal. If you do not want a
+global command, you can run the repository entrypoint directly:
+
+```bash
+node bin/auto-research.js ui
+```
+
 ## Start the Dashboard
 
-After installing the CLI package:
+After installing the CLI command:
 
 ```bash
 co-auto-research ui
 ```
 
-If you are running directly from a cloned repository before installing the CLI:
+If you skipped the global install, use the direct entrypoint instead:
 
 ```bash
 node bin/auto-research.js ui

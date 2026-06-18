@@ -7,6 +7,19 @@ co-auto-research
 auto-research
 ```
 
+These commands are available after installing the package, for example from a
+cloned repository with:
+
+```bash
+npm install -g .
+```
+
+Without a global install, run the same entrypoint from the repository:
+
+```bash
+node bin/auto-research.js <command>
+```
+
 ## Commands
 
 | Command | Purpose |

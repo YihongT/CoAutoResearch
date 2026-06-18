@@ -166,6 +166,12 @@ try {
     !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
     pagesWorkflow.includes("jekyll-build-pages") ||
     pagesWorkflow.includes("ENABLE_PRIVATE_PAGES") ||
+    !readme.includes("npm install -g .") ||
+    !docsIndex.includes("npm install -g .") ||
+    !gettingStartedDocs.includes("npm install -g .") ||
+    !cliDocs.includes("npm install -g .") ||
+    !readme.includes("node bin/auto-research.js ui") ||
+    !gettingStartedDocs.includes("node bin/auto-research.js ui") ||
     !gettingStartedDocs.includes("co-auto-research ui") ||
     !cliDocs.includes("COAUTO_REMOTE_TARGET") ||
     !helpOutput.includes("co-auto-research attach") ||
