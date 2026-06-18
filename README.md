@@ -93,6 +93,18 @@ directly from the repository:
 node bin/auto-research.js ui
 ```
 
+To update a clone-based install later:
+
+```bash
+cd CoAutoResearch
+git pull
+npm install -g .
+```
+
+If you update the checkout often, use `npm link` once instead of reinstalling
+after each pull. It keeps the global `co-auto-research` command pointed at this
+checkout.
+
 The printed URL will look like:
 
 ```text

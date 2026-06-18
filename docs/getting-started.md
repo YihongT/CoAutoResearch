@@ -56,6 +56,25 @@ node bin/auto-research.js ui
 The UI opens in your browser. If browser launch is unavailable, open the printed
 URL manually.
 
+## Update a Clone-Based Install
+
+If you installed from a cloned repository, pull the latest code and reinstall
+the global command:
+
+```bash
+cd CoAutoResearch
+git pull
+npm install -g .
+```
+
+If you update the checkout often, use `npm link` once from the repository root.
+After that, the global command points at this checkout, so `git pull` updates
+the command implementation.
+
+Updating the CLI affects new projects and the dashboard command. Existing
+generated projects are independent working copies; `co-auto-research upgrade`
+currently reports version information but does not rewrite project files.
+
 ## Create a Project
 
 1. Click `+` in the left sidebar.

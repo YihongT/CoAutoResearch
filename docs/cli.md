@@ -21,6 +21,17 @@ Without a global install, run the same entrypoint from the repository:
 node bin/auto-research.js <command>
 ```
 
+To update a clone-based install:
+
+```bash
+cd CoAutoResearch
+git pull
+npm install -g .
+```
+
+Use `npm link` instead of `npm install -g .` if you want the global command to
+track this checkout while you develop or pull frequent updates.
+
 ## Commands
 
 | Command | Purpose |

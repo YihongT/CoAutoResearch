@@ -144,6 +144,7 @@ try {
   const remoteDocs = await fsp.readFile(path.join(root, "docs", "remote-server.md"), "utf8");
   const gettingStartedDocs = await fsp.readFile(path.join(root, "docs", "getting-started.md"), "utf8");
   const cliDocs = await fsp.readFile(path.join(root, "docs", "cli.md"), "utf8");
+  const contributingDocs = await fsp.readFile(path.join(root, "CONTRIBUTING.md"), "utf8");
   const upgradingDocs = await fsp.readFile(path.join(root, "docs", "upgrading.md"), "utf8");
   const pagesWorkflow = await fsp.readFile(path.join(root, ".github", "workflows", "pages.yml"), "utf8");
   const cliSource = await fsp.readFile(path.join(root, "bin", "auto-research.js"), "utf8");
@@ -174,6 +175,14 @@ try {
     !docsIndex.includes("npm install -g .") ||
     !gettingStartedDocs.includes("npm install -g .") ||
     !cliDocs.includes("npm install -g .") ||
+    !readme.includes("git pull") ||
+    !docsIndex.includes("git pull") ||
+    !gettingStartedDocs.includes("git pull") ||
+    !cliDocs.includes("git pull") ||
+    !gettingStartedDocs.includes("npm link") ||
+    !gettingStartedDocs.includes("co-auto-research upgrade") ||
+    !contributingDocs.includes("npm publish --provenance") ||
+    !contributingDocs.includes("npm install -g co-auto-research@latest") ||
     !readme.includes("node bin/auto-research.js ui") ||
     !gettingStartedDocs.includes("node bin/auto-research.js ui") ||
     !gettingStartedDocs.includes("co-auto-research ui") ||

@@ -36,3 +36,29 @@ Do not add GitHub Pages setup instructions to the public docs navigation.
 The release workflow currently runs a package dry run. Publishing should only be
 enabled after npm trusted publishing or an equivalent token-based setup is
 configured for the repository.
+
+## npm Publishing
+
+Before the first public npm release:
+
+1. Confirm the package name in `package.json` is available or choose a scoped
+   package name.
+2. Configure npm trusted publishing for this GitHub repository, or add a
+   repository secret such as `NODE_AUTH_TOKEN`.
+3. Keep `npm test` and `npm run pack:dry-run` passing on all CI platforms.
+4. Bump `package.json` to a new version before each publish; npm versions are
+   immutable once published.
+5. Replace the release workflow dry run with `npm publish --provenance` after
+   publishing credentials are configured.
+
+After publication, user-facing installation can become:
+
+```bash
+npm install -g co-auto-research
+```
+
+Updates can then use:
+
+```bash
+npm install -g co-auto-research@latest
+```

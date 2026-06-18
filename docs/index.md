@@ -36,6 +36,14 @@ The first command installs the `co-auto-research` executable. The second command
 opens a local dashboard. If you are not inside an existing generated project, it
 uses `local-projects/`, where you can create projects from the sidebar.
 
+To update a clone-based install later:
+
+```bash
+cd CoAutoResearch
+git pull
+npm install -g .
+```
+
 ```{toctree}
 :caption: Get Started
 :maxdepth: 2
