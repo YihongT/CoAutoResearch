@@ -210,9 +210,13 @@ try {
     !helpOutput.includes("[--remote]") ||
     !cliSource.includes("function printRemoteAccessHint") ||
     !cliSource.includes("ssh -N -L") ||
+    !cliSource.includes("user}@<ssh-host>") ||
+    cliSource.includes("os.hostname") ||
     !cliSource.includes("Remote mode enabled") ||
     !readme.includes("co-auto-research ui --remote") ||
     !remoteDocs.includes("co-auto-research ui --remote") ||
+    !remoteDocs.includes("user@<ssh-host>") ||
+    !remoteDocs.includes("COAUTO_REMOTE_TARGET=user@host") ||
     !docsIndex.includes("```{toctree}") ||
     !docsIndex.includes("Welcome to CoAutoResearch's documentation") ||
     !docsConfig.includes('html_theme = "sphinx_rtd_theme"') ||

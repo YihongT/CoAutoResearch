@@ -3,7 +3,6 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -466,9 +465,8 @@ function localhostHost(host) {
 
 function remoteSshTarget() {
   if (process.env.COAUTO_REMOTE_TARGET) return process.env.COAUTO_REMOTE_TARGET;
-  const user = process.env.USER || process.env.LOGNAME || process.env.USERNAME || os.userInfo().username || "user";
-  const host = process.env.HOSTNAME || os.hostname() || "server";
-  return `${user}@${host}`;
+  const user = process.env.USER || process.env.LOGNAME || process.env.USERNAME || "user";
+  return `${user}@<ssh-host>`;
 }
 
 function printRemoteAccessHint(url, options) {
@@ -490,7 +488,10 @@ function printRemoteAccessHint(url, options) {
   console.log("Then open this in your local browser:");
   console.log(`  ${localUrl}`);
   console.log("");
-  console.log("If the SSH target above is not the exact alias you used, replace it with the same server name from your ssh command.");
+  if (!process.env.COAUTO_REMOTE_TARGET) {
+    console.log("Replace <ssh-host> with the same host or alias you used to connect to this server.");
+    console.log("Set COAUTO_REMOTE_TARGET=user@host before starting the UI if you want this command printed fully.");
+  }
   console.log("VS Code Remote, Cursor Remote, and Codespaces users can instead forward the printed port from the Ports panel.");
   if (!localhostHost(options.host || DEFAULT_HOST)) {
     console.log("");

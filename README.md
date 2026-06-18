@@ -127,8 +127,10 @@ co-auto-research ui --remote
 ```
 
 Remote mode keeps the UI bound to server-local `127.0.0.1`, skips browser
-launch on the server, and prints the exact SSH tunnel command and local browser
-URL after startup. Keep that server command running, run the printed `ssh -L`
+launch on the server, and prints the SSH tunnel command and local browser URL
+after startup. The SSH host is shown as `<ssh-host>` unless you set
+`COAUTO_REMOTE_TARGET=user@host`, because the server's machine hostname is often
+not the SSH alias you used. Keep the server command running, run the tunnel
 command from your local machine, then open the printed local URL in your local
 browser.
 

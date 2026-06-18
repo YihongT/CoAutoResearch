@@ -95,7 +95,9 @@ co-auto-research ui --remote
 ```
 
 Remote mode is for SSH-accessible servers. It keeps browser launch disabled on
-the server and prints the local SSH tunnel command.
+the server and prints the local SSH tunnel command. The command uses
+`user@<ssh-host>` unless `COAUTO_REMOTE_TARGET` is set, because server hostnames
+are often not valid SSH aliases from your laptop.
 
 ## Environment Variables
 
@@ -105,4 +107,4 @@ the server and prints the local SSH tunnel command.
 | `COAUTO_CODEX` | Explicit Codex executable path. |
 | `CODEX_BIN` | Alternate Codex executable path. |
 | `COAUTO_NO_OPEN` | Disable automatic browser launch. |
-| `COAUTO_REMOTE_TARGET` | Override the SSH target printed by `--remote`. |
+| `COAUTO_REMOTE_TARGET` | Override the SSH target printed by `--remote`, for example `yihong@login.example.edu`. |

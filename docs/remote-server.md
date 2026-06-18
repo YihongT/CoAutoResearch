@@ -34,12 +34,17 @@ co-auto-research ui --projects-dir . --remote
 From your local machine, forward the printed port:
 
 ```bash
-ssh -N -L 8765:127.0.0.1:8765 user@server
+ssh -N -L 8765:127.0.0.1:8765 user@<ssh-host>
 ```
+
+Use the same SSH host or alias you used to connect to the server. CoAutoResearch
+does not guess the host from the server machine name because that is often an
+internal hostname. To print a fully concrete command, start the UI with
+`COAUTO_REMOTE_TARGET=user@host` set on the server.
 
 If the server prints a different URL because port `8765` was already in use,
 forward that printed port instead, for example
-`ssh -N -L 8766:127.0.0.1:8766 user@server`.
+`ssh -N -L 8766:127.0.0.1:8766 user@<ssh-host>`.
 
 Then open:
 
