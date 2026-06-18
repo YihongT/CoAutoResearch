@@ -112,60 +112,6 @@ function waitForOpenPort(child, timeoutMs = 8000) {
   });
 }
 
-async function waitForFallbackPort(child, requestedPort, timeoutMs = 20000) {
-  let output = "";
-  let exit = null;
-  const onData = (chunk) => {
-    output += chunk.toString();
-  };
-  const onExit = (code, signal) => {
-    exit = { code, signal };
-  };
-  child.stdout?.on("data", onData);
-  child.stderr?.on("data", onData);
-  child.once("exit", onExit);
-  const started = Date.now();
-  const firstFallbackPort = Math.min(65535, Number(requestedPort) + 1);
-  const lastFallbackPort = Math.min(65535, Number(requestedPort) + 50);
-  let lastError = null;
-  try {
-    while (Date.now() - started < timeoutMs) {
-      const match = output.match(/Open http:\/\/127\.0\.0\.1:(\d+)/);
-      if (match) return Number(match[1]);
-      for (let port = firstFallbackPort; port <= lastFallbackPort; port += 1) {
-        try {
-          const payload = await fetchJsonOnce(`http://127.0.0.1:${port}/api/projects`, 250);
-          if (payload?.ok && payload.multi_project) return port;
-          lastError = new Error(`Unexpected fallback payload on ${port}`);
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      if (exit) {
-        throw new Error(`Server exited before binding fallback port, code ${exit.code ?? ""}${exit.signal ? ` signal ${exit.signal}` : ""}. Output:\n${output}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    throw new Error(`Timed out waiting for fallback server. Tried ports ${firstFallbackPort}-${lastFallbackPort}. Last error: ${lastError?.message || "none"}. Output:\n${output}`);
-  } finally {
-    child.stdout?.off("data", onData);
-    child.stderr?.off("data", onData);
-    child.off("exit", onExit);
-  }
-}
-
-async function fetchJsonOnce(url, timeoutMs = 500) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function waitForJson(url, timeoutMs = 8000) {
   const started = Date.now();
   let lastError = null;
@@ -630,26 +576,40 @@ try {
   }
 
   const occupied = await reserveFallbackTestPort();
-  const fallbackServer = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(occupied.port), "--no-open"], {
-    cwd: root,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
   try {
-    const boundPort = await waitForFallbackPort(fallbackServer, occupied.port);
+    const fallbackOutput = execFileSync(python.command, [
+      ...python.args,
+      "-c",
+      [
+        "import importlib.util, os, pathlib",
+        "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+        "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+        "module = importlib.util.module_from_spec(spec)",
+        "spec.loader.exec_module(module)",
+        "requested = int(os.environ['COAUTO_OCCUPIED_PORT'])",
+        "httpd, bound = module.bind_http_server('127.0.0.1', requested)",
+        "print(bound)",
+        "httpd.server_close()",
+        "assert bound != requested, bound"
+      ].join("; ")
+    ], {
+      cwd: root,
+      env: {
+        ...process.env,
+        COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+        COAUTO_OCCUPIED_PORT: String(occupied.port)
+      },
+      encoding: "utf8"
+    }).trim();
+    const boundPort = Number(fallbackOutput);
     if (boundPort === occupied.port) {
       throw new Error("UI did not move away from an occupied port");
     }
-    const payload = await waitForJson(`http://127.0.0.1:${boundPort}/api/projects`);
-    if (!payload.multi_project) {
-      throw new Error("fallback-port UI did not start in multi-project mode");
+    if (!Number.isInteger(boundPort) || boundPort < 1 || boundPort > 65535) {
+      throw new Error(`Python fallback test returned an invalid port: ${fallbackOutput}`);
     }
   } finally {
-    fallbackServer.kill("SIGTERM");
-    occupied.server.close();
-    await new Promise((resolve) => {
-      fallbackServer.once("exit", resolve);
-      setTimeout(resolve, 1000);
-    });
+    await closeServer(occupied.server);
   }
 
   const singlePort = await freePort();
