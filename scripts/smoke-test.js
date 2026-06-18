@@ -147,6 +147,32 @@ try {
   ) {
     throw new Error(`ui from a project directory should use the package-managed UI server:\n${projectUiProbeOutput}`);
   }
+  const defaultDashboardRoot = path.join(tempRoot, "default-dashboard-root");
+  await fsp.mkdir(defaultDashboardRoot, { recursive: true });
+  const defaultDashboardProbeOutput = execFileSync("node", [cli, "ui", "--no-open"], {
+    cwd: defaultDashboardRoot,
+    env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
+    encoding: "utf8"
+  }).trim();
+  const defaultDashboardProbe = JSON.parse(defaultDashboardProbeOutput.split(/\r?\n/).at(-1));
+  const expectedDefaultProjectsDir = path.join(defaultDashboardRoot, "co-autoresearch-projects");
+  const defaultProbeProjectsDir = await fsp.realpath(defaultDashboardProbe.projectsDir);
+  if (
+    defaultDashboardProbe.projectRoot !== "" ||
+    defaultProbeProjectsDir !== await fsp.realpath(expectedDefaultProjectsDir)
+  ) {
+    throw new Error(`default dashboard should use co-autoresearch-projects:\n${defaultDashboardProbeOutput}`);
+  }
+  const legacyDashboardRoot = path.join(tempRoot, "legacy-dashboard-root");
+  const legacyProjectDir = path.join(legacyDashboardRoot, "local-projects", "legacy-project");
+  execFileSync("node", [cli, "init", legacyProjectDir], { cwd: root, stdio: "pipe" });
+  const legacyListOutput = execFileSync("node", [cli, "ls"], {
+    cwd: legacyDashboardRoot,
+    encoding: "utf8"
+  });
+  if (!legacyListOutput.includes("legacy-project")) {
+    throw new Error(`ls should still discover legacy local-projects folders:\n${legacyListOutput}`);
+  }
   const manifest = JSON.parse(await fsp.readFile(path.join(projectDir, ".co-auto-research-template", "manifest.json"), "utf8"));
   if (manifest.templateVersion !== "0.1.0") {
     throw new Error(`unexpected template version ${manifest.templateVersion}`);
@@ -757,7 +783,7 @@ try {
       "assert single.multi_project and single_names == ['project', 'project-two', 'sibling project'], single_names",
       "assert (temp_root / 'sibling_project' / 'AGENTS.md').exists()",
       "default_cwd = temp_root / 'default-dashboard'",
-      "default_projects = default_cwd / 'local-projects'",
+      "default_projects = default_cwd / 'co-autoresearch-projects'",
       "default_cwd.mkdir(exist_ok=True)",
       "empty_dashboard = module.ProjectRegistry(default_cwd, default_projects)",
       "assert empty_dashboard.multi_project and empty_dashboard.summaries() == []",

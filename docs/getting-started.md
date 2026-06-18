@@ -68,7 +68,7 @@ If you run `co-auto-research ui` outside a generated project, CoAutoResearch
 creates a local dashboard folder:
 
 ```text
-local-projects/
+co-autoresearch-projects/
 ```
 
 Projects created from the UI live there.

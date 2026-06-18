@@ -8,8 +8,8 @@ Each project remains an independent working copy.
 From the parent folder that should contain generated projects:
 
 ```bash
-mkdir -p local-projects
-co-auto-research ui --projects-dir local-projects
+mkdir -p co-autoresearch-projects
+co-auto-research ui --projects-dir co-autoresearch-projects
 ```
 
 The CLI opens the UI automatically on local machines. If it cannot, open the

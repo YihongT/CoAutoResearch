@@ -82,7 +82,7 @@ co-auto-research ui
 The CLI opens the UI in your browser after the server starts. If your terminal
 cannot open a browser, open the printed URL manually. Then click `+` in the left
 sidebar to create a project. Dashboard-created projects live in
-`local-projects/`.
+`co-autoresearch-projects/`.
 
 To update the CLI and package-managed UI runtime later:
 
@@ -177,12 +177,12 @@ co-auto-research version
 
 - `init` copies `templates/default/` into a new empty project directory.
 - `ls` lists generated CoAutoResearch projects under the current directory,
-  plus `local-projects/` when present. `list` is an alias.
+  plus `co-autoresearch-projects/` when present. `list` is an alias.
 - `attach [project-name-or-path]` starts the UI for an existing generated
   project. Use this when returning to work after closing the terminal/browser.
 - `ui` starts the package-managed Python standard-library UI server. Inside a
   generated project it serves that project; otherwise it creates/serves
-  `local-projects/` as a dashboard where projects can be created from the UI.
+  `co-autoresearch-projects/` as a dashboard where projects can be created from the UI.
 - `ui --projects-dir <dir>` starts one dashboard that can switch between all
   generated projects directly inside `<dir>` and create new ones from the UI.
 - `ui --port <port>` starts port selection from a different local port. If that

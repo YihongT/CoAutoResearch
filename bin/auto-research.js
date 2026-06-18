@@ -17,6 +17,8 @@ const TEMPLATE_ROOT = path.join(PACKAGE_ROOT, "templates", "default");
 const MANIFEST_PATH = path.join(TEMPLATE_ROOT, ".co-auto-research-template", "manifest.json");
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = "8765";
+const DEFAULT_PROJECTS_DIR = "co-autoresearch-projects";
+const LEGACY_PROJECTS_DIR = "local-projects";
 
 function usage() {
   return `CoAutoResearch
@@ -204,7 +206,8 @@ function collectProjectCandidates(options = {}) {
     const cwd = process.cwd();
     addProjectCandidate(candidates, cwd);
     scanImmediateProjects(candidates, cwd);
-    scanImmediateProjects(candidates, path.join(cwd, "local-projects"));
+    scanImmediateProjects(candidates, path.join(cwd, DEFAULT_PROJECTS_DIR));
+    scanImmediateProjects(candidates, path.join(cwd, LEGACY_PROJECTS_DIR));
   }
   return [...candidates.values()].sort((a, b) => {
     if (a.relativePath === ".") return -1;
@@ -592,7 +595,7 @@ function commandUi(args) {
   const projectServerPath = path.join(projectRoot, "ui", "server.py");
   const projectMode = !projectsDir && (Boolean(options.project) || isProjectRootSync(projectRoot));
   if (!projectsDir && !projectMode) {
-    projectsDir = path.resolve(process.cwd(), "local-projects");
+    projectsDir = path.resolve(process.cwd(), DEFAULT_PROJECTS_DIR);
     fs.mkdirSync(projectsDir, { recursive: true });
   }
   let serverPath = packageServerPath;

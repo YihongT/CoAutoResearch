@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Changed the default dashboard project folder from `local-projects/` to
+  `co-autoresearch-projects/`.
+- Kept legacy `local-projects/` discovery for existing local dashboards.
+
 ## 0.1.0
 
 - Initial CoAutoResearch project structure.

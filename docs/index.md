@@ -32,7 +32,7 @@ co-auto-research ui
 
 The first command installs the `co-auto-research` executable. The second command
 opens a local dashboard. If you are not inside an existing generated project, it
-uses `local-projects/`, where you can create projects from the sidebar.
+uses `co-autoresearch-projects/`, where you can create projects from the sidebar.
 
 To update later:
 

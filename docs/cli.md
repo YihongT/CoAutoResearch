@@ -26,7 +26,7 @@ Source-checkout development commands are covered in the contributor guide.
 | Command | Purpose |
 | --- | --- |
 | `init <dir>` | Copy the template into a new empty project directory. |
-| `ls` | List generated projects under the current folder and `local-projects/`. |
+| `ls` | List generated projects under the current folder and `co-autoresearch-projects/`. |
 | `attach [project]` | Reopen the UI for an existing generated project. |
 | `ui` | Start the local web UI. |
 | `ui --projects-dir <dir>` | Start a dashboard over several generated projects. |
@@ -41,7 +41,7 @@ co-auto-research ui
 ```
 
 Inside a generated project, this serves that project using the package-managed
-UI runtime. Outside a generated project, it creates or serves `local-projects/`
+UI runtime. Outside a generated project, it creates or serves `co-autoresearch-projects/`
 as a dashboard.
 
 ## Project Dashboard
@@ -61,7 +61,7 @@ co-auto-research attach my-project
 ```
 
 `ls` scans the current directory, immediate generated-project children, and a
-`local-projects/` dashboard folder when present. It prints project names,
+`co-autoresearch-projects/` dashboard folder when present. It prints project names,
 statuses, and paths.
 
 `attach` resolves a project by display name, directory name, path, or project ID
