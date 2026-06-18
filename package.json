@@ -17,8 +17,8 @@
     "access": "public"
   },
   "bin": {
-    "co-auto-research": "./bin/auto-research.js",
-    "auto-research": "./bin/auto-research.js"
+    "co-auto-research": "bin/auto-research.js",
+    "auto-research": "bin/auto-research.js"
   },
   "files": [
     ".npmignore",
