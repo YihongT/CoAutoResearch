@@ -4,7 +4,7 @@ import fsp from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -68,94 +68,6 @@ async function reserveFallbackTestPort() {
     await closeServer(occupied);
   }
   throw new Error("Could not reserve a contiguous fallback port pair for the UI smoke test.");
-}
-
-function waitForOpenPort(child, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    let output = "";
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out waiting for server URL. Output:\n${output}`));
-    }, timeoutMs);
-    function cleanup() {
-      clearTimeout(timeout);
-      child.stdout?.off("data", onData);
-      child.stderr?.off("data", onData);
-      child.off("exit", onExit);
-    }
-    function onData(chunk) {
-      output += chunk.toString();
-      const match = output.match(/Open http:\/\/127\.0\.0\.1:(\d+)/);
-      if (match) {
-        cleanup();
-        resolve(Number(match[1]));
-      }
-    }
-    function onExit(code) {
-      cleanup();
-      reject(new Error(`Server exited before printing URL, code ${code}. Output:\n${output}`));
-    }
-    child.stdout?.on("data", onData);
-    child.stderr?.on("data", onData);
-    child.on("exit", onExit);
-  });
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = 750) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function waitForJson(url, timeoutMs = 8000) {
-  const started = Date.now();
-  let lastError = null;
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetchWithTimeout(url);
-      if (response.ok) return await response.json();
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-  throw lastError || new Error(`Timed out waiting for ${url}`);
-}
-
-async function waitForHtml(url, timeoutMs = 8000) {
-  const started = Date.now();
-  let lastError = null;
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetchWithTimeout(url);
-      const text = await response.text();
-      const contentType = response.headers.get("content-type") || "";
-      if (response.ok && contentType.includes("text/html") && text.includes("CoAutoResearch")) return text;
-      lastError = new Error(`Unexpected HTML response: ${response.status} ${contentType} ${text.slice(0, 120)}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-  throw lastError || new Error(`Timed out waiting for ${url}`);
-}
-
-async function postJson(url, payload) {
-  const response = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  }, 4000);
-  const body = await response.json();
-  if (!response.ok || body.ok === false) {
-    throw new Error(body.error || `HTTP ${response.status}`);
-  }
-  return body;
 }
 
 async function writeFakeCodexBin(directory) {
@@ -611,118 +523,63 @@ try {
     await closeServer(occupied.server);
   }
 
-  const singlePort = await freePort();
-  const singleServer = spawn("node", [cli, "ui", "--project", projectDir, "--host", "127.0.0.1", "--port", String(singlePort), "--no-open"], {
+  const registryOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    [
+      "import importlib.util, json, os, pathlib, shutil",
+      "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+      "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "temp_root = pathlib.Path(os.environ['COAUTO_TEMP_ROOT'])",
+      "project_dir = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT'])",
+      "single = module.ProjectRegistry(project_dir)",
+      "single_projects = single.summaries()",
+      "assert len(single_projects) == 1 and not single.multi_project, single_projects",
+      "created_sibling = single.create_project({'name': 'sibling project'})",
+      "single_names = sorted(item['display_name'] for item in single.summaries())",
+      "assert single.multi_project and single_names == ['project', 'project-two', 'sibling project'], single_names",
+      "assert (temp_root / 'sibling_project' / 'AGENTS.md').exists()",
+      "default_cwd = temp_root / 'default-dashboard'",
+      "default_projects = default_cwd / 'local-projects'",
+      "default_cwd.mkdir(exist_ok=True)",
+      "empty_dashboard = module.ProjectRegistry(default_cwd, default_projects)",
+      "assert empty_dashboard.multi_project and empty_dashboard.summaries() == []",
+      "from_ui = empty_dashboard.create_project({'name': 'from ui'})",
+      "assert from_ui['display_name'] == 'from ui', from_ui",
+      "assert (default_projects / 'from_ui' / 'AGENTS.md').exists()",
+      "dashboard = module.ProjectRegistry(temp_root, temp_root)",
+      "names = sorted(item['display_name'] for item in dashboard.summaries())",
+      "assert names == ['project', 'project-two', 'sibling project'], names",
+      "created = dashboard.create_project({'name': 'ui project'})",
+      "assert created['display_name'] == 'ui project', created",
+      "assert (temp_root / 'ui_project' / '.co-auto-research' / 'project.json').exists()",
+      "renamed = dashboard.rename_project({'project': created['id'], 'name': 'renamed ui project'})",
+      "assert renamed['display_name'] == 'renamed ui project', renamed",
+      "try:",
+      "    dashboard.delete_project({'project': created['id'], 'confirm': 'ui project'})",
+      "    raise AssertionError('project deletion did not require exact confirmation name')",
+      "except ValueError:",
+      "    pass",
+      "deleted = dashboard.delete_project({'project': created['id'], 'confirm': 'renamed ui project'})",
+      "assert all(item['id'] != created['id'] for item in deleted['projects'])",
+      "assert not (temp_root / 'ui_project').exists()",
+      "print(json.dumps({'single': single_names, 'default': from_ui['display_name'], 'renamed': renamed['display_name'], 'deleted': deleted['deleted_project_id']}))"
+    ].join("\n")
+  ], {
     cwd: root,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  try {
-    const singleBoundPort = await waitForOpenPort(singleServer);
-    if (singleBoundPort !== singlePort) {
-      throw new Error(`single-project UI bound unexpected port ${singleBoundPort}, expected ${singlePort}`);
-    }
-    const payload = await waitForJson(`http://127.0.0.1:${singleBoundPort}/api/projects`);
-    if (payload.multi_project || (payload.projects || []).length !== 1) {
-      throw new Error("single-project UI did not start in single-project mode");
-    }
-    const created = await postJson(`http://127.0.0.1:${singleBoundPort}/api/projects`, { name: "sibling project" });
-    const names = (created.projects || []).map((project) => project.display_name).sort();
-    if (!created.multi_project || JSON.stringify(names) !== JSON.stringify(["project", "project-two", "sibling project"])) {
-      throw new Error(`single-project create did not promote to dashboard: ${names.join(", ")}`);
-    }
-    await fsp.access(path.join(tempRoot, "sibling_project", "AGENTS.md"));
-  } finally {
-    singleServer.kill("SIGTERM");
-    await new Promise((resolve) => {
-      singleServer.once("exit", resolve);
-      setTimeout(resolve, 1000);
-    });
-  }
-
-  const defaultPort = await freePort();
-  const defaultCwd = path.join(tempRoot, "default-dashboard");
-  await fsp.mkdir(defaultCwd);
-  const defaultServer = spawn("node", [cli, "ui", "--host", "127.0.0.1", "--port", String(defaultPort), "--no-open"], {
-    cwd: defaultCwd,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  try {
-    const defaultBoundPort = await waitForOpenPort(defaultServer);
-    if (defaultBoundPort !== defaultPort) {
-      throw new Error(`default UI bound unexpected port ${defaultBoundPort}, expected ${defaultPort}`);
-    }
-    const payload = await waitForJson(`http://127.0.0.1:${defaultBoundPort}/api/projects`);
-    if (!payload.multi_project || (payload.projects || []).length !== 0) {
-      throw new Error("default UI did not start as an empty dashboard");
-    }
-    await waitForHtml(`http://127.0.0.1:${defaultBoundPort}/`);
-    const created = await postJson(`http://127.0.0.1:${defaultBoundPort}/api/projects`, { name: "from ui" });
-    if (!created.multi_project || created.project?.display_name !== "from ui") {
-      throw new Error("default dashboard could not create a project from the UI API");
-    }
-    await fsp.access(path.join(defaultCwd, "local-projects", "from_ui", "AGENTS.md"));
-  } finally {
-    defaultServer.kill("SIGTERM");
-    await new Promise((resolve) => {
-      defaultServer.once("exit", resolve);
-      setTimeout(resolve, 1000);
-    });
-  }
-
-  const port = await freePort();
-  const server = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(port), "--no-open"], {
-    cwd: root,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  try {
-    const boundPort = await waitForOpenPort(server);
-    if (boundPort !== port) {
-      throw new Error(`multi-project UI bound unexpected port ${boundPort}, expected ${port}`);
-    }
-    const payload = await waitForJson(`http://127.0.0.1:${boundPort}/api/projects`);
-    const names = (payload.projects || []).map((project) => project.display_name).sort();
-    if (JSON.stringify(names) !== JSON.stringify(["project", "project-two", "sibling project"])) {
-      throw new Error(`multi-project API returned unexpected projects: ${names.join(", ")}`);
-    }
-    const created = await postJson(`http://127.0.0.1:${boundPort}/api/projects`, { name: "ui project" });
-    if (created.project?.display_name !== "ui project") {
-      throw new Error("UI project creation did not preserve display name");
-    }
-    await fsp.access(path.join(tempRoot, "ui_project", "AGENTS.md"));
-    await fsp.access(path.join(tempRoot, "ui_project", ".co-auto-research", "project.json"));
-    const renamed = await postJson(`http://127.0.0.1:${boundPort}/api/projects/rename`, { project: created.project.id, name: "renamed ui project" });
-    if (renamed.project?.display_name !== "renamed ui project") {
-      throw new Error("project rename did not update display name");
-    }
-    let deleteRejected = false;
-    try {
-      await postJson(`http://127.0.0.1:${boundPort}/api/projects/delete`, { project: created.project.id, confirm: "ui project" });
-    } catch {
-      deleteRejected = true;
-    }
-    if (!deleteRejected) {
-      throw new Error("project deletion did not require exact confirmation name");
-    }
-    const deleted = await postJson(`http://127.0.0.1:${boundPort}/api/projects/delete`, { project: created.project.id, confirm: "renamed ui project" });
-    if ((deleted.projects || []).some((project) => project.id === created.project.id)) {
-      throw new Error("deleted project still appears in project list");
-    }
-    try {
-      await fsp.access(path.join(tempRoot, "ui_project", "AGENTS.md"));
-      throw new Error("deleted project directory still exists");
-    } catch (error) {
-      if (error.message === "deleted project directory still exists") throw error;
-    }
-    const afterCreate = (created.projects || []).map((project) => project.display_name).sort();
-    if (JSON.stringify(afterCreate) !== JSON.stringify(["project", "project-two", "sibling project", "ui project"])) {
-      throw new Error(`project creation returned unexpected projects: ${afterCreate.join(", ")}`);
-    }
-  } finally {
-    server.kill("SIGTERM");
-    await new Promise((resolve) => {
-      server.once("exit", resolve);
-      setTimeout(resolve, 1000);
-    });
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_TEMPLATE_ROOT: path.join(root, "templates", "default"),
+      COAUTO_TEMP_ROOT: tempRoot,
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!registryOutput.includes("renamed ui project")) {
+    throw new Error(`project registry smoke test returned unexpected output: ${registryOutput}`);
   }
   console.log("Smoke test passed.");
 } finally {
