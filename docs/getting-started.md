@@ -24,9 +24,11 @@ available.
 
 ## Install the CLI Command
 
-From a cloned repository, install the command once:
+Clone the repository and install the command once:
 
 ```bash
+git clone https://github.com/YihongT/CoAutoResearch.git
+cd CoAutoResearch
 npm install -g .
 ```
 

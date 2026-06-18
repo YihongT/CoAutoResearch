@@ -166,6 +166,10 @@ try {
     !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
     pagesWorkflow.includes("jekyll-build-pages") ||
     pagesWorkflow.includes("ENABLE_PRIVATE_PAGES") ||
+    !readme.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
+    !docsIndex.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
+    !gettingStartedDocs.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
+    !cliDocs.includes("git clone https://github.com/YihongT/CoAutoResearch.git") ||
     !readme.includes("npm install -g .") ||
     !docsIndex.includes("npm install -g .") ||
     !gettingStartedDocs.includes("npm install -g .") ||

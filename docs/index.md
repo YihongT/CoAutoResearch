@@ -20,9 +20,11 @@ research trajectory you can actually use.
 
 ## Quick Start
 
-From a cloned repository:
+Clone the repository and install the CLI command:
 
 ```bash
+git clone https://github.com/YihongT/CoAutoResearch.git
+cd CoAutoResearch
 npm install -g .
 ```
 

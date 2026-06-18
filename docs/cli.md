@@ -7,10 +7,11 @@ co-auto-research
 auto-research
 ```
 
-These commands are available after installing the package, for example from a
-cloned repository with:
+These commands are available after installing the package. From a new machine:
 
 ```bash
+git clone https://github.com/YihongT/CoAutoResearch.git
+cd CoAutoResearch
 npm install -g .
 ```
 

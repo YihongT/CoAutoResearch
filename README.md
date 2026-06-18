@@ -67,9 +67,11 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 
 ## Quick Start
 
-From a cloned repository, install the CLI command once:
+Clone the repository and install the CLI command once:
 
 ```bash
+git clone https://github.com/YihongT/CoAutoResearch.git
+cd CoAutoResearch
 npm install -g .
 ```
 
