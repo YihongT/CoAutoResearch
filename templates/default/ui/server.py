@@ -2859,6 +2859,45 @@ def normalize_gate_status(value: str) -> str:
     return text.split()[0]
 
 
+REQUIRED_REVIEWER_GATES = {
+    "plan": "Plan reviewer",
+    "process": "Process reviewer",
+    "evidence": "Evidence reviewer",
+    "venue_fit": "Venue fit reviewer",
+    "manuscript": "Manuscript reviewer",
+    "figure_table": "Figure/table reviewer",
+}
+
+
+def reviewer_gate_key(label: str) -> str:
+    clean = re.sub(r"[^a-z/ ]+", " ", label.lower())
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if clean.startswith("plan"):
+        return "plan"
+    if clean.startswith("process"):
+        return "process"
+    if clean.startswith("evidence"):
+        return "evidence"
+    if clean.startswith("venue"):
+        return "venue_fit"
+    if clean.startswith("manuscript"):
+        return "manuscript"
+    if clean.startswith("figure") or clean.startswith("table") or "figure/table" in clean:
+        return "figure_table"
+    return ""
+
+
+def parse_reviewer_gate_line(line: str) -> tuple[str, str, str]:
+    match = re.match(r"^\s*[-*]\s*([^:]+?)\s*:\s*(.+?)\s*$", line)
+    if not match:
+        return "", "", ""
+    key = reviewer_gate_key(match.group(1))
+    if not key:
+        return "", "", ""
+    raw_status = match.group(2).strip()
+    return key, normalize_gate_status(raw_status), raw_status
+
+
 def markdown_section(text: str, heading: str) -> str:
     pattern = re.compile(rf"(^##\s+{re.escape(heading)}\s*$)(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL)
     match = pattern.search(text)
@@ -2910,23 +2949,51 @@ def read_autoresearch_gate() -> dict[str, Any]:
         if match:
             raw_status = match.group(1).strip()
             break
-    status = normalize_gate_status(raw_status)
-    reviewer_lines = [
-        line.strip()
-        for line in section.splitlines()
-        if re.match(r"^\s*[-*]\s*(?:plan|process|evidence|venue|manuscript|figure|table|figure/table)\b", line, re.IGNORECASE)
-    ][:12]
+    overall_status = normalize_gate_status(raw_status)
+    reviewer_lines = []
+    reviewer_statuses: dict[str, str] = {}
+    reviewer_raw_statuses: dict[str, str] = {}
+    for line in section.splitlines():
+        key, reviewer_status, reviewer_raw_status = parse_reviewer_gate_line(line)
+        if not key:
+            continue
+        clean_line = line.strip()
+        reviewer_lines.append(clean_line)
+        reviewer_statuses[key] = reviewer_status
+        reviewer_raw_statuses[key] = reviewer_raw_status
+    reviewer_lines = reviewer_lines[:12]
+    missing_reviewers = [key for key in REQUIRED_REVIEWER_GATES if key not in reviewer_statuses]
+    incomplete_reviewers = [
+        key
+        for key in REQUIRED_REVIEWER_GATES
+        if reviewer_statuses.get(key) != "pass"
+    ]
+    all_reviewers_passed = not missing_reviewers and not incomplete_reviewers
+    status = overall_status
+    if overall_status == "pass" and not all_reviewers_passed:
+        status = "continue"
     return {
         "exists": True,
         "status": status,
         "raw_status": raw_status,
+        "overall_status": overall_status,
+        "reviewer_statuses": reviewer_statuses,
+        "reviewer_raw_statuses": reviewer_raw_statuses,
+        "missing_reviewers": missing_reviewers,
+        "incomplete_reviewers": incomplete_reviewers,
+        "all_reviewers_passed": all_reviewers_passed,
         "summary": "\n".join(reviewer_lines) if reviewer_lines else first_meaningful_line(section, "Gate section exists."),
         "path": str(RESEARCH_STATE_PATH.relative_to(REPO_ROOT)),
     }
 
 
 def gate_has_passed(gate: dict[str, Any]) -> bool:
-    return gate.get("status") == "pass"
+    if gate.get("status") != "pass":
+        return False
+    reviewer_statuses = gate.get("reviewer_statuses")
+    if not isinstance(reviewer_statuses, dict):
+        return False
+    return all(reviewer_statuses.get(key) == "pass" for key in REQUIRED_REVIEWER_GATES)
 
 
 def write_initial_autoresearch_gate() -> None:

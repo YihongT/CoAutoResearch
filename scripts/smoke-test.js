@@ -556,6 +556,46 @@ try {
     throw new Error(`resource resolver did not report the external repo: ${resourceResolverOutput}`);
   }
 
+  const gateParserScript = [
+    "import importlib.util, json, os, pathlib",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+    "module._CONTEXT.project = context",
+    "state = context.research_state_path",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\", encoding='utf-8')",
+    "gate = module.read_autoresearch_gate()",
+    "assert gate['overall_status'] == 'pass', gate",
+    "assert gate['status'] == 'continue', gate",
+    "assert gate['reviewer_statuses']['evidence'] == 'continue', gate",
+    "assert gate['all_reviewers_passed'] is False, gate",
+    "assert module.gate_has_passed(gate) is False, gate",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
+    "passed = module.read_autoresearch_gate()",
+    "assert passed['status'] == 'pass', passed",
+    "assert passed['all_reviewers_passed'] is True, passed",
+    "assert module.gate_has_passed(passed) is True, passed",
+    "print(json.dumps({'blocked': gate['status'], 'passed': passed['status']}))"
+  ].join("\n");
+  const gateParserOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    gateParserScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!gateParserOutput.includes('"blocked": "continue"') || !gateParserOutput.includes('"passed": "pass"')) {
+    throw new Error(`gate parser smoke test returned unexpected output: ${gateParserOutput}`);
+  }
+
   const occupied = await reserveFallbackTestPort();
   try {
     const fallbackOutput = execFileSync(python.command, [
