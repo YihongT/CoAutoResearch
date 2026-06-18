@@ -15,6 +15,7 @@ This reviewer should judge venue fit by comparing the project against representa
 Before reviewing, read:
 
 ```text
+instructions/reviewers/REVIEW_TAXONOMY.md
 PROJECT.md
 research_trajectory/STATE.md
 research_trajectory/CURRENT_FINDINGS.md
@@ -78,6 +79,14 @@ Evaluate:
 7. Does the project need more experiments, stronger analysis, clearer mechanism, better framing, or a different target venue?
 8. What specific gaps remain relative to the seed papers?
 
+## Pass Standard
+
+Use `Decision: pass` only when the current direction or deliverable is strongly
+fit for the declared target, grounded in representative venue examples or other
+appropriate target evidence, and no required venue-positioning action remains.
+Generic plausibility, missing seed papers, uncertain article type, or "fit if
+revised" requires `Decision: continue`.
+
 ## Output Location
 
 If the review is part of a trial, write it into:
@@ -94,7 +103,8 @@ manuscript/reviews/
 
 ## Output Format
 
-Use the following structure:
+Use the shared schema from `instructions/reviewers/REVIEW_TAXONOMY.md`, then add
+this venue-specific detail:
 
 ```markdown
 # Venue Fit Review

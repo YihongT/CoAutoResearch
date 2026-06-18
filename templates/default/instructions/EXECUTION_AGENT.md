@@ -254,10 +254,14 @@ Maintain a section inside `research_trajectory/STATE.md`:
 Use this section to decide whether the autoresearch loop should continue or stop. It must include:
 
 - `Status: pass`, `continue`, `blocked`, or `needs_human`;
-- reviewer gate lines for Plan, Process, Evidence, Venue fit, Manuscript, and Figure/table;
+- reviewer gate lines for Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, and Final gate;
 - the next action when any gate is not `pass`.
 
-The autoresearch goal is complete only when `Status: pass` and every required reviewer gate is `pass`.
+The autoresearch goal is complete only when `Status: pass` and every required reviewer gate is a strict `pass`, including the Final gate reviewer.
+
+Before marking any gate as `pass`, read `instructions/reviewers/REVIEW_TAXONOMY.md`. Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results and require `continue` unless the relevant reviewer standard is fully satisfied.
+
+The Final gate reviewer is required before the loop can stop. It must confirm that all other required reviewers passed under the shared output schema and that no blocking issues, required actions, unresolved qualifications, active revision constraints, or critical unassessed areas remain.
 
 If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a human decision is genuinely required, mark `Status: needs_human` and state the exact question.
 

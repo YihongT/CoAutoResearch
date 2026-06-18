@@ -2550,7 +2550,7 @@ function renderStage() {
       ? "All reviewer gates have passed."
       : locked
         ? "Finish PROJECT.md before starting autoresearch."
-        : "Run the autoresearch loop until reviewer gates pass.";
+        : "Run the autoresearch loop until strict reviewer gates pass.";
   }
   renderFramingConversation();
 }

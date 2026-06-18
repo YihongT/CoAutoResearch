@@ -48,7 +48,11 @@ flowchart TD
 | `PROJECT.md` | Overall direction, scope, audience, and constraints. |
 | `STATE.md` | Current objective, active plan, blockers, and reviewer gate state. |
 | Human interventions | Explicit changes to scope, claim, venue, method, or priority. |
-| Reviewer gates | Plan, process, evidence, venue fit, manuscript, and figure/table checks. |
+| Reviewer gates | Plan, process, evidence, venue fit, manuscript, figure/table, and final-gate checks. |
+
+Autoresearch stops only after strict reviewer pass. A completed trial, approved
+plan, plausible venue fit, coherent manuscript architecture, or targeted
+revision-ready draft is progress, not final pass.
 
 ## Why This Matters
 

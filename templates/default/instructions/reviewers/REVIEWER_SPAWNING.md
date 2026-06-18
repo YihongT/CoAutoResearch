@@ -44,6 +44,14 @@ Each spawned reviewer must define:
 7. output format;
 8. whether it can block execution or only advise.
 
+Every spawned reviewer must read and follow:
+
+`instructions/reviewers/REVIEW_TAXONOMY.md`
+
+It must use the shared output schema and canonical decisions unless it is only a
+non-gating advisory note. If it can affect the autoresearch gate, it must define
+a strict pass standard and a `Gate impact`.
+
 ## Output Rule
 
 Reviewer instructions do not store review results.

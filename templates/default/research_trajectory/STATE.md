@@ -99,6 +99,7 @@ Required reviewer gates:
 - Venue fit reviewer: continue - venue or audience is not initialized yet.
 - Manuscript reviewer: continue - manuscript-facing direction is not initialized yet.
 - Figure/table reviewer: continue - display needs are not initialized yet.
+- Final gate reviewer: continue - required reviewers have not strictly passed yet.
 
 Next action: complete cold start or conversion, then create the first coherent trial.
 

@@ -6,6 +6,7 @@ Review manuscript-facing deliverables as a target-venue reviewer would.
 
 ## Required Reading
 
+- `instructions/reviewers/REVIEW_TAXONOMY.md`
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
@@ -33,3 +34,19 @@ Evaluate:
 - sufficiency of figures and tables;
 - treatment of limitations and alternatives;
 - whether the manuscript can stand on its own without hidden trial details.
+
+## Pass Standard
+
+Use `Decision: pass` only for submission-readiness or declared final-deliverable
+readiness. The manuscript must have no unresolved required revision constraints
+for the declared scope, and the review must account for contribution, evidence,
+venue fit, figures/tables, limitations, references, and self-contained
+readability.
+
+If the manuscript architecture is coherent, the story is plausible, or the
+deliverable is ready for targeted revision, use `Decision: continue` and record
+those positives under `Qualified / Partial Passes`.
+
+## Output Schema
+
+Follow `instructions/reviewers/REVIEW_TAXONOMY.md`.

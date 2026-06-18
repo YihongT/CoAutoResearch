@@ -67,21 +67,30 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 
 ## Quick Start
 
-Install the CLI:
+Open the dashboard:
+
+```bash
+npx --yes co-auto-research ui
+```
+
+That command downloads the CLI if needed, starts the local UI, and opens it in
+your browser. Create or continue projects from the dashboard; normal use should
+happen in the UI after this point.
+
+For repeated use, install the command once:
 
 ```bash
 npm install -g co-auto-research
 ```
 
-Then start the dashboard:
+Then run:
 
 ```bash
 co-auto-research ui
 ```
 
-The CLI opens the UI in your browser after the server starts. If your terminal
-cannot open a browser, open the printed URL manually. Then click `+` in the left
-sidebar to create a project. Dashboard-created projects live in
+If your terminal cannot open a browser, open the printed URL manually. Click `+`
+in the left sidebar to create a project. Dashboard-created projects live in
 `co-autoresearch-projects/`.
 
 To update the CLI and package-managed UI runtime later:

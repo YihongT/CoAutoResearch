@@ -6,6 +6,7 @@ Review figure and table quality, especially target-venue fit and communication v
 
 ## Required Reading
 
+- `instructions/reviewers/REVIEW_TAXONOMY.md`
 - `PROJECT.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
 - `resources/target_venue/FIGURE_TABLE_NOTES.md`
@@ -29,3 +30,15 @@ Check:
 - Are axes, labels, baselines, uncertainty, and comparisons clear?
 - Are conceptual figures specified in enough detail before generation?
 - Are result plots traceable to trial artifacts?
+
+## Pass Standard
+
+Use `Decision: pass` only when every active figure/table required for the
+declared scope is final enough for that scope: inclusion decision made, source or
+artifact traceable, caption precise, labels readable, and target-audience fit
+checked. Candidate assets, unresolved display inventory, stale bundle notes, or
+"acceptable for now" displays require `Decision: continue`.
+
+## Output Schema
+
+Follow `instructions/reviewers/REVIEW_TAXONOMY.md`.

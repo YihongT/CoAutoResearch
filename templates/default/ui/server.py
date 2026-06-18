@@ -2871,12 +2871,15 @@ def normalize_gate_status(value: str) -> str:
     text = value.strip().lower()
     if not text:
         return "missing"
-    if re.search(r"\b(not\s+pass|not\s+passed|not_ready|needs_work|needs_follow_up|follow_up|continue|running)\b", text):
-        return "continue"
-    if re.search(r"\b(pass|passed|all_passed|complete|completed|ready)\b", text):
-        return "pass"
     if re.search(r"\b(blocked|needs_human|human|clarification)\b", text):
         return "blocked"
+    normalized = text.replace("_", " ").replace("-", " ")
+    if re.search(r"\b(not\s+pass|not\s+passed|not\s+ready|needs\s+work|needs\s+follow\s+up|follow\s+up|continue|running|revise|revision\s+required|targeted\s+revision|architecture|partial|qualified|qualification|supported\s+with\s+qualification|plausible|approved|complete|completed|ready|pass\s+for)\b", normalized):
+        return "continue"
+    if re.match(r"^(strict\s+)?pass(?:\s*$|\s*[:.;,]\s*|\s+-\s+)", text):
+        return "pass"
+    if re.match(r"^(all[_\s-]?passed)(?:\s*$|\s*[:.;,]\s*|\s+-\s+)", text):
+        return "pass"
     if re.search(r"\b(fail|failed)\b", text):
         return "continue"
     return text.split()[0]
@@ -2889,6 +2892,7 @@ REQUIRED_REVIEWER_GATES = {
     "venue_fit": "Venue fit reviewer",
     "manuscript": "Manuscript reviewer",
     "figure_table": "Figure/table reviewer",
+    "final_gate": "Final gate reviewer",
 }
 
 
@@ -2907,6 +2911,8 @@ def reviewer_gate_key(label: str) -> str:
         return "manuscript"
     if clean.startswith("figure") or clean.startswith("table") or "figure/table" in clean:
         return "figure_table"
+    if clean.startswith("final"):
+        return "final_gate"
     return ""
 
 
@@ -3027,7 +3033,7 @@ def write_initial_autoresearch_gate() -> None:
 Status: continue
 Updated: {now_iso()}
 
-This section is owned by the autoresearch loop. The loop should continue until every required reviewer gate below is `pass`.
+This section is owned by the autoresearch loop. The loop should continue until every required reviewer gate below is a strict `pass`.
 
 Required reviewer gates:
 - Plan reviewer: continue
@@ -3036,6 +3042,7 @@ Required reviewer gates:
 - Venue fit reviewer: continue
 - Manuscript reviewer: continue
 - Figure/table reviewer: continue
+- Final gate reviewer: continue
 
 Next action: start or continue the next coherent autoresearch iteration.
 """
@@ -3168,9 +3175,11 @@ Read:
 - research_trajectory/STATE.md
 - research_trajectory/CURRENT_FINDINGS.md
 - the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
+- instructions/reviewers/REVIEW_TAXONOMY.md
 - relevant reviewer instructions under instructions/reviewers/
+- instructions/reviewers/FINAL_GATE_REVIEWER.md
 
-If the `Autoresearch Goal Gate` section in `research_trajectory/STATE.md` says `Status: pass` and every required reviewer gate is pass, do not create a new trial. Report that the autoresearch goal has passed all reviewer gates.
+If the `Autoresearch Goal Gate` section in `research_trajectory/STATE.md` says `Status: pass` and every required reviewer gate is a strict pass, including the Final gate reviewer, do not create a new trial. Report that the autoresearch goal has passed all reviewer gates.
 
 Otherwise, run exactly the next coherent autoresearch iteration needed to move the gate toward pass:
 1. create the next trial under research_trajectory/trials/;
@@ -3181,7 +3190,7 @@ Otherwise, run exactly the next coherent autoresearch iteration needed to move t
 6. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
 7. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end.
 
-Do not stop merely because one trial completed. Stop only when all required reviewer gates pass, or when human input is genuinely required."""
+Do not stop merely because one trial completed, a plan was approved, a manuscript architecture is coherent, a venue fit is plausible, or evidence is supported with qualification. Stop only when all required reviewer gates are strict pass with no blocking issues, required actions, unresolved qualifications, active revision constraints, or critical unassessed areas."""
 
 
 def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
@@ -3438,7 +3447,9 @@ Use the repository instructions:
 - read research_trajectory/STATE.md
 - read research_trajectory/CURRENT_FINDINGS.md
 - inspect resources only as needed for the next coherent research objective
+- read instructions/reviewers/REVIEW_TAXONOMY.md
 - read the reviewer instructions under instructions/reviewers/
+- read instructions/reviewers/FINAL_GATE_REVIEWER.md
 - create or update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
 
 This is not complete after one trial. Run the next autoresearch iteration and maintain the reviewer gate:
@@ -3451,10 +3462,12 @@ This is not complete after one trial. Run the next autoresearch iteration and ma
 7. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, or notes only when their current state genuinely changes;
 8. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md with:
    - `Status: pass`, `continue`, `blocked`, or `needs_human`;
-   - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table;
+   - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Final gate;
    - the next action if any gate is not pass.
 
-Required reviewer gates must all be `pass` before the autoresearch goal is complete. If any reviewer gate is not pass, set `Status: continue` unless human input is truly required.
+Required reviewer gates must all be strict `pass` before the autoresearch goal is complete, including the Final gate reviewer. If any reviewer gate is not pass, or if any blocking issue, required action, unresolved qualification, active revision constraint, or critical unassessed area remains, set `Status: continue` unless human input is truly required.
+
+Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results unless the relevant reviewer standard and Final gate standard are fully satisfied.
 
 Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message and set `Status: needs_human` instead of silently inventing a different project."""
 

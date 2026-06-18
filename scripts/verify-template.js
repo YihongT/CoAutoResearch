@@ -57,6 +57,33 @@ for (const file of files) {
   }
 }
 
+const reviewerDir = path.join(template, "instructions", "reviewers");
+const reviewerEntries = await fsp.readdir(reviewerDir, { withFileTypes: true });
+const reviewerFiles = reviewerEntries
+  .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+  .map((entry) => path.join(reviewerDir, entry.name));
+
+for (const file of reviewerFiles) {
+  const name = path.basename(file);
+  const text = await fsp.readFile(file, "utf8");
+  if (name !== "REVIEW_TAXONOMY.md" && !text.includes("REVIEW_TAXONOMY.md")) {
+    failures.push(`${path.relative(template, file)}: reviewer does not reference REVIEW_TAXONOMY.md`);
+  }
+  if (name.endsWith("_REVIEWER.md") && !text.includes("## Pass Standard") && name !== "FINAL_GATE_REVIEWER.md") {
+    failures.push(`${path.relative(template, file)}: reviewer is missing a Pass Standard section`);
+  }
+}
+
+const stateTemplate = await fsp.readFile(path.join(template, "research_trajectory", "STATE.md"), "utf8");
+if (!stateTemplate.includes("Final gate reviewer")) {
+  failures.push("research_trajectory/STATE.md: missing Final gate reviewer");
+}
+
+const serverTemplate = await fsp.readFile(path.join(template, "ui", "server.py"), "utf8");
+if (!serverTemplate.includes('"final_gate": "Final gate reviewer"')) {
+  failures.push("ui/server.py: missing Final gate reviewer parser entry");
+}
+
 if (failures.length) {
   console.error("Template verification failed:");
   for (const failure of failures) console.error(`- ${failure}`);

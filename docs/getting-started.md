@@ -2,6 +2,18 @@
 
 Start here if you want to use CoAutoResearch from a local machine.
 
+## Quick Start
+
+Open the dashboard:
+
+```bash
+npx --yes co-auto-research ui
+```
+
+This command downloads the CLI if needed, starts the local UI, and opens it in
+your browser. Create projects, attach files, revise framing, and start
+autoresearch from the UI.
+
 ## Prerequisites
 
 Install:
@@ -24,7 +36,7 @@ available.
 
 ## Install the CLI Command
 
-Install the command:
+For repeated use, install the command once:
 
 ```bash
 npm install -g co-auto-research

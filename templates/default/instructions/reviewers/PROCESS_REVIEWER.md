@@ -29,6 +29,7 @@ Do not create `research_trajectory/process_reviews/`.
 
 ## Required Reading
 
+- `instructions/reviewers/REVIEW_TAXONOMY.md`
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
@@ -53,3 +54,14 @@ Ask:
 - local-minimum risks;
 - recommended next trial;
 - any required updates to `STATE.md` or `CURRENT_FINDINGS.md`.
+
+## Pass Standard
+
+Use `Decision: pass` only when the process is not drifting from `PROJECT.md`, no
+unresolved formal intervention or state inconsistency remains, recent trials are
+making substantive progress, and no known local-minimum or hidden-TODO risk
+needs a follow-up trial. "Process review completed" is not the same as pass.
+
+## Output Schema
+
+Follow `instructions/reviewers/REVIEW_TAXONOMY.md`.

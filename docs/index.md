@@ -20,19 +20,17 @@ research trajectory you can actually use.
 
 ## Quick Start
 
-Install the CLI:
+Open the dashboard:
 
 ```bash
-npm install -g co-auto-research
+npx --yes co-auto-research ui
 ```
 
-```bash
-co-auto-research ui
-```
+This starts the local dashboard and opens it in your browser. Create projects,
+attach files, revise framing, and start autoresearch from the UI.
 
-The first command installs the `co-auto-research` executable. The second command
-opens a local dashboard. If you are not inside an existing generated project, it
-uses `co-autoresearch-projects/`, where you can create projects from the sidebar.
+For repeated use, install once with `npm install -g co-auto-research`, then run
+`co-auto-research ui`.
 
 To update later:
 
