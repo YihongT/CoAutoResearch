@@ -60,6 +60,7 @@ const defaultSessionSettings = {
   approvalPolicy: "on-request",
   webSearch: true,
   extraConfig: "",
+  reviewCheckpointInterval: 100,
 };
 
 const allowedThemeModes = new Set(["light", "night"]);
@@ -2255,6 +2256,7 @@ function settingsFromForm() {
     ...permissionPresets[permissionPreset],
     webSearch: Boolean(data.get("webSearch")),
     extraConfig: String(data.get("extraConfig") || "").trim(),
+    reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("reviewCheckpointInterval")),
   };
   scopedSet("autoResearchSessionSettings", JSON.stringify(settings));
   renderSettingsSummary(settings);
@@ -2285,6 +2287,11 @@ function normalizeReasoningEffort(value) {
   return allowedReasoningEfforts.has(reasoning) ? reasoning : defaultSessionSettings.reasoningEffort;
 }
 
+function normalizeReviewCheckpointInterval(value) {
+  const interval = Number(String(value ?? "").trim());
+  return Number.isInteger(interval) && interval > 0 ? interval : defaultSessionSettings.reviewCheckpointInterval;
+}
+
 function inferPermissionPreset(settings = {}) {
   const explicit = String(settings.permissionPreset || "").trim();
   if (allowedPermissionPresets.has(explicit)) return explicit;
@@ -2303,6 +2310,7 @@ function normalizePermissionPreset(value, settings = {}) {
 function normalizeSessionSettings(settings = {}) {
   const merged = { ...defaultSessionSettings, ...(settings || {}) };
   merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort);
+  merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
   merged.permissionPreset = normalizePermissionPreset(merged.permissionPreset, merged);
   Object.assign(merged, permissionPresets[merged.permissionPreset]);
   if (!allowedApprovalPolicies.has(merged.approvalPolicy)) {
@@ -2320,6 +2328,7 @@ function applySessionSettings(settings, persist = false) {
   form.elements.permissionPreset.value = merged.permissionPreset;
   form.elements.webSearch.checked = Boolean(merged.webSearch);
   form.elements.extraConfig.value = merged.extraConfig || "";
+  if (form.elements.reviewCheckpointInterval) form.elements.reviewCheckpointInterval.value = merged.reviewCheckpointInterval;
   if (persist) scopedSet("autoResearchSessionSettings", JSON.stringify(merged));
   renderSettingsSummary(merged);
   syncComposerSettings(merged);
@@ -2341,6 +2350,7 @@ function settingsLabel(settings) {
   if (normalized.model) parts.push(normalized.model);
   parts.push(labelForReasoning(normalized.reasoningEffort));
   parts.push(permissionPresets[normalized.permissionPreset]?.label || "Default permissions");
+  parts.push(`review ${normalized.reviewCheckpointInterval}`);
   if (normalized.webSearch) parts.push("web");
   return parts.join(" / ");
 }
@@ -2378,6 +2388,7 @@ function codexSettingsFromModal() {
     ...permissionPresets[permissionPreset],
     webSearch: Boolean(data.get("settingsWebSearch")),
     extraConfig: String(data.get("settingsExtraConfig") || "").trim(),
+    reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("settingsReviewCheckpointInterval")),
   };
 }
 
@@ -2390,6 +2401,7 @@ function hydrateSettingsDialog(settings) {
   form.elements.settingsPermissionPreset.value = codex.permissionPreset;
   form.elements.settingsWebSearch.checked = Boolean(codex.webSearch);
   form.elements.settingsExtraConfig.value = codex.extraConfig || "";
+  if (form.elements.settingsReviewCheckpointInterval) form.elements.settingsReviewCheckpointInterval.value = codex.reviewCheckpointInterval;
 
   const envPresent = settings?.env_present || {};
   const keys = settingsSecretKeys.length ? settingsSecretKeys : Object.keys(secretKeyLabels);
@@ -2743,6 +2755,19 @@ function formatStatusText(value, fallback = "Unknown") {
   return text || fallback;
 }
 
+function formatStopReason(value) {
+  const reason = String(value || "").trim();
+  const labels = {
+    all_reviewer_gates_passed: "Reviewer gates passed",
+    gate_requires_human_input: "Needs human input",
+    review_checkpoint_reached: "Review checkpoint reached",
+    paused_by_user: "Paused by user",
+    cleared_by_user: "Cleared by user",
+    stopped_by_user: "Stopped by user",
+  };
+  return labels[reason] || formatStatusText(reason.replaceAll("_", " "), "none");
+}
+
 function statusMetricHtml(label, value, tone = "") {
   return `
     <div class="status-metric ${tone ? `is-${escapeHtml(tone)}` : ""}">
@@ -2819,6 +2844,7 @@ function statusSettingsHtml(settings = {}) {
       ${statusMetricHtml("Model", settings.model || "Default")}
       ${statusMetricHtml("Reasoning", settings.reasoning || "medium")}
       ${statusMetricHtml("Permissions", permission || "Default")}
+      ${statusMetricHtml("Review checkpoint", `${settings.review_checkpoint_interval || 100} turns`)}
       ${statusMetricHtml("Web", settings.web_search ? "Live search" : "Off")}
     </div>
   `;
@@ -2829,6 +2855,11 @@ function statusCardHtml(payload, entry) {
   const process = payload.process || {};
   const events = payload.events || {};
   const gate = payload.gate || "missing";
+  const iteration = Number.isFinite(Number(payload.loop_iteration)) ? Number(payload.loop_iteration) : 0;
+  const interval = Number.isFinite(Number(payload.review_checkpoint_interval)) && Number(payload.review_checkpoint_interval) > 0 ? Number(payload.review_checkpoint_interval) : 100;
+  const checkpoint = Number.isFinite(Number(payload.loop_review_checkpoint_iteration)) && Number(payload.loop_review_checkpoint_iteration) > 0
+    ? Number(payload.loop_review_checkpoint_iteration)
+    : iteration + interval;
   return `
     <article class="transcript-message assistant is-status-card" data-transcript-id="${escapeHtml(entry?.id || "")}">
       <div class="status-card">
@@ -2841,9 +2872,11 @@ function statusCardHtml(payload, entry) {
         </div>
         <div class="status-card-grid">
           ${statusMetricHtml("Goal loop", payload.goal_loop || "paused", ["active", "passed"].includes(payload.goal_loop) ? "active" : "")}
+          ${statusMetricHtml("Iteration", iteration)}
+          ${statusMetricHtml("Next review", checkpoint)}
           ${statusMetricHtml("Trials", `${payload.trials_reported || 0} reported`)}
           ${statusMetricHtml("Gate", gate, gate === "pass" ? "active" : "")}
-          ${statusMetricHtml("Stop reason", payload.stop_reason || "none")}
+          ${statusMetricHtml("Stop reason", formatStopReason(payload.stop_reason))}
           ${statusMetricHtml("Events", `${events.raw_logs || 0} raw · ${events.transcript || 0} shown`)}
           ${statusMetricHtml("Process", process.active ? `pid ${process.pid}` : "not running", process.active ? "active" : "")}
         </div>

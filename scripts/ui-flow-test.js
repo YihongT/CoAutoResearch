@@ -291,6 +291,7 @@ function loadAppContext() {
     };
     globalThis.__messageHtml = (index = 0) => framingMessageHtml(localMessages[index]);
     globalThis.__sessionTimelineProbe = () => sessionTimelineHtml(sessionTranscriptEntries());
+    globalThis.__statusCardProbe = (payload) => statusCardHtml(payload, { id: "status-test" });
     `,
     context
   );
@@ -512,6 +513,33 @@ function testPassedGoalDoesNotShowStaleRunningTrial() {
   assert.equal(html.includes("Trial 6"), true, "passed goals should default to the latest reported trial");
 }
 
+function testStatusCardShowsReviewCheckpoint() {
+  const app = loadAppContext();
+  const html = app.run(`__statusCardProbe({
+    kind: "status_card",
+    session_id: "sid",
+    run_status: "completed",
+    goal_loop: "paused",
+    loop_iteration: 37,
+    loop_review_checkpoint_iteration: 100,
+    review_checkpoint_interval: 100,
+    trials_reported: 4,
+    gate: "continue",
+    stop_reason: "review_checkpoint_reached",
+    settings: { review_checkpoint_interval: 100 },
+    process: { active: false },
+    events: { raw_logs: 12, transcript: 5 },
+    limits: [],
+    limitations: []
+  })`);
+  assert.equal(html.includes("Iteration"), true, "status card should label current loop iteration");
+  assert.equal(html.includes(">37<"), true, "status card should show current loop iteration");
+  assert.equal(html.includes("Next review"), true, "status card should label next human review checkpoint");
+  assert.equal(html.includes(">100<"), true, "status card should show next human review checkpoint");
+  assert.equal(html.includes("Review checkpoint reached"), true, "status card should humanize checkpoint stop reason");
+  assert.equal(html.includes("Review checkpoint"), true, "Codex settings should show checkpoint interval");
+}
+
 function testThemeModePersistsAndApplies() {
   const app = loadAppContext();
   let theme = app.run('__themeState()');
@@ -606,6 +634,7 @@ await testEditTruncatesLaterConversationBeforeResend();
 await testLaunchGoalMessageBeforeBackendWork();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
 testPassedGoalDoesNotShowStaleRunningTrial();
+testStatusCardShowsReviewCheckpoint();
 testThemeModePersistsAndApplies();
 testComposerPromptInsertionIsIdempotent();
 testManuscriptPanelRendersFigureDescriptions();

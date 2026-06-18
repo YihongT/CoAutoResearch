@@ -480,7 +480,7 @@
           <div>
             <p class="eyebrow">Autoresearch loop</p>
             <h2 id="launch-dialog-title">Start autoresearch.</h2>
-            <p>Codex will continue this same session until the reviewer gate passes or you stop it.</p>
+            <p>Codex will continue this same session until reviewer gates pass, human input is needed, or the review checkpoint is reached.</p>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-launch-close aria-label="Close launch dialog" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
@@ -514,6 +514,11 @@
               <option value="auto-review">Auto-review</option>
               <option value="full-access">Full access</option>
             </select>
+          </label>
+          <label class="field">
+            <span>Human review checkpoint</span>
+            <input name="reviewCheckpointInterval" type="number" min="1" step="1" inputmode="numeric" value="100" />
+            <small>Pause for human review after this many Codex turns if reviewer gates have not passed. You can resume afterward.</small>
           </label>
           <label class="toggle-field">
             <input name="webSearch" type="checkbox" />
@@ -645,6 +650,11 @@
                   <option value="auto-review">Auto-review</option>
                   <option value="full-access">Full access</option>
                 </select>
+              </label>
+              <label class="field">
+                <span>Human review checkpoint</span>
+                <input name="settingsReviewCheckpointInterval" type="number" min="1" step="1" inputmode="numeric" value="100" />
+                <small>Pause for human review after this many Codex turns if reviewer gates have not passed. You can resume afterward.</small>
               </label>
               <label class="toggle-field">
                 <input name="settingsWebSearch" type="checkbox" />

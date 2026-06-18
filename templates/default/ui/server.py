@@ -28,7 +28,8 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 UI_DIR = Path(__file__).resolve().parent
 DEFAULT_PROJECT_ROOT = UI_DIR.parent
 PACKAGE_TEMPLATE_ROOT = Path(os.path.expanduser(os.environ.get("COAUTO_TEMPLATE_ROOT", ""))).resolve() if os.environ.get("COAUTO_TEMPLATE_ROOT") else None
-AUTORESEARCH_MAX_ITERATIONS = 50
+DEFAULT_REVIEW_CHECKPOINT_INTERVAL = 100
+AUTORESEARCH_MAX_ITERATIONS = DEFAULT_REVIEW_CHECKPOINT_INTERVAL
 PORT_FALLBACK_ATTEMPTS = 50
 FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection"
 MAX_TEXT_BYTES = 500_000
@@ -109,6 +110,7 @@ def new_research_session() -> dict[str, Any]:
         "loop_active": False,
         "loop_iteration": 0,
         "loop_max_iterations": AUTORESEARCH_MAX_ITERATIONS,
+        "loop_review_checkpoint_iteration": 0,
         "loop_stop_reason": "",
         "gate": {},
         "process": None,
@@ -337,6 +339,7 @@ class ProjectContext:
                 "loop_active",
                 "loop_iteration",
                 "loop_max_iterations",
+                "loop_review_checkpoint_iteration",
                 "loop_stop_reason",
                 "gate",
             ):
@@ -645,6 +648,7 @@ DEFAULT_CODEX_SETTINGS = {
     "approvalPolicy": "on-request",
     "webSearch": True,
     "extraConfig": "",
+    "reviewCheckpointInterval": DEFAULT_REVIEW_CHECKPOINT_INTERVAL,
 }
 ALLOWED_CODEX_MODELS = {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"}
 SECRET_ENV_KEYS = [
@@ -681,6 +685,14 @@ def apply_permission_preset(settings: dict[str, Any]) -> dict[str, Any]:
     normalized["permissionPreset"] = preset
     normalized.update(PERMISSION_PRESETS[preset])
     return normalized
+
+
+def normalize_review_checkpoint_interval(value: Any) -> int:
+    try:
+        interval = int(str(value).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_REVIEW_CHECKPOINT_INTERVAL
+    return interval if interval > 0 else DEFAULT_REVIEW_CHECKPOINT_INTERVAL
 
 
 WATCHED_PATHS = [
@@ -762,6 +774,7 @@ def load_research_session_runtime() -> None:
             "loop_active",
             "loop_iteration",
             "loop_max_iterations",
+            "loop_review_checkpoint_iteration",
             "loop_stop_reason",
             "gate",
         ):
@@ -796,6 +809,9 @@ def load_ui_settings() -> dict[str, Any]:
             if key == "permissionPreset":
                 preset = str(value).strip()
                 settings["codex"][key] = preset if preset in PERMISSION_PRESETS else DEFAULT_CODEX_SETTINGS["permissionPreset"]
+                continue
+            if key == "reviewCheckpointInterval":
+                settings["codex"][key] = normalize_review_checkpoint_interval(value)
                 continue
             settings["codex"][key] = value
         settings["codex"]["reasoningEffort"] = (
@@ -836,6 +852,8 @@ def save_ui_settings(payload: dict[str, Any]) -> dict[str, Any]:
             elif key == "reasoningEffort":
                 reasoning = str(codex[key]).strip()
                 merged_codex[key] = reasoning if reasoning in ALLOWED_REASONING_EFFORTS else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
+            elif key == "reviewCheckpointInterval":
+                merged_codex[key] = normalize_review_checkpoint_interval(codex[key])
             else:
                 merged_codex[key] = codex[key]
     merged_codex = apply_permission_preset(merged_codex)
@@ -2746,7 +2764,10 @@ def normalize_research_settings(raw: Any) -> dict[str, Any]:
     if "extraConfig" in payload:
         extra_config = str(payload.get("extraConfig", "")).strip()
         settings["extraConfig"] = extra_config[:4000]
+    if "reviewCheckpointInterval" in payload:
+        settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(payload.get("reviewCheckpointInterval"))
     settings["reasoningEffort"] = settings["reasoningEffort"] if settings["reasoningEffort"] in ALLOWED_REASONING_EFFORTS else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
+    settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
     return apply_permission_preset(settings)
 
 
@@ -3033,6 +3054,12 @@ def research_session_snapshot() -> dict[str, Any]:
         RESEARCH_SESSION["gate"] = gate
         loop_active = bool(RESEARCH_SESSION.get("loop_active"))
         loop_stop_reason = RESEARCH_SESSION.get("loop_stop_reason", "")
+        loop_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        settings = dict(RESEARCH_SESSION.get("settings") or {})
+        review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+        loop_review_checkpoint_iteration = int(RESEARCH_SESSION.get("loop_review_checkpoint_iteration") or 0)
+        if loop_review_checkpoint_iteration <= 0:
+            loop_review_checkpoint_iteration = loop_iteration + review_checkpoint_interval
         if gate_has_passed(gate):
             loop_active = False
             loop_stop_reason = "all_reviewer_gates_passed"
@@ -3052,8 +3079,10 @@ def research_session_snapshot() -> dict[str, Any]:
             "raw_logs": list(RESEARCH_SESSION.get("raw_logs", []))[-2000:],
             "transcript": list(RESEARCH_SESSION.get("transcript", []))[-600:],
             "loop_active": loop_active,
-            "loop_iteration": int(RESEARCH_SESSION.get("loop_iteration") or 0),
+            "loop_iteration": loop_iteration,
             "loop_max_iterations": int(RESEARCH_SESSION.get("loop_max_iterations") or AUTORESEARCH_MAX_ITERATIONS),
+            "loop_review_checkpoint_iteration": loop_review_checkpoint_iteration,
+            "review_checkpoint_interval": review_checkpoint_interval,
             "loop_stop_reason": loop_stop_reason,
             "gate": gate,
         }
@@ -3100,6 +3129,26 @@ def stop_autoresearch_loop(reason: str, gate: dict[str, Any] | None = None) -> N
     persist_research_session()
 
 
+def set_review_checkpoint_window(settings: dict[str, Any] | None = None, base_iteration: int | None = None) -> int:
+    interval = normalize_review_checkpoint_interval((settings or {}).get("reviewCheckpointInterval"))
+    with RESEARCH_LOCK:
+        if base_iteration is None:
+            base_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        checkpoint_iteration = int(base_iteration) + interval
+        RESEARCH_SESSION["loop_review_checkpoint_iteration"] = checkpoint_iteration
+        RESEARCH_SESSION["loop_max_iterations"] = interval
+    return checkpoint_iteration
+
+
+def current_review_checkpoint_iteration(settings: dict[str, Any] | None = None) -> int:
+    with RESEARCH_LOCK:
+        checkpoint_iteration = int(RESEARCH_SESSION.get("loop_review_checkpoint_iteration") or 0)
+        current_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+    if checkpoint_iteration > 0:
+        return checkpoint_iteration
+    return set_review_checkpoint_window(settings, current_iteration)
+
+
 def continue_autoresearch_loop_prompt(gate: dict[str, Any]) -> str:
     status = gate.get("raw_status") or gate.get("status") or "missing"
     summary = gate.get("summary") or "No reviewer gate summary yet."
@@ -3141,7 +3190,6 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         mode = str(RESEARCH_SESSION.get("mode") or "")
         settings = dict(RESEARCH_SESSION.get("settings") or {})
         iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
-        max_iterations = int(RESEARCH_SESSION.get("loop_max_iterations") or AUTORESEARCH_MAX_ITERATIONS)
     if not loop_active or mode not in {"goal", "command"}:
         return
     gate = read_autoresearch_gate()
@@ -3160,9 +3208,12 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         stop_autoresearch_loop("gate_requires_human_input", gate)
         append_research_log("Autoresearch loop paused because the gate requires human input.")
         return
-    if iteration >= max_iterations:
-        stop_autoresearch_loop("max_iterations_reached", gate)
-        append_research_log(f"Autoresearch loop paused after {iteration} Codex turns without all reviewer gates passing.")
+    checkpoint_iteration = current_review_checkpoint_iteration(settings)
+    if iteration >= checkpoint_iteration:
+        stop_autoresearch_loop("review_checkpoint_reached", gate)
+        append_research_log(
+            f"Autoresearch loop paused for human review at iteration {iteration}; reviewer gates have not all passed."
+        )
         return
     append_research_log(
         f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; resuming same Codex session for iteration {iteration + 1}."
@@ -3214,6 +3265,7 @@ def start_research_run(
     settings_payload: Any | None = None,
     display_prompt: str | None = None,
     loop_active: bool | None = None,
+    reset_review_checkpoint: bool = False,
 ) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt:
@@ -3228,6 +3280,10 @@ def start_research_run(
         previous_loop_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
         next_loop_active = bool(RESEARCH_SESSION.get("loop_active")) if loop_active is None else bool(loop_active)
         next_loop_iteration = previous_loop_iteration + 1 if next_loop_active and mode == "goal" else previous_loop_iteration
+        review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+        loop_review_checkpoint_iteration = int(RESEARCH_SESSION.get("loop_review_checkpoint_iteration") or 0)
+        if next_loop_active and (reset_review_checkpoint or loop_review_checkpoint_iteration <= 0):
+            loop_review_checkpoint_iteration = previous_loop_iteration + review_checkpoint_interval
         if not resume:
             RESEARCH_SESSION["logs"] = []
             RESEARCH_SESSION["raw_logs"] = []
@@ -3245,7 +3301,8 @@ def start_research_run(
                 "returncode": None,
                 "loop_active": next_loop_active,
                 "loop_iteration": next_loop_iteration,
-                "loop_max_iterations": int(RESEARCH_SESSION.get("loop_max_iterations") or AUTORESEARCH_MAX_ITERATIONS),
+                "loop_max_iterations": review_checkpoint_interval,
+                "loop_review_checkpoint_iteration": loop_review_checkpoint_iteration,
                 "loop_stop_reason": "" if next_loop_active else RESEARCH_SESSION.get("loop_stop_reason", ""),
                 "process": None,
             }
@@ -3480,6 +3537,7 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
         resume = should_resume_research_session()
         RESEARCH_SESSION["loop_iteration"] = 0
         RESEARCH_SESSION["loop_max_iterations"] = AUTORESEARCH_MAX_ITERATIONS
+        RESEARCH_SESSION["loop_review_checkpoint_iteration"] = 0
         RESEARCH_SESSION["loop_stop_reason"] = ""
     ensure_autoresearch_gate_for_loop()
     session = start_research_run(
@@ -3489,6 +3547,7 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
         settings_payload=payload.get("settings"),
         display_prompt="Start autoresearch loop with /goal.",
         loop_active=True,
+        reset_review_checkpoint=True,
     )
     return {"files": result, "session": session}
 
@@ -3690,6 +3749,8 @@ def build_status_payload() -> dict[str, Any]:
         "goal_loop": goal_loop,
         "loop_iteration": int(session.get("loop_iteration") or 0),
         "loop_max_iterations": int(session.get("loop_max_iterations") or AUTORESEARCH_MAX_ITERATIONS),
+        "loop_review_checkpoint_iteration": int(session.get("loop_review_checkpoint_iteration") or 0),
+        "review_checkpoint_interval": int(session.get("review_checkpoint_interval") or DEFAULT_REVIEW_CHECKPOINT_INTERVAL),
         "trials_reported": len(completed_trials),
         "gate": gate.get("raw_status") or gate.get("status") or "missing",
         "gate_summary": gate.get("summary") or "",
@@ -3703,6 +3764,7 @@ def build_status_payload() -> dict[str, Any]:
             "sandbox": settings.get("sandbox") or "",
             "approval": settings.get("approvalPolicy") or "",
             "web_search": bool(settings.get("webSearch")),
+            "review_checkpoint_interval": normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval")),
         },
         "process": {
             "active": bool(pid),
@@ -3807,11 +3869,17 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
                 RESEARCH_SESSION["gate"] = gate
             persist_research_session()
             return append_local_command_result(command, "The autoresearch goal is already passed; no new iteration was started.")
+        settings = normalize_research_settings(settings_payload)
+        review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
         with RESEARCH_LOCK:
             proc = RESEARCH_SESSION.get("process")
             running = bool(proc and proc.poll() is None)
+            current_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
             RESEARCH_SESSION["loop_active"] = True
             RESEARCH_SESSION["loop_stop_reason"] = ""
+            RESEARCH_SESSION["settings"] = settings
+            RESEARCH_SESSION["loop_max_iterations"] = review_checkpoint_interval
+            RESEARCH_SESSION["loop_review_checkpoint_iteration"] = current_iteration + review_checkpoint_interval
         persist_research_session()
         if running:
             return append_local_command_result(command, "Goal loop resumed. The next iteration will start after the current Codex turn finishes.")
@@ -3821,9 +3889,10 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
                 continue_autoresearch_loop_prompt(gate),
                 "goal",
                 resume=True,
-                settings_payload=settings_payload,
+                settings_payload=settings,
                 display_prompt=command,
                 loop_active=True,
+                reset_review_checkpoint=True,
             ),
         }
     return None

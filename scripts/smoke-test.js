@@ -750,6 +750,62 @@ try {
     throw new Error(`gate parser smoke test returned unexpected output: ${gateParserOutput}`);
   }
 
+  const checkpointScript = [
+    "import importlib.util, json, os, pathlib",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+    "module._CONTEXT.project = context",
+    "state = context.research_state_path",
+    "continue_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: continue\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\"",
+    "pass_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n\nNext action: none.\n\"\"\"",
+    "assert module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL == 100",
+    "assert module.normalize_review_checkpoint_interval(None) == 100",
+    "assert module.normalize_research_settings({'reviewCheckpointInterval': '25'})['reviewCheckpointInterval'] == 25",
+    "module.save_ui_settings({'codex': {'reviewCheckpointInterval': '25'}})",
+    "assert module.load_ui_settings()['codex']['reviewCheckpointInterval'] == 25",
+    "state.write_text(continue_gate, encoding='utf-8')",
+    "context.session.update({'loop_active': True, 'mode': 'goal', 'loop_iteration': 100, 'loop_review_checkpoint_iteration': 100, 'settings': {'reviewCheckpointInterval': 100}, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "module.maybe_continue_autoresearch_loop(0)",
+    "assert context.session['loop_active'] is False, context.session",
+    "assert context.session['loop_stop_reason'] == 'review_checkpoint_reached', context.session",
+    "state.write_text(pass_gate, encoding='utf-8')",
+    "context.session.update({'loop_active': True, 'mode': 'goal', 'loop_iteration': 2, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': '', 'settings': {'reviewCheckpointInterval': 100}, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "module.maybe_continue_autoresearch_loop(0)",
+    "assert context.session['loop_active'] is False, context.session",
+    "assert context.session['loop_stop_reason'] == 'all_reviewer_gates_passed', context.session",
+    "state.write_text(continue_gate, encoding='utf-8')",
+    "context.session.update({'loop_active': False, 'mode': 'goal', 'loop_iteration': 100, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': 'review_checkpoint_reached', 'settings': {'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000000', 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "module.start_research_run = lambda *args, **kwargs: {'ok': True, 'kwargs': kwargs}",
+    "resumed = module.handle_local_slash_command('/goal resume', '/goal resume', {'reviewCheckpointInterval': 25})",
+    "assert resumed and resumed.get('local') is True, resumed",
+    "assert context.session['loop_active'] is True, context.session",
+    "assert context.session['loop_review_checkpoint_iteration'] == 125, context.session",
+    "print(json.dumps({'default': module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL, 'checkpoint_stop': 'review_checkpoint_reached', 'resumed_checkpoint': context.session['loop_review_checkpoint_iteration']}))"
+  ].join("\n");
+  const checkpointOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    checkpointScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (
+    !checkpointOutput.includes('"default": 100') ||
+    !checkpointOutput.includes('"checkpoint_stop": "review_checkpoint_reached"') ||
+    !checkpointOutput.includes('"resumed_checkpoint": 125')
+  ) {
+    throw new Error(`checkpoint smoke test returned unexpected output: ${checkpointOutput}`);
+  }
+
   const occupied = await reserveFallbackTestPort();
   try {
     const fallbackOutput = execFileSync(python.command, [

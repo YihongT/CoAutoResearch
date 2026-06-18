@@ -839,6 +839,12 @@ h3 {
   font-weight: 650;
 }
 
+.field small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .thread {
   min-height: 0;
   overflow-y: auto;
