@@ -63,6 +63,7 @@ Use these default destinations:
 - proposals, grants, prior submissions, reviewer comments, or drafts: `resources/proposals/`
 - target venue notes, CFPs, author guidelines, seed papers, or style notes: `resources/target_venue/`
 - raw briefs and user notes: `resources/user_input/`
+- composer-uploaded files without a more specific classification: `resources/user_input/attachments/`
 - unclear or mixed materials: `resources/other/`
 
 If a filed resource later appears misclassified, move it only when that improves clarity and record the decision in `RESOURCE_MANIFEST.md` or the relevant trial report.

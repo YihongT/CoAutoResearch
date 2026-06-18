@@ -705,6 +705,7 @@ RESOURCE_GROUPS = {
 }
 
 UPLOAD_TARGETS = {
+    "user_input": "resources/user_input/attachments",
     "ongoing_work": "resources/ongoing_work",
     "proposals": "resources/proposals",
     "literature": "resources/literature",
@@ -714,6 +715,7 @@ UPLOAD_TARGETS = {
 }
 
 RESOURCE_LINK_TARGETS = {
+    "user_input": "resources/user_input/attachments",
     "ongoing_work": "resources/ongoing_work",
     "proposals": "resources/proposals",
     "literature": "resources/literature",

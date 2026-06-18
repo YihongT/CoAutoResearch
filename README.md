@@ -158,6 +158,13 @@ The left sidebar will list `test`, `paper-a`, and any other generated projects
 under that folder. Each project keeps its own files, runtime state, and Codex
 session.
 
+The composer `+` button attaches local files to the next message. By default,
+these uploads are copied into the current project's
+`resources/user_input/attachments/` folder. You can reclassify an attachment in
+the attachment chip before sending, and uploaded or linked materials are indexed
+in `resources/user_input/RESOURCE_MANIFEST.md` so the agent can cite the same
+project-local record later.
+
 In dashboard mode, the sidebar `+` button can also create a new project from the
 same immutable template. This is the simplest path for normal use; `init`
 remains available for scripting.

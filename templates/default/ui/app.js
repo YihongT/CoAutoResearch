@@ -66,6 +66,7 @@ const allowedThemeModes = new Set(["light", "night"]);
 let currentThemeMode = normalizeThemeMode(localStorage.getItem("coAutoResearchTheme") || document.documentElement.dataset.theme || "light");
 
 const resourceCategories = {
+  user_input: "User input",
   ongoing_work: "Ongoing work",
   literature: "Papers",
   proposals: "Proposal",
@@ -4049,10 +4050,10 @@ function hasDroppedDirectory(dataTransfer) {
   });
 }
 
-function addFilesFromList(files, source = "file") {
+function addFilesFromList(files, source = "file", options = {}) {
   const list = Array.from(files || []).filter(Boolean);
   if (!list.length) return 0;
-  list.forEach((file) => addUploadFile(file));
+  list.forEach((file) => addUploadFile(file, options));
   showToast(`${list.length} ${list.length === 1 ? "file" : "files"} attached from ${source}.`);
   return list.length;
 }
@@ -5133,6 +5134,13 @@ function bindEvents() {
   });
   $("#cold-file-editor").addEventListener("paste", handleAttachmentPaste);
   $("#chat-form textarea").addEventListener("paste", handleAttachmentPaste);
+  $("#composer-attach-button")?.addEventListener("click", () => {
+    $("#composer-file-input")?.click();
+  });
+  $("#composer-file-input")?.addEventListener("change", (event) => {
+    addFilesFromList(event.target.files, "file picker", { category: "user_input" });
+    event.target.value = "";
+  });
   document.addEventListener("dragover", (event) => {
     if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
     event.preventDefault();

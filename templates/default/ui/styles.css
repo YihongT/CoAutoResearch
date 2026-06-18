@@ -2753,6 +2753,44 @@ textarea:focus {
   display: none;
 }
 
+.composer-file-input {
+  display: none;
+}
+
+.composer-attach-button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  border: 1px solid rgba(32, 31, 27, 0.14);
+  border-radius: 50%;
+  background: rgba(255, 253, 248, 0.92);
+  color: var(--muted);
+  box-shadow: 0 12px 26px rgba(31, 33, 28, 0.06);
+}
+
+.composer-attach-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.composer-attach-button:hover {
+  border-color: rgba(82, 111, 92, 0.4);
+  color: var(--accent);
+  background: #f4f7ef;
+}
+
+.composer-attach-button:focus-visible {
+  outline: 2px solid rgba(82, 111, 92, 0.45);
+  outline-offset: 3px;
+}
+
 .attachment-chip {
   position: relative;
   display: grid;
@@ -7362,7 +7400,13 @@ body.has-brief-dock {
   align-items: center !important;
   gap: 10px !important;
   min-height: 78px !important;
-  padding: 14px 18px 14px 30px !important;
+  padding: 14px 18px !important;
+}
+
+.brief-editor-shell.is-framing-dock .composer-attach-button {
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
 }
 
 .brief-editor-shell.is-framing-dock #cold-file-editor {

@@ -179,6 +179,12 @@
 	                      <div class="editor-workbench is-source" id="cold-editor-workbench">
 	                        <div class="attachment-tray" id="brief-attachment-tray" aria-live="polite"></div>
 	                        <div class="brief-composer-row" aria-label="Codex send settings">
+	                          <input class="composer-file-input" id="composer-file-input" type="file" multiple hidden />
+	                          <button class="composer-attach-button" id="composer-attach-button" type="button" aria-label="Attach local files" title="Attach local files">
+	                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+	                              <path d="M12 5v14M5 12h14" />
+	                            </svg>
+	                          </button>
 	                          <textarea id="cold-file-editor" spellcheck="false" aria-label="Research brief" placeholder="Research topic, problem, scope, and data or materials to use..."></textarea>
 	                          <div class="brief-run-controls">
 	                            <label>

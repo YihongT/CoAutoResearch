@@ -73,6 +73,14 @@ co-autoresearch-projects/
 
 Projects created from the UI live there.
 
+## Attach Files
+
+Use the composer `+` button to attach local files to the next message. The UI
+also supports paste and drag-and-drop for files. The `+` button files are copied
+into `resources/user_input/attachments/` by default. You can reclassify an
+attachment in its chip before sending, and uploaded or linked materials are
+recorded in `resources/user_input/RESOURCE_MANIFEST.md`.
+
 ## Return Later
 
 If you closed the browser or terminal, you can find and reopen existing

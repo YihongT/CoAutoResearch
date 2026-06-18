@@ -186,6 +186,7 @@ try {
   if (
     !resourceIntakeInstructions.includes("## Embedded Resource Scan") ||
     !resourceIntakeInstructions.includes("A general bibliography embedded in an ongoing manuscript is not automatically a target-venue seed-paper set") ||
+    !resourceIntakeInstructions.includes("resources/user_input/attachments/") ||
     !conversionInstructions.includes("Do not interpret an empty `resources/target_venue/papers/` folder as proof that no literature exists") ||
     !executionInstructions.includes("A manuscript `references.bib` or bibliography inside `resources/ongoing_work/` is literature grounding") ||
     !resourceManifestTemplate.includes("## Embedded Resource Surfacing") ||
@@ -322,6 +323,24 @@ try {
     !serverPy.includes('display_message = "Attached resources."')
   ) {
     throw new Error("server must preserve goal-launch messages and keep attachment-only chat turns visible");
+  }
+  if (
+    !indexHtml.includes('id="composer-attach-button"') ||
+    !indexHtml.includes('id="composer-file-input"') ||
+    !indexHtml.includes('type="file" multiple hidden') ||
+    !appJs.includes('$("#composer-attach-button")?.addEventListener("click"') ||
+    !appJs.includes('$("#composer-file-input")?.addEventListener("change"') ||
+    !appJs.includes('addFilesFromList(event.target.files, "file picker", { category: "user_input" })') ||
+    !appJs.includes('user_input: "User input"') ||
+    !serverPy.includes('"user_input": "resources/user_input/attachments"') ||
+    !stylesCss.includes(".composer-attach-button") ||
+    !stylesCss.includes(".composer-file-input") ||
+    !readme.includes("composer `+` button") ||
+    !readme.includes("resources/user_input/attachments/") ||
+    !gettingStartedDocs.includes("resources/user_input/attachments/") ||
+    !gettingStartedDocs.includes("resources/user_input/RESOURCE_MANIFEST.md")
+  ) {
+    throw new Error("composer must expose a local file attach button and document project-local attachment storage");
   }
   if (
     !serverPy.includes("WinError 10013") ||
