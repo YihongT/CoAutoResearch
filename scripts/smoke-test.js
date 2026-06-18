@@ -14,6 +14,7 @@ const cli = path.join(root, "bin", "auto-research.js");
 const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "co-auto-research-smoke-"));
 const projectDir = path.join(tempRoot, "project");
 const projectTwoDir = path.join(tempRoot, "project-two");
+let nextTestPort = 32100;
 
 function findPython() {
   const candidates = [
@@ -29,28 +30,16 @@ function findPython() {
   throw new Error("No Python executable found for smoke tests.");
 }
 
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      resolve({ server, port });
-    });
-  });
+async function freePort() {
+  for (let attempts = 0; attempts < 1000; attempts += 1) {
+    const port = nextTestPort;
+    nextTestPort += 1;
+    const server = await tryReservePort(port);
+    if (!server) continue;
+    await closeServer(server);
+    return port;
+  }
+  throw new Error("Could not find a free low-numbered localhost port for the smoke test.");
 }
 
 function tryReservePort(port) {
@@ -112,12 +101,22 @@ function waitForOpenPort(child, timeoutMs = 8000) {
   });
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 750) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function waitForJson(url, timeoutMs = 8000) {
   const started = Date.now();
   let lastError = null;
   while (Date.now() - started < timeoutMs) {
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       if (response.ok) return await response.json();
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
@@ -133,7 +132,7 @@ async function waitForHtml(url, timeoutMs = 8000) {
   let lastError = null;
   while (Date.now() - started < timeoutMs) {
     try {
-      const response = await fetch(url);
+      const response = await fetchWithTimeout(url);
       const text = await response.text();
       const contentType = response.headers.get("content-type") || "";
       if (response.ok && contentType.includes("text/html") && text.includes("CoAutoResearch")) return text;
@@ -147,11 +146,11 @@ async function waitForHtml(url, timeoutMs = 8000) {
 }
 
 async function postJson(url, payload) {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
-  });
+  }, 4000);
   const body = await response.json();
   if (!response.ok || body.ok === false) {
     throw new Error(body.error || `HTTP ${response.status}`);
@@ -615,14 +614,18 @@ try {
   const singlePort = await freePort();
   const singleServer = spawn("node", [cli, "ui", "--project", projectDir, "--host", "127.0.0.1", "--port", String(singlePort), "--no-open"], {
     cwd: root,
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "pipe"]
   });
   try {
-    const payload = await waitForJson(`http://127.0.0.1:${singlePort}/api/projects`);
+    const singleBoundPort = await waitForOpenPort(singleServer);
+    if (singleBoundPort !== singlePort) {
+      throw new Error(`single-project UI bound unexpected port ${singleBoundPort}, expected ${singlePort}`);
+    }
+    const payload = await waitForJson(`http://127.0.0.1:${singleBoundPort}/api/projects`);
     if (payload.multi_project || (payload.projects || []).length !== 1) {
       throw new Error("single-project UI did not start in single-project mode");
     }
-    const created = await postJson(`http://127.0.0.1:${singlePort}/api/projects`, { name: "sibling project" });
+    const created = await postJson(`http://127.0.0.1:${singleBoundPort}/api/projects`, { name: "sibling project" });
     const names = (created.projects || []).map((project) => project.display_name).sort();
     if (!created.multi_project || JSON.stringify(names) !== JSON.stringify(["project", "project-two", "sibling project"])) {
       throw new Error(`single-project create did not promote to dashboard: ${names.join(", ")}`);
@@ -641,15 +644,19 @@ try {
   await fsp.mkdir(defaultCwd);
   const defaultServer = spawn("node", [cli, "ui", "--host", "127.0.0.1", "--port", String(defaultPort), "--no-open"], {
     cwd: defaultCwd,
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "pipe"]
   });
   try {
-    const payload = await waitForJson(`http://127.0.0.1:${defaultPort}/api/projects`);
+    const defaultBoundPort = await waitForOpenPort(defaultServer);
+    if (defaultBoundPort !== defaultPort) {
+      throw new Error(`default UI bound unexpected port ${defaultBoundPort}, expected ${defaultPort}`);
+    }
+    const payload = await waitForJson(`http://127.0.0.1:${defaultBoundPort}/api/projects`);
     if (!payload.multi_project || (payload.projects || []).length !== 0) {
       throw new Error("default UI did not start as an empty dashboard");
     }
-    await waitForHtml(`http://127.0.0.1:${defaultPort}/`);
-    const created = await postJson(`http://127.0.0.1:${defaultPort}/api/projects`, { name: "from ui" });
+    await waitForHtml(`http://127.0.0.1:${defaultBoundPort}/`);
+    const created = await postJson(`http://127.0.0.1:${defaultBoundPort}/api/projects`, { name: "from ui" });
     if (!created.multi_project || created.project?.display_name !== "from ui") {
       throw new Error("default dashboard could not create a project from the UI API");
     }
@@ -665,34 +672,38 @@ try {
   const port = await freePort();
   const server = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(port), "--no-open"], {
     cwd: root,
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "pipe"]
   });
   try {
-    const payload = await waitForJson(`http://127.0.0.1:${port}/api/projects`);
+    const boundPort = await waitForOpenPort(server);
+    if (boundPort !== port) {
+      throw new Error(`multi-project UI bound unexpected port ${boundPort}, expected ${port}`);
+    }
+    const payload = await waitForJson(`http://127.0.0.1:${boundPort}/api/projects`);
     const names = (payload.projects || []).map((project) => project.display_name).sort();
     if (JSON.stringify(names) !== JSON.stringify(["project", "project-two", "sibling project"])) {
       throw new Error(`multi-project API returned unexpected projects: ${names.join(", ")}`);
     }
-    const created = await postJson(`http://127.0.0.1:${port}/api/projects`, { name: "ui project" });
+    const created = await postJson(`http://127.0.0.1:${boundPort}/api/projects`, { name: "ui project" });
     if (created.project?.display_name !== "ui project") {
       throw new Error("UI project creation did not preserve display name");
     }
     await fsp.access(path.join(tempRoot, "ui_project", "AGENTS.md"));
     await fsp.access(path.join(tempRoot, "ui_project", ".co-auto-research", "project.json"));
-    const renamed = await postJson(`http://127.0.0.1:${port}/api/projects/rename`, { project: created.project.id, name: "renamed ui project" });
+    const renamed = await postJson(`http://127.0.0.1:${boundPort}/api/projects/rename`, { project: created.project.id, name: "renamed ui project" });
     if (renamed.project?.display_name !== "renamed ui project") {
       throw new Error("project rename did not update display name");
     }
     let deleteRejected = false;
     try {
-      await postJson(`http://127.0.0.1:${port}/api/projects/delete`, { project: created.project.id, confirm: "ui project" });
+      await postJson(`http://127.0.0.1:${boundPort}/api/projects/delete`, { project: created.project.id, confirm: "ui project" });
     } catch {
       deleteRejected = true;
     }
     if (!deleteRejected) {
       throw new Error("project deletion did not require exact confirmation name");
     }
-    const deleted = await postJson(`http://127.0.0.1:${port}/api/projects/delete`, { project: created.project.id, confirm: "renamed ui project" });
+    const deleted = await postJson(`http://127.0.0.1:${boundPort}/api/projects/delete`, { project: created.project.id, confirm: "renamed ui project" });
     if ((deleted.projects || []).some((project) => project.id === created.project.id)) {
       throw new Error("deleted project still appears in project list");
     }
