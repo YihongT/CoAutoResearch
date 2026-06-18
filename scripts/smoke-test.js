@@ -53,6 +53,34 @@ function reservePort() {
   });
 }
 
+function tryReservePort(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(null));
+    server.listen(port, "127.0.0.1", () => resolve(server));
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+  });
+}
+
+async function reserveFallbackTestPort() {
+  for (let port = 31000; port < 32000; port += 1) {
+    const occupied = await tryReservePort(port);
+    if (!occupied) continue;
+    const next = await tryReservePort(port + 1);
+    if (next) {
+      await closeServer(next);
+      return { server: occupied, port };
+    }
+    await closeServer(occupied);
+  }
+  throw new Error("Could not reserve a contiguous fallback port pair for the UI smoke test.");
+}
+
 function waitForOpenPort(child, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     let output = "";
@@ -271,6 +299,13 @@ try {
     !serverPy.includes('display_message = "Attached resources."')
   ) {
     throw new Error("server must preserve goal-launch messages and keep attachment-only chat turns visible");
+  }
+  if (
+    !serverPy.includes("WinError 10013") ||
+    !serverPy.includes("isinstance(exc, PermissionError)") ||
+    !serverPy.includes('getattr(exc, "winerror", None) == 10013')
+  ) {
+    throw new Error("UI server port fallback must treat Windows WinError 10013 as an unavailable port");
   }
   if (!appJs.includes("maybeOpenInitialProjectDialog") || !appJs.includes("Create a project first.")) {
     throw new Error("empty dashboard must auto-open project creation and block composer submission");
@@ -594,7 +629,7 @@ try {
     throw new Error(`resource resolver did not report the external repo: ${resourceResolverOutput}`);
   }
 
-  const occupied = await reservePort();
+  const occupied = await reserveFallbackTestPort();
   const fallbackServer = spawn("node", [cli, "ui", "--projects-dir", tempRoot, "--host", "127.0.0.1", "--port", String(occupied.port), "--no-open"], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"]

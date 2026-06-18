@@ -4003,7 +4003,13 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
 
 def is_port_in_use_error(exc: OSError) -> bool:
     in_use_codes = {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", 10048)}
-    return getattr(exc, "errno", None) in in_use_codes
+    if getattr(exc, "errno", None) in in_use_codes:
+        return True
+    # On Windows, binding to a port already held by another process can surface
+    # as WinError 10013 instead of WSAEADDRINUSE.
+    if os.name == "nt" and isinstance(exc, PermissionError) and getattr(exc, "winerror", None) == 10013:
+        return True
+    return False
 
 
 def display_url_host(host: str) -> str:
