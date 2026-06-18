@@ -67,25 +67,24 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 
 ## Quick Start
 
-From this repository checkout:
-
-```bash
-node bin/auto-research.js ui
-```
-
-The CLI opens the UI in your browser after the server starts. If your terminal
-cannot open a browser, open the printed URL manually. Then click `+` in the left
-sidebar to create a project. `local-projects/` is ignored by this repository, so
-projects created while testing the package are not pushed accidentally.
-
-After npm publication, the intended flow is:
+After installing the CLI package, use:
 
 ```bash
 co-auto-research ui
 ```
 
-The CLI opens the UI automatically on local machines. The printed URL will look
-like:
+The CLI opens the UI in your browser after the server starts. If your terminal
+cannot open a browser, open the printed URL manually. Then click `+` in the left
+sidebar to create a project. Dashboard-created projects live in
+`local-projects/`.
+
+If you are running directly from a cloned repository before installing the CLI:
+
+```bash
+node bin/auto-research.js ui
+```
+
+The printed URL will look like:
 
 ```text
 http://127.0.0.1:8765
@@ -176,8 +175,7 @@ co-auto-research upgrade
   generated projects directly inside `<dir>` and create new ones from the UI.
 - `ui --port <port>` starts port selection from a different local port. If that
   port is busy, the server automatically tries the next available port.
-- `ui --open` forces browser launch; `ui --no-open` disables it. Browser launch
-  is skipped automatically in CI and SSH sessions unless `--open` is passed.
+- `ui --open` forces browser launch; `ui --no-open` disables it.
 - `ui --remote` is the recommended server mode. It disables browser launch on
   the server and prints SSH port-forwarding instructions for opening the UI
   from your local browser.
@@ -201,16 +199,6 @@ Generated projects separate the pieces that make research usable:
 
 For remote use, keep the UI bound to localhost on the server and access it with
 an SSH tunnel. See [docs/remote-server.md](docs/remote-server.md).
-
-## Development
-
-```bash
-npm test
-npm run pack:dry-run
-```
-
-The test script verifies that the template does not contain project-specific
-artifacts and runs a CLI initialization smoke test.
 
 ## Contact
 

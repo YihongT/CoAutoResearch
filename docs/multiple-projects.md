@@ -1,9 +1,3 @@
----
-layout: default
-title: Multiple Projects
-description: Run one dashboard over several generated research projects.
----
-
 # Multiple Projects
 
 CoAutoResearch can show several generated research projects in one local UI.

@@ -1,9 +1,3 @@
----
-layout: default
-title: Concepts
-description: The CoAutoResearch control model and research trajectory.
----
-
 # Concepts
 
 CoAutoResearch is a human-centered research loop. The agent can do substantial
@@ -12,7 +6,7 @@ revision.
 
 ## Research Loop
 
-```mermaid
+```{mermaid}
 flowchart TD
   H["Human brief or intervention"] --> P["PROJECT.md<br/>research direction"]
   P --> S["STATE.md<br/>current objective"]

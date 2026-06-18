@@ -1,9 +1,3 @@
----
-layout: default
-title: Getting Started
-description: Install prerequisites, start the UI, and create your first CoAutoResearch project.
----
-
 # Getting Started
 
 Start here if you want to use CoAutoResearch from a local machine.
@@ -30,16 +24,16 @@ available.
 
 ## Start the Dashboard
 
-From a checkout of this repository:
-
-```bash
-node bin/auto-research.js ui
-```
-
-After npm publication, the intended command is:
+After installing the CLI package:
 
 ```bash
 co-auto-research ui
+```
+
+If you are running directly from a cloned repository before installing the CLI:
+
+```bash
+node bin/auto-research.js ui
 ```
 
 The UI opens in your browser. If browser launch is unavailable, open the printed
@@ -59,7 +53,7 @@ creates a local dashboard folder:
 local-projects/
 ```
 
-Projects created from the UI live there and are ignored by this repository.
+Projects created from the UI live there.
 
 ## Return Later
 

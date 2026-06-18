@@ -1,9 +1,3 @@
----
-layout: default
-title: Platform Support
-description: Notes for macOS, Linux, Windows, WSL2, and remote servers.
----
-
 # Platform Support
 
 CoAutoResearch is designed to run on macOS, Linux, and Windows.
@@ -136,4 +130,4 @@ Remote use is OS-independent as long as the server has Node.js, Python 3, Git,
 and Codex CLI installed. Keep the UI bound to `127.0.0.1` and forward the port
 with SSH or an equivalent secure tunnel.
 
-See [Remote server setup](remote-server.html).
+See [Remote server setup](remote-server.md).

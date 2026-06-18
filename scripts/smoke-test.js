@@ -138,13 +138,14 @@ try {
   }
   const indexHtml = await fsp.readFile(path.join(root, "templates", "default", "ui", "index.html"), "utf8");
   const readme = await fsp.readFile(path.join(root, "README.md"), "utf8");
-  const docsConfig = await fsp.readFile(path.join(root, "docs", "_config.yml"), "utf8");
+  const docsConfig = await fsp.readFile(path.join(root, "docs", "conf.py"), "utf8");
+  const docsRequirements = await fsp.readFile(path.join(root, "docs", "requirements.txt"), "utf8");
   const docsIndex = await fsp.readFile(path.join(root, "docs", "index.md"), "utf8");
   const remoteDocs = await fsp.readFile(path.join(root, "docs", "remote-server.md"), "utf8");
   const gettingStartedDocs = await fsp.readFile(path.join(root, "docs", "getting-started.md"), "utf8");
   const cliDocs = await fsp.readFile(path.join(root, "docs", "cli.md"), "utf8");
-  const docsLayout = await fsp.readFile(path.join(root, "docs", "_layouts", "default.html"), "utf8");
-  const docsStyles = await fsp.readFile(path.join(root, "docs", "assets", "docs.css"), "utf8");
+  const upgradingDocs = await fsp.readFile(path.join(root, "docs", "upgrading.md"), "utf8");
+  const pagesWorkflow = await fsp.readFile(path.join(root, ".github", "workflows", "pages.yml"), "utf8");
   const cliSource = await fsp.readFile(path.join(root, "bin", "auto-research.js"), "utf8");
   const helpOutput = execFileSync("node", [cli, "help"], { cwd: root, encoding: "utf8" });
   if (
@@ -154,17 +155,28 @@ try {
     !cliSource.includes("Remote mode enabled") ||
     !readme.includes("co-auto-research ui --remote") ||
     !remoteDocs.includes("co-auto-research ui --remote") ||
-    !docsIndex.includes("getting-started.html") ||
-    !docsConfig.includes('baseurl: "/CoAutoResearch"') ||
+    !docsIndex.includes("```{toctree}") ||
+    !docsIndex.includes("Welcome to CoAutoResearch's documentation") ||
+    !docsConfig.includes('html_theme = "sphinx_rtd_theme"') ||
+    !docsConfig.includes('"sphinxcontrib.mermaid"') ||
+    !docsConfig.includes('html_baseurl = "https://yihongt.github.io/CoAutoResearch/"') ||
+    !docsRequirements.includes("sphinx-rtd-theme") ||
+    !docsRequirements.includes("myst-parser") ||
+    !docsRequirements.includes("sphinxcontrib-mermaid") ||
+    !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
+    pagesWorkflow.includes("jekyll-build-pages") ||
+    pagesWorkflow.includes("ENABLE_PRIVATE_PAGES") ||
     !gettingStartedDocs.includes("co-auto-research ui") ||
     !cliDocs.includes("COAUTO_REMOTE_TARGET") ||
-    !docsLayout.includes("docs-sidebar") ||
-    !docsLayout.includes("mermaid.initialize") ||
-    !docsStyles.includes(".card-grid") ||
-    !docsStyles.includes(".docs-sidebar") ||
     !helpOutput.includes("co-auto-research attach") ||
     !readme.includes("co-auto-research attach my-project") ||
     !cliDocs.includes("Return to Existing Work") ||
+    readme.includes("npm run pack:dry-run") ||
+    readme.includes("## Development") ||
+    readme.includes("GitHub Pages") ||
+    docsIndex.includes("GitHub Pages") ||
+    gettingStartedDocs.includes("ignored by this repository") ||
+    upgradingDocs.includes("Future automated upgrades should") ||
     readme.includes("docs/hosting-docs.md") ||
     docsIndex.includes("hosting-docs")
   ) {

@@ -1,9 +1,3 @@
----
-layout: default
-title: Remote Server Use
-description: Open a CoAutoResearch UI running on a remote server from your local browser.
----
-
 # Remote Servers
 
 Run the UI on the remote server in remote mode:

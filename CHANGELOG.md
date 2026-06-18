@@ -2,7 +2,7 @@
 
 ## 0.1.0
 
-- Initial CoAutoResearch open-source maintenance repository structure.
+- Initial CoAutoResearch project structure.
 - Added immutable `templates/default/` project template.
 - Added `co-auto-research` CLI skeleton with `init`, `ui`, `doctor`, and
   advisory `upgrade` commands.
@@ -12,4 +12,4 @@
   remote servers.
 - Reworked public docs with a product-docs layout, sidebar navigation, and
   Mermaid rendering.
-- Added remote-server, upgrading, security, CI, and release preparation docs.
+- Added remote-server, upgrading, security, and platform docs.

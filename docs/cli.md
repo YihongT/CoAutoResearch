@@ -1,9 +1,3 @@
----
-layout: default
-title: CLI Reference
-description: Command reference for the CoAutoResearch CLI.
----
-
 # CLI Reference
 
 The package exposes two equivalent commands:
