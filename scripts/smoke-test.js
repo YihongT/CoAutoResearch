@@ -92,6 +92,31 @@ try {
   if (projectMetadata.displayName !== "project" || !projectMetadata.projectId) {
     throw new Error("project metadata was not initialized correctly");
   }
+  const projectListOutput = execFileSync("node", [cli, "ls", "--projects-dir", tempRoot], { cwd: root, encoding: "utf8" });
+  const projectListAliasOutput = execFileSync("node", [cli, "list", "--projects-dir", tempRoot], { cwd: root, encoding: "utf8" });
+  if (
+    !projectListOutput.includes("Found 2 CoAutoResearch projects") ||
+    !projectListOutput.includes("project-two") ||
+    !projectListOutput.includes("co-auto-research attach") ||
+    !projectListAliasOutput.includes("project")
+  ) {
+    throw new Error(`project list output was not useful:\n${projectListOutput}`);
+  }
+  let ambiguousAttachOutput = "";
+  let ambiguousAttachFailed = false;
+  try {
+    execFileSync("node", [cli, "attach", "--projects-dir", tempRoot], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+  } catch (error) {
+    ambiguousAttachFailed = true;
+    ambiguousAttachOutput = `${error.stdout || ""}${error.stderr || ""}`;
+  }
+  if (!ambiguousAttachFailed || !ambiguousAttachOutput.includes("Multiple CoAutoResearch projects found")) {
+    throw new Error(`attach should ask the user to choose when several projects exist:\n${ambiguousAttachOutput}`);
+  }
   const manifest = JSON.parse(await fsp.readFile(path.join(projectDir, ".co-auto-research-template", "manifest.json"), "utf8"));
   if (manifest.templateVersion !== "0.1.0") {
     throw new Error(`unexpected template version ${manifest.templateVersion}`);
@@ -113,9 +138,13 @@ try {
   }
   const indexHtml = await fsp.readFile(path.join(root, "templates", "default", "ui", "index.html"), "utf8");
   const readme = await fsp.readFile(path.join(root, "README.md"), "utf8");
+  const docsConfig = await fsp.readFile(path.join(root, "docs", "_config.yml"), "utf8");
   const docsIndex = await fsp.readFile(path.join(root, "docs", "index.md"), "utf8");
   const remoteDocs = await fsp.readFile(path.join(root, "docs", "remote-server.md"), "utf8");
-  const hostingDocs = await fsp.readFile(path.join(root, "docs", "hosting-docs.md"), "utf8");
+  const gettingStartedDocs = await fsp.readFile(path.join(root, "docs", "getting-started.md"), "utf8");
+  const cliDocs = await fsp.readFile(path.join(root, "docs", "cli.md"), "utf8");
+  const docsLayout = await fsp.readFile(path.join(root, "docs", "_layouts", "default.html"), "utf8");
+  const docsStyles = await fsp.readFile(path.join(root, "docs", "assets", "docs.css"), "utf8");
   const cliSource = await fsp.readFile(path.join(root, "bin", "auto-research.js"), "utf8");
   const helpOutput = execFileSync("node", [cli, "help"], { cwd: root, encoding: "utf8" });
   if (
@@ -125,11 +154,21 @@ try {
     !cliSource.includes("Remote mode enabled") ||
     !readme.includes("co-auto-research ui --remote") ||
     !remoteDocs.includes("co-auto-research ui --remote") ||
-    !docsIndex.includes("hosting-docs.html") ||
-    !hostingDocs.includes("Build and deployment -> Source") ||
-    !hostingDocs.includes("ENABLE_PRIVATE_PAGES=true")
+    !docsIndex.includes("getting-started.html") ||
+    !docsConfig.includes('baseurl: "/CoAutoResearch"') ||
+    !gettingStartedDocs.includes("co-auto-research ui") ||
+    !cliDocs.includes("COAUTO_REMOTE_TARGET") ||
+    !docsLayout.includes("docs-sidebar") ||
+    !docsLayout.includes("mermaid.initialize") ||
+    !docsStyles.includes(".card-grid") ||
+    !docsStyles.includes(".docs-sidebar") ||
+    !helpOutput.includes("co-auto-research attach") ||
+    !readme.includes("co-auto-research attach my-project") ||
+    !cliDocs.includes("Return to Existing Work") ||
+    readme.includes("docs/hosting-docs.md") ||
+    docsIndex.includes("hosting-docs")
   ) {
-    throw new Error("CLI and docs must explain remote browser access and GitHub Pages docs hosting");
+    throw new Error("CLI and public docs must explain remote browser access through the product docs template without hosting-instruction pages");
   }
   if (!/<nav class="rail-nav"[^>]*hidden/.test(indexHtml)) {
     throw new Error("current project navigation must be hidden before a project is active");

@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Upgrading
+description: How generated project copies relate to template versions.
 ---
 
 # Upgrading

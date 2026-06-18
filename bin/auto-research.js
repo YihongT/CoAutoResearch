@@ -22,6 +22,8 @@ function usage() {
 
 Usage:
   co-auto-research init <dir>
+  co-auto-research ls [--projects-dir <dir>]
+  co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
@@ -79,6 +81,219 @@ async function assertDirectoryEmptyOrMissing(target) {
 
 async function readJson(target) {
   return JSON.parse(await fsp.readFile(target, "utf8"));
+}
+
+function readJsonSync(target) {
+  return JSON.parse(fs.readFileSync(target, "utf8"));
+}
+
+function isProjectRootSync(root) {
+  return (
+    fs.existsSync(path.join(root, "ui", "server.py")) &&
+    (
+      fs.existsSync(path.join(root, ".co-auto-research-template", "manifest.json")) ||
+      (fs.existsSync(path.join(root, "AGENTS.md")) && fs.existsSync(path.join(root, "PROJECT.md")))
+    )
+  );
+}
+
+function readProjectMetadataSync(root) {
+  const metadataPath = path.join(root, ".co-auto-research", "project.json");
+  if (!fs.existsSync(metadataPath)) return {};
+  try {
+    const payload = readJsonSync(metadataPath);
+    return payload && typeof payload === "object" ? payload : {};
+  } catch {
+    return {};
+  }
+}
+
+function readProjectRuntimeStatusSync(root) {
+  const sessionPath = path.join(root, "ui", ".runtime", "research_session.json");
+  if (!fs.existsSync(sessionPath)) return "new";
+  try {
+    const payload = readJsonSync(sessionPath);
+    const status = String(payload.status || "").trim();
+    if (status === "running" || status === "stopping") return "interrupted";
+    if (status) return status;
+  } catch {
+    return "unknown";
+  }
+  return "idle";
+}
+
+function projectDirectorySlug(value) {
+  const text = String(value || "").trim();
+  return text.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[ ._-]+|[ ._-]+$/g, "").slice(0, 80) || "project";
+}
+
+function shellQuote(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9_./:@-]+$/.test(text)) return text;
+  return JSON.stringify(text);
+}
+
+function addProjectCandidate(candidates, root) {
+  const resolved = path.resolve(root);
+  if (!isProjectRootSync(resolved)) return;
+  let key = resolved;
+  try {
+    key = fs.realpathSync.native(resolved);
+  } catch {
+    key = resolved;
+  }
+  if (candidates.has(key)) return;
+  const metadata = readProjectMetadataSync(resolved);
+  const name = String(metadata.displayName || "").trim() || path.basename(resolved) || "project";
+  const relativePath = path.relative(process.cwd(), resolved) || ".";
+  candidates.set(key, {
+    id: String(metadata.projectId || "").trim(),
+    name,
+    slug: projectDirectorySlug(name),
+    directory: path.basename(resolved),
+    path: resolved,
+    relativePath,
+    status: readProjectRuntimeStatusSync(resolved),
+    templateVersion: String(metadata.templateVersion || "").trim()
+  });
+}
+
+function scanImmediateProjects(candidates, directory) {
+  if (!fs.existsSync(directory)) return;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name === "node_modules" || entry.name === "__pycache__") continue;
+    const candidate = path.join(directory, entry.name);
+    let stats;
+    try {
+      stats = fs.statSync(candidate);
+    } catch {
+      continue;
+    }
+    if (!stats.isDirectory()) continue;
+    addProjectCandidate(candidates, candidate);
+  }
+}
+
+function collectProjectCandidates(options = {}) {
+  const candidates = new Map();
+  if (options["projects-dir"]) {
+    const projectsDir = path.resolve(process.cwd(), options["projects-dir"]);
+    addProjectCandidate(candidates, projectsDir);
+    scanImmediateProjects(candidates, projectsDir);
+  } else {
+    const cwd = process.cwd();
+    addProjectCandidate(candidates, cwd);
+    scanImmediateProjects(candidates, cwd);
+    scanImmediateProjects(candidates, path.join(cwd, "local-projects"));
+  }
+  return [...candidates.values()].sort((a, b) => {
+    if (a.relativePath === ".") return -1;
+    if (b.relativePath === ".") return 1;
+    return a.relativePath.localeCompare(b.relativePath);
+  });
+}
+
+function printProjectTable(projects) {
+  const rows = projects.map((project, index) => [
+    String(index + 1),
+    project.name,
+    project.status,
+    project.relativePath
+  ]);
+  const headers = ["#", "name", "status", "path"];
+  const widths = headers.map((header, column) => Math.max(header.length, ...rows.map((row) => row[column].length)));
+  const format = (row) => row.map((value, column) => value.padEnd(widths[column])).join("  ");
+  console.log(format(headers));
+  console.log(format(widths.map((width) => "-".repeat(width))));
+  for (const row of rows) console.log(format(row));
+}
+
+function commandList(args) {
+  const { options, rest } = parseOptions(args);
+  if (rest.length > 0) {
+    throw new Error("Unexpected argument. Usage: co-auto-research ls [--projects-dir <dir>]");
+  }
+  const projects = collectProjectCandidates(options);
+  if (projects.length === 0) {
+    const root = options["projects-dir"] ? path.resolve(process.cwd(), options["projects-dir"]) : process.cwd();
+    console.log(`No CoAutoResearch projects found under ${root}`);
+    console.log("Create one with `co-auto-research init <dir>` or start the dashboard with `co-auto-research ui`.");
+    return;
+  }
+  console.log(`Found ${projects.length} CoAutoResearch project${projects.length === 1 ? "" : "s"}:`);
+  printProjectTable(projects);
+  console.log("");
+  console.log("Open one with:");
+  const first = projects[0];
+  const duplicateName = projects.some((project, index) => index > 0 && project.name === first.name);
+  console.log(`  co-auto-research attach ${shellQuote(duplicateName ? first.relativePath : first.name)}`);
+}
+
+function projectMatchesTarget(project, target) {
+  const normalizedTarget = String(target || "").trim().toLowerCase();
+  if (!normalizedTarget) return false;
+  const directValues = [
+    project.name,
+    project.slug,
+    project.directory,
+    project.relativePath,
+    path.normalize(project.relativePath),
+    project.path
+  ].map((value) => String(value || "").trim().toLowerCase());
+  if (directValues.includes(normalizedTarget)) return true;
+  return Boolean(project.id && normalizedTarget.length >= 4 && project.id.toLowerCase().startsWith(normalizedTarget));
+}
+
+function resolveAttachProject(targetArg, options) {
+  const target = String(targetArg || "").trim();
+  if (target) {
+    const directPath = path.resolve(process.cwd(), target);
+    if (isProjectRootSync(directPath)) {
+      const candidates = new Map();
+      addProjectCandidate(candidates, directPath);
+      return [...candidates.values()][0];
+    }
+  }
+
+  const projects = collectProjectCandidates(options);
+  if (!target) {
+    if (projects.length === 1) return projects[0];
+    if (projects.length === 0) {
+      throw new Error("No CoAutoResearch project found. Run `co-auto-research ls` to inspect this folder, or create one with `co-auto-research init <dir>`.");
+    }
+    throw new Error("Multiple CoAutoResearch projects found. Run `co-auto-research ls` and pass a project name or path to `co-auto-research attach <project>`.");
+  }
+
+  const matches = projects.filter((project) => projectMatchesTarget(project, target));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    const names = matches.map((project) => `${project.name} (${project.relativePath})`).join(", ");
+    throw new Error(`Project name is ambiguous: ${target}. Matches: ${names}`);
+  }
+  throw new Error(`No CoAutoResearch project matched ${shellQuote(target)}. Run \`co-auto-research ls\` to see available projects.`);
+}
+
+function commandAttach(args) {
+  const { options, rest } = parseOptions(args);
+  if (rest.length > 1) {
+    throw new Error("Usage: co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]");
+  }
+  const project = resolveAttachProject(rest[0] || options.project || "", options);
+  console.log(`Attaching to ${project.name} (${project.relativePath})`);
+  const uiArgs = ["--project", project.path];
+  for (const name of ["host", "port"]) {
+    if (options[name]) uiArgs.push(`--${name}`, options[name]);
+  }
+  for (const name of ["open", "no-open", "remote"]) {
+    if (options[name]) uiArgs.push(`--${name}`);
+  }
+  return commandUi(uiArgs);
 }
 
 async function commandInit(args) {
@@ -430,6 +645,8 @@ async function main() {
     return;
   }
   if (command === "init") return commandInit(args);
+  if (command === "ls" || command === "list") return commandList(args);
+  if (command === "attach") return commandAttach(args);
   if (command === "ui") return commandUi(args);
   if (command === "doctor") return commandDoctor(args);
   if (command === "upgrade") return commandUpgrade(args);

@@ -1,13 +1,16 @@
 ---
 layout: default
-title: Conceptual Framework
+title: Concepts
+description: The CoAutoResearch control model and research trajectory.
 ---
 
-# Conceptual Framework
+# Concepts
 
 CoAutoResearch is a human-centered research loop. The agent can do substantial
 work, but the human remains responsible for direction, claims, evidence, and
 revision.
+
+## Research Loop
 
 ```mermaid
 flowchart TD
@@ -36,10 +39,26 @@ flowchart TD
   class M output;
 ```
 
-## What The Diagram Means
+## What the Diagram Means
 
 - The loop is linear enough for a human to follow.
 - Every substantive work package gets a plan and report.
 - Claims become current only when reflected in findings and evidence records.
 - Human intervention is not an afterthought; it is part of the control system.
 - The output should be something the human can understand, defend, and revise.
+
+## Control Surfaces
+
+| Surface | What it controls |
+| --- | --- |
+| `PROJECT.md` | Overall direction, scope, audience, and constraints. |
+| `STATE.md` | Current objective, active plan, blockers, and reviewer gate state. |
+| Human interventions | Explicit changes to scope, claim, venue, method, or priority. |
+| Reviewer gates | Plan, process, evidence, venue fit, manuscript, and figure/table checks. |
+
+## Why This Matters
+
+The system is not optimized for autonomous output at all costs. It is optimized
+for research ownership: the human should be able to explain why a claim exists,
+where the evidence came from, which alternatives were rejected, and what work
+remains open.

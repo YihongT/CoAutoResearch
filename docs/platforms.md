@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Platform Support
+description: Notes for macOS, Linux, Windows, WSL2, and remote servers.
 ---
 
 # Platform Support

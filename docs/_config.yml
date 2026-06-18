@@ -1,4 +1,8 @@
 title: CoAutoResearch
 description: Human-centered AI research scaffolding with traceable evidence and steerable progress.
+baseurl: "/CoAutoResearch"
 markdown: kramdown
-theme: minima
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge

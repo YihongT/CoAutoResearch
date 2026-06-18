@@ -1,9 +1,10 @@
 ---
 layout: default
 title: Remote Server Use
+description: Open a CoAutoResearch UI running on a remote server from your local browser.
 ---
 
-# Remote Server Use
+# Remote Servers
 
 Run the UI on the remote server in remote mode:
 
@@ -52,10 +53,8 @@ Then open:
 http://127.0.0.1:8765
 ```
 
-The CLI skips automatic browser launch in SSH sessions by default. `--no-open`
-makes this explicit and keeps the remote server from trying to open a browser on
-the server machine. `--remote` does the same thing and also prints the local
-browser instructions.
+`--remote` is the recommended command because it prints the correct local
+instructions after the server picks its actual port.
 
 ## File Access Semantics
 

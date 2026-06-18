@@ -57,22 +57,13 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 ## Documentation
 
 - [Documentation home](docs/index.md)
-- [Conceptual framework](docs/conceptual-framework.md)
+- [Getting started](docs/getting-started.md)
+- [Concepts](docs/conceptual-framework.md)
+- [CLI reference](docs/cli.md)
 - [Multiple projects](docs/multiple-projects.md)
+- [Remote servers](docs/remote-server.md)
 - [Platform support](docs/platforms.md)
-- [Remote server setup](docs/remote-server.md)
-- [Hosting the docs](docs/hosting-docs.md)
 - [Upgrading generated projects](docs/upgrading.md)
-
-When this repo is public on GitHub, the included GitHub Pages workflow can host
-the docs automatically from `docs/`. In the repository settings, set
-**Pages -> Build and deployment -> Source** to **GitHub Actions**. The workflow
-will publish on pushes to `main` that change `docs/**`.
-
-Private repositories do not deploy Pages by default in this scaffold, because
-GitHub Pages must be enabled/configured first and may depend on the account
-plan. To deploy docs from a private repo, enable Pages in repository settings
-and set the repository variable `ENABLE_PRIVATE_PAGES=true`.
 
 ## Quick Start
 
@@ -131,6 +122,17 @@ URL after startup. Keep that server command running, run the printed `ssh -L`
 command from your local machine, then open the printed local URL in your local
 browser.
 
+To come back later, list known projects from the current folder and attach to
+one:
+
+```bash
+co-auto-research ls
+co-auto-research attach my-project
+```
+
+`attach` starts the same UI server for the selected generated project; it does
+not require a background process from the previous day to still be running.
+
 To watch several generated research projects from one UI, start the dashboard
 from their parent folder:
 
@@ -152,6 +154,8 @@ remains available for scripting.
 
 ```bash
 co-auto-research init <dir>
+co-auto-research ls [--projects-dir <dir>]
+co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
 co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
 co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
 co-auto-research doctor [--host 127.0.0.1] [--port 8765]
@@ -161,6 +165,10 @@ co-auto-research upgrade
 `auto-research` is kept as a command alias.
 
 - `init` copies `templates/default/` into a new empty project directory.
+- `ls` lists generated CoAutoResearch projects under the current directory,
+  plus `local-projects/` when present. `list` is an alias.
+- `attach [project-name-or-path]` starts the UI for an existing generated
+  project. Use this when returning to work after closing the terminal/browser.
 - `ui` starts the Python standard-library UI server. Inside a generated project
   it serves that project; otherwise it creates/serves `local-projects/` as a
   dashboard where projects can be created from the UI.

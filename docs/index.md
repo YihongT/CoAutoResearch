@@ -1,66 +1,68 @@
 ---
 layout: default
-title: CoAutoResearch Docs
+title: Overview
+description: Human-centered AI research scaffold with traceable evidence and steerable progress.
 ---
 
-# CoAutoResearch Docs
+<section class="hero">
+  <h1>Research automation that stays reviewable.</h1>
+  <p class="lead">CoAutoResearch helps Codex do substantial research work while keeping the human author in control of direction, evidence, claims, and revision.</p>
+  <div class="hero-actions">
+    <a class="button primary" href="{{ '/getting-started.html' | relative_url }}">Get started</a>
+    <a class="button" href="{{ '/conceptual-framework.html' | relative_url }}">Understand the model</a>
+  </div>
+</section>
 
-CoAutoResearch is a human-centered AI research scaffold. It helps agents do
-serious research work while keeping the human author able to understand, steer,
-defend, and revise the project.
+## What It Does
 
-## Start Here
+<div class="card-grid">
+  <section class="card">
+    <h3>Frames the project</h3>
+    <p>Turns an initial brief into a canonical <code>PROJECT.md</code> that the human can inspect and revise.</p>
+  </section>
+  <section class="card">
+    <h3>Runs traceable work</h3>
+    <p>Organizes research into trials with plans, reviews, reports, artifacts, and accepted findings.</p>
+  </section>
+  <section class="card">
+    <h3>Keeps the author in charge</h3>
+    <p>Records formal interventions so scope, claims, methods, and venue choices stay accountable.</p>
+  </section>
+</div>
+
+## Quick Start
 
 ```bash
 co-auto-research ui
 ```
 
-The CLI opens the UI in your browser after the server starts. If browser launch
-is unavailable, open the printed URL manually, then click `+` in the left
-sidebar to create a project. If you run this outside a generated project,
-CoAutoResearch creates a local `local-projects/` dashboard folder for UI-created
-projects.
+The CLI starts the local UI. If you are not inside an existing generated
+project, it opens a dashboard backed by `local-projects/`, where you can create
+projects from the sidebar.
 
-If the default port is busy, CoAutoResearch automatically tries the next
-available port and prints the actual URL. To prefer a different starting port:
+## Core Files
 
-```bash
-co-auto-research ui --port 8780
-```
+| Path | Purpose |
+| --- | --- |
+| `PROJECT.md` | Canonical project framing and scope. |
+| `research_trajectory/STATE.md` | Current objective, plan, blockers, and gate status. |
+| `research_trajectory/trials/` | Work packages with plans, reviews, reports, and artifacts. |
+| `research_trajectory/CURRENT_FINDINGS.md` | Accepted, tentative, rejected, and open findings. |
+| `resources/` | Raw inputs, papers, prior work, datasets, and notes. |
+| `manuscript/` | Manuscript-facing blueprint, figure specs, reviews, and deliverables. |
 
-Use `--no-open` on remote servers or when you want to open the printed URL
-yourself.
+## Common Paths
 
-For SSH-accessible servers, use:
+- New local project: [Getting Started](getting-started.html)
+- Return to existing work: [CLI Reference](cli.html#return-to-existing-work)
+- Existing folder of projects: [Multiple Projects](multiple-projects.html)
+- SSH server use: [Remote Servers](remote-server.html)
+- Windows/macOS/Linux notes: [Platform Support](platforms.html)
 
-```bash
-co-auto-research ui --remote
-```
+## Design Principle
 
-Remote mode prints the SSH tunnel command and local browser URL after startup.
-
-## Guides
-
-- [Conceptual framework](conceptual-framework.html)
-- [Multiple projects](multiple-projects.html)
-- [Platform support](platforms.html)
-- [Remote server setup](remote-server.html)
-- [Hosting the docs](hosting-docs.html)
-- [Upgrading generated projects](upgrading.html)
-
-## Project Model
-
-Generated projects separate:
-
-- raw resources;
-- executable workspace files;
-- research trajectory records;
-- current findings;
-- formal human interventions;
-- manuscript-facing materials.
-
-The core principle is that AI can assist the research loop, but the human
-remains able to own, explain, and revise the work.
+The output should not be a black-box artifact. It should be a research trajectory
+that the human can understand, defend, and continue.
 
 ## Contact
 
