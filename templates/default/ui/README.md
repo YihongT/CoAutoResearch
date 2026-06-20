@@ -45,7 +45,8 @@ co-auto-research ui --projects-dir /path/to/projects
 ```
 
 In dashboard mode, click `+` in the left sidebar to create a new project inside
-that folder. The UI uses the same immutable template as `co-auto-research init`.
+that folder, choose the project default agent backend, and continue with
+framing. The UI uses the same immutable template as `co-auto-research init`.
 
 No npm or pip install is required.
 
@@ -60,7 +61,7 @@ No npm or pip install is required.
 ## User Experience
 
 - Project framing: write the research brief, set target venue / audience, attach optional resources, and review or edit the generated `PROJECT.md` draft in the main chat surface.
-- Launch autoresearch: opens a settings dialog and starts the first real agent CLI session only after the user confirms launch.
+- Launch autoresearch: opens a settings dialog and starts the first real agent CLI session only after the user confirms launch. The dialog can override the per-project backend for that run unless `COAUTO_AGENT_BACKEND` forces a backend in the server environment; invalid env values are ignored with a visible warning.
 - Session chat: after launch, the same UI shows the captured transcript and sends follow-up messages to the same resumed session.
 - Chat: enabled only after a session exists, and sends follow-up instructions through Codex `exec resume` or Claude Code `--resume`.
 - Continue: resumes the current session and asks it to continue the research loop without an extra user instruction.
@@ -76,6 +77,12 @@ No npm or pip install is required.
 - Source preview: shown inline at the file's own position and can save supported text files.
 
 The UI controls a real local Codex or Claude Code CLI session. It does not control an already-open conversation inside an IDE panel.
+
+Project creation succeeds even if the selected agent CLI is not installed yet.
+Starting framing, autoresearch, chat, resume, or restart checks the selected
+backend with the provider `--version` and auth status commands. Missing or
+unauthenticated selected backends block startup with Codex- or Claude-specific
+setup guidance; the UI does not silently fall back to the other backend.
 
 ## File Writes
 

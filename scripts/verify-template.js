@@ -80,7 +80,7 @@ if (!stateTemplate.includes("Final gate reviewer")) {
 }
 
 const manifest = JSON.parse(await fsp.readFile(path.join(template, ".co-auto-research-template", "manifest.json"), "utf8"));
-if (manifest.reviewerBaselineVersion !== "2026-06-per-reviewer-files") {
+if (manifest.reviewerBaselineVersion !== "2026-06-inline-blueprint") {
   failures.push(".co-auto-research-template/manifest.json: missing reviewer baseline version");
 }
 const coreReviewerFiles = Array.isArray(manifest.coreReviewerFiles) ? manifest.coreReviewerFiles : [];
@@ -105,15 +105,13 @@ for (const heading of [
   "## Target Venue / Audience / Article Type",
   "## Target-Venue Organization Rationale",
   "## Core Story",
-  "## Accepted Claims And Evidence Map",
-  "## Section-By-Section Architecture",
-  "## Figure Plan",
-  "## Table Plan",
-  "### No-Table Rationale",
+  "## Architecture Overview / Table of Contents",
+  "## Manuscript Architecture",
   "## Reference / Literature Grounding Plan",
   "## Appendix / Supplement Plan",
   "## Blocking Missing Evidence",
   "## Required Qualifications / Claim Constraints",
+  "## Provenance / Audit Index",
   "## Deprecated Or Superseded Ideas",
   "## Submission-Readiness Summary"
 ]) {
@@ -122,13 +120,15 @@ for (const heading of [
   }
 }
 for (const requiredText of [
-  "Section thesis:",
+  "Target-venue role:",
   "Reader question answered:",
-  "Narrative role in target venue:",
+  "Local thesis / purpose:",
   "Paragraph plan:",
   "Content to cover, not full prose",
-  "Linked paragraphs:",
-  "Key results shown:"
+  "Placement:",
+  "Caption draft or current caption:",
+  "Key result or conceptual contrast shown:",
+  "Source code or artifact links:"
 ]) {
   if (!blueprintTemplate.includes(requiredText)) {
     failures.push(`manuscript/BLUEPRINT.md: missing paragraph-level contract text ${requiredText}`);

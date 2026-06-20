@@ -77,8 +77,12 @@ python ui/server.py --host 127.0.0.1 --port 8765
 
 ### Agent Executable Resolution
 
-Codex remains the default backend. Set `COAUTO_AGENT_BACKEND=claude` or choose
-Claude Code in the UI settings to run new turns with Claude Code.
+Codex remains the default backend. Choose Codex or Claude Code when creating a
+project, change the per-project default in Settings, or override one launch from
+the launch dialog. Set `COAUTO_AGENT_BACKEND=claude` or
+`COAUTO_AGENT_BACKEND=codex` only when the server environment should force one
+backend; while set, runtime launches use the forced backend even if the UI saves
+a different choice. Other values are ignored with a visible warning.
 
 The UI resolves Codex in this order:
 
@@ -91,6 +95,7 @@ This matters on Windows because npm global binaries are commonly installed as
 
 ```powershell
 codex --version
+codex login status
 Get-Command codex
 ```
 
@@ -110,11 +115,18 @@ The UI resolves Claude Code similarly:
 
 ```powershell
 claude --version
+claude auth status
 Get-Command claude
 $env:COAUTO_AGENT_BACKEND = "claude"
 $env:COAUTO_CLAUDE = (Get-Command claude).Source
 co-auto-research ui
 ```
+
+Before starting framing, autoresearch, chat, resume, or restart, the UI checks
+the selected backend with `--version` and the provider auth status command. A
+definitely missing or unauthenticated selected backend blocks startup with
+provider-specific instructions; the UI never silently falls back to the other
+backend.
 
 Codex also documents native Windows sandbox modes. If native sandbox setup is
 blocked by enterprise policy or admin restrictions, use WSL2.

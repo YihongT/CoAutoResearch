@@ -18,7 +18,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = "8765";
 const DEFAULT_PROJECTS_DIR = "co-autoresearch-projects";
 const LEGACY_PROJECTS_DIR = "local-projects";
-const REVIEWER_BASELINE_VERSION = "2026-06-per-reviewer-files";
+const REVIEWER_BASELINE_VERSION = "2026-06-inline-blueprint";
 const CORE_REVIEWER_FILES = [
   "REVIEW_TAXONOMY.md",
   "FINAL_GATE_REVIEWER.md",
@@ -1037,6 +1037,11 @@ function selectedAgentBackend(env = process.env) {
   return backend === "claude" ? "claude" : "codex";
 }
 
+function invalidAgentBackendEnv(env = process.env) {
+  const backend = String(env.COAUTO_AGENT_BACKEND || "").trim().toLowerCase();
+  return Boolean(backend && !["codex", "claude"].includes(backend));
+}
+
 function pythonCandidates() {
   const candidates = [];
   const configured = (process.env.COAUTO_PYTHON || process.env.PYTHON || "").trim();
@@ -1197,7 +1202,11 @@ async function commandDoctor(args) {
     const label = result.ok ? "ok" : selectedMissing || !anyAgent && agentMissing ? "warn" : agentMissing ? "optional" : "missing";
     console.log(`${label.padEnd(7)} ${name}${result.output ? ` - ${result.output}` : ""}`);
   }
-  console.log(`${anyAgent ? "ok" : "warn"}      selected agent - ${selectedBackend}${anyAgent && !checks.find(([name]) => name === selectedBackend)?.[1].ok ? " (selected backend missing; another agent is available)" : ""}`);
+  const selectedAgent = selectedBackend === "claude" ? claude : codex;
+  console.log(`${selectedAgent.ok ? "ok" : "warn"}      selected agent - ${selectedBackend}${!selectedAgent.ok && anyAgent ? " (selected backend missing; another agent is available)" : ""}`);
+  if (invalidAgentBackendEnv()) {
+    console.log(`warn    COAUTO_AGENT_BACKEND - invalid value ${JSON.stringify(process.env.COAUTO_AGENT_BACKEND)}; expected "codex" or "claude"`);
+  }
 
   const portCheck = await checkPort(host, port);
   console.log(`${(portCheck.ok ? "ok" : "warn").padEnd(7)} port ${host}:${port}${portCheck.error ? ` - ${portCheck.error}` : ""}`);

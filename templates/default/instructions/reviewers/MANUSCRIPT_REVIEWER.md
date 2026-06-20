@@ -34,15 +34,18 @@ Evaluate:
 - fidelity to the target manual, venue style notes, and seed-paper section
   structure;
 - target-venue organization rationale;
+- complete architecture overview / table of contents with all planned section,
+  subsection, subsubsection, and deeper titled units;
 - research problem motivation;
 - novelty and contribution clarity;
 - story coherence;
 - abstract structure and content plan when the target deliverable has an
   abstract;
-- paragraph-level writing plan for every active section;
-- claim/evidence alignment;
-- sufficiency of figures and tables;
-- placement of figures/tables/results in specific paragraphs;
+- paragraph-level writing plan for every active titled unit;
+- local claim/evidence/result explanation inside the relevant manuscript
+  section, without requiring readers to jump to separate ID maps;
+- sufficiency and local placement of figures, tables, algorithms, datasets,
+  benchmark results, methods, and captions;
 - reference and literature grounding posture;
 - appendix and supplement posture;
 - treatment of limitations and alternatives;
@@ -53,20 +56,30 @@ Evaluate:
 Use `Decision: pass` only for submission-readiness or declared final-deliverable
 readiness. The manuscript must have no unresolved required revision constraints
 for the declared scope, and the review must account for contribution, evidence,
-venue fit, figures/tables, limitations, references, and self-contained
-readability. For manuscript-facing final pass, `manuscript/BLUEPRINT.md` must be
-self-contained and target-venue-ready: accepted claims, evidence, target-venue
-section titles/order, abstract plan when applicable, paragraph-level writing
-plan, figures, tables, captions, references, appendix/supplement posture,
-blocking missing evidence, required qualifications, and submission-readiness
-must all be explicit and mutually consistent.
+venue fit, displays/methods/results, limitations, references, and
+self-contained readability. For manuscript-facing final pass,
+`manuscript/BLUEPRINT.md` must be self-contained and target-venue-ready:
+target-venue section titles/order/depth, abstract plan when applicable,
+paragraph-level writing plans, local claim/evidence/result explanations, inline
+figure/table/algorithm/dataset/benchmark/result blocks, captions, references,
+appendix/supplement posture, blocking missing evidence, required
+qualifications, provenance/audit index, and submission-readiness must all be
+explicit and mutually consistent.
 
-Each active section must specify the section thesis, reader question answered,
-narrative role, and a paragraph plan that states what each paragraph covers
-without drafting full paper prose. Every paragraph row must map to the relevant
-claims/evidence, results/artifacts, figures/tables, citation posture,
-qualification, and transition job. Generic rows such as "discuss results" or
-unplaced figures/tables require `Decision: continue`.
+Each active titled unit must specify the target-venue role, reader question
+answered, local thesis or purpose, local claims in plain language, local
+evidence/results/artifacts, placed displays/methods/results, local
+qualifications, and transition job. Every paragraph row must map to the
+relevant local evidence/result/artifact, display/method/result block, citation
+posture, qualification, and transition job. Generic rows such as "discuss
+results", unplaced figures/tables/algorithms/results, or sections that only
+point to claim/evidence IDs require `Decision: continue`.
+
+Separate claim/evidence maps, `Figure Plan`, `Table Plan`, or
+`manuscript/figures/FIGURE_SPECS.md` entries may support provenance, but they
+cannot substitute for a self-contained manuscript architecture. If a reader
+must leave the target-venue reading order to understand what goes where, use
+`Decision: continue`.
 
 If the manuscript architecture is coherent, the story is plausible, or the
 deliverable is ready for targeted revision, use `Decision: continue` and record

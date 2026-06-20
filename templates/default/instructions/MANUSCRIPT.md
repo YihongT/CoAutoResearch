@@ -2,22 +2,23 @@
 
 ## Purpose
 
-The manuscript directory maintains a target-aware manuscript blueprint and candidate deliverable materials.
+The manuscript directory maintains a target-aware manuscript blueprint and
+candidate deliverable materials.
 
-The main file is:
+The canonical manuscript-facing file is:
 
 `manuscript/BLUEPRINT.md`
 
-The blueprint is not final paper prose. It is a publication-like,
-result-bearing writing blueprint: story, claims, evidence, target-venue
-sections, paragraph-by-paragraph writing responsibilities, figures, tables,
-captions, appendix, limitations, and missing work.
+The blueprint is not final paper prose. It is a self-contained, publication-like
+architecture for the final manuscript or deliverable. A human author should be
+able to read it from top to bottom and understand the intended paper structure,
+where every result/display/method object belongs, what each paragraph must do,
+and which source artifacts support each local claim without bouncing through
+separate claim, evidence, figure, or table indexes.
 
 For a final or gate-passing manuscript-facing deliverable, the blueprint must be
-self-contained, target-venue-ready, and readable like a paper map. A human
-author should be able to inspect `manuscript/BLUEPRINT.md` and understand what
-the paper would say, which results appear where, and how the argument develops,
-without opening hidden trial logs.
+target-venue-ready and readable as a paper map. Cross-references may support
+audit and provenance, but they must not replace local explanation.
 
 ---
 
@@ -40,14 +41,14 @@ The manuscript blueprint must reflect:
 
 - target venue;
 - target audience;
-- research type;
+- research type or article type;
 - expected contribution style;
 - required evidence standard;
-- expected figure/table style;
+- expected figure/table/algorithm/result style;
 - expected appendix/supplementary material.
 
 Do not impose a generic AI-paper structure unless that matches the target.
-Section titles and section order must come from, in priority order:
+Section titles and order must come from, in priority order:
 
 1. explicit user-provided target manual or venue rules;
 2. `resources/target_venue/STYLE_NOTES.md` and
@@ -59,19 +60,21 @@ If the target manual or venue structure is insufficiently known, state that
 limitation explicitly in the blueprint instead of inventing venue-specific
 requirements.
 
-Seed papers are style and structure references. Do not copy their research content.
+Seed papers are style and structure references. Do not copy their research
+content.
 
-The blueprint must explicitly explain the target-venue organization rationale:
-why the section order, figure/table density, evidence posture, reference style,
-and appendix/supplement plan fit the declared venue and article type.
+The blueprint must explain the target-venue organization rationale: why the
+section order, section depth, display density, evidence posture, reference
+style, and appendix/supplement plan fit the declared venue and article type.
 
 ---
 
 ## Source of Evidence
 
-Use `research_trajectory/CURRENT_FINDINGS.md` as the current accepted/tentative evidence summary.
+Use `research_trajectory/CURRENT_FINDINGS.md` as the current accepted/tentative
+evidence summary.
 
-Use trial reports and artifacts for traceability.
+Use trial reports and artifacts for provenance.
 
 Do not rely on hidden or unreviewed workspace outputs as manuscript evidence.
 
@@ -82,160 +85,193 @@ Do not rely on hidden or unreviewed workspace outputs as manuscript evidence.
 Allowed:
 
 - manuscript story and architecture;
-- claim/evidence map;
-- section plan;
-- candidate-final figure/table plan;
-- detailed conceptual figure specifications;
+- section/subsection/subsubsection plans;
+- paragraph or rhetorical-move writing obligations;
+- inline figure, table, algorithm, dataset, benchmark, and result blocks;
+- captions, labels, panel descriptions, compact table previews, and method
+  interface sketches;
 - manuscript reviews;
-- appendix/supplementary plan.
+- appendix/supplementary plan;
+- provenance or audit indexes.
 
 Not allowed by default:
 
 - raw exploratory outputs;
 - unreviewed workspace files;
-- trial logs;
+- trial logs as primary manuscript content;
 - full paper prose unless explicitly requested.
 
-Captions, figure labels, table titles, and compact table entries may be written
-as final deliverable text. Section and paragraph entries must remain writing
-plans: they should say what each paragraph must accomplish, which results and
-evidence it uses, and how it transitions, without drafting full prose.
+Captions, figure labels, table titles, algorithm names, and compact display
+entries may be written as final deliverable text. Section and paragraph entries
+must remain writing plans: they should say what each paragraph must accomplish,
+which results and evidence it uses, and how it transitions, without drafting the
+full paper.
 
 ---
 
-## Conceptual Figures
+## Canonical Blueprint Contract
 
-Many manuscript figures are not direct result plots. Examples:
+`manuscript/BLUEPRINT.md` must use the manuscript's final reading order as its
+primary organization.
 
-- overview schematic;
-- mechanism diagram;
-- pipeline diagram;
-- taxonomy;
-- system architecture figure;
-- conceptual contrast figure;
-- hypothesis diagram.
+Required top-level sections:
 
-Do not draw or generate conceptual figures by default.
+- `Target Venue / Audience / Article Type`
+- `Target-Venue Organization Rationale`
+- `Core Story`
+- `Architecture Overview / Table of Contents`
+- `Manuscript Architecture`
+- `Reference / Literature Grounding Plan`
+- `Appendix / Supplement Plan`
+- `Blocking Missing Evidence`
+- `Required Qualifications / Claim Constraints`
+- `Provenance / Audit Index`
+- `Deprecated Or Superseded Ideas`
+- `Submission-Readiness Summary`
 
-Instead, write detailed figure specifications in:
+The `Architecture Overview / Table of Contents` must list the complete planned
+structure, including section, subsection, subsubsection, and deeper titled units
+when used. Each entry should link to the corresponding manuscript-architecture
+anchor when practical.
 
-`manuscript/figures/FIGURE_SPECS.md`
+The `Manuscript Architecture` section is the canonical content. It must be
+organized in target-venue manuscript order, not by claim IDs or display IDs.
+Figures, tables, algorithms, datasets, benchmarks, result summaries, captions,
+and source links must appear where the final manuscript would use them.
 
-Each specification should include:
+Claim/evidence IDs, figure/table IDs, and source IDs may appear as local
+provenance anchors, but the blueprint must not require the reader to jump to a
+separate map to understand the section, paragraph, result, figure, table, or
+method.
 
-- purpose;
-- figure type;
-- content layout;
-- visual style;
-- detailed image-generation-like prompt;
-- caption draft;
-- evidence or conceptual basis;
-- linked manuscript paragraphs;
-- status.
+Separate files such as `manuscript/figures/FIGURE_SPECS.md` may remain as
+source/spec caches, but they are secondary. They are not the canonical placement
+or readability surface.
 
-Result plots generated by code should originate from trial artifacts and may be promoted into `manuscript/figures/` only when candidate-final.
+---
 
-## Final Blueprint Contract
+## Manuscript Architecture Requirements
 
-Before a manuscript-facing autoresearch gate can pass, `manuscript/BLUEPRINT.md`
-must include:
+Every titled unit in `Manuscript Architecture` must state:
 
-- target venue / audience / article type / contribution posture;
-- target-venue organization rationale;
-- core story;
-- accepted claims and evidence map, or candidate claims with the gate kept on
-  `continue`;
-- section-by-section paragraph-level architecture;
-- figure plan;
-- table plan;
-- reference / literature grounding plan;
-- appendix / supplement plan;
-- blocking missing evidence;
-- required qualifications / claim constraints;
-- deprecated or superseded ideas;
-- submission-readiness summary.
-
-The final blueprint must not contain contradictions such as "no active claims"
-while listing active claims, or stale statements that the core story is
-tentative because a source-level evidence check remains when that check has
-already passed.
-
-## Section And Paragraph Requirements
-
-The section architecture must follow the target manual and venue style. Include
-the abstract when the target deliverable has one:
-
-- for a structured abstract, use the target's required abstract headings as
-  paragraph/move labels;
-- for an unstructured abstract, plan 4-6 rhetorical moves;
-- do not write full abstract prose unless explicitly requested.
-
-Every active section must include:
-
-- target-venue section title;
-- purpose;
-- section thesis;
+- target-venue title;
+- target-venue role;
 - reader question answered;
-- narrative role in the target venue;
-- accepted claim IDs and evidence IDs used in the section;
-- figures/tables placed in the section;
-- required qualifications;
-- a paragraph plan table with one row per paragraph or abstract move.
+- local thesis or purpose;
+- local claims in plain language;
+- local evidence, results, or artifacts in plain language;
+- planned paragraphs or rhetorical moves;
+- figures/tables/algorithms/results placed here, or `none`;
+- local qualifications and limits;
+- transition job.
 
-Every paragraph-plan row must include:
+Paragraphs do not require titles, but each paragraph or move must specify:
 
 - paragraph or move ID;
 - rhetorical move;
 - content to cover, not full prose;
-- linked claim IDs and evidence IDs;
-- results or artifact paths used;
-- figure/table IDs, or `none`;
+- local claim/evidence/result to use;
+- artifact paths or source links when applicable;
+- figure/table/algorithm/result blocks used, or `none`;
 - citation posture;
 - required qualification, or `none`;
 - transition job.
 
-## Figure And Table Requirements
+Use deeper headings when the target venue or manuscript logic requires them. A
+methodology paper should include method subsections, algorithm blocks, and
+evaluation/result placement where they belong. An empirical paper should place
+datasets, metrics, benchmark results, figures, and tables in Results/Methods
+order. A Perspective or review should place conceptual figures, contrast
+tables, cases, and agenda items in the rhetorical section where they support the
+argument.
 
-Every active figure must be summarized directly in `manuscript/BLUEPRINT.md`,
-even when detailed specifications also live in
-`manuscript/figures/FIGURE_SPECS.md`. The blueprint entry must include:
+---
 
-- figure id and title;
+## Inline Artifact Blocks
+
+Active artifacts must be placed inline inside the relevant manuscript section,
+subsection, or paragraph area.
+
+### Figure blocks
+
+Every active figure block must include:
+
+- placement;
 - inclusion status;
-- argument or result role;
+- purpose or result role;
 - content and panel layout;
 - visual style;
 - exact caption draft or current caption;
-- source artifact path;
+- source artifact path or source specification path;
 - result shown or conceptual basis;
-- linked manuscript paragraphs;
-- linked claim ids and evidence ids;
+- provenance links to findings, trials, or source files;
 - target-venue fit rationale;
 - remaining blocker, or `none`.
 
-Every active table must be summarized directly in `manuscript/BLUEPRINT.md`
-with:
+### Table blocks
 
-- table id and title;
+Every active table block must include:
+
+- placement;
 - inclusion status;
-- content, columns, rows, or comparison logic;
-- argument or result role;
+- purpose or result role;
+- columns, rows, or comparison logic;
 - exact caption draft or current caption;
-- source artifact path;
-- key results shown;
-- linked manuscript paragraphs;
-- linked claim ids and evidence ids;
+- source artifact path or source specification path;
+- key result or conceptual contrast shown;
+- compact preview when useful;
+- provenance links to findings, trials, or source files;
 - target-venue fit rationale;
 - remaining blocker, or `none`.
 
-Use `Spec+source` for tables. Compact tables may be included directly as
-markdown tables in the blueprint. Larger tables must provide a source artifact
-path, column/row logic, key result summary, and complete caption.
+If there are no active tables, say so in the relevant manuscript architecture
+location or in the appendix/supplement plan, and explain where the needed
+comparison or evidence mapping is carried instead.
 
-If there are no active tables, the blueprint must include a no-table rationale:
-why no table is needed for the target venue and current argument, whether any
-candidate table was considered, and which figure or prose section carries the
-claim/evidence mapping instead.
+### Algorithm / method blocks
+
+Every active algorithm or method block must include:
+
+- placement;
+- method or algorithm name;
+- purpose;
+- inputs and outputs;
+- pseudocode, interface sketch, or step sequence;
+- assumptions and failure modes;
+- validation evidence or planned evaluation;
+- source code or artifact links;
+- remaining blocker, or `none`.
+
+### Dataset / benchmark / result blocks
+
+Every active dataset, benchmark, or result block must include:
+
+- placement;
+- metric or result summary;
+- source artifact path;
+- comparison or baseline logic when applicable;
+- limitations and uncertainty;
+- manuscript claim supported in plain language;
+- remaining blocker, or `none`.
+
+---
+
+## Provenance And Audit
+
+Use `Provenance / Audit Index` for secondary traceability only. It may contain:
+
+- accepted or candidate claim/evidence maps;
+- source-to-section indexes;
+- display inventory;
+- deferred figure/table/algorithm candidates;
+- superseded claim IDs or evidence IDs;
+- links to trials, reports, reviews, source files, and generated artifacts.
+
+This index must not be required to understand the main blueprint. If moving an
+old claim/evidence map into provenance leaves the main architecture unclear,
+rewrite the local manuscript section instead of relying on the index.
+
+---
 
 ## Missing Evidence And Qualifications
 
@@ -244,8 +280,8 @@ Do not mix blockers with rhetorical caveats.
 - `Blocking Missing Evidence` contains only evidence gaps that prevent final
   gate pass. Any non-empty item other than `none` requires `Status: continue`.
 - `Required Qualifications / Claim Constraints` contains non-blocking limits
-  that must already be reflected in the accepted claims, paragraph plan,
-  figure/table captions, and compact table entries when present.
+  that must already be reflected locally in the manuscript architecture,
+  captions, table entries, algorithm/result descriptions, and claim wording.
 
 ---
 
@@ -259,6 +295,3 @@ Trial-level manuscript review gates belong in the relevant trial's canonical
 review file:
 
 `research_trajectory/trials/<trial_id>/reviews/MANUSCRIPT_REVIEW.md`
-
-The manuscript review may be mirrored or summarized in `manuscript/reviews/`,
-but the current trial file remains the gate artifact.

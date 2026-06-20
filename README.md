@@ -50,8 +50,10 @@ Verify your environment:
 node --version
 npm --version
 codex --version
+codex login status
 # optional
 claude --version
+claude auth status
 ```
 
 On Windows, if the UI cannot start Codex but `codex --version` works in
@@ -60,8 +62,12 @@ can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
 For Claude Code, use `COAUTO_CLAUDE` or `CLAUDE_BIN` to pin `claude.cmd` or
 `claude`.
 
-Codex remains the default backend. Set `COAUTO_AGENT_BACKEND=claude` or choose
-Claude Code in the UI settings to use Claude for new runs.
+Codex remains the default backend. You can choose `Codex` or `Claude Code` when
+creating a project in the UI, change the per-project default in Settings, or
+override one launch from the launch dialog. Set `COAUTO_AGENT_BACKEND=claude`
+or `COAUTO_AGENT_BACKEND=codex` only when you want the server environment to
+force that backend; while set, UI choices are saved but runtime launches use
+the forced backend. Other values are ignored with a visible warning.
 
 ## Documentation
 
@@ -99,8 +105,14 @@ co-auto-research ui
 ```
 
 If your terminal cannot open a browser, open the printed URL manually. Click `+`
-in the left sidebar to create a project. Dashboard-created projects live in
-`co-autoresearch-projects/`.
+in the left sidebar to create a project, then choose the project default agent
+backend. Dashboard-created projects live in `co-autoresearch-projects/`.
+
+Project creation does not require the selected agent CLI to be installed yet.
+Starting framing, autoresearch, chat, resume, or restart does: the UI checks
+`codex --version` plus `codex login status`, or `claude --version` plus
+`claude auth status`, and blocks startup with provider-specific setup guidance
+when the selected backend is definitely missing or unauthenticated.
 
 To update the CLI and package-managed UI runtime later:
 

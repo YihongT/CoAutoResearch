@@ -41,6 +41,8 @@ let pendingResumeTrialConfirm = null;
 let pendingRestartAutoresearchConfirm = null;
 let activeLargeResourceImportId = "";
 let optimisticResearchSession = null;
+let fileViewerResizeState = null;
+let fileViewerReturnPath = "";
 let composerDraft = "";
 let targetVenueProjectId = activeProjectId || "";
 const localMessages = [];
@@ -56,6 +58,8 @@ const inlineFileModes = {};
 const COLD_AUTOSAVE_DELAY = 900;
 const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024;
 const LARGE_RESOURCE_CHUNK_BYTES = 8 * 1024 * 1024;
+const FILE_VIEWER_SIZE_KEY = "coAutoResearchFileViewerSize";
+const LATEST_MANUSCRIPT_PATH = "manuscript/BLUEPRINT.md";
 
 const panelTitles = {
   workspace: "Project files",
@@ -420,15 +424,31 @@ function markdownLinkHtml(label, href) {
   }
   const path = repoRelativePath(target);
   if (path && !path.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/i.test(path)) {
-    return `<button class="markdown-file-link" type="button" data-inline-fullscreen="${escapeHtml(path)}">${escapeHtml(text)}</button>`;
+    return markdownFileButtonHtml(path, text);
   }
   return escapeHtml(text);
+}
+
+function markdownFileButtonHtml(path, label = path) {
+  const value = repoRelativePath(path);
+  if (!value || value.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(value)) return `<code>${escapeHtml(label)}</code>`;
+  return `<button class="markdown-file-link" type="button" data-inline-fullscreen="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+}
+
+function markdownCodeHtml(value) {
+  const text = String(value || "");
+  const linkTarget = text.includes("::") ? text.split("::")[0] : text;
+  const path = repoRelativePath(linkTarget.replace(/[.,;:)]+$/, ""));
+  if (/^(?:resources|research_trajectory|manuscript|workspace|archive|instructions|templates|ui)\//.test(path) || /^[A-Z0-9_./-]+\.(?:md|pdf|png|jpg|jpeg|svg|csv|tsv|json|jsonl|txt|tex|bib|py|js|ts|tsx|jsx|html|css)$/i.test(path)) {
+    return markdownFileButtonHtml(path, text);
+  }
+  return `<code>${escapeHtml(text)}</code>`;
 }
 
 function inlineMarkup(text) {
   return escapeHtml(text)
     .replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, label, href) => markdownLinkHtml(label, href))
-    .replaceAll(/`([^`]+)`/g, "<code>$1</code>")
+    .replaceAll(/`([^`]+)`/g, (_, value) => markdownCodeHtml(value))
     .replaceAll(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 
@@ -737,6 +757,8 @@ function agentStatusText(backend, scope = "settings") {
   const effective = forced || requested;
   const status = statusForBackend(effective);
   const parts = [];
+  const envWarning = String(agentStatusEnvelope().env_warning || "").trim();
+  if (envWarning) parts.push(envWarning);
   if (forced) {
     const forcedLabel = agentLabel(forced);
     if (scope === "project") {
@@ -761,7 +783,7 @@ function renderAgentStatusNote(selector, backend, scope = "settings") {
   const status = statusForBackend(effective);
   const message = agentStatusText(backend, scope);
   note.textContent = message;
-  const tone = statusTone(status);
+  const tone = agentStatusEnvelope().env_warning ? "warning" : statusTone(status);
   if (tone) note.dataset.tone = tone;
   else delete note.dataset.tone;
 }
@@ -1469,7 +1491,9 @@ async function createProjectFromDialog(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const submit = form.querySelector('button[type="submit"]');
-  const name = String(new FormData(form).get("projectName") || "").trim();
+  const data = new FormData(form);
+  const name = String(data.get("projectName") || "").trim();
+  const agentBackend = normalizeAgentBackend(data.get("agentBackend") || activeSettingsBackend());
   if (!name) {
     showToast("Project name is required.", true);
     return;
@@ -1613,10 +1637,14 @@ function hasVisibleManuscript() {
     hasRealText(manuscript.target) ||
     hasRealText(manuscript.contribution) ||
     hasRealText(manuscript.core_story) ||
+    hasRealText(manuscript.toc) ||
     hasRealText(manuscript.no_table_rationale) ||
+    hasRealText(manuscript.provenance) ||
     hasRealText(manuscript.traceability)
   ) return true;
   const sections = [
+    ...(manuscript.architecture || []),
+    ...(manuscript.inline_artifacts || []),
     ...(manuscript.claims || []),
     ...(manuscript.sections || []),
     ...(manuscript.section_blueprint || []),
@@ -1803,6 +1831,11 @@ function activeRun() {
   return typeof run === "object" && run ? run : {};
 }
 
+function activeRunWaitState() {
+  const wait = activeRun().wait_state || sessionState().agent_wait_state || {};
+  return typeof wait === "object" && wait ? wait : {};
+}
+
 function activeRunMode() {
   return String(activeRun().mode || sessionState().mode || "").toLowerCase();
 }
@@ -1836,6 +1869,33 @@ function activeRunStatusLabel() {
   const provider = agentLabel(sessionBackend());
   if (isAutoresearchActiveRun()) return `${provider} is working on Trial ${activeRunTrialIteration()}`;
   return `${provider} is working`;
+}
+
+function agentWaitStateText(waitState = activeRunWaitState()) {
+  const wait = waitState && typeof waitState === "object" ? waitState : {};
+  const kind = String(wait.kind || "").toLowerCase();
+  const age = Number(wait.last_event_age_seconds);
+  const ageText = Number.isFinite(age) ? formatWorkedDuration(age) : "";
+  const summary = String(wait.last_event_summary || "").trim();
+  if (kind === "rate_limited") {
+    return `Rate limit reported${ageText ? ` · last event ${ageText} ago` : ""}`;
+  }
+  if (kind === "idle") {
+    return `No agent events${ageText ? ` for ${ageText}` : ""}; process is still running.`;
+  }
+  if (kind === "active" && ageText) {
+    return `Last event ${ageText} ago${summary ? ` · ${compactText(summary, 140)}` : ""}`;
+  }
+  return String(wait.message || "").trim();
+}
+
+function agentWaitStateHtml(waitState = activeRunWaitState()) {
+  const wait = waitState && typeof waitState === "object" ? waitState : {};
+  const kind = String(wait.kind || "").toLowerCase();
+  if (!["idle", "rate_limited"].includes(kind)) return "";
+  const text = agentWaitStateText(wait);
+  if (!text) return "";
+  return `<p class="run-waiting is-${escapeHtml(kind)}">${escapeHtml(text)}</p>`;
 }
 
 function activeRunScopeLabel() {
@@ -2517,12 +2577,14 @@ function framingMessageHtml(message) {
 }
 
 function framingThinkingHtml() {
+  const showTrialHistory = isAutoresearchActiveRun();
+  if (showTrialHistory) return activeTrialHistoryHtml();
+
   const status = hasLaunched()
     ? activeRunStatusLabel()
     : isSessionRunning()
       ? "Drafting PROJECT.md"
       : `Starting ${agentLabel(sessionBackend())}`;
-  const trialHistory = isAutoresearchActiveRun() ? activeTrialHistoryHtml() : "";
   return `
     <article class="framing-message assistant is-thinking" aria-live="polite">
       <div class="transcript-meta">CoAutoResearch</div>
@@ -2535,7 +2597,6 @@ function framingThinkingHtml() {
           ${isSessionRunning() ? workingDurationHtml() : ""}
         </div>
         ${framingProgressDetailsHtml()}
-        ${trialHistory}
       </div>
     </article>
   `;
@@ -2611,7 +2672,7 @@ function currentProgressEntries() {
 
 function framingProgressRowsHtml(entries) {
   if (!entries.length) {
-    return `<div class="framing-progress is-empty">Waiting for agent events...</div>`;
+    return `<div class="framing-progress is-empty">${agentWaitStateHtml() || "Waiting for agent events..."}</div>`;
   }
   return `
     <div class="framing-progress" aria-label="Agent progress">
@@ -2650,7 +2711,7 @@ function framingProgressDetailsHtml() {
   const latestEntry = latestTrialProgressEntry(entries);
   const latestText = latestEntry
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : "Waiting for agent events...";
+    : agentWaitStateText() || "Waiting for agent events...";
   const runControls = runControlButtonsHtml();
   const activityKey = activeRunActivityDetailsKey();
   return `
@@ -3598,6 +3659,9 @@ function statusCardHtml(payload, entry) {
   const provider = payload.backend_label || agentLabel(payload.backend);
   const process = payload.process || {};
   const events = payload.events || {};
+  const waitState = payload.agent_wait_state || {};
+  const lastEventAge = Number(events.last_event_age_seconds);
+  const lastEvent = Number.isFinite(lastEventAge) ? `${formatWorkedDuration(lastEventAge)} ago` : "none";
   const gate = payload.gate || "missing";
   const iteration = Number.isFinite(Number(payload.loop_iteration)) ? Number(payload.loop_iteration) : 0;
   const interval = Number.isFinite(Number(payload.review_checkpoint_interval)) && Number(payload.review_checkpoint_interval) > 0 ? Number(payload.review_checkpoint_interval) : 100;
@@ -3622,8 +3686,10 @@ function statusCardHtml(payload, entry) {
           ${statusMetricHtml("Gate", gate, gate === "pass" ? "active" : "")}
           ${statusMetricHtml("Stop reason", formatStopReason(payload.stop_reason))}
           ${statusMetricHtml("Events", `${events.raw_logs || 0} raw · ${events.transcript || 0} shown`)}
+          ${statusMetricHtml("Last event", lastEvent)}
           ${statusMetricHtml("Process", process.active ? `pid ${process.pid}` : "not running", process.active ? "active" : "")}
         </div>
+        ${agentWaitStateHtml(waitState)}
         ${payload.gate_summary ? `<p class="status-note">${escapeHtml(payload.gate_summary)}</p>` : ""}
         <section>
           <h4>${escapeHtml(provider)} settings</h4>
@@ -3762,10 +3828,28 @@ function isCodexRuntimeEntry(entry) {
   return rawType.startsWith("item.") || rawType.startsWith("turn.") || rawType.startsWith("process.");
 }
 
+function inferredTrialIterationFromText(value) {
+  const text = String(value || "");
+  const pathMatch = text.match(/(?:^|[\\/])trials[\\/](\d{6})(?:[_\\/]|\/|\b)/i);
+  if (pathMatch) return Number(pathMatch[1]);
+  const idMatch = text.match(/\b(\d{6})_[a-z0-9][a-z0-9_]*\b/i);
+  if (idMatch) return Number(idMatch[1]);
+  const possessiveMatch = text.match(/\bTrial\s+(\d{1,4})(?:'s|’s)\b/i);
+  if (possessiveMatch) return Number(possessiveMatch[1]);
+  const actionMatch = text.match(/\b(?:start(?:ing)?|started|create|creating|move|moving|continue|continuing|validate|validating|complete|completed|finish|finishing)\s+(?:the\s+)?(?:current\s+)?Trial\s+(\d{1,4})\b/i);
+  if (actionMatch) return Number(actionMatch[1]);
+  return 0;
+}
+
 function effectiveIteration(entry, currentIteration) {
   if (isUiLocalTranscript(entry)) return 0;
+  const inferred = inferredTrialIterationFromText(entry?.content);
+  if (inferred > 0) return inferred;
   const explicit = Number(entry?.iteration || 0);
-  if (explicit > 0) return explicit;
+  if (explicit > 0) {
+    if (currentIteration > explicit && isCodexRuntimeEntry(entry)) return currentIteration;
+    return explicit;
+  }
   if (startsGoalIteration(entry)) return Math.max(1, currentIteration + 1);
   if ((hasGoalStarted() || visibleTrialReports().length > 0) && isCodexRuntimeEntry(entry)) {
     return Math.max(1, currentIteration || currentTrialIndex());
@@ -3828,11 +3912,17 @@ function runningTrialStatusHtml(trial) {
   const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
   if (!iteration || !isTrialLive(iteration)) return "";
   const entries = Array.isArray(trial?.entries) ? trial.entries : [];
+  const report = trial?.report || reportForIteration(iteration);
+  const reportSummary = cleanText(report?.report_summary, "");
   const latestEntry = latestTrialProgressEntry(entries);
   const latestText = latestEntry
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : "Waiting for agent events...";
+    : reportSummary || agentWaitStateText() || "Waiting for agent events...";
   const eventLabel = entries.length ? `${entries.length} event${entries.length === 1 ? "" : "s"}` : "waiting";
+  const actions = [
+    report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : "",
+    report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : "",
+  ].filter(Boolean).join("");
   return `
     <section class="trial-live-status" aria-live="polite">
       <div class="trial-live-status-head">
@@ -3848,7 +3938,8 @@ function runningTrialStatusHtml(trial) {
           ${runControlButtonsHtml()}
         </div>
       </div>
-      <p>${escapeHtml(compactText(latestText, 240))}</p>
+      ${agentWaitStateHtml() || `<p>${escapeHtml(compactText(latestText, 240))}</p>`}
+      ${actions ? `<div class="trial-report-actions">${actions}</div>` : ""}
       ${
         entries.length
           ? `<details class="trial-live-details">
@@ -3918,11 +4009,10 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
   const countLabel = `${trials.length} trial${trials.length === 1 ? "" : "s"}${reportedCount ? ` · ${reportedCount} reported` : ""}`;
   const latest = trials[trials.length - 1];
   const latestReport = latest?.report?.id ? cleanText(latest.report.id, "") : "";
-  const activeTrialIsRunningWithoutReport = runningTrialData
+  const activeTrialIsRunning = runningTrialData
     && activeTrialData
-    && Number(runningTrialData.iteration) === Number(activeTrialData.iteration)
-    && !activeTrialData.report?.report_path;
-  const shouldShowActiveTrialReport = activeTrialData && !activeTrialIsRunningWithoutReport;
+    && Number(runningTrialData.iteration) === Number(activeTrialData.iteration);
+  const shouldShowActiveTrialReport = activeTrialData && !activeTrialIsRunning;
   return `
     <section class="trial-history-card" aria-label="Autoresearch trials">
       <header class="trial-history-head">
@@ -5024,6 +5114,169 @@ function renderTraceabilityPanel(manuscript) {
   return sectionList(manuscript.claims, "No traceability map is available yet.");
 }
 
+function renderArchitectureOverview(manuscript) {
+  const toc = cleanText(manuscript.toc, "");
+  if (hasRealText(toc)) {
+    return `<div class="markdown-preview architecture-overview">${markdownToHtml(toc)}</div>`;
+  }
+  const blocks = (manuscript.architecture || manuscript.sections || []).filter(sectionHasRealContent);
+  if (!blocks.length) return empty("No manuscript architecture overview is available yet.");
+  return `
+    <nav class="architecture-toc" aria-label="Manuscript architecture">
+      ${blocks
+        .map((block) => `
+          <div class="architecture-toc-row depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
+            <span>${escapeHtml(block.is_artifact ? String(block.kind || "artifact").toUpperCase() : "SECTION")}</span>
+            <strong>${escapeHtml(cleanText(block.title, "Untitled"))}</strong>
+          </div>
+        `)
+        .join("")}
+    </nav>
+  `;
+}
+
+function architectureFieldGridHtml(block) {
+  const fields = [
+    ["Target-venue role", manuscriptFieldValue(block, ["Target-venue role", "Narrative role in target venue", "Section role"])],
+    ["Reader question", manuscriptFieldValue(block, ["Reader question answered", "Reader question"])],
+    ["Local thesis / purpose", manuscriptFieldValue(block, ["Local thesis / purpose", "Section thesis", "Thesis", "Purpose"])],
+    ["Local claims", manuscriptFieldValue(block, ["Local claims in plain language", "Accepted claims", "Claims"])],
+    ["Evidence / results / artifacts", manuscriptFieldValue(block, ["Local evidence, results, or artifacts", "Evidence", "Results / artifacts", "Results or artifacts"])],
+    ["Placed objects", manuscriptFieldValue(block, ["Placed displays / methods / results", "Figures / tables", "Displays / methods / results"])],
+    ["Qualifications", manuscriptFieldValue(block, ["Local qualifications", "Required qualifications", "Required qualification"])],
+    ["Transition", manuscriptFieldValue(block, ["Transition job"])],
+  ].filter(([, value]) => hasRealText(value));
+  if (!fields.length) return "";
+  return `
+    <dl class="paper-field-grid architecture-field-grid">
+      ${fields
+        .map(([label, value]) => `
+          <div>
+            <dt>${escapeHtml(label)}</dt>
+            <dd><div class="markdown-preview">${markdownToHtml(value)}</div></dd>
+          </div>
+        `)
+        .join("")}
+    </dl>
+  `;
+}
+
+function artifactKindLabel(kind) {
+  const value = String(kind || "").toLowerCase();
+  if (value === "figure") return "Figure";
+  if (value === "table") return "Table";
+  if (value === "algorithm") return "Algorithm / method";
+  if (value === "result") return "Dataset / benchmark / result";
+  return "Artifact";
+}
+
+function manuscriptArtifactCardHtml(block) {
+  const kind = artifactKindLabel(block.kind);
+  const status = manuscriptFieldValue(block, ["Inclusion status", "Status"]);
+  const placement = manuscriptFieldValue(block, ["Placement"]);
+  const role = manuscriptFieldValue(block, ["Purpose or result role", "Argument or result role", "Purpose"]);
+  const caption = manuscriptFieldValue(block, ["Caption draft or current caption", "Caption draft", "Caption"]);
+  const sourcePath = firstArtifactPath([
+    manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source code or artifact links", "Source artifact"]),
+    block.body,
+  ].filter(Boolean).join("\n"));
+  const details = [
+    ["Placement", placement],
+    ["Purpose / role", role],
+    ["Content", manuscriptFieldValue(block, ["Content and panel layout", "Columns, rows, or comparison logic", "Pseudocode / interface sketch", "Metric or result summary"])],
+    ["Evidence / basis", manuscriptFieldValue(block, ["Result shown or conceptual basis", "Key result or conceptual contrast shown", "Validation evidence", "Manuscript claim supported in plain language"])],
+    ["Provenance", manuscriptFieldValue(block, ["Provenance links", "Source links"])],
+    ["Target-venue fit", manuscriptFieldValue(block, ["Target-venue fit rationale"])],
+    ["Remaining blocker", manuscriptFieldValue(block, ["Remaining blocker"])],
+  ].filter(([, value]) => hasRealText(value));
+  return `
+    <article class="manuscript-artifact-card artifact-${escapeHtml(String(block.kind || "artifact"))} depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
+      <header class="figure-spec-head">
+        <div>
+          <p>${escapeHtml(kind)} block</p>
+          <h4>${escapeHtml(cleanText(block.title, "Untitled artifact"))}</h4>
+        </div>
+        ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
+      </header>
+      ${manuscriptActionsHtml([
+        copyButton([`${"#".repeat(Number(block.level || 4))} ${block.title}`, block.body].join("\n\n"), "Copy block", "Artifact block copied."),
+        caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
+        sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
+      ])}
+      ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
+      ${details.length ? `
+        <dl class="paper-field-grid artifact-field-grid">
+          ${details
+            .map(([label, value]) => `
+              <div>
+                <dt>${escapeHtml(label)}</dt>
+                <dd><div class="markdown-preview">${markdownToHtml(value)}</div></dd>
+              </div>
+            `)
+            .join("")}
+        </dl>
+      ` : `<div class="markdown-preview">${markdownToHtml(block.body)}</div>`}
+      ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
+      <details class="figure-spec-full">
+        <summary>Full block</summary>
+        <div class="markdown-preview">${markdownToHtml(block.body)}</div>
+      </details>
+    </article>
+  `;
+}
+
+function manuscriptArchitectureBlockHtml(block) {
+  if (block.is_artifact) return manuscriptArtifactCardHtml(block);
+  const paragraphPlan = paragraphPlanHtml(block);
+  const fieldGrid = architectureFieldGridHtml(block);
+  const fallback = fieldGrid || paragraphPlan ? "" : `<div class="markdown-preview">${markdownToHtml(block.body)}</div>`;
+  return `
+    <article class="paper-section-row architecture-section-row depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
+      <header class="paper-section-head">
+        <p>${escapeHtml(block.path && block.path !== block.title ? block.path : "Manuscript section")}</p>
+        <h4>${escapeHtml(cleanText(block.title, "Untitled section"))}</h4>
+      </header>
+      ${fieldGrid}
+      ${paragraphPlan}
+      ${fallback}
+    </article>
+  `;
+}
+
+function renderManuscriptArchitecture(manuscript) {
+  const blocks = (manuscript.architecture || []).filter(sectionHasRealContent);
+  if (blocks.length) {
+    return `<section class="manuscript-architecture">${blocks.map(manuscriptArchitectureBlockHtml).join("")}</section>`;
+  }
+  return renderPaperOutline(manuscript);
+}
+
+function renderManuscriptAuditPanel(manuscript) {
+  const provenance = cleanText(manuscript.provenance || manuscript.traceability, "");
+  const legacy = [
+    hasRealText(provenance)
+      ? `<details class="traceability-details" open>
+          <summary>Provenance / audit index</summary>
+          ${copyButton(provenance, "Copy provenance", "Provenance copied.")}
+          <div class="markdown-preview">${markdownToHtml(provenance)}</div>
+        </details>`
+      : "",
+    (manuscript.figure_specs || []).filter(sectionHasRealContent).length
+      ? `<details class="traceability-details">
+          <summary>Secondary figure specs</summary>
+          ${figureSpecCardsHtml(manuscript.figure_specs, { label: "Secondary spec" })}
+        </details>`
+      : "",
+    realTablePlans(manuscript).length || hasRealText(manuscript.no_table_rationale)
+      ? `<details class="traceability-details">
+          <summary>Legacy table/source notes</summary>
+          ${renderTablesPanel(manuscript)}
+        </details>`
+      : "",
+  ].filter(Boolean).join("");
+  return legacy || empty("No provenance or secondary audit notes are available yet.");
+}
+
 function renderManuscriptPanel() {
   const manuscript = appState.summaries?.manuscript || {};
   const blueprintViewer = `
@@ -5032,10 +5285,9 @@ function renderManuscriptPanel() {
     </div>
   `;
   return [
-    contextCard("Writing blueprint", renderPaperOutline(manuscript), "Paragraph-level manuscript architecture with results, claims, and figures attached where they belong."),
-    contextCard("Figures", renderFiguresPanel(manuscript), "One card per planned figure, matched to FIGURE_SPECS.md.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
-    contextCard("Tables", renderTablesPanel(manuscript), "Render stable table content here; otherwise explain why no table is active."),
-    contextCard("Traceability", renderTraceabilityPanel(manuscript), "Secondary audit map for claims and evidence."),
+    contextCard("Architecture overview", renderArchitectureOverview(manuscript), "Full target-venue table of contents for the planned manuscript."),
+    contextCard("Manuscript architecture", renderManuscriptArchitecture(manuscript), "Self-contained section order with local claims, evidence, displays, methods, results, and captions where they belong."),
+    contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
     contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
     contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
   ].join("");
@@ -6101,11 +6353,112 @@ async function saveInlineFile(path, root = document) {
   }
 }
 
-async function openInlineFullscreen(path) {
+function clampFileViewerSize(width, height) {
+  const maxWidth = Math.max(320, Number(window.innerWidth || 0) - 36);
+  const maxHeight = Math.max(280, Number(window.innerHeight || 0) - 36);
+  const minWidth = Math.min(520, maxWidth);
+  const minHeight = Math.min(360, maxHeight);
+  return {
+    width: Math.min(maxWidth, Math.max(minWidth, Math.round(Number(width) || maxWidth))),
+    height: Math.min(maxHeight, Math.max(minHeight, Math.round(Number(height) || maxHeight))),
+  };
+}
+
+function storedFileViewerSize() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FILE_VIEWER_SIZE_KEY) || "{}");
+    if (!parsed || typeof parsed !== "object") return null;
+    const width = Number(parsed.width || 0);
+    const height = Number(parsed.height || 0);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    return clampFileViewerSize(width, height);
+  } catch (error) {
+    return null;
+  }
+}
+
+function applyFileViewerSize(dialog = $("#file-viewer-dialog")) {
+  if (!dialog) return;
+  const size = storedFileViewerSize();
+  if (!size) {
+    dialog.style.removeProperty("width");
+    dialog.style.removeProperty("height");
+    return;
+  }
+  dialog.style.width = `${size.width}px`;
+  dialog.style.height = `${size.height}px`;
+}
+
+function persistFileViewerSize(dialog = $("#file-viewer-dialog")) {
+  if (!dialog) return;
+  const rect = dialog.getBoundingClientRect();
+  const size = clampFileViewerSize(rect.width, rect.height);
+  localStorage.setItem(FILE_VIEWER_SIZE_KEY, JSON.stringify(size));
+}
+
+function startFileViewerResize(event) {
+  const handle = event.target?.closest?.("[data-file-viewer-resize]");
+  if (!handle) return;
+  const dialog = $("#file-viewer-dialog");
+  if (!dialog) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = dialog.getBoundingClientRect();
+  fileViewerResizeState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    width: rect.width,
+    height: rect.height,
+  };
+  handle.setPointerCapture?.(event.pointerId);
+  document.body.classList.add("is-resizing-file-viewer");
+}
+
+function updateFileViewerResize(event) {
+  if (!fileViewerResizeState) return;
+  event.preventDefault();
+  const dialog = $("#file-viewer-dialog");
+  if (!dialog) return;
+  const size = clampFileViewerSize(
+    fileViewerResizeState.width + event.clientX - fileViewerResizeState.startX,
+    fileViewerResizeState.height + event.clientY - fileViewerResizeState.startY
+  );
+  dialog.style.width = `${size.width}px`;
+  dialog.style.height = `${size.height}px`;
+}
+
+function finishFileViewerResize(event) {
+  if (!fileViewerResizeState) return;
+  const dialog = $("#file-viewer-dialog");
+  const handle = event?.target?.closest?.("[data-file-viewer-resize]") || document.querySelector("[data-file-viewer-resize]");
+  try {
+    handle?.releasePointerCapture?.(fileViewerResizeState.pointerId);
+  } catch (error) {
+    // Pointer capture may already be gone if the drag ended outside the dialog.
+  }
+  fileViewerResizeState = null;
+  document.body.classList.remove("is-resizing-file-viewer");
+  if (dialog) persistFileViewerSize(dialog);
+}
+
+function updateFileViewerReturnAction(currentPath) {
+  const button = document.querySelector("[data-file-viewer-return]");
+  if (!button) return;
+  const current = repoRelativePath(currentPath);
+  const target = repoRelativePath(fileViewerReturnPath || button.dataset.fileViewerReturn || LATEST_MANUSCRIPT_PATH);
+  const show = Boolean(target && current && current !== target && fileViewerReturnPath);
+  button.hidden = !show;
+  button.dataset.fileViewerReturn = target || LATEST_MANUSCRIPT_PATH;
+}
+
+async function openInlineFullscreen(path, options = {}) {
   const dialog = $("#file-viewer-dialog");
   const body = $("#file-viewer-body");
   const title = $("#file-viewer-title");
   if (!dialog || !body || !title) return;
+  const previousPath = repoRelativePath(body.dataset.inlineFullscreenFile || "");
+  const requestedReturnPath = repoRelativePath(options.returnPath || "");
   let payload = inlineFilePayloads[path];
   if (!payload) {
     try {
@@ -6122,10 +6475,22 @@ async function openInlineFullscreen(path) {
   inlineFilePayloads[payload.path || path] = payload;
   inlineFiles[payload.path || path] = payload.text || "";
   const resolvedPath = payload.path || path;
+  const normalizedResolvedPath = repoRelativePath(resolvedPath);
+  if (normalizedResolvedPath === LATEST_MANUSCRIPT_PATH) {
+    fileViewerReturnPath = "";
+  } else if (requestedReturnPath) {
+    fileViewerReturnPath = requestedReturnPath;
+  } else if (dialog.open && previousPath === LATEST_MANUSCRIPT_PATH) {
+    fileViewerReturnPath = LATEST_MANUSCRIPT_PATH;
+  } else if (!dialog.open) {
+    fileViewerReturnPath = "";
+  }
   title.textContent = basename(resolvedPath);
   body.dataset.inlineFullscreenFile = resolvedPath;
   body.dataset.compactInline = "false";
   body.innerHTML = inlineEditorHtml(payload, false);
+  updateFileViewerReturnAction(resolvedPath);
+  applyFileViewerSize(dialog);
   if (dialog.showModal) dialog.showModal();
   else dialog.setAttribute("open", "");
 }
@@ -6134,12 +6499,15 @@ function closeInlineFullscreen() {
   const dialog = $("#file-viewer-dialog");
   const body = $("#file-viewer-body");
   if (!dialog) return;
+  if (fileViewerResizeState) finishFileViewerResize();
   if (dialog.close) dialog.close();
   else dialog.removeAttribute("open");
   if (body) {
     body.innerHTML = "";
     delete body.dataset.inlineFullscreenFile;
   }
+  fileViewerReturnPath = "";
+  updateFileViewerReturnAction("");
 }
 
 function filesFromApiResponse(payload) {
@@ -7351,7 +7719,19 @@ function bindEvents() {
     }
     const inlineFullscreen = event.target.closest("[data-inline-fullscreen]");
     if (inlineFullscreen) {
-      openInlineFullscreen(inlineFullscreen.dataset.inlineFullscreen);
+      const sourcePath = repoRelativePath(
+        inlineFullscreen.closest("[data-inline-fullscreen-file]")?.dataset.inlineFullscreenFile ||
+        inlineFullscreen.closest("[data-inline-file]")?.dataset.inlineFile ||
+        ""
+      );
+      const targetPath = repoRelativePath(inlineFullscreen.dataset.inlineFullscreen || "");
+      const returnPath = sourcePath === LATEST_MANUSCRIPT_PATH && targetPath !== LATEST_MANUSCRIPT_PATH ? LATEST_MANUSCRIPT_PATH : fileViewerReturnPath;
+      openInlineFullscreen(inlineFullscreen.dataset.inlineFullscreen, { returnPath });
+      return;
+    }
+    const fileViewerReturn = event.target.closest("[data-file-viewer-return]");
+    if (fileViewerReturn) {
+      openInlineFullscreen(fileViewerReturn.dataset.fileViewerReturn || LATEST_MANUSCRIPT_PATH);
       return;
     }
     const fileViewerClose = event.target.closest("[data-file-viewer-close]");
@@ -7500,11 +7880,18 @@ function bindEvents() {
   $("#file-viewer-dialog")?.addEventListener("click", (event) => {
     if (event.target?.id === "file-viewer-dialog") closeInlineFullscreen();
   });
+  $("#file-viewer-dialog")?.addEventListener("pointerdown", startFileViewerResize);
+  document.addEventListener("pointermove", updateFileViewerResize);
+  document.addEventListener("pointerup", finishFileViewerResize);
+  document.addEventListener("pointercancel", finishFileViewerResize);
   $("#file-viewer-dialog")?.addEventListener("close", () => {
+    if (fileViewerResizeState) finishFileViewerResize();
     const body = $("#file-viewer-body");
     if (!body) return;
     body.innerHTML = "";
     delete body.dataset.inlineFullscreenFile;
+    fileViewerReturnPath = "";
+    updateFileViewerReturnAction("");
   });
 
   document.body.addEventListener("submit", (event) => {

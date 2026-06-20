@@ -200,6 +200,45 @@ async function writeFakeAuthFailureBin(directory, backend) {
   }
 }
 
+async function writeFakeClaudePermissionBin(directory, modes) {
+  await fsp.mkdir(directory, { recursive: true });
+  const quotedModes = modes.map((mode) => `"${mode}"`).join(", ");
+  const help = `Usage: claude [options]\n  --permission-mode <mode> Permission mode to use for the session (choices: ${quotedModes})\n`;
+  const cmd = path.join(directory, "claude.cmd");
+  await fsp.writeFile(
+    cmd,
+    [
+      "@echo off",
+      "if \"%1\"==\"auth\" if \"%2\"==\"status\" (echo Authenticated& exit /b 0)",
+      "if \"%1\"==\"--help\" goto help",
+      "echo claude fake 0.0.0",
+      "exit /b 0",
+      ":help",
+      "echo Usage: claude [options]",
+      `echo   --permission-mode ^<mode^> Permission mode to use for the session choices: ${quotedModes}`,
+      "exit /b 0",
+      "",
+    ].join("\r\n"),
+    "utf8"
+  );
+  if (process.platform !== "win32") {
+    const shell = path.join(directory, "claude");
+    await fsp.writeFile(
+      shell,
+      [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then echo Authenticated; exit 0; fi",
+        `if [ "$1" = "--help" ]; then printf '%s\\n' ${JSON.stringify(help)}; exit 0; fi`,
+        "echo claude fake 0.0.0",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+    await fsp.chmod(shell, 0o755);
+    await fsp.chmod(cmd, 0o755);
+  }
+}
+
 try {
   execFileSync("node", [cli, "init", projectDir], { cwd: root, stdio: "pipe" });
   execFileSync("node", [cli, "init", projectTwoDir], { cwd: root, stdio: "pipe" });
@@ -297,7 +336,7 @@ try {
   }
   const reviewerMetadataPath = path.join(projectDir, "instructions", ".co-auto-research-instructions.json");
   const reviewerMetadata = JSON.parse(await fsp.readFile(reviewerMetadataPath, "utf8"));
-  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-per-reviewer-files") {
+  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-inline-blueprint") {
     throw new Error("new projects should record the reviewer baseline");
   }
   const staleReviewerFixtureRoot = path.join(tempRoot, "upgrade-fixtures");
@@ -371,7 +410,7 @@ Confidence: medium
     throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
   }
   const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
-  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-per-reviewer-files" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
+  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-inline-blueprint" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
     throw new Error("upgrade-project should write reviewer baseline metadata");
   }
   try {
@@ -421,6 +460,7 @@ Confidence: medium
   const contributingDocs = await fsp.readFile(path.join(root, "CONTRIBUTING.md"), "utf8");
   const upgradingDocs = await fsp.readFile(path.join(root, "docs", "upgrading.md"), "utf8");
   const pagesWorkflow = await fsp.readFile(path.join(root, ".github", "workflows", "pages.yml"), "utf8");
+  const ciWorkflow = await fsp.readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
   const cliSource = await fsp.readFile(path.join(root, "bin", "auto-research.js"), "utf8");
   const helpOutput = execFileSync("node", [cli, "help"], { cwd: root, encoding: "utf8" });
   if (
@@ -443,6 +483,11 @@ Confidence: medium
     !docsRequirements.includes("myst-parser") ||
     !docsRequirements.includes("sphinxcontrib-mermaid") ||
     !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
+    !ciWorkflow.includes("ubuntu-latest") ||
+    !ciWorkflow.includes("macos-latest") ||
+    !ciWorkflow.includes("windows-latest") ||
+    !ciWorkflow.includes("npm test") ||
+    !ciWorkflow.includes("npm pack --dry-run") ||
     pagesWorkflow.includes("jekyll-build-pages") ||
     pagesWorkflow.includes("ENABLE_PRIVATE_PAGES") ||
     packageManifest.name !== "co-auto-research" ||
@@ -511,7 +556,7 @@ Confidence: medium
     throw new Error("framing composer and CoAutoResearch returns must share a centered column");
   }
   if (
-    !indexHtml.includes("20260617-figure-cards") ||
+    !indexHtml.includes("20260620-run-ui2") ||
     !stylesCss.includes("Reader typography: match the composer text across content surfaces.") ||
     !stylesCss.includes(".framing-message .transcript-body") ||
     !stylesCss.includes("font-family: var(--reader);")
@@ -722,7 +767,7 @@ Confidence: medium
     !appJs.includes("markdownLinkHtml") ||
     !appJs.includes('transcriptContentHtml(message.text, { markdown: role === "assistant" })') ||
     !stylesCss.includes(".markdown-file-link") ||
-    !indexHtml.includes("20260617-figure-cards")
+    !indexHtml.includes("20260620-run-ui2")
   ) {
     throw new Error("Codex assistant responses must render Markdown in framing chat");
   }
@@ -773,7 +818,7 @@ Confidence: medium
     throw new Error("interrupted goal sessions must show resume controls instead of pause controls");
   }
   if (
-    !indexHtml.includes("app.js?v=20260617-figure-cards") ||
+    !indexHtml.includes("app.js?v=20260620-run-ui2") ||
     !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command"])') ||
     !appJs.includes('appendFramingMessage("user", displayText, { kind: "command" })') ||
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
@@ -831,7 +876,7 @@ Confidence: medium
     throw new Error("slash command pending state must start before the command row is rendered");
   }
   if (
-    !indexHtml.includes("styles.css?v=20260617-figure-cards") ||
+    !indexHtml.includes("styles.css?v=20260620-run-ui2") ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
     !appJs.includes("const latestRunStart = transcript.reduce") ||
     !appJs.includes("function framingProgressDetailsHtml()") ||
@@ -887,6 +932,20 @@ Confidence: medium
     throw new Error("UI must expose the latest manuscript and make quick prompt insertion idempotent");
   }
   if (
+    !indexHtml.includes("data-file-viewer-resize") ||
+    !indexHtml.includes("data-file-viewer-return=\"manuscript/BLUEPRINT.md\"") ||
+    !appJs.includes("function startFileViewerResize") ||
+    !appJs.includes("function clampFileViewerSize") ||
+    !appJs.includes("function updateFileViewerReturnAction") ||
+    !appJs.includes("LATEST_MANUSCRIPT_PATH") ||
+    !appJs.includes("FILE_VIEWER_SIZE_KEY") ||
+    !stylesCss.includes(".file-viewer-resize-handle") ||
+    !stylesCss.includes(".file-viewer-return") ||
+    !stylesCss.includes("body.is-resizing-file-viewer")
+  ) {
+    throw new Error("fullscreen file preview must expose a draggable resize handle and return-to-manuscript action");
+  }
+  if (
     !appJs.includes("function messageCopyButton") ||
     !appJs.includes("message-copy-button") ||
     !stylesCss.includes(".message-copy-button") ||
@@ -916,37 +975,40 @@ Confidence: medium
     throw new Error("trial strip numbers must render as high-contrast fixed-size badges");
   }
   if (
+    !appJs.includes("function renderArchitectureOverview") ||
+    !appJs.includes("function renderManuscriptArchitecture") ||
+    !appJs.includes("function manuscriptArtifactCardHtml") ||
+    !appJs.includes("function renderManuscriptAuditPanel") ||
     !appJs.includes("function figureSpecCardsHtml") ||
     !appJs.includes("function figureSpecFields") ||
-    !appJs.includes("function renderPaperOutline") ||
-    !appJs.includes("function renderFiguresPanel") ||
-    !appJs.includes("function renderTablesPanel") ||
-    !appJs.includes("function renderTraceabilityPanel") ||
-    !appJs.includes('contextCard("Writing blueprint"') ||
+    !appJs.includes('contextCard("Architecture overview"') ||
+    !appJs.includes('contextCard("Manuscript architecture"') ||
+    !appJs.includes('contextCard("Audit / provenance"') ||
     !appJs.includes("function paragraphPlanHtml") ||
     !appJs.includes("Paragraph plan") ||
-    !appJs.includes('contextCard("Figures"') ||
-    !appJs.includes('contextCard("Tables"') ||
-    !appJs.includes('contextCard("Traceability"') ||
+    !appJs.includes("Provenance / audit index") ||
+    !appJs.includes("Secondary figure specs") ||
     !appJs.includes("data-copy-text") ||
-    !appJs.includes("Copy spec") ||
+    !appJs.includes("Copy block") ||
     !appJs.includes("Copy caption") ||
-    !appJs.includes("figureSpecDetail(\"Purpose\"") ||
-    !appJs.includes("figureSpecDetail(\"Evidence / conceptual basis\"") ||
+    !appJs.includes("markdownFileButtonHtml") ||
+    !serverPy.includes('"architecture"') ||
+    !serverPy.includes('"inline_artifacts"') ||
+    !serverPy.includes('"toc"') ||
     !serverPy.includes('"figure_plans"') ||
     !serverPy.includes('"table_plans"') ||
-    !serverPy.includes('"no_table_rationale"') ||
-    !serverPy.includes('"traceability"') ||
+    !serverPy.includes('"provenance"') ||
     !stylesCss.includes(".figure-spec-card") ||
     !stylesCss.includes(".figure-caption") ||
     !stylesCss.includes(".figure-status.is-caution") ||
-    !stylesCss.includes(".paper-outline") ||
+    !stylesCss.includes(".manuscript-architecture") ||
+    !stylesCss.includes(".manuscript-artifact-card") ||
+    !stylesCss.includes(".architecture-toc") ||
     !stylesCss.includes(".paragraph-plan-block") ||
     !stylesCss.includes(".manuscript-actions") ||
-    !stylesCss.includes(".table-empty-rationale") ||
     !stylesCss.includes(".traceability-details")
   ) {
-    throw new Error("manuscript panel must render a paragraph-level writing blueprint with inline figure specs, tables, traceability, and copy/open controls");
+    throw new Error("manuscript panel must render a self-contained architecture blueprint with inline artifact blocks, provenance, and copy/open controls");
   }
   if (
     !appJs.includes("selectedResumeTrialContext") ||
@@ -1028,6 +1090,14 @@ Confidence: medium
   if (!doctorOutput.includes("package-managed runtime") || !doctorOutput.includes("legacy project ui/server.py")) {
     throw new Error(`doctor should report package-managed UI runtime and legacy project UI fallback:\n${doctorOutput}`);
   }
+  const invalidBackendDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
+    cwd: root,
+    env: { ...process.env, COAUTO_AGENT_BACKEND: "not-a-backend", PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    encoding: "utf8"
+  });
+  if (!invalidBackendDoctorOutput.includes("invalid value") || !invalidBackendDoctorOutput.includes("COAUTO_AGENT_BACKEND")) {
+    throw new Error(`doctor should warn about invalid COAUTO_AGENT_BACKEND:\n${invalidBackendDoctorOutput}`);
+  }
 
   const packedName = execFileSync("npm", ["pack", "--pack-destination", tempRoot], {
     cwd: root,
@@ -1058,6 +1128,17 @@ Confidence: medium
   }
 
   const python = findPython();
+  const spacedBinRoot = path.join(tempRoot, "Program Files", "CoAuto Agents");
+  const spacedCodexDir = path.join(spacedBinRoot, "Codex CLI");
+  const spacedClaudeDir = path.join(spacedBinRoot, "Claude Code");
+  await fsp.mkdir(spacedCodexDir, { recursive: true });
+  await fsp.mkdir(spacedClaudeDir, { recursive: true });
+  const spacedCodexCmd = path.join(spacedCodexDir, "codex.cmd");
+  const spacedCodexExe = path.join(spacedCodexDir, "codex.exe");
+  const spacedClaudeCmd = path.join(spacedClaudeDir, "claude.cmd");
+  await fsp.writeFile(spacedCodexCmd, "@echo off\r\necho codex fake 0.0.0\r\n", "utf8");
+  await fsp.writeFile(spacedCodexExe, "", "utf8");
+  await fsp.writeFile(spacedClaudeCmd, "@echo off\r\necho claude fake 0.0.0\r\n", "utf8");
   const resolverOutput = execFileSync(python.command, [
     ...python.args,
     "-c",
@@ -1070,24 +1151,39 @@ Confidence: medium
       "resolved = pathlib.Path(module.resolve_codex_executable({'PATH': os.environ['COAUTO_FAKE_PATH']}, windows=True)).name.lower()",
       "claude = pathlib.Path(module.resolve_claude_executable({'PATH': os.environ['COAUTO_FAKE_PATH']}, windows=True)).name.lower()",
       "needs_shell = module.executable_requires_windows_shell('C:/Program Files/nodejs/codex.cmd', windows=True)",
-      "print(f'{resolved}|{claude}|{needs_shell}')",
+      "space_codex = os.environ['COAUTO_SPACED_CODEX']",
+      "space_claude = os.environ['COAUTO_SPACED_CLAUDE']",
+      "assert module.resolve_codex_executable({'PATH': '', 'COAUTO_CODEX': space_codex}, windows=True) == space_codex",
+      "assert module.resolve_claude_executable({'PATH': '', 'COAUTO_CLAUDE': space_claude}, windows=True) == space_claude",
+      "assert module.executable_requires_windows_shell(space_codex, windows=True) is True",
+      "assert module.executable_requires_windows_shell(os.environ['COAUTO_SPACED_CODEX_EXE'], windows=True) is False",
+      "print(f'{resolved}|{claude}|{needs_shell}|space-ok')",
       "assert resolved == 'codex.cmd', resolved",
       "assert claude == 'claude.cmd', claude",
       "assert needs_shell is True"
     ].join("; ")
   ], {
     cwd: root,
-    env: { ...process.env, COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"), COAUTO_FAKE_PATH: fakeBin },
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_FAKE_PATH: fakeBin,
+      COAUTO_SPACED_CODEX: spacedCodexCmd,
+      COAUTO_SPACED_CODEX_EXE: spacedCodexExe,
+      COAUTO_SPACED_CLAUDE: spacedClaudeCmd
+    },
     encoding: "utf8"
   }).trim();
-  if (resolverOutput !== "codex.cmd|claude.cmd|True") {
+  if (resolverOutput !== "codex.cmd|claude.cmd|True|space-ok") {
     throw new Error(`Python agent resolver returned ${resolverOutput}`);
   }
 
   const codexAuthFailBin = path.join(tempRoot, "fake-codex-auth-fail");
   const claudeAuthFailBin = path.join(tempRoot, "fake-claude-auth-fail");
+  const claudeNoAutoBin = path.join(tempRoot, "fake-claude-no-auto");
   await writeFakeAuthFailureBin(codexAuthFailBin, "codex");
   await writeFakeAuthFailureBin(claudeAuthFailBin, "claude");
+  await writeFakeClaudePermissionBin(claudeNoAutoBin, ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan"]);
   const readinessOutput = execFileSync(python.command, [
     ...python.args,
     "-c",
@@ -1100,11 +1196,42 @@ Confidence: medium
       "project_root = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT'])",
       "context = module.ProjectContext(project_root)",
       "module._CONTEXT.project = context",
+      "module.write_default_project_ui_settings(project_root, 'claude')",
+      "assert module.selected_agent_backend_from_env({'COAUTO_AGENT_BACKEND': 'bogus'}) == 'codex'",
+      "assert 'invalid COAUTO_AGENT_BACKEND' in module.agent_backend_env_warning({'COAUTO_AGENT_BACKEND': 'bogus'})",
+      "old_backend = os.environ.get('COAUTO_AGENT_BACKEND', '')",
+      "old_path_for_invalid = os.environ.get('PATH', '')",
+      "old_codex_for_invalid = os.environ.get('COAUTO_CODEX', '')",
+      "old_claude_for_invalid = os.environ.get('COAUTO_CLAUDE', '')",
+      "os.environ['COAUTO_AGENT_BACKEND'] = 'bogus'",
+      "os.environ['PATH'] = os.environ['COAUTO_FAKE_PATH']",
+      "os.environ['COAUTO_CODEX'] = ''",
+      "os.environ['COAUTO_CLAUDE'] = ''",
+      "try:",
+      "    invalid_env_settings = module.normalize_research_settings({})",
+      "    assert invalid_env_settings['backend'] == 'claude', invalid_env_settings",
+      "    public_settings = module.public_ui_settings()",
+      "    assert 'invalid COAUTO_AGENT_BACKEND' in public_settings['agent_status']['env_warning'], public_settings['agent_status']",
+      "finally:",
+      "    os.environ['COAUTO_AGENT_BACKEND'] = old_backend",
+      "    os.environ['PATH'] = old_path_for_invalid",
+      "    os.environ['COAUTO_CODEX'] = old_codex_for_invalid",
+      "    os.environ['COAUTO_CLAUDE'] = old_claude_for_invalid",
       "ok_env = dict(os.environ, PATH=os.environ['COAUTO_FAKE_PATH'], COAUTO_CODEX='', CODEX_BIN='', COAUTO_CLAUDE='', CLAUDE_BIN='')",
       "codex_ok = module.agent_setup_status('codex', ok_env)",
       "claude_ok = module.agent_setup_status('claude', ok_env)",
       "assert codex_ok['ok'] and codex_ok['auth'] == 'ok', codex_ok",
       "assert claude_ok['ok'] and claude_ok['auth'] == 'ok', claude_ok",
+      "no_auto_env = dict(os.environ, PATH=os.environ['COAUTO_CLAUDE_NO_AUTO_PATH'], COAUTO_CLAUDE='', CLAUDE_BIN='')",
+      "no_auto = module.claude_permission_mode_status({'permissionPreset': 'auto-review'}, no_auto_env)",
+      "assert no_auto['blocking'] and no_auto['mode'] == 'auto', no_auto",
+      "default_mode = module.claude_permission_mode_status({'permissionPreset': 'default'}, no_auto_env)",
+      "assert default_mode['ok'] and not default_mode['blocking'], default_mode",
+      "try:",
+      "    module.ensure_agent_ready('claude', no_auto_env, {'permissionPreset': 'auto-review'})",
+      "    raise AssertionError('unsupported Claude auto permission mode should block readiness')",
+      "except ValueError as exc:",
+      "    assert 'permission mode `auto`' in str(exc), str(exc)",
       "missing = module.agent_setup_status('codex', dict(os.environ, PATH='', COAUTO_CODEX='', CODEX_BIN=''))",
       "assert missing['blocking'] and 'COAUTO_CODEX' in missing['message'], missing",
       "codex_auth = module.agent_setup_status('codex', dict(os.environ, PATH=os.environ['COAUTO_CODEX_FAIL_PATH'], COAUTO_CODEX='', CODEX_BIN=''))",
@@ -1127,7 +1254,7 @@ Confidence: medium
       "    os.environ['PATH'] = old_path",
       "    os.environ['COAUTO_CLAUDE'] = old_claude",
       "    os.environ['CLAUDE_BIN'] = old_claude_bin",
-      "print(json.dumps({'codex': codex_ok['auth'], 'claude': claude_ok['auth'], 'blocked': 'claude auth login'}))",
+      "print(json.dumps({'codex': codex_ok['auth'], 'claude': claude_ok['auth'], 'blocked': 'claude auth login', 'permission': no_auto['mode'], 'invalid': invalid_env_settings['backend']}))",
     ].join("\n")
   ], {
     cwd: root,
@@ -1137,11 +1264,12 @@ Confidence: medium
       COAUTO_PROJECT_ROOT: projectDir,
       COAUTO_FAKE_PATH: fakeBin,
       COAUTO_CODEX_FAIL_PATH: codexAuthFailBin,
-      COAUTO_CLAUDE_FAIL_PATH: claudeAuthFailBin
+      COAUTO_CLAUDE_FAIL_PATH: claudeAuthFailBin,
+      COAUTO_CLAUDE_NO_AUTO_PATH: claudeNoAutoBin
     },
     encoding: "utf8"
   }).trim();
-  if (!readinessOutput.includes('"blocked": "claude auth login"')) {
+  if (!readinessOutput.includes('"blocked": "claude auth login"') || !readinessOutput.includes('"permission": "auto"') || !readinessOutput.includes('"invalid": "claude"')) {
     throw new Error(`Python readiness fixture returned unexpected output: ${readinessOutput}`);
   }
 
@@ -1156,6 +1284,13 @@ Confidence: medium
       "spec.loader.exec_module(module)",
       "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
       "module._CONTEXT.project = context",
+      "codex_settings = module.normalize_research_settings({'backend': 'codex', 'model': 'gpt-5.5', 'reasoningEffort': 'medium', 'permissionPreset': 'auto-review', 'webSearch': True, 'reviewCheckpointInterval': '30'})",
+      "context.session.update({'session_id': '00000000-0000-0000-0000-000000000111', 'backend': 'codex', 'settings': codex_settings, 'logs': [], 'raw_logs': [], 'transcript': []})",
+      "codex_new_cmd = module.agent_command_for_prompt(False, codex_settings)",
+      "codex_resume_cmd = module.agent_command_for_prompt(True, codex_settings)",
+      "assert pathlib.Path(codex_new_cmd[0]).name.startswith('codex'), codex_new_cmd",
+      "assert codex_new_cmd[1] == 'exec' and '--json' in codex_new_cmd and codex_new_cmd[-1] == '-', codex_new_cmd",
+      "assert codex_resume_cmd[1:3] == ['exec', 'resume'] and '00000000-0000-0000-0000-000000000111' in codex_resume_cmd and codex_resume_cmd[-1] == '-', codex_resume_cmd",
       "settings = module.normalize_research_settings({'backend': 'claude', 'model': 'sonnet', 'reasoningEffort': 'high', 'permissionPreset': 'full-access', 'webSearch': False, 'reviewCheckpointInterval': '25'})",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000123', 'backend': 'claude', 'settings': settings, 'logs': [], 'raw_logs': [], 'transcript': []})",
       "new_cmd = module.agent_command_for_prompt(False, settings)",
@@ -1188,6 +1323,8 @@ Confidence: medium
       ...process.env,
       COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
       COAUTO_PROJECT_ROOT: projectDir,
+      COAUTO_AGENT_BACKEND: "",
+      COAUTO_CODEX: process.platform === "win32" ? path.join(fakeBin, "codex.cmd") : path.join(fakeBin, "codex"),
       COAUTO_CLAUDE: process.platform === "win32" ? path.join(fakeBin, "claude.cmd") : path.join(fakeBin, "claude")
     },
     encoding: "utf8"
@@ -1376,7 +1513,7 @@ Confidence: medium
     "    trial_dir.mkdir(parents=True, exist_ok=True)",
     "    (trial_dir / 'PLAN.md').write_text('# Plan\\n\\nFinal gate smoke plan.\\n', encoding='utf-8')",
     "    (trial_dir / 'REPORT.md').write_text('# Report\\n\\nFinal gate smoke report.\\n', encoding='utf-8')",
-    "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected figure/table style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Accepted Claims And Evidence Map\n\n| Claim ID | Claim | Evidence IDs | Evidence strength | Required qualification | Manuscript location |\n|---|---|---|---|---|---|\n| C000001 | A bounded accepted claim. | R000001 | qualified | none | Introduction P1 |\n\n---\n\n## Section-By-Section Architecture\n\n### Section 1: Introduction\n\nPurpose: Establish the problem.\n\nSection thesis: The accepted claim is important but bounded by the reviewed evidence.\n\nReader question answered: Why should this perspective exist and what claim is supported?\n\nNarrative role in target venue: Open the perspective with a qualified evidence synthesis.\n\nAccepted claims: C000001.\n\nEvidence: R000001.\n\nFigures / tables: none.\n\nRequired qualifications: The claim remains bounded to R000001.\n\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Claims / evidence | Results / artifacts | Figures / tables | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|---|\n| P1 | Establish problem and bounded claim | State the research problem, introduce C000001, and say exactly what R000001 supports without drafting final prose. | C000001 / R000001 | research_trajectory/CURRENT_FINDINGS.md | none | cite the accepted source audit | bounded to reviewed evidence | sets up the implication section |\n\n---\n\n## Figure Plan\n\nNo active figures are required for the final scoped deliverable.\n\n---\n\n## Table Plan\n\nNo active tables are required for the final scoped deliverable.\n\n### No-Table Rationale\n\nNo table is needed because the accepted claim/evidence mapping is compact and carried by Section 1 paragraph P1.\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence and that qualification is reflected in paragraph P1.\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
+    "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected display / method / result style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Architecture Overview / Table of Contents\n\n- [Section 1: Introduction](#section-1-introduction)\n\n---\n\n## Manuscript Architecture\n\n### Section 1: Introduction\n\nTarget-venue role: Open the perspective with a qualified evidence synthesis.\n\nReader question answered: Why should this perspective exist and what claim is supported?\n\nLocal thesis / purpose: The bounded accepted claim is important but constrained by the reviewed evidence.\n\nLocal claims in plain language: The manuscript makes one bounded claim that is understandable without opening a claim/evidence index.\n\nLocal evidence, results, or artifacts: `research_trajectory/CURRENT_FINDINGS.md` supports the claim through the current source audit.\n\nPlaced displays / methods / results: none.\n\nLocal qualifications: The claim remains bounded to the reviewed evidence.\n\nTransition job: sets up the implication section.\n\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|\n| P1 | Establish problem and bounded claim | State the research problem and say exactly what the current finding supports without drafting final prose. | `research_trajectory/CURRENT_FINDINGS.md` | none | cite the accepted source audit | bounded to reviewed evidence | sets up the implication section |\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports. No active tables are needed because the comparison is carried locally in Section 1 paragraph P1.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence and that qualification is reflected in Section 1 paragraph P1.\n\n---\n\n## Provenance / Audit Index\n\n### Claim / Evidence Index\n\nC000001 maps to the local Section 1 claim and `research_trajectory/CURRENT_FINDINGS.md`.\n\n### Display / Method / Result Inventory\n\nNo active displays, methods, datasets, benchmarks, or result blocks are required for this scoped fixture.\n\n### Source Links\n\n- `research_trajectory/CURRENT_FINDINGS.md`\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
     "    review_template = \"\"\"Reviewer: {reviewer}\nScope: {scope}\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `{instruction}`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `PROJECT.md`\n- `research_trajectory/STATE.md`\n- `research_trajectory/trials/000001_final_smoke/PLAN.md`\n- `research_trajectory/trials/000001_final_smoke/REPORT.md`\n\n## Context Summary\n\nSmoke test reviewer fixture.\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\"",
     "    for key, config in module.REQUIRED_REVIEWER_OUTPUTS.items():",
     "        if key == 'final_gate':",

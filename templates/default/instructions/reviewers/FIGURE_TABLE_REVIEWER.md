@@ -12,7 +12,7 @@ Review figure and table quality, especially target-venue fit and communication v
 - `resources/target_venue/FIGURE_TABLE_NOTES.md`
 - `resources/target_venue/SEED_PAPERS.md`
 - `manuscript/BLUEPRINT.md`
-- `manuscript/figures/FIGURE_SPECS.md`
+- `manuscript/figures/FIGURE_SPECS.md` when present as a secondary spec cache
 - candidate figures/tables if present
 
 ## Output Location
@@ -34,20 +34,20 @@ Check:
 - Are axes, labels, baselines, uncertainty, and comparisons clear?
 - Are conceptual figures specified in enough detail before generation?
 - Are result plots traceable to trial artifacts?
-- Is each active figure/table placed in specific manuscript paragraphs in
-  `manuscript/BLUEPRINT.md`?
-- Does each active figure/table state the result or conceptual basis it carries,
-  not only its visual form?
-- Does `manuscript/BLUEPRINT.md` summarize every active figure/table with
-  inclusion status, argument or result role, content, visual style when
-  applicable, complete caption, source artifact, linked paragraphs, linked
-  claims/evidence, target-venue rationale, and remaining blocker?
+- Is each active figure/table placed inline at the specific manuscript section,
+  subsection, or paragraph location where the final manuscript would use it?
+- Does each active figure/table state the result, conceptual basis, or local
+  manuscript job it carries, not only its visual form?
+- Does `manuscript/BLUEPRINT.md` contain every active figure/table block in
+  manuscript reading order, with placement, inclusion status, role, content or
+  panel/table logic, complete caption, source artifact/spec path, local
+  evidence/provenance links, target-venue rationale, and remaining blocker?
 - For tables, is the `Spec+source` representation sufficient: compact tables
   shown inline when useful, larger tables linked to a source artifact with
   columns/rows, key results, and caption specified?
 - If there are no active tables, does the blueprint explain why no table is
-  needed, which candidate tables were considered, and where the claim/evidence
-  mapping is carried instead?
+  needed, which candidate tables were considered, and where the needed
+  comparison or evidence mapping is carried in the manuscript architecture?
 
 ## Pass Standard
 
@@ -55,10 +55,12 @@ Use `Decision: pass` only when every active figure/table required for the
 declared scope is final enough for that scope: inclusion decision made, source or
 artifact traceable, caption precise, labels readable, and target-audience fit
 checked. The final blueprint must also be self-contained for figure/table status
-and rationale. Candidate assets, unresolved display inventory, missing captions,
-missing source artifacts, missing linked paragraph placement, missing result
-mapping, missing target-venue rationale, stale bundle notes, or "acceptable for
-now" displays require `Decision: continue`.
+and rationale in the exact manuscript location where each display belongs.
+Candidate assets, unresolved display inventory, missing captions, missing
+source artifacts, display specs that only live in `FIGURE_SPECS.md`, active
+figures/tables that only appear in a back-matter plan, missing local placement,
+missing result mapping, missing target-venue rationale, stale bundle notes, or
+"acceptable for now" displays require `Decision: continue`.
 
 ## Output Schema
 

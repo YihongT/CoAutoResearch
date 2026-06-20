@@ -50,25 +50,36 @@ Check:
   level for the declared target, not merely ready for another revision phase.
 - if the goal is manuscript-facing, `manuscript/BLUEPRINT.md` is a
   self-contained, target-venue-ready blueprint with explicit organization,
-  accepted claims, evidence map, target-manual section architecture,
-  paragraph-level writing plan, figure plan, table plan, reference plan,
-  appendix/supplement plan, blockers, qualifications, deprecated ideas, and
-  submission-readiness summary.
+  architecture overview/table of contents, target-manual section architecture,
+  paragraph-level writing plans, local claim/evidence/result explanations,
+  inline figure/table/algorithm/dataset/benchmark/result blocks, reference
+  plan, appendix/supplement plan, blockers, qualifications, provenance/audit
+  index, deprecated ideas, and submission-readiness summary.
 - if the target deliverable has an abstract, the blueprint plans the abstract
   according to the target manual: structured headings when required, otherwise
   4-6 unstructured rhetorical moves.
-- every active figure has a title, inclusion status, argument/result role,
-  content and panel layout, caption draft/current caption, source artifact path,
-  result shown or conceptual basis, linked manuscript paragraphs, linked claim
-  IDs, linked evidence IDs, target-venue fit rationale, and remaining blocker
-  value.
-- every active table has a title, inclusion status, argument/result role,
+- every active figure is placed inline in `Manuscript Architecture` and has a
+  title, placement, inclusion status, purpose/result role, content and panel
+  layout, visual style, caption draft/current caption, source artifact or spec
+  path, result shown or conceptual basis, provenance links, target-venue fit
+  rationale, and remaining blocker value.
+- every active table is placed inline in `Manuscript Architecture` and has a
+  title, placement, inclusion status, purpose/result role,
   content/columns/rows/comparison logic, caption draft/current caption, source
-  artifact path, key results shown, linked manuscript paragraphs, linked claim
-  IDs, linked evidence IDs, target-venue fit rationale, and remaining blocker
-  value. Compact tables may be included directly; larger tables must link to a
-  source artifact. If there are no active tables, the blueprint must explain why
-  no table is needed and what carries the claim/evidence mapping instead.
+  artifact or spec path, key result or conceptual contrast, provenance links,
+  target-venue fit rationale, and remaining blocker value. Compact tables may
+  be included directly; larger tables must link to a source artifact. If there
+  are no active tables, the blueprint must explain in the architecture or
+  appendix/supplement plan where the needed comparison or evidence mapping is
+  carried instead.
+- every active algorithm, method, dataset, benchmark, or result block is placed
+  inline in `Manuscript Architecture` and includes placement, purpose, source
+  artifacts or code links, validation/evidence or limitations, and remaining
+  blocker value.
+- separate claim/evidence maps, `Figure Plan`, `Table Plan`, and
+  `manuscript/figures/FIGURE_SPECS.md` may support audit, but they cannot be
+  used as the primary proof that the manuscript blueprint is readable or
+  complete.
 - `Blocking Missing Evidence` is empty or explicitly `none`; missing evidence
   may not be hidden as a non-blocking qualification.
 - stale language such as "tentative until source-level evidence checks are
@@ -81,15 +92,16 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - reviewer baseline status: current or outdated;
 - final blueprint section completeness;
 - target manual section title/order fidelity;
+- architecture overview / table of contents completeness;
 - paragraph plan completeness;
-- accepted claims vs candidate claims status;
+- local claim/evidence/result explanation completeness;
 - blocking missing evidence status;
-- figure plan completeness;
-- figure paragraph placement completeness;
-- table plan or no-table rationale completeness;
-- table paragraph placement and source/result completeness;
+- inline figure block completeness;
+- inline table block or no-table rationale completeness;
+- inline algorithm/method/dataset/benchmark/result block completeness;
 - reference/literature grounding completeness;
 - appendix/supplement plan completeness;
+- provenance/audit index status;
 - stale contradiction scan result;
 - exact reason the gate can pass, or the exact next action if it cannot.
 

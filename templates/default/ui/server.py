@@ -132,7 +132,7 @@ PREVIEWABLE_SUFFIXES = TEXT_PREVIEW_SUFFIXES | IMAGE_PREVIEW_SUFFIXES | PDF_PREV
 COLD_START_EDIT_FILES = [
     "resources/user_input/INITIAL_BRIEF.md",
 ]
-REVIEWER_BASELINE_VERSION = "2026-06-per-reviewer-files"
+REVIEWER_BASELINE_VERSION = "2026-06-inline-blueprint"
 CORE_REVIEWER_FILES = [
     "REVIEW_TAXONOMY.md",
     "FINAL_GATE_REVIEWER.md",
@@ -194,13 +194,13 @@ REQUIRED_BLUEPRINT_SECTIONS = [
     "Target Venue / Audience / Article Type",
     "Target-Venue Organization Rationale",
     "Core Story",
-    "Section-By-Section Architecture",
-    "Figure Plan",
-    "Table Plan",
+    "Architecture Overview / Table of Contents",
+    "Manuscript Architecture",
     "Reference / Literature Grounding Plan",
     "Appendix / Supplement Plan",
     "Blocking Missing Evidence",
     "Required Qualifications / Claim Constraints",
+    "Provenance / Audit Index",
     "Deprecated Or Superseded Ideas",
     "Submission-Readiness Summary",
 ]
@@ -226,6 +226,9 @@ def new_research_session() -> dict[str, Any]:
         "loop_review_checkpoint_iteration": 0,
         "loop_stop_reason": "",
         "gate": {},
+        "last_event_at": "",
+        "last_event_summary": "",
+        "agent_notice": {},
         "process": None,
     }
 
@@ -1096,6 +1099,9 @@ class ProjectContext:
                 "loop_review_checkpoint_iteration",
                 "loop_stop_reason",
                 "gate",
+                "last_event_at",
+                "last_event_summary",
+                "agent_notice",
             ):
                 if key in payload:
                     self.session[key] = payload[key]
@@ -1478,6 +1484,11 @@ SECRET_ENV_KEYS = [
 ALLOWED_SANDBOXES = {"read-only", "workspace-write", "danger-full-access"}
 ALLOWED_APPROVAL_POLICIES = {"untrusted", "on-request", "never"}
 ALLOWED_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
+AGENT_IDLE_NOTICE_SECONDS = 180
+AGENT_RATE_LIMIT_PATTERN = re.compile(
+    r"\b(rate[-\s]?limit(?:ed|ing)?|429|too many requests|quota exceeded|usage limit|resource_exhausted)\b",
+    re.IGNORECASE,
+)
 PERMISSION_PRESETS = {
     "default": {"sandbox": "workspace-write", "approvalPolicy": "on-request"},
     "auto-review": {"sandbox": "workspace-write", "approvalPolicy": "never"},
@@ -1495,9 +1506,25 @@ def normalize_agent_backend(value: Any = "") -> str:
     return backend if backend in ALLOWED_AGENT_BACKENDS else DEFAULT_AGENT_SETTINGS["backend"]
 
 
-def selected_agent_backend_from_env(env: dict[str, str] | None = None) -> str:
+def raw_agent_backend_from_env(env: dict[str, str] | None = None) -> str:
     process_env = env if env is not None else os.environ
-    return normalize_agent_backend(process_env.get("COAUTO_AGENT_BACKEND") or DEFAULT_AGENT_SETTINGS["backend"])
+    return str(process_env.get("COAUTO_AGENT_BACKEND") or "").strip().lower()
+
+
+def valid_agent_backend_from_env(env: dict[str, str] | None = None) -> str:
+    backend = raw_agent_backend_from_env(env)
+    return backend if backend in ALLOWED_AGENT_BACKENDS else ""
+
+
+def agent_backend_env_warning(env: dict[str, str] | None = None) -> str:
+    backend = raw_agent_backend_from_env(env)
+    if backend and backend not in ALLOWED_AGENT_BACKENDS:
+        return f"Ignoring invalid COAUTO_AGENT_BACKEND={backend!r}; expected `codex` or `claude`."
+    return ""
+
+
+def selected_agent_backend_from_env(env: dict[str, str] | None = None) -> str:
+    return valid_agent_backend_from_env(env) or DEFAULT_AGENT_SETTINGS["backend"]
 
 
 def infer_permission_preset(settings: dict[str, Any]) -> str:
@@ -1708,6 +1735,70 @@ def now_id() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+def parse_iso_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed
+
+
+def seconds_since_iso(value: Any) -> int | None:
+    parsed = parse_iso_datetime(value)
+    if parsed is None:
+        return None
+    return max(0, int((datetime.now().astimezone() - parsed.astimezone()).total_seconds()))
+
+
+def agent_notice_from_event(line: str, display: str = "") -> dict[str, Any]:
+    text = "\n".join(part for part in (line, display) if part).strip()
+    if not text:
+        return {}
+    if AGENT_RATE_LIMIT_PATTERN.search(text):
+        message = compact_single_line(display or text, 260)
+        return {
+            "kind": "rate_limited",
+            "message": message or "Agent reported a rate limit or quota limit.",
+            "detected_at": now_iso(),
+        }
+    return {}
+
+
+def agent_wait_state_from_values(running: bool, last_event_at: Any, last_event_summary: Any, notice: Any) -> dict[str, Any]:
+    age_seconds = seconds_since_iso(last_event_at)
+    notice_payload = notice if isinstance(notice, dict) else {}
+    kind = str(notice_payload.get("kind") or "").strip()
+    message = str(notice_payload.get("message") or "").strip()
+    stale = bool(running and age_seconds is not None and age_seconds >= AGENT_IDLE_NOTICE_SECONDS)
+    if kind == "rate_limited":
+        message = message or "Agent reported a rate limit or quota limit."
+    elif stale:
+        kind = "idle"
+        message = f"No agent events for {age_seconds} seconds; the process is still running."
+    elif running:
+        kind = "active"
+        message = "Agent process is running."
+    else:
+        kind = "inactive"
+        message = "No active agent process."
+    return {
+        "kind": kind,
+        "message": message,
+        "last_event_at": str(last_event_at or ""),
+        "last_event_age_seconds": age_seconds,
+        "last_event_summary": str(last_event_summary or ""),
+        "idle_threshold_seconds": AGENT_IDLE_NOTICE_SECONDS,
+        "notice": notice_payload,
+    }
+
+
 def persist_research_session() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     with RESEARCH_LOCK:
@@ -1742,6 +1833,9 @@ def load_research_session_runtime() -> None:
             "loop_review_checkpoint_iteration",
             "loop_stop_reason",
             "gate",
+            "last_event_at",
+            "last_event_summary",
+            "agent_notice",
         ):
             if key in payload:
                 RESEARCH_SESSION[key] = payload[key]
@@ -1767,9 +1861,9 @@ def load_ui_settings() -> dict[str, Any]:
         settings["agent"]["backend"] = normalize_agent_backend(payload["agent"].get("backend"))
     elif isinstance(payload.get("backend"), str):
         settings["agent"]["backend"] = normalize_agent_backend(payload.get("backend"))
-    env_backend = os.environ.get("COAUTO_AGENT_BACKEND")
+    env_backend = valid_agent_backend_from_env()
     if env_backend:
-        settings["agent"]["backend"] = normalize_agent_backend(env_backend)
+        settings["agent"]["backend"] = env_backend
     if isinstance(payload.get("codex"), dict):
         settings["codex"] = normalize_codex_settings(payload["codex"], settings["codex"])
     if isinstance(payload.get("claude"), dict):
@@ -2252,12 +2346,13 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
 def agent_backend_status_payload(selected_backend: Any = "") -> dict[str, Any]:
     selected = normalize_agent_backend(selected_backend or selected_agent_backend_from_env())
     statuses = {backend: agent_setup_status(backend) for backend in sorted(ALLOWED_AGENT_BACKENDS)}
-    env_override = os.environ.get("COAUTO_AGENT_BACKEND", "").strip()
-    normalized_override = normalize_agent_backend(env_override) if env_override else ""
+    env_override = valid_agent_backend_from_env()
+    env_override_raw = raw_agent_backend_from_env()
     return {
         "selected": selected,
-        "env_override": normalized_override if env_override else "",
-        "env_override_raw": env_override,
+        "env_override": env_override,
+        "env_override_raw": env_override_raw,
+        "env_warning": agent_backend_env_warning(),
         "backends": statuses,
     }
 
@@ -2276,12 +2371,68 @@ def agent_unavailable_message(status: dict[str, Any], statuses: dict[str, Any] |
     return message
 
 
-def ensure_agent_ready(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+def claude_permission_mode_from_settings(settings: dict[str, Any] | None = None) -> str:
+    preset = infer_claude_permission_preset(settings or {})
+    return CLAUDE_PERMISSION_PRESETS[preset]["permissionMode"]
+
+
+def claude_permission_modes_from_help(help_text: str) -> set[str]:
+    text = str(help_text or "")
+    marker = "--permission-mode"
+    index = text.find(marker)
+    if index < 0:
+        return set()
+    snippet = text[index:index + 800]
+    modes = set(re.findall(r'"([^"]+)"', snippet))
+    known_modes = {"acceptEdits", "auto", "bypassPermissions", "default", "delegate", "dontAsk", "plan"}
+    return modes & known_modes
+
+
+def claude_permission_mode_status(settings: dict[str, Any] | None = None, env: dict[str, str] | None = None) -> dict[str, Any]:
+    mode = claude_permission_mode_from_settings(settings)
+    process_env = env if env is not None else os.environ
+    try:
+        executable = resolve_agent_executable("claude", process_env)
+    except FileNotFoundError as exc:
+        return {"ok": False, "blocking": True, "mode": mode, "message": str(exc)}
+    help_probe = run_agent_probe(executable, ["--help"], process_env)
+    if not help_probe.get("ok"):
+        return {
+            "ok": True,
+            "blocking": False,
+            "mode": mode,
+            "message": "Claude Code permission-mode support could not be probed; startup will continue.",
+            "details": str(help_probe.get("output") or help_probe.get("error") or ""),
+        }
+    modes = claude_permission_modes_from_help(str(help_probe.get("output") or ""))
+    if not modes or mode in modes:
+        return {"ok": True, "blocking": False, "mode": mode, "supported_modes": sorted(modes)}
+    return {
+        "ok": False,
+        "blocking": True,
+        "mode": mode,
+        "supported_modes": sorted(modes),
+        "message": (
+            f"Claude Code CLI does not support permission mode `{mode}`. "
+            "Update Claude Code or choose a different permission preset in Settings."
+        ),
+    }
+
+
+def ensure_agent_ready(backend: str, env: dict[str, str] | None = None, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     backend = normalize_agent_backend(backend)
     statuses = {name: agent_setup_status(name, env) for name in sorted(ALLOWED_AGENT_BACKENDS)}
     selected = statuses[backend]
     if selected.get("blocking"):
         raise ValueError(agent_unavailable_message(selected, statuses))
+    if backend == "claude":
+        permission_status = claude_permission_mode_status(settings, env)
+        if permission_status.get("blocking"):
+            message = str(permission_status.get("message") or "Claude Code permission mode is not supported.")
+            other = statuses.get("codex")
+            if isinstance(other, dict) and other.get("ok") and not other.get("blocking"):
+                message += " Codex is available; select it in Settings if you want to use it."
+            raise ValueError(message)
     return selected
 
 
@@ -3286,6 +3437,44 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     def title_starts(section: dict[str, Any], prefix: str) -> bool:
         return str(section.get("title", "")).strip().lower().startswith(prefix)
 
+    def artifact_kind(title: str) -> str:
+        value = str(title or "").strip().lower()
+        if re.match(r"^(figure|fig\.?|f\d{3,})\b", value):
+            return "figure"
+        if re.match(r"^(table|tbl\.?|t\d{3,})\b", value):
+            return "table"
+        if re.match(r"^(algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:))\b", value):
+            return "algorithm"
+        if re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d|\d|block|:))\b", value):
+            return "result"
+        return ""
+
+    def architecture_heading_blocks(section_text: str) -> list[dict[str, Any]]:
+        matches = list(re.finditer(r"^(#{3,6})\s+(.+?)\s*$", section_text, re.MULTILINE))
+        blocks: list[dict[str, Any]] = []
+        stack: list[dict[str, Any]] = []
+        for index, match in enumerate(matches):
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(section_text)
+            body = section_text[match.end():end].strip()
+            while stack and int(stack[-1]["level"]) >= level:
+                stack.pop()
+            parents = [str(item["title"]) for item in stack]
+            kind = artifact_kind(title)
+            block = {
+                "level": level,
+                "title": title,
+                "body": body,
+                "parents": parents,
+                "path": " / ".join([*parents, title]),
+                "kind": kind or "section",
+                "is_artifact": bool(kind),
+            }
+            blocks.append(block)
+            stack.append({"level": level, "title": title})
+        return [block for block in blocks if real_section(block)]
+
     def figure_plan_section(section: dict[str, Any]) -> bool:
         title = str(section.get("title", "")).strip()
         if not title.lower().startswith("figure"):
@@ -3303,22 +3492,21 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         return bool(re.search(r"\b(?:t\d{3,}|table\s+\d+)\b", title, re.IGNORECASE))
 
     claims = [section for section in sections if section["title"].lower().startswith("c") and real_section(section)]
-    architecture_sections = [
-        {"level": 3, "title": title, "body": body}
+    architecture_text = extract_section(blueprint_text, "Manuscript Architecture")
+    architecture = architecture_heading_blocks(architecture_text)
+    legacy_architecture_sections = [
+        {"level": 3, "title": title, "body": body, "kind": "section", "is_artifact": False, "parents": [], "path": title}
         for title, body in blueprint_section_blocks(extract_section(blueprint_text, "Section-By-Section Architecture"))
     ]
-    section_blueprint = [
-        section
-        for section in architecture_sections
-        if real_section(section)
-    ]
+    section_blueprint = [section for section in legacy_architecture_sections if real_section(section)]
     figure_sections = [section for section in sections if title_starts(section, "figure") and real_section(section)]
     table_sections = [section for section in sections if title_starts(section, "table") and real_section(section)]
     figure_plans = [section for section in sections if figure_plan_section(section) and real_section(section)]
     table_plans = [section for section in sections if table_plan_section(section) and real_section(section)]
     no_table_rationale = clean_summary_value(extract_section(blueprint_text, "No-Table Rationale", level=3)) or clean_summary_value(extract_section(blueprint_text, "No-Table Rationale"))
-    traceability = (
-        clean_summary_value(extract_section(blueprint_text, "Accepted Claims And Evidence Map"))
+    provenance = (
+        clean_summary_value(extract_section(blueprint_text, "Provenance / Audit Index"))
+        or clean_summary_value(extract_section(blueprint_text, "Accepted Claims And Evidence Map"))
         or clean_summary_value(extract_section(blueprint_text, "Accepted Claims and Evidence Map"))
         or clean_summary_value(extract_section(blueprint_text, "Active Claims and Evidence Map"))
         or clean_summary_value(extract_section(blueprint_text, "Candidate Claims And Evidence Map"))
@@ -3330,20 +3518,27 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         for section in extract_sections(figure_text)
         if real_section(section) and str(section.get("title", "")).strip().lower() not in {"figures", "figure specs", "figure specifications"}
     ]
+    toc = clean_summary_value(extract_section(blueprint_text, "Architecture Overview / Table of Contents"))
+    inline_artifacts = [block for block in architecture if block.get("is_artifact")]
+    section_architecture = [block for block in architecture if not block.get("is_artifact")]
     return {
         "target": clean_summary_value(value_after_label(target_section, "Target venue") or first_meaningful_line(target_section)),
         "contribution": clean_summary_value(value_after_label(target_section, "Contribution posture") or value_after_label(target_section, "Contribution style")),
         "core_story": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Core Story"))),
+        "toc": toc,
+        "architecture": architecture,
+        "inline_artifacts": inline_artifacts,
         "claims": claims,
-        "sections": section_blueprint,
-        "section_blueprint": section_blueprint,
-        "figures": figure_sections,
-        "figure_plans": figure_plans or figure_sections,
-        "tables": table_sections,
-        "table_plans": table_plans,
+        "sections": section_architecture or section_blueprint,
+        "section_blueprint": section_architecture or section_blueprint,
+        "figures": [item for item in inline_artifacts if item.get("kind") == "figure"] or figure_sections,
+        "figure_plans": [item for item in inline_artifacts if item.get("kind") == "figure"] or figure_plans or figure_sections,
+        "tables": [item for item in inline_artifacts if item.get("kind") == "table"] or table_sections,
+        "table_plans": [item for item in inline_artifacts if item.get("kind") == "table"] or table_plans,
         "no_table_rationale": no_table_rationale,
-        "traceability": traceability,
-        "missing_evidence": [item for item in list_section_items(extract_section(blueprint_text, "Missing Evidence")) if meaningful_summary_value(item)][:12],
+        "provenance": provenance,
+        "traceability": provenance,
+        "missing_evidence": [item for item in list_section_items(extract_section(blueprint_text, "Blocking Missing Evidence") or extract_section(blueprint_text, "Missing Evidence")) if meaningful_summary_value(item)][:12],
         "figure_specs": figure_specs[:10],
     }
 
@@ -5374,7 +5569,7 @@ def normalize_research_settings(raw: Any) -> dict[str, Any]:
         or ""
     )
     requested_backend = normalize_agent_backend(requested_backend_raw) if requested_backend_raw else ""
-    env_backend = os.environ.get("COAUTO_AGENT_BACKEND")
+    env_backend = valid_agent_backend_from_env()
     backend = normalize_agent_backend(env_backend or requested_backend or saved.get("agent", {}).get("backend"))
     if isinstance(payload.get(backend), dict):
         provider_payload = payload.get(backend)
@@ -5719,8 +5914,10 @@ def final_blueprint_consistency_blockers() -> list[str]:
             blockers.append(f"BLUEPRINT.md is missing required section `{heading}`.")
         elif section_has_unresolved_placeholder(section):
             blockers.append(f"BLUEPRINT.md section `{heading}` still contains template placeholders.")
-    if not markdown_section(text, "Accepted Claims And Evidence Map"):
-        blockers.append("BLUEPRINT.md must use `Accepted Claims And Evidence Map` before final pass; candidate claims cannot pass.")
+    if re.search(r"^##\s+Accepted Claims And Evidence Map\s*$", text, re.IGNORECASE | re.MULTILINE):
+        blockers.append("BLUEPRINT.md still uses a claim/evidence map as a top-level manuscript section; move it under `Provenance / Audit Index` and explain claims locally in `Manuscript Architecture`.")
+    if re.search(r"^##\s+Candidate Claims And Evidence Map\s*$", text, re.IGNORECASE | re.MULTILINE):
+        blockers.append("BLUEPRINT.md still uses a candidate claim/evidence map as a top-level manuscript section; explain local claims/evidence in `Manuscript Architecture` and keep IDs only in provenance.")
     if re.search(r"Main Claim Candidates", text, re.IGNORECASE):
         blockers.append("BLUEPRINT.md still uses `Main Claim Candidates`; final pass requires accepted or explicitly candidate claims.")
     if re.search(r"No active claims", text, re.IGNORECASE) and re.search(r"\bactive with qualification\b|\bAccepted Claims\b", text, re.IGNORECASE):
@@ -5731,60 +5928,111 @@ def final_blueprint_consistency_blockers() -> list[str]:
     if blocking_missing and meaningful_section_lines(blocking_missing):
         blockers.append("BLUEPRINT.md has non-empty `Blocking Missing Evidence`.")
 
-    section_architecture = markdown_section(text, "Section-By-Section Architecture")
-    section_blocks = blueprint_section_blocks(section_architecture)
-    if not section_blocks:
-        blockers.append("BLUEPRINT.md must include target-venue section entries under `Section-By-Section Architecture`.")
-    for title, body in section_blocks:
+    architecture = markdown_section(text, "Manuscript Architecture")
+    architecture_body = section_body(architecture)
+    architecture_matches = list(re.finditer(r"^(#{3,6})\s+(.+?)\s*$", architecture_body, re.MULTILINE))
+    if not architecture_matches:
+        blockers.append("BLUEPRINT.md must include target-venue entries under `Manuscript Architecture`.")
+
+    artifact_title_re = re.compile(r"^(figure|fig\.?|f\d{3,}|table|tbl\.?|t\d{3,}|algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:)|dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d|\d|block|:))\b", re.IGNORECASE)
+    inline_artifacts: list[tuple[str, str, str]] = []
+    for index, match in enumerate(architecture_matches):
+        title = match.group(2).strip()
+        end = architecture_matches[index + 1].start() if index + 1 < len(architecture_matches) else len(architecture_body)
+        body = architecture_body[match.end():end].strip()
+        if artifact_title_re.search(title):
+            inline_artifacts.append((title, body, title.lower()))
+            continue
         for label in (
-            "Section thesis:",
+            "Target-venue role:",
             "Reader question answered:",
-            "Narrative role in target venue:",
+            "Local thesis / purpose:",
+            "Local claims in plain language:",
+            "Local evidence, results, or artifacts:",
+            "Transition job:",
         ):
             if label not in body:
                 blockers.append(f"`{title}` is missing `{label}`.")
         if not paragraph_plan_complete(body):
             blockers.append(f"`{title}` is missing a complete paragraph plan table.")
 
-    figure_plan = markdown_section(text, "Figure Plan")
-    active_figure = bool(re.search(r"Inclusion status:\s*active\b", figure_plan, re.IGNORECASE))
-    if active_figure:
+    def active_block(body: str) -> bool:
+        return bool(re.search(r"Inclusion status:\s*active\b", body, re.IGNORECASE)) or not re.search(r"Inclusion status:\s*(candidate|deprecated|deferred|supplement)\b", body, re.IGNORECASE)
+
+    figure_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(figure|fig\.?|f\d{3,})\b", lower, re.IGNORECASE)]
+    table_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(table|tbl\.?|t\d{3,})\b", lower, re.IGNORECASE)]
+    algorithm_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:))\b", lower, re.IGNORECASE)]
+    result_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d|\d|block|:))\b", lower, re.IGNORECASE)]
+
+    for title, body in figure_blocks:
+        if not active_block(body):
+            continue
         for label in (
-            "Argument or result role:",
+            "Placement:",
+            "Purpose or result role:",
             "Content and panel layout:",
-            "Visual style:",
             "Caption draft or current caption:",
-            "Source artifact path:",
+            "Source artifact or spec path:",
             "Result shown or conceptual basis:",
-            "Linked paragraphs:",
-            "Linked claims:",
-            "Linked evidence:",
+            "Provenance links:",
             "Target-venue fit rationale:",
             "Remaining blocker:",
         ):
-            if label not in figure_plan:
-                blockers.append(f"Active figure plan is missing `{label}`.")
-    table_plan = markdown_section(text, "Table Plan")
-    active_table = bool(re.search(r"Inclusion status:\s*active\b", table_plan, re.IGNORECASE))
-    if active_table:
+            if label not in body:
+                blockers.append(f"Inline figure `{title}` is missing `{label}`.")
+    for title, body in table_blocks:
+        if not active_block(body):
+            continue
         for label in (
-            "Argument or result role:",
-            "Content, columns, rows, or comparison logic:",
+            "Placement:",
+            "Purpose or result role:",
+            "Columns, rows, or comparison logic:",
             "Caption draft or current caption:",
-            "Source artifact path:",
-            "Key results shown:",
-            "Linked paragraphs:",
-            "Linked claims:",
-            "Linked evidence:",
+            "Source artifact or spec path:",
+            "Key result or conceptual contrast shown:",
+            "Provenance links:",
             "Target-venue fit rationale:",
             "Remaining blocker:",
         ):
-            if label not in table_plan:
-                blockers.append(f"Active table plan is missing `{label}`.")
-    else:
-        no_table = re.search(r"###\s+No-Table Rationale\s*(.*?)(?=^###\s+|\Z)", table_plan, re.MULTILINE | re.DOTALL)
-        if not no_table or not meaningful_section_lines(no_table.group(0)):
-            blockers.append("BLUEPRINT.md must include a substantive no-table rationale when no active table is planned.")
+            if label not in body:
+                blockers.append(f"Inline table `{title}` is missing `{label}`.")
+    for title, body in algorithm_blocks:
+        if not active_block(body):
+            continue
+        for label in (
+            "Placement:",
+            "Purpose:",
+            "Inputs:",
+            "Outputs:",
+            "Source code or artifact links:",
+            "Remaining blocker:",
+        ):
+            if label not in body:
+                blockers.append(f"Inline algorithm/method `{title}` is missing `{label}`.")
+    for title, body in result_blocks:
+        if not active_block(body):
+            continue
+        for label in (
+            "Placement:",
+            "Metric or result summary:",
+            "Source artifact path:",
+            "Limitations and uncertainty:",
+            "Manuscript claim supported in plain language:",
+            "Remaining blocker:",
+        ):
+            if label not in body:
+                blockers.append(f"Inline dataset/benchmark/result `{title}` is missing `{label}`.")
+
+    legacy_figure_plan = markdown_section(text, "Figure Plan")
+    legacy_table_plan = markdown_section(text, "Table Plan")
+    if re.search(r"Inclusion status:\s*active\b", legacy_figure_plan, re.IGNORECASE) and not figure_blocks:
+        blockers.append("Active figures only appear in legacy `Figure Plan`; place them inline under `Manuscript Architecture`.")
+    if re.search(r"Inclusion status:\s*active\b", legacy_table_plan, re.IGNORECASE) and not table_blocks:
+        blockers.append("Active tables only appear in legacy `Table Plan`; place them inline under `Manuscript Architecture`.")
+    if not table_blocks:
+        no_table_text = "\n".join([architecture, markdown_section(text, "Appendix / Supplement Plan"), legacy_table_plan])
+        if not re.search(r"\b(no active tables|no table|no-table rationale)\b", no_table_text, re.IGNORECASE):
+            blockers.append("BLUEPRINT.md must explain where comparison/evidence mapping is carried when no active table is planned.")
     return blockers
 
 
@@ -6006,6 +6254,12 @@ def research_session_snapshot() -> dict[str, Any]:
         settings = dict(RESEARCH_SESSION.get("settings") or {})
         backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or settings.get("backend") or load_ui_settings().get("agent", {}).get("backend"))
         backend_label = agent_display_name(backend)
+        wait_state = agent_wait_state_from_values(
+            running,
+            RESEARCH_SESSION.get("last_event_at", ""),
+            RESEARCH_SESSION.get("last_event_summary", ""),
+            RESEARCH_SESSION.get("agent_notice", {}),
+        )
         review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
         loop_review_checkpoint_iteration = int(RESEARCH_SESSION.get("loop_review_checkpoint_iteration") or 0)
         if loop_review_checkpoint_iteration <= 0:
@@ -6045,6 +6299,7 @@ def research_session_snapshot() -> dict[str, Any]:
                 else ""
             ),
             "trajectory_mismatch": trajectory_mismatch,
+            "wait_state": wait_state,
         }
         return {
             "id": RESEARCH_SESSION.get("id", ""),
@@ -6061,6 +6316,10 @@ def research_session_snapshot() -> dict[str, Any]:
             "logs": list(RESEARCH_SESSION.get("logs", []))[-500:],
             "raw_logs": list(RESEARCH_SESSION.get("raw_logs", []))[-2000:],
             "transcript": list(RESEARCH_SESSION.get("transcript", []))[-600:],
+            "last_event_at": RESEARCH_SESSION.get("last_event_at", ""),
+            "last_event_summary": RESEARCH_SESSION.get("last_event_summary", ""),
+            "agent_notice": dict(RESEARCH_SESSION.get("agent_notice") if isinstance(RESEARCH_SESSION.get("agent_notice"), dict) else {}),
+            "agent_wait_state": wait_state,
             "loop_active": loop_active,
             "loop_iteration": loop_iteration,
             "loop_max_iterations": int(RESEARCH_SESSION.get("loop_max_iterations") or AUTORESEARCH_MAX_ITERATIONS),
@@ -6082,11 +6341,19 @@ def append_research_log(line: str) -> None:
         )
     display = format_agent_event(line, backend)
     transcript = transcript_from_agent_line(line, backend)
+    event_at = now_iso()
+    notice = agent_notice_from_event(line, display)
     with RESEARCH_LOCK:
         if line.strip():
             RESEARCH_SESSION["raw_logs"].append(line.rstrip("\n"))
+            RESEARCH_SESSION["last_event_at"] = event_at
         if display:
             RESEARCH_SESSION["logs"].append(display)
+            RESEARCH_SESSION["last_event_summary"] = compact_single_line(display, 260)
+        elif line.strip():
+            RESEARCH_SESSION["last_event_summary"] = compact_single_line(line, 260)
+        if notice:
+            RESEARCH_SESSION["agent_notice"] = notice
         if transcript and transcript.get("content"):
             RESEARCH_SESSION["transcript"].append(transcript_entry(**transcript))
         session_id = ""
@@ -6319,7 +6586,7 @@ def start_research_run(
         proc = RESEARCH_SESSION.get("process")
         if proc and proc.poll() is None:
             raise ValueError(f"A {agent_display_name(backend)} run is already active.")
-    ensure_agent_ready(backend)
+    ensure_agent_ready(backend, settings=settings)
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
         if proc and proc.poll() is None:
@@ -6372,6 +6639,9 @@ def start_research_run(
                 "loop_review_checkpoint_iteration": loop_review_checkpoint_iteration,
                 "loop_stop_reason": "" if next_loop_active else RESEARCH_SESSION.get("loop_stop_reason", ""),
                 "process": None,
+                "last_event_at": now_iso(),
+                "last_event_summary": "Starting selected agent.",
+                "agent_notice": {},
                 "protected_snapshot": protected_snapshot,
             }
         )
@@ -6546,15 +6816,19 @@ Do not treat "approved", "completed", "ready", "plausible", "architecture pass",
 Before any final pass in a manuscript-facing project, run a final synthesis step:
 update `manuscript/BLUEPRINT.md`, `research_trajectory/CURRENT_FINDINGS.md`,
 and `manuscript/figures/FIGURE_SPECS.md` as needed. The final blueprint must be
-self-contained and target-venue-ready: accepted claims and evidence map,
-section architecture, figure plan with captions/content/source/evidence/venue
-rationale, table plan or no-table rationale, reference/literature grounding,
-appendix/supplement posture, blocking missing evidence, required
-qualifications, deprecated ideas, and submission-readiness summary must all be
-current. If `Blocking Missing Evidence` is non-empty, if a figure/table lacks
-caption/content/source/evidence/venue rationale, if reviewer instructions are
-outdated, or if stale language such as "tentative until source-level evidence
-checks are completed" remains, keep `Status: continue`.
+self-contained and target-venue-ready in final manuscript reading order:
+architecture overview/table of contents, section/subsection architecture, local
+claim/evidence/result explanations, inline figure/table/algorithm/dataset/
+benchmark/result blocks with captions/content/source/provenance/venue
+rationale, reference/literature grounding, appendix/supplement posture, blocking
+missing evidence, required qualifications, provenance/audit index, deprecated
+ideas, and submission-readiness summary must all be current. Separate
+claim/evidence maps, Figure Plan, Table Plan, or FIGURE_SPECS entries may
+support audit only; they do not satisfy final readability by themselves. If
+`Blocking Missing Evidence` is non-empty, if an active artifact lacks inline
+placement/caption/content/source/provenance/venue rationale, if reviewer
+instructions are outdated, or if stale language such as "tentative until
+source-level evidence checks are completed" remains, keep `Status: continue`.
 
 Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message and set `Status: needs_human` instead of silently inventing a different project."""
 
@@ -7289,6 +7563,7 @@ def build_status_payload() -> dict[str, Any]:
         pid = proc.pid if proc and proc.poll() is None else None
         command = " ".join(RESEARCH_SESSION.get("command", []))
     agent_usage = latest_agent_usage()
+    wait_state = session.get("agent_wait_state") if isinstance(session.get("agent_wait_state"), dict) else {}
     return {
         "kind": "status_card",
         "backend": backend,
@@ -7324,9 +7599,13 @@ def build_status_payload() -> dict[str, Any]:
             "pid": pid,
             "command": command,
         },
+        "agent_wait_state": wait_state,
         "events": {
             "transcript": len(session.get("transcript") or []),
             "raw_logs": agent_usage.get("raw_log_count") or 0,
+            "last_event_at": wait_state.get("last_event_at") or session.get("last_event_at") or "",
+            "last_event_age_seconds": wait_state.get("last_event_age_seconds"),
+            "last_event_summary": wait_state.get("last_event_summary") or session.get("last_event_summary") or "",
         },
         "usage": agent_usage.get("usage") or {},
         "cost_usd": agent_usage.get("cost_usd"),

@@ -29,6 +29,11 @@ Only the active step's content is visible:
 
 The user can choose a resource type, browse local files or folders from the UI, and add them as optional resources. Supported types are ongoing work, papers/literature, proposals, and data/other. The backend attaches each selected item into the matching resource folder, creates a symlink when possible, and falls back to copying only if symlink creation fails. PDF, DOCX, and other binary files can be stored as resources, but only supported text files are rendered or edited inline.
 
+When the UI creates a project from dashboard mode, the creation dialog includes
+an agent backend selector. Codex is selected by default; Claude Code is
+available as an optional project default. Project creation does not require the
+selected CLI to be installed yet.
+
 ### 2. Session Chat
 
 The main screen is a centered conversation with the active agent session.
@@ -51,6 +56,19 @@ The user can adjust:
 - provider-specific permissions;
 - live web search;
 - advanced Codex `-c key=value` config overrides.
+
+Settings store the per-project default backend. Launch controls can override it
+for a single run. If `COAUTO_AGENT_BACKEND` is set in the server environment,
+the UI must show that the environment is forcing the runtime backend and should
+not silently use a different backend. Invalid `COAUTO_AGENT_BACKEND` values are
+ignored with a visible warning instead of silently becoming Codex.
+
+Before starting framing, autoresearch, chat, resume, or restart, the backend
+checks the selected runtime backend with provider-specific setup commands:
+`codex --version`, `codex login status`, `claude --version`, and
+`claude auth status`. A definitely missing or unauthenticated selected backend
+blocks startup with provider-specific setup guidance. Unknown auth status from
+older CLIs is a warning, not a hard block.
 
 The UI exposes common local slash commands:
 

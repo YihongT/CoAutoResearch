@@ -2,7 +2,7 @@
 
 This file is the self-contained, target-venue-aware architecture for the active
 manuscript or deliverable. It must be useful to a human author without reading
-hidden trial logs.
+hidden trial logs or jumping through separate claim/evidence/display indexes.
 
 Read before editing:
 
@@ -27,14 +27,15 @@ Contribution posture:
 
 Evidence standard:
 
-Expected figure/table style:
+Expected display / method / result style:
 
 ---
 
 ## Target-Venue Organization Rationale
 
-Explain why the section order, claim strength, figure/table density, citation
-posture, and appendix/supplement plan fit the declared target venue.
+Explain why the section order, section depth, display density, citation posture,
+method/result placement, and appendix/supplement plan fit the declared target
+venue and article type.
 
 ---
 
@@ -46,71 +47,80 @@ completed" after the evidence gate has passed.
 
 ---
 
-## Accepted Claims And Evidence Map
+## Architecture Overview / Table of Contents
 
-Use this section only when claims are accepted for the current manuscript. If
-claims are not accepted yet, rename this section to `Candidate Claims And
-Evidence Map` and keep the autoresearch gate on `continue`.
+List the complete planned structure in manuscript order. Include every section,
+subsection, subsubsection, and deeper titled unit that the manuscript currently
+expects to use.
 
-| Claim ID | Claim | Evidence IDs | Evidence strength | Required qualification | Manuscript location |
-|---|---|---|---|---|---|
-| C000000 | <accepted claim> | R000000 | <strong / qualified / limited> | <none or exact qualification already reflected in prose> | <section / figure / table> |
-
-Evidence IDs must resolve to `research_trajectory/CURRENT_FINDINGS.md` and the
-source trials or artifacts cited there.
+- [Section 1: <target-venue section title>](#section-1-target-venue-section-title)
+  - [Subsection 1.1: <subsection title>](#subsection-11-subsection-title)
+  - [Figure F000000: <figure title>](#figure-f000000-figure-title)
+- [Section 2: <target-venue section title>](#section-2-target-venue-section-title)
 
 ---
 
-## Section-By-Section Architecture
+## Manuscript Architecture
 
-Use the section order and section titles required by the target manual, target
-venue notes, seed-paper style, or explicit project scope. Do not default to a
-generic paper structure unless that is the target-venue structure.
-
-Include the abstract as a section when the target deliverable has one. If the
-target requires a structured abstract, use the target's required abstract
-headings as paragraph/move labels. If the abstract is unstructured, plan 4-6
-rhetorical moves. Do not write full manuscript prose here; specify what each
-paragraph or abstract move must accomplish.
+Use the target venue's final reading order. Do not organize this section by
+claim IDs, evidence IDs, figure IDs, or table IDs. IDs may appear only as local
+provenance.
 
 ### Section 1: <target-venue section title>
 
-Purpose:
-
-Section thesis:
+Target-venue role:
 
 Reader question answered:
 
-Narrative role in target venue:
+Local thesis / purpose:
 
-Accepted claims:
+Local claims in plain language:
 
-Evidence:
+Local evidence, results, or artifacts:
 
-Figures / tables:
+Placed displays / methods / results:
 
-Required qualifications:
+Local qualifications:
+
+Transition job:
 
 Paragraph plan:
 
-| Para | Rhetorical move | Content to cover, not full prose | Claims / evidence | Results / artifacts | Figures / tables | Citation posture | Required qualification | Transition job |
-|---|---|---|---|---|---|---|---|---|
-| P1 | <move> | <specific content obligation> | <claim IDs / evidence IDs> | <result IDs or artifact paths> | <figure/table IDs or none> | <citation role> | <qualification or none> | <how this sets up the next paragraph/section> |
+| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |
+|---|---|---|---|---|---|---|---|
+| P1 | <move> | <specific content obligation> | <finding IDs plus plain-language support and artifact paths> | <figure/table/algorithm/result block or none> | <citation role> | <qualification or none> | <how this sets up the next paragraph/section> |
 
----
+#### Subsection 1.1: <subsection title>
 
-## Figure Plan
+Target-venue role:
 
-Every active figure must be self-contained here, even if detailed specs also
-live in `manuscript/figures/FIGURE_SPECS.md`. Captions may be complete prose
-because they are deliverable text; section paragraphs should remain writing
-plans, not full manuscript prose.
+Reader question answered:
 
-### Figure F000000: <title>
+Local thesis / purpose:
+
+Local claims in plain language:
+
+Local evidence, results, or artifacts:
+
+Placed displays / methods / results:
+
+Local qualifications:
+
+Transition job:
+
+Paragraph plan:
+
+| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |
+|---|---|---|---|---|---|---|---|
+| P1 | <move> | <specific content obligation> | <finding IDs plus plain-language support and artifact paths> | <figure/table/algorithm/result block or none> | <citation role> | <qualification or none> | <how this sets up the next paragraph/section> |
+
+##### Figure F000000: <title>
+
+Placement:
 
 Inclusion status: <active / candidate / supplement / deprecated>
 
-Argument or result role:
+Purpose or result role:
 
 Content and panel layout:
 
@@ -118,57 +128,75 @@ Visual style:
 
 Caption draft or current caption:
 
-Source artifact path:
+Source artifact or spec path:
 
 Result shown or conceptual basis:
 
-Linked paragraphs:
-
-Linked claims:
-
-Linked evidence:
+Provenance links:
 
 Target-venue fit rationale:
 
 Remaining blocker: <none, or exact blocker>
 
----
+##### Table T000000: <title>
 
-## Table Plan
-
-Every active table must be self-contained here.
-
-### Table T000000: <title>
+Placement:
 
 Inclusion status: <active / candidate / supplement / deprecated>
 
-Argument or result role:
+Purpose or result role:
 
-Content, columns, rows, or comparison logic:
+Columns, rows, or comparison logic:
 
 Caption draft or current caption:
 
-Source artifact path:
+Source artifact or spec path:
 
-Key results shown:
+Key result or conceptual contrast shown:
 
-Small table preview, if compact enough:
+Compact preview, if useful:
 
-Linked paragraphs:
-
-Linked claims:
-
-Linked evidence:
+Provenance links:
 
 Target-venue fit rationale:
 
 Remaining blocker: <none, or exact blocker>
 
-### No-Table Rationale
+##### Algorithm A000000: <name>
 
-If there are no active tables, explain why no table is needed for the target
-venue and current argument, whether candidate tables were considered, and which
-figures or prose sections carry the claim/evidence mapping instead.
+Placement:
+
+Purpose:
+
+Inputs:
+
+Outputs:
+
+Pseudocode / interface sketch:
+
+Assumptions and failure modes:
+
+Validation evidence:
+
+Source code or artifact links:
+
+Remaining blocker: <none, or exact blocker>
+
+##### Result RSLT000000: <name>
+
+Placement:
+
+Metric or result summary:
+
+Source artifact path:
+
+Comparison or baseline logic:
+
+Limitations and uncertainty:
+
+Manuscript claim supported in plain language:
+
+Remaining blocker: <none, or exact blocker>
 
 ---
 
@@ -183,7 +211,9 @@ work.
 ## Appendix / Supplement Plan
 
 State whether appendix or supplement material is needed. If not needed, explain
-why that is appropriate for the target venue and current deliverable.
+why that is appropriate for the target venue and current deliverable. If no
+active tables are used, explain here or in the relevant architecture section
+where the necessary comparison/evidence mapping is carried instead.
 
 ---
 
@@ -198,8 +228,31 @@ autoresearch gate must be `continue`.
 
 ## Required Qualifications / Claim Constraints
 
-List non-blocking qualifications that must already be reflected in manuscript
-prose, figure/table captions, and accepted-claim wording.
+List non-blocking qualifications that must already be reflected locally in the
+manuscript architecture, captions, table entries, algorithm/result descriptions,
+and claim wording.
+
+---
+
+## Provenance / Audit Index
+
+Use this section only for secondary audit. Do not make it necessary for reading
+the manuscript architecture.
+
+### Claim / Evidence Index
+
+If useful, list accepted or candidate claim/evidence IDs here after the same
+claims have already been explained locally in the relevant manuscript sections.
+
+### Display / Method / Result Inventory
+
+If useful, list active, candidate, deferred, or superseded display/method/result
+objects here after active objects have already been placed inline.
+
+### Source Links
+
+List project-relative source paths, trial reports, reviews, and artifact files
+that support the blueprint.
 
 ---
 

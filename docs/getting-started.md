@@ -30,8 +30,10 @@ Check the basics:
 node --version
 python3 --version
 codex --version
+codex login status
 # optional
 claude --version
+claude auth status
 ```
 
 On Windows, use `python --version` or `py -3 --version` if `python3` is not
@@ -76,8 +78,21 @@ template version, and recommended update command.
 
 1. Click `+` in the left sidebar.
 2. Enter a project name.
-3. Add a research brief, existing folder, paper bundle, or other resources.
-4. Review the generated framing before starting the autoresearch loop.
+3. Choose the project default agent backend. Codex is the default; Claude Code
+   is optional.
+4. Add a research brief, existing folder, paper bundle, or other resources.
+5. Review the generated framing before starting the autoresearch loop.
+
+You can change the default backend later in Settings or override one launch
+from the launch dialog. If `COAUTO_AGENT_BACKEND` is set in the server
+environment, the UI shows that backend as forced and runtime launches use it
+until the env var is removed. Only `codex` and `claude` are valid values; other
+values are ignored with a visible warning.
+
+Creating a project does not require the selected agent CLI to be installed.
+Starting a run does. The UI checks the selected backend and blocks startup with
+Codex- or Claude-specific install/auth instructions when the CLI is definitely
+missing or unauthenticated.
 
 If you run `co-auto-research ui` outside a generated project, CoAutoResearch
 creates a local dashboard folder:

@@ -149,7 +149,7 @@ are often not valid SSH aliases from your laptop.
 | Variable | Purpose |
 | --- | --- |
 | `COAUTO_PYTHON` | Python executable used to start the UI server. |
-| `COAUTO_AGENT_BACKEND` | Default backend for new agent runs: `codex` or `claude`. Codex remains the default. |
+| `COAUTO_AGENT_BACKEND` | Force the runtime backend for UI-launched agent runs: `codex` or `claude`. Other values are ignored with a warning. Codex remains the default when unset. |
 | `COAUTO_CODEX` | Explicit Codex executable path. |
 | `CODEX_BIN` | Alternate Codex executable path. |
 | `COAUTO_CLAUDE` | Explicit Claude Code executable path. |

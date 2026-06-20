@@ -1645,6 +1645,73 @@ textarea:focus {
   margin: 12px 0;
 }
 
+.architecture-overview {
+  display: grid;
+  gap: 8px;
+}
+
+.architecture-toc {
+  display: grid;
+  gap: 6px;
+}
+
+.architecture-toc-row {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 253, 247, 0.56);
+}
+
+.architecture-toc-row span {
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.architecture-toc-row strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.manuscript-architecture {
+  display: grid;
+  gap: 12px;
+}
+
+.architecture-section-row.depth-4,
+.manuscript-artifact-card.depth-4 {
+  margin-left: 16px;
+}
+
+.architecture-section-row.depth-5,
+.manuscript-artifact-card.depth-5 {
+  margin-left: 32px;
+}
+
+.architecture-section-row.depth-6,
+.manuscript-artifact-card.depth-6 {
+  margin-left: 48px;
+}
+
+.manuscript-artifact-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--accent) 6%);
+}
+
+.artifact-field-grid {
+  margin-top: 0;
+}
+
 .mini-button {
   justify-self: start;
   min-height: 30px;
@@ -8243,8 +8310,13 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
-  padding: 2px 2px 8px;
-  scrollbar-width: thin;
+  padding: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.trial-strip-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .trial-scroll-button {
@@ -8639,6 +8711,12 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   padding: 12px 14px;
 }
 
+.run-waiting.is-rate_limited {
+  border-color: rgba(157, 91, 28, 0.26);
+  background: rgba(255, 246, 232, 0.78);
+  color: rgba(103, 61, 20, 0.86);
+}
+
 .file-change-event {
   overflow: hidden;
   border: 1px solid rgba(79, 102, 91, 0.18);
@@ -8839,6 +8917,9 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 .file-viewer-dialog {
   width: min(1180px, calc(100vw - 36px));
   height: min(900px, calc(100vh - 36px));
+  min-width: min(520px, calc(100vw - 36px));
+  min-height: min(360px, calc(100vh - 36px));
+  max-width: calc(100vw - 36px);
   max-height: calc(100vh - 36px);
   padding: 0;
   overflow: hidden;
@@ -8854,6 +8935,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 }
 
 .file-viewer-shell {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
@@ -8876,6 +8958,18 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   font-size: 24px;
   line-height: 1.12;
   overflow-wrap: anywhere;
+}
+
+.file-viewer-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.file-viewer-return[hidden] {
+  display: none;
 }
 
 .file-viewer-body {
@@ -8907,6 +9001,39 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 
 .file-viewer-body .file-media-preview {
   max-height: calc(100vh - 250px);
+}
+
+.file-viewer-resize-handle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 5;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(0, 93, 88, 0.18);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, transparent 46%, rgba(0, 93, 88, 0.62) 47%, rgba(0, 93, 88, 0.62) 53%, transparent 54%) 7px 11px / 12px 12px no-repeat,
+    linear-gradient(135deg, transparent 46%, rgba(0, 93, 88, 0.4) 47%, rgba(0, 93, 88, 0.4) 53%, transparent 54%) 12px 13px / 8px 8px no-repeat,
+    rgba(255, 253, 247, 0.86);
+  box-shadow: 0 8px 22px rgba(17, 20, 17, 0.12);
+  cursor: nwse-resize;
+}
+
+.file-viewer-resize-handle:hover {
+  border-color: rgba(0, 93, 88, 0.34);
+  background-color: rgba(242, 250, 247, 0.95);
+}
+
+body.is-resizing-file-viewer {
+  cursor: nwse-resize;
+  user-select: none;
+}
+
+body.is-resizing-file-viewer iframe,
+body.is-resizing-file-viewer .file-viewer-body {
+  pointer-events: none;
 }
 
 .inline-view-switch {
@@ -10501,7 +10628,7 @@ html[data-theme] :is(.file-manager-head h2, .context-card h3, .review-card h3, .
   color: var(--panel-ink) !important;
 }
 
-html[data-theme] :is(.file-manager-head p, .file-manager-count span, .context-card .meta, .review-summary, .review-path, .paper-story, .paper-field-grid dt, .figure-spec-head p, .figure-type, .figure-source-path, .figure-spec-detail .markdown-preview :where(p, li), .traceability-details, .browser-pathbar code, .browser-note, .browser-entry-main small, .tree-empty, .tree-file small, .tree-file-node > summary small, .tree-folder > summary small, .local-browser .browser-resource-tools p, .local-browser .resource-empty, .material-type-shell p, .material-type-grid button span) {
+html[data-theme] :is(.file-manager-head p, .file-manager-count span, .context-card .meta, .review-summary, .review-path, .paper-story, .paper-field-grid dt, .figure-spec-head p, .figure-type, .figure-source-path, .figure-spec-detail .markdown-preview :where(p, li), .traceability-details, .architecture-toc-row span, .browser-pathbar code, .browser-note, .browser-entry-main small, .tree-empty, .tree-file small, .tree-file-node > summary small, .tree-folder > summary small, .local-browser .browser-resource-tools p, .local-browser .resource-empty, .material-type-shell p, .material-type-grid button span) {
   color: var(--panel-muted) !important;
 }
 
@@ -10538,7 +10665,7 @@ html[data-theme] .review-chip {
   color: var(--link) !important;
 }
 
-html[data-theme] :is(.figure-spec-card, .figure-spec-card.is-compact, .paper-field-grid dd .markdown-preview, .figure-plan-row > .markdown-preview, .table-plan-row > .markdown-preview, .table-empty-rationale .markdown-preview, .figure-caption) {
+html[data-theme] :is(.figure-spec-card, .figure-spec-card.is-compact, .manuscript-artifact-card, .architecture-toc-row, .paper-field-grid dd .markdown-preview, .figure-plan-row > .markdown-preview, .table-plan-row > .markdown-preview, .table-empty-rationale .markdown-preview, .figure-caption) {
   border-color: var(--panel-border) !important;
   background: var(--panel-bg) !important;
   color: var(--panel-ink) !important;

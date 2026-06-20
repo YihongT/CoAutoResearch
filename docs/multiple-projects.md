@@ -20,7 +20,8 @@ http://127.0.0.1:8765
 ```
 
 Click `+` in the left sidebar to create a project from the immutable template.
-The new project appears in the sidebar and becomes the active project.
+Choose the project's default agent backend in the creation dialog. The new
+project appears in the sidebar and becomes the active project.
 
 You can also create projects from the CLI first:
 
@@ -45,6 +46,8 @@ settings, and agent-session API calls.
 - `PROJECT.md`, `resources/`, `workspace/`, `manuscript/`, and
   `research_trajectory/` are read and written only inside the selected project.
 - UI runtime state stays under that project, usually `ui/.runtime/`.
+- Per-project agent defaults, including `agent.backend`, are stored in that
+  runtime state and can be changed later in Settings.
 - Agent commands run with the selected project as the working directory.
 - Starting or stopping an agent run affects only the selected project.
 

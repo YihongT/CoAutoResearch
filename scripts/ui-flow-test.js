@@ -298,6 +298,7 @@ function loadAppContext() {
       globalThis.__lastRenderedMessages = globalThis.__messages();
     };
     globalThis.__renderStageImpl = renderStage;
+    scheduleOverviewPoll = () => {};
     renderChatState = () => {};
     renderSession = () => {};
     renderResumeCommandBar = () => {};
@@ -1167,7 +1168,9 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(thinkingHtml.includes("Codex is working on Trial 1"), true, "working bubble should name the active trial");
   assert.equal(thinkingHtml.includes("Working for"), true, "working bubble should show elapsed running time");
   assert.equal(thinkingHtml.includes("Trial 1"), true, "working bubble should include the trial axis for autoresearch runs");
-  assert.equal(thinkingHtml.includes("Update: Checking sources."), true, "current run activity summary should expose the latest update");
+  assert.equal(thinkingHtml.includes("Current run activity"), false, "autoresearch working bubble should not duplicate the trial live activity panel");
+  assert.equal(thinkingHtml.includes("Live trial activity"), true, "autoresearch working bubble should keep the trial live activity panel");
+  assert.equal(thinkingHtml.includes("Update: Checking sources."), true, "trial live activity summary should expose the latest update");
   assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking sources.", "collapsed current run summary should prefer readable Codex updates over later commands");
 }
 
@@ -1300,8 +1303,8 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
   const app = loadAppContext();
   const storageOnly = app.run(`projectReviewerInstructionsOutdated({
     reviewer_status: {
-      baseline_version: "2026-06-per-reviewer-files",
-      latest_baseline_version: "2026-06-per-reviewer-files",
+      baseline_version: "2026-06-inline-blueprint",
+      latest_baseline_version: "2026-06-inline-blueprint",
       missing: [],
       changed: [],
       metadata_missing: [],
@@ -1312,7 +1315,7 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
   const changedTemplate = app.run(`projectReviewerInstructionsOutdated({
     reviewer_status: {
       baseline_version: "old",
-      latest_baseline_version: "2026-06-per-reviewer-files",
+      latest_baseline_version: "2026-06-inline-blueprint",
       missing: [],
       changed: ["EVIDENCE_REVIEWER.md"],
       metadata_missing: []
@@ -1542,11 +1545,15 @@ async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
       return {
         calls: globalThis.__apiCalls,
         activeProjectId,
-        state: __sessionSettingsState()
+        state: __sessionSettingsState(),
+        toasts: globalThis.__toastMessages,
+        name: form.elements.projectName.value,
+        backend: form.elements.agentBackend.value
       };
     })()
   `);
   const createCall = result.calls.find((call) => call.endpoint === "/api/projects");
+  assert.ok(createCall, `project create API call missing: ${JSON.stringify(result)}`);
   assert.equal(createCall.body.agentBackend, "claude", "project create should send the selected backend");
   assert.equal(result.activeProjectId, "p2");
   assert.equal(result.state.formBackend, "claude", "new project should load with its seeded backend default");
@@ -1607,6 +1614,30 @@ function testEnvForcedBackendStatusMessage() {
   `);
   assert.equal(state.projectNote.includes("COAUTO_AGENT_BACKEND forces Claude Code"), true);
   assert.equal(state.projectNote.includes("runs use the forced backend"), true);
+}
+
+function testInvalidEnvBackendStatusWarning() {
+  const app = loadAppContext();
+  const state = app.run(`
+    uiSettings = {
+      agent: { backend: "claude" },
+      codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 },
+      agent_status: {
+        selected: "claude",
+        env_override: "",
+        env_warning: "Ignoring invalid COAUTO_AGENT_BACKEND='bogus'; expected \`codex\` or \`claude\`.",
+        backends: {
+          claude: { ok: true, blocking: false, auth: "ok", message: "Claude Code CLI is installed and authenticated." }
+        }
+      }
+    };
+    renderAgentStatusNote("#settings-agent-status", "claude", "settings");
+    __agentStatusState();
+  `);
+  assert.equal(state.settingsTone, "warning");
+  assert.equal(state.settingsNote.includes("invalid COAUTO_AGENT_BACKEND"), true);
+  assert.equal(state.settingsNote.includes("Claude Code CLI is installed"), true);
 }
 
 function testProviderSpecificResumeCommand() {
@@ -1914,35 +1945,56 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   const app = loadAppContext();
   const payload = {
     core_story: "A manuscript story.",
-    claims: [],
-    sections: [{
+    toc: [
+      "- [Section 2: Calibration result](#section-2-calibration-result)",
+      "  - [Figure F000001: Calibration Map](#figure-f000001-calibration-map)"
+    ].join("\n"),
+    architecture: [{
       title: "Section 2: Calibration result",
+      level: 3,
+      kind: "section",
+      is_artifact: false,
       body: [
-        "Purpose: Explain the calibrated result.",
-        "Section thesis: Calibration changes the observed outcome in the accepted evidence.",
+        "Target-venue role: Results-like argument.",
         "Reader question answered: What result should the reader take away?",
-        "Narrative role in target venue: Results-like argument.",
-        "Accepted claims: C1.",
-        "Evidence: E1.",
-        "Figures / tables: Figure 1 active.",
+        "Local thesis / purpose: Calibration changes the observed outcome in the accepted evidence.",
+        "Local claims in plain language: The local claim is understandable without opening an ID map.",
+        "Local evidence, results, or artifacts: Evidence E1 supports the local result.",
+        "Placed displays / methods / results: Figure F000001.",
+        "Local qualifications: none.",
+        "Transition job: sets up interpretation.",
         "Paragraph plan:",
         "",
-        "| Para | Rhetorical move | Content to cover, not full prose | Claims / evidence | Results / artifacts | Figures / tables | Citation posture | Required qualification | Transition job |",
-        "|---|---|---|---|---|---|---|---|---|",
-        "| P1 | State result | Put the calibration result beside Figure 1. | C1 / E1 | `research_trajectory/CURRENT_FINDINGS.md` | Figure 1 | cite source trial | none | sets up interpretation |"
+        "| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |",
+        "|---|---|---|---|---|---|---|---|",
+        "| P1 | State result | Put the calibration result beside Figure F000001. | E1 and `research_trajectory/CURRENT_FINDINGS.md` | Figure F000001 | cite source trial | none | sets up interpretation |"
       ].join("\n")
-    }],
-    figure_plans: [{
+    }, {
       title: "Figure F000001: Calibration Map",
+      level: 4,
+      kind: "figure",
+      is_artifact: true,
+      path: "Section 2: Calibration result / Figure F000001: Calibration Map",
       body: [
-        "Status: active",
-        "Caption: Calibration map caption.",
-        "Source artifact path: `manuscript/figures/calibration_map.pdf`"
+        "Placement: Section 2 paragraph P1.",
+        "Inclusion status: active",
+        "Purpose or result role: Shows the calibration map at the point of use.",
+        "Content and panel layout: Two-panel conceptual display.",
+        "Visual style: restrained.",
+        "Caption draft or current caption: Calibration map caption.",
+        "Source artifact or spec path: `manuscript/figures/calibration_map.pdf`",
+        "Result shown or conceptual basis: Evidence E1.",
+        "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
+        "Target-venue fit rationale: Fits a compact result-led display.",
+        "Remaining blocker: none."
       ].join("\n")
     }],
+    claims: [],
+    sections: [],
+    figure_plans: [],
     table_plans: [],
     no_table_rationale: "No active tables are present because the current evidence is figure-led.",
-    traceability: "Claim C1 maps to calibration evidence E1.",
+    provenance: "Claim C1 maps to calibration evidence E1.",
     missing_evidence: [],
     figure_specs: [{
           title: "Figure F000001: Calibration Map",
@@ -1964,29 +2016,27 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
     }]
   };
   const html = app.run(`__renderManuscriptPanelProbe(${JSON.stringify(payload)})`);
-  assert.equal(html.includes("Writing blueprint"), true);
-  assert.equal(html.includes("Figures"), true);
-  assert.equal(html.includes("Tables"), true);
-  assert.equal(html.includes("Traceability"), true);
+  assert.equal(html.includes("Architecture overview"), true);
+  assert.equal(html.includes("Manuscript architecture"), true);
+  assert.equal(html.includes("Audit / provenance"), true);
   assert.equal(html.includes("Section 2: Calibration result"), true);
-  assert.equal(html.includes("Section thesis"), true);
+  assert.equal(html.includes("Local thesis / purpose"), true);
   assert.equal(html.includes("Reader question"), true);
-  assert.equal(html.includes("Narrative role"), true);
+  assert.equal(html.includes("Target-venue role"), true);
   assert.equal(html.includes("Paragraph plan"), true);
   assert.equal(html.includes("Rhetorical move"), true);
-  assert.equal(html.includes("Put the calibration result beside Figure 1."), true);
-  assert.equal(html.includes("Figure specs at this location"), true);
-  assert.equal(html.indexOf("Section 2: Calibration result") < html.indexOf("Inline figure spec"), true, "figure spec should render beside the relevant paper section");
-  assert.equal(html.includes("figure-spec-card"), true);
+  assert.equal(html.includes("Put the calibration result beside Figure F000001."), true);
+  assert.equal(html.includes("Figure block"), true);
+  assert.equal(html.indexOf("Section 2: Calibration result") < html.indexOf("Figure block"), true, "inline figure block should render in manuscript order");
+  assert.equal(html.includes("manuscript-artifact-card"), true);
   assert.equal(html.includes("Figure F000001: Calibration Map"), true);
-  assert.equal(html.includes("generated / needs source-level review"), true);
-  assert.equal(html.includes("Show that calibrated perceived safety is an action standard."), true);
-  assert.equal(html.includes("Calibrated perceived safety is an action standard"), true);
-  assert.equal(html.includes("Copy spec"), true);
+  assert.equal(html.includes("active"), true);
+  assert.equal(html.includes("Shows the calibration map at the point of use."), true);
+  assert.equal(html.includes("Calibration map caption"), true);
+  assert.equal(html.includes("Copy block"), true);
   assert.equal(html.includes("Copy caption"), true);
   assert.equal(html.includes("Open source"), true);
   assert.equal(html.includes("manuscript/figures/calibration_map.pdf"), true);
-  assert.equal(html.includes("No active tables"), true);
   assert.equal(html.includes("No active tables are present because the current evidence is figure-led."), true);
   assert.equal(html.includes("Claim C1 maps to calibration evidence E1."), true);
   assert.equal(html.includes("Figure descriptions"), false);
@@ -2025,6 +2075,7 @@ testAgentBackendSelectorPersistsProviderSettings();
 await testProjectCreateSendsBackendAndLoadsProjectDefault();
 testAgentReadinessStatusBlocksLaunchUi();
 testEnvForcedBackendStatusMessage();
+testInvalidEnvBackendStatusWarning();
 testProviderSpecificResumeCommand();
 await testSettingsModalSaveSyncsScopedSessionSettings();
 testProjectScopedComposerDraftAndTargetVenueRestore();

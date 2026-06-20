@@ -15,7 +15,7 @@
         }
       })();
     </script>
-    <link rel="stylesheet" href="/styles.css?v=20260617-figure-cards" />
+    <link rel="stylesheet" href="/styles.css?v=20260620-run-ui2" />
   </head>
   <body>
     <div class="app-shell">
@@ -807,16 +807,20 @@
             <p class="eyebrow">File preview</p>
             <h2 id="file-viewer-title">File</h2>
           </div>
-          <button class="icon-button" type="button" data-file-viewer-close aria-label="Close fullscreen preview">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
-          </button>
+          <div class="file-viewer-actions">
+            <button class="secondary-button small-button file-viewer-return" type="button" data-file-viewer-return="manuscript/BLUEPRINT.md" hidden>Return to latest manuscript</button>
+            <button class="icon-button" type="button" data-file-viewer-close aria-label="Close fullscreen preview">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </div>
         </header>
         <div class="file-viewer-body" id="file-viewer-body"></div>
+        <div class="file-viewer-resize-handle" data-file-viewer-resize role="separator" aria-orientation="horizontal" aria-label="Resize file preview" title="Drag to resize"></div>
       </section>
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260617-figure-cards"></script>
+    <script src="/app.js?v=20260620-run-ui2"></script>
   </body>
 </html>
