@@ -2,7 +2,7 @@
 
 ## Product Goal
 
-Provide a minimal, beautiful, Cold-start-first interface for starting and steering a CoAutoResearch project through a real local Codex CLI exec session.
+Provide a minimal, beautiful, Cold-start-first interface for starting and steering a CoAutoResearch project through a real local agent CLI session. Codex is the default backend; Claude Code is optional.
 
 The UI should feel closer to a calm research workspace and ChatGPT-style session than to an IDE dashboard. Repository markdown files remain the source of truth.
 
@@ -25,19 +25,19 @@ Only the active step's content is visible:
 
 - Step 1: edit cold-start files, preview Markdown, set target venue / audience as a string, and attach optional resources.
 - Step 2: review launch settings and run `Cold start and launch`.
-- Step 3: message the captured Codex session.
+- Step 3: message the captured agent session.
 
 The user can choose a resource type, browse local files or folders from the UI, and add them as optional resources. Supported types are ongoing work, papers/literature, proposals, and data/other. The backend attaches each selected item into the matching resource folder, creates a symlink when possible, and falls back to copying only if symlink creation fails. PDF, DOCX, and other binary files can be stored as resources, but only supported text files are rendered or edited inline.
 
 ### 2. Session Chat
 
-The main screen is a centered conversation with the active Codex session.
+The main screen is a centered conversation with the active agent session.
 
-- Normal messages resume the current Codex exec session.
-- Messages starting with `/` are sent as Codex slash commands.
+- Normal messages resume the current agent session.
+- Messages starting with `/` are handled as local CoAutoResearch controls or sent to the current agent session.
 - `Continue` resumes the current session and asks it to continue the research loop.
-- Chat is disabled until the first Codex session exists.
-- The UI must not fake assistant work. The session log should show what the real Codex process is doing.
+- Chat is disabled until the first agent session exists.
+- The UI must not fake assistant work. The session log should show what the real agent process is doing.
 
 ### 3. Session Controls
 
@@ -47,12 +47,12 @@ The user can adjust:
 
 - model;
 - reasoning effort;
-- sandbox mode;
-- approval policy;
+- backend (`codex` or `claude`);
+- provider-specific permissions;
 - live web search;
-- advanced `-c key=value` config overrides.
+- advanced Codex `-c key=value` config overrides.
 
-The UI exposes common Codex slash commands:
+The UI exposes common local slash commands:
 
 - `/status`
 - `/ps`
@@ -67,11 +67,11 @@ The UI exposes common Codex slash commands:
 
 ### 4. Session Log
 
-The chat screen includes a compact Codex session panel:
+The chat screen includes a compact agent session panel:
 
 - current status;
 - captured session id;
-- command used to start or resume Codex;
+- command used to start or resume the agent;
 - recent JSONL/log output;
 - stop control for the active subprocess.
 

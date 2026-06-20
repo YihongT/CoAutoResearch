@@ -82,6 +82,10 @@ function loadAppContext() {
     close() { this.closed = true; },
     showModal() { this.open = true; },
   });
+  const projectDialog = element({
+    close() { this.closed = true; },
+    showModal() { this.open = true; },
+  });
   const restartDialog = element({
     close() { this.closed = true; },
     showModal() { this.open = true; },
@@ -93,6 +97,7 @@ function loadAppContext() {
   const field = (value = "", extra = {}) => element({ value, ...extra });
   const sessionForm = element({
     elements: {
+      backend: field("codex"),
       model: field("gpt-5.5"),
       reasoningEffort: field("medium"),
       permissionPreset: field("default"),
@@ -104,6 +109,7 @@ function loadAppContext() {
   const settingsForm = element({
     elements: {
       themeMode: field("graphite-aurora"),
+      settingsBackend: field("codex"),
       settingsModel: field("gpt-5.5"),
       settingsReasoningEffort: field("medium"),
       settingsPermissionPreset: field("default"),
@@ -113,6 +119,20 @@ function loadAppContext() {
     },
     querySelector() {
       return element();
+    },
+  });
+  const projectCreateSubmit = element();
+  const projectCreateForm = element({
+    elements: {
+      projectName: field(""),
+      agentBackend: field("codex"),
+    },
+    reset() {
+      this.elements.projectName.value = "";
+      this.elements.agentBackend.value = "codex";
+    },
+    querySelector(selector) {
+      return selector === 'button[type="submit"]' ? projectCreateSubmit : null;
     },
   });
   const composerModel = sessionForm.elements.model;
@@ -142,7 +162,15 @@ function loadAppContext() {
     ["#open-launch-dialog-inline", element()],
     ["#composer-suggestions", element()],
     ["#launch-dialog", launchDialog],
+    ["#launch-autoresearch", element()],
+    ["#launch-agent-status", element()],
     ["#launch-instruction", element()],
+    ["#project-dialog", projectDialog],
+    ["#project-create-form", projectCreateForm],
+    ["#project-name", projectCreateForm.elements.projectName],
+    ["#project-agent-backend", projectCreateForm.elements.agentBackend],
+    ["#project-agent-backend-note", element()],
+    ["#project-create-note", element()],
     ["#restart-autoresearch-dialog", restartDialog],
     ["#restart-autoresearch-reason", element()],
     ["#large-resource-import-dialog", largeImportDialog],
@@ -160,6 +188,7 @@ function loadAppContext() {
     ["#settings-summary", element()],
     ["#session-settings", element()],
     ["#settings-secret-grid", element()],
+    ["#settings-agent-status", element()],
   ].forEach(([selector, value]) => elements.set(selector, value));
 
   const context = {
@@ -268,6 +297,7 @@ function loadAppContext() {
       globalThis.__renderCount += 1;
       globalThis.__lastRenderedMessages = globalThis.__messages();
     };
+    globalThis.__renderStageImpl = renderStage;
     renderChatState = () => {};
     renderSession = () => {};
     renderResumeCommandBar = () => {};
@@ -399,6 +429,7 @@ function loadAppContext() {
       const form = document.querySelector("#session-settings-form");
       return {
         projectId: activeProjectId,
+        formBackend: form?.elements?.backend?.value || "",
         composerModel: document.querySelector("#composer-model")?.value || "",
         composerReasoning: document.querySelector("#composer-reasoning")?.value || "",
         formModel: form?.elements?.model?.value || "",
@@ -411,6 +442,17 @@ function loadAppContext() {
         legacy: localStorage.getItem("autoResearchSessionSettings"),
       };
     };
+    globalThis.__agentStatusState = () => ({
+      settingsNote: document.querySelector("#settings-agent-status")?.textContent || "",
+      settingsTone: document.querySelector("#settings-agent-status")?.dataset?.tone || "",
+      launchNote: document.querySelector("#launch-agent-status")?.textContent || "",
+      launchTone: document.querySelector("#launch-agent-status")?.dataset?.tone || "",
+      projectNote: document.querySelector("#project-agent-backend-note")?.textContent || "",
+      projectTone: document.querySelector("#project-agent-backend-note")?.dataset?.tone || "",
+      launchDisabled: Boolean(document.querySelector("#launch-autoresearch")?.disabled),
+      launchTitle: document.querySelector("#launch-autoresearch")?.title || "",
+      createBackend: document.querySelector("#project-agent-backend")?.value || "",
+    });
     globalThis.__composerDraftState = () => ({
       projectId: activeProjectId,
       value: document.querySelector("#cold-file-editor")?.value || "",
@@ -973,6 +1015,12 @@ async function testLaunchGoalMessageBeforeBackendWork() {
   const pendingState = app.context.__pendingState();
   assert.equal(pendingState.draft, true, "goal launch should show immediate pending feedback");
   assert.ok(pendingState.since > 0, "goal launch pending state should start a visible working timer");
+  const optimisticSession = app.run("sessionState()");
+  assert.equal(optimisticSession.status, "running", "goal launch should immediately expose a running session");
+  assert.equal(optimisticSession.mode, "goal", "goal launch should immediately expose goal mode");
+  assert.equal(optimisticSession.loop_iteration, 1, "goal launch should immediately show the first trial");
+  assert.equal(optimisticSession.active_run.trial_iteration, 1, "goal launch should mark Trial 1 as the active run");
+  assert.equal(app.run("__thinkingProbe()").includes("Starting autoresearch on Trial 1"), true, "pending UI should name the optimistic trial immediately");
   const html = app.run("__messageHtml(0)");
   assert.equal(html.includes('class="framing-message control"'), true, "goal launch should render as a control row, not a user bubble");
   assert.equal(html.includes("Autoresearch"), true);
@@ -984,6 +1032,7 @@ async function testLaunchGoalMessageBeforeBackendWork() {
   await pending;
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/cold-start");
   assert.equal(app.context.__apiCalls[0].body.launchInstruction, "Prioritize source-level evidence before drafting.");
+  assert.equal(app.run("Boolean(optimisticResearchSession)"), false, "real backend session should replace optimistic launch state");
   assert.equal(app.coldEditor.value, "", "successful launch should clear the submitted composer draft");
   assert.equal(app.context.__composerDraftState().stored, null, "successful launch should clear the project-scoped composer draft");
 }
@@ -1110,6 +1159,7 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(html.includes("Stop current run"), true, "running trial live status should expose a contextual stop button");
   assert.equal(html.includes("data-stop-current-run"), true, "contextual stop button should stop the active Codex process");
   assert.equal(html.includes("Live trial activity"), true, "running trial event details should be folded under the live status row");
+  assert.equal(html.includes("Open latest manuscript"), false, "first running trial should not expose latest manuscript before a report exists");
   assert.equal(html.includes("Report pending"), false, "running trial should not render a low-information pending report card");
   assert.equal(html.includes("Report is not available yet."), false, "running trial should not render a low-information pending report card");
   assert.equal(html.includes("<span>Trial activity</span>"), false, "running trial details should stay in the live status row instead of a duplicate report card");
@@ -1153,6 +1203,7 @@ function testPassedGoalDoesNotShowStaleRunningTrial() {
   assert.equal(html.includes("Live trial activity"), false, "passed goals must not show live activity for stale trial events");
   assert.equal(html.includes(">Running<"), false, "reported trials must not retain the Running chip label after gates pass");
   assert.equal(html.includes("Trial 6"), true, "passed goals should default to the latest reported trial");
+  assert.equal(html.includes("Open latest manuscript"), true, "reported trials should expose the latest manuscript shortcut");
   assert.equal(html.includes("Autoresearch complete"), true, "passed goals should mark the whole autoresearch trajectory complete");
   app.run(`
     appState.research_session.gate = { status: "continue" };
@@ -1243,6 +1294,31 @@ function testStatusCardShowsReviewCheckpoint() {
   assert.equal(html.includes(">100<"), true, "status card should show next human review checkpoint");
   assert.equal(html.includes("Review checkpoint reached"), true, "status card should humanize checkpoint stop reason");
   assert.equal(html.includes("Review checkpoint"), true, "Codex settings should show checkpoint interval");
+}
+
+function testReviewStorageOutdatedDoesNotShowProjectWarning() {
+  const app = loadAppContext();
+  const storageOnly = app.run(`projectReviewerInstructionsOutdated({
+    reviewer_status: {
+      baseline_version: "2026-06-per-reviewer-files",
+      latest_baseline_version: "2026-06-per-reviewer-files",
+      missing: [],
+      changed: [],
+      metadata_missing: [],
+      review_storage: { outdated: true }
+    }
+  })`);
+  assert.equal(storageOnly, false, "review storage/state sync issues should not show the project-list reviewer-template warning");
+  const changedTemplate = app.run(`projectReviewerInstructionsOutdated({
+    reviewer_status: {
+      baseline_version: "old",
+      latest_baseline_version: "2026-06-per-reviewer-files",
+      missing: [],
+      changed: ["EVIDENCE_REVIEWER.md"],
+      metadata_missing: []
+    }
+  })`);
+  assert.equal(changedTemplate, true, "actual reviewer template drift should still show the project-list warning");
 }
 
 function testComposerPlaceholderBecomesGeneralAfterLaunch() {
@@ -1362,8 +1438,9 @@ function testComposerModelReasoningChangesPersistProjectScoped() {
     __sessionSettingsState();
   `);
   let stored = JSON.parse(state.stored);
-  assert.equal(stored.model, "gpt-5.3-codex");
-  assert.equal(stored.reasoningEffort, "high");
+  assert.equal(stored.agent.backend, "codex");
+  assert.equal(stored.codex.model, "gpt-5.3-codex");
+  assert.equal(stored.codex.reasoningEffort, "high");
   assert.equal(state.composerModel, "gpt-5.3-codex");
   assert.equal(state.composerReasoning, "high");
   assert.equal(state.formModel, "gpt-5.3-codex");
@@ -1385,10 +1462,170 @@ function testComposerModelReasoningChangesPersistProjectScoped() {
     __sessionSettingsState();
   `);
   stored = JSON.parse(state.stored);
-  assert.equal(stored.model, "gpt-5.3-codex");
-  assert.equal(stored.reasoningEffort, "high");
+  assert.equal(stored.agent.backend, "codex");
+  assert.equal(stored.codex.model, "gpt-5.3-codex");
+  assert.equal(stored.codex.reasoningEffort, "high");
   assert.equal(state.composerModel, "gpt-5.3-codex", "returning to p1 should restore its model override");
   assert.equal(state.composerReasoning, "high", "returning to p1 should restore its reasoning override");
+}
+
+function testAgentBackendSelectorPersistsProviderSettings() {
+  const app = loadAppContext();
+  let state = app.run(`
+    uiSettings = {
+      agent: { backend: "codex" },
+      codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 }
+    };
+    switchSessionBackend("claude");
+    __sessionSettingsState();
+  `);
+  let stored = JSON.parse(state.stored);
+  assert.equal(state.formBackend, "claude");
+  assert.equal(state.composerModel, "sonnet");
+  assert.equal(stored.agent.backend, "claude");
+  assert.equal(stored.claude.model, "sonnet");
+
+  state = app.run(`
+    document.querySelector("#composer-model").value = "opus";
+    document.querySelector("#composer-reasoning").value = "high";
+    updateSessionSettingsFromComposer();
+    __sessionSettingsState();
+  `);
+  stored = JSON.parse(state.stored);
+  assert.equal(stored.agent.backend, "claude");
+  assert.equal(stored.claude.model, "opus");
+  assert.equal(stored.claude.reasoningEffort, "high");
+  assert.equal(stored.codex.model, "gpt-5.5", "Codex settings should remain provider-specific");
+
+  state = app.run(`
+    switchSessionBackend("codex");
+    __sessionSettingsState();
+  `);
+  stored = JSON.parse(state.stored);
+  assert.equal(state.formBackend, "codex");
+  assert.equal(state.composerModel, "gpt-5.5");
+  assert.equal(stored.agent.backend, "codex");
+}
+
+async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
+  const app = loadAppContext();
+  const result = await app.run(`
+    (async () => {
+      const settingsPayload = {
+        agent: { backend: "claude" },
+        codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+        claude: { model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 },
+        agent_status: { selected: "claude", backends: {} }
+      };
+      api = async (endpoint, options = {}) => {
+        const body = options.body ? JSON.parse(options.body) : {};
+        globalThis.__apiCalls.push({ endpoint, body });
+        if (endpoint === "/api/projects") {
+          return {
+            ok: true,
+            project: { id: "p2", display_name: "Claude Project" },
+            active_project_id: "p2",
+            projects: [{ id: "p2", display_name: "Claude Project" }],
+            multi_project: true
+          };
+        }
+        if (endpoint === "/api/settings") {
+          return { ok: true, settings: settingsPayload, secret_keys: [] };
+        }
+        return { ok: true };
+      };
+      const form = document.querySelector("#project-create-form");
+      form.elements.projectName.value = "Claude Project";
+      form.elements.agentBackend.value = "claude";
+      await createProjectFromDialog({ preventDefault() {}, currentTarget: form });
+      return {
+        calls: globalThis.__apiCalls,
+        activeProjectId,
+        state: __sessionSettingsState()
+      };
+    })()
+  `);
+  const createCall = result.calls.find((call) => call.endpoint === "/api/projects");
+  assert.equal(createCall.body.agentBackend, "claude", "project create should send the selected backend");
+  assert.equal(result.activeProjectId, "p2");
+  assert.equal(result.state.formBackend, "claude", "new project should load with its seeded backend default");
+  assert.equal(result.state.composerModel, "sonnet");
+}
+
+function testAgentReadinessStatusBlocksLaunchUi() {
+  const app = loadAppContext();
+  const state = app.run(`
+    uiSettings = {
+      agent: { backend: "claude" },
+      codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 },
+      agent_status: {
+        selected: "claude",
+        backends: {
+          codex: { ok: true, blocking: false, message: "Codex CLI is installed and authenticated." },
+          claude: {
+            ok: false,
+            blocking: true,
+            auth: "missing",
+            message: "Claude Code is not authenticated. Run claude auth login and verify claude auth status before starting a run."
+          }
+        }
+      }
+    };
+    prepareSaved = true;
+    appState.files.project.text = "# Project\\n\\nReady.";
+    applySessionSettings({ backend: "claude", model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 }, true);
+    globalThis.__renderStageImpl();
+    __agentStatusState();
+  `);
+  assert.equal(state.launchDisabled, true, "blocking selected backend should disable launch");
+  assert.equal(state.launchTone, "error");
+  assert.equal(state.launchNote.includes("claude auth login"), true, "launch status should include Claude setup guidance");
+  assert.equal(state.launchTitle.includes("claude auth login"), true, "disabled launch title should include provider-specific guidance");
+}
+
+function testEnvForcedBackendStatusMessage() {
+  const app = loadAppContext();
+  const state = app.run(`
+    uiSettings = {
+      agent: { backend: "claude" },
+      codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 },
+      agent_status: {
+        selected: "claude",
+        env_override: "claude",
+        backends: {
+          claude: { ok: true, blocking: false, auth: "ok", message: "Claude Code CLI is installed and authenticated." }
+        }
+      }
+    };
+    const form = document.querySelector("#project-create-form");
+    form.elements.agentBackend.value = "codex";
+    renderAgentStatusNote("#project-agent-backend-note", "codex", "project");
+    __agentStatusState();
+  `);
+  assert.equal(state.projectNote.includes("COAUTO_AGENT_BACKEND forces Claude Code"), true);
+  assert.equal(state.projectNote.includes("runs use the forced backend"), true);
+}
+
+function testProviderSpecificResumeCommand() {
+  const app = loadAppContext();
+  const codex = app.run(`
+    appState.repo_root = "/tmp/project root";
+    __setSession({ session_id: "00000000-0000-0000-0000-000000000001", backend: "codex", settings: { backend: "codex" } });
+    agentResumeCommand();
+  `);
+  assert.equal(codex.includes("codex resume --include-non-interactive"), true, "Codex resume command should use Codex CLI");
+  assert.equal(codex.includes("-C '/tmp/project root'"), true, "Codex resume command should include cwd");
+
+  const claude = app.run(`
+    __setSession({ session_id: "00000000-0000-0000-0000-000000000002", backend: "claude", settings: { backend: "claude" } });
+    agentResumeCommand();
+  `);
+  assert.equal(claude.includes("claude --resume"), true, "Claude resume command should use Claude Code CLI");
+  assert.equal(claude.includes("--add-dir '/tmp/project root'"), true, "Claude resume command should include allowed project dir");
+  assert.equal(claude.includes("codex"), false, "Claude resume command should not use Codex");
 }
 
 async function testSettingsModalSaveSyncsScopedSessionSettings() {
@@ -1404,18 +1641,19 @@ async function testSettingsModalSaveSyncsScopedSessionSettings() {
       form.elements.settingsWebSearch.checked = false;
       form.elements.settingsExtraConfig.value = "sandbox note";
       form.elements.settingsReviewCheckpointInterval.value = "17";
-      const codex = codexSettingsFromModal();
-      globalThis.__apiResponse = { settings: { codex }, secret_keys: [] };
+      const payload = settingsPayloadFromModal();
+      globalThis.__apiResponse = { settings: payload, secret_keys: [] };
       await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
       return __sessionSettingsState();
     })()
   `);
   const stored = JSON.parse(state.stored);
-  assert.equal(stored.model, "gpt-5.2");
-  assert.equal(stored.reasoningEffort, "low");
-  assert.equal(stored.permissionPreset, "full-access");
-  assert.equal(stored.webSearch, false);
-  assert.equal(Number(stored.reviewCheckpointInterval), 17);
+  assert.equal(stored.agent.backend, "codex");
+  assert.equal(stored.codex.model, "gpt-5.2");
+  assert.equal(stored.codex.reasoningEffort, "low");
+  assert.equal(stored.codex.permissionPreset, "full-access");
+  assert.equal(stored.codex.webSearch, false);
+  assert.equal(Number(stored.codex.reviewCheckpointInterval), 17);
   assert.equal(state.composerModel, "gpt-5.2", "Settings save should sync the composer model");
   assert.equal(state.composerReasoning, "low", "Settings save should sync the composer reasoning");
   assert.equal(state.formPermission, "full-access", "Settings save should sync launch/session form values");
@@ -1778,10 +2016,16 @@ testCurrentRunActivityShowsPauseForChatRun();
 testWorkingDurationFormatter();
 testTrialStripScrollRestoresAcrossRender();
 testStatusCardShowsReviewCheckpoint();
+testReviewStorageOutdatedDoesNotShowProjectWarning();
 testComposerPlaceholderBecomesGeneralAfterLaunch();
 testSettingsRenderPreservesComposerDraft();
 testProjectScopedSessionSettingsOverrideServerDefaults();
 testComposerModelReasoningChangesPersistProjectScoped();
+testAgentBackendSelectorPersistsProviderSettings();
+await testProjectCreateSendsBackendAndLoadsProjectDefault();
+testAgentReadinessStatusBlocksLaunchUi();
+testEnvForcedBackendStatusMessage();
+testProviderSpecificResumeCommand();
 await testSettingsModalSaveSyncsScopedSessionSettings();
 testProjectScopedComposerDraftAndTargetVenueRestore();
 testThemeModePersistsAndApplies();

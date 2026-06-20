@@ -20,6 +20,10 @@ venv/
 # Local UI runtime state
 ui/.runtime/
 
+# Local agent overrides
+CLAUDE.local.md
+.claude/settings.local.json
+
 # Runtime, caches, and generated outputs
 .cache/
 tmp/

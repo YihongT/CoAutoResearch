@@ -152,12 +152,51 @@ async function reserveFallbackTestPort() {
 async function writeFakeCodexBin(directory) {
   await fsp.mkdir(directory, { recursive: true });
   const cmdCodex = path.join(directory, "codex.cmd");
-  await fsp.writeFile(cmdCodex, "@echo off\r\necho codex fake 0.0.0\r\n", "utf8");
+  const cmdClaude = path.join(directory, "claude.cmd");
+  await fsp.writeFile(
+    cmdCodex,
+    "@echo off\r\nif \"%1\"==\"login\" if \"%2\"==\"status\" (echo Logged in& exit /b 0)\r\necho codex fake 0.0.0\r\n",
+    "utf8"
+  );
+  await fsp.writeFile(
+    cmdClaude,
+    "@echo off\r\nif \"%1\"==\"auth\" if \"%2\"==\"status\" (echo Authenticated& exit /b 0)\r\necho claude fake 0.0.0\r\n",
+    "utf8"
+  );
   if (process.platform !== "win32") {
     const shellCodex = path.join(directory, "codex");
-    await fsp.writeFile(shellCodex, "#!/bin/sh\necho codex fake 0.0.0\n", "utf8");
+    const shellClaude = path.join(directory, "claude");
+    await fsp.writeFile(
+      shellCodex,
+      "#!/bin/sh\nif [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then echo Logged in; exit 0; fi\necho codex fake 0.0.0\n",
+      "utf8"
+    );
+    await fsp.writeFile(
+      shellClaude,
+      "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then echo Authenticated; exit 0; fi\necho claude fake 0.0.0\n",
+      "utf8"
+    );
     await fsp.chmod(shellCodex, 0o755);
+    await fsp.chmod(shellClaude, 0o755);
     await fsp.chmod(cmdCodex, 0o755);
+    await fsp.chmod(cmdClaude, 0o755);
+  }
+}
+
+async function writeFakeAuthFailureBin(directory, backend) {
+  await fsp.mkdir(directory, { recursive: true });
+  const name = backend === "claude" ? "claude" : "codex";
+  const cmd = path.join(directory, `${name}.cmd`);
+  const authArgs = backend === "claude" ? 'if "%1"=="auth" if "%2"=="status"' : 'if "%1"=="login" if "%2"=="status"';
+  await fsp.writeFile(cmd, `@echo off\r\n${authArgs} (echo Not authenticated& exit /b 1)\r\necho ${name} fake 0.0.0\r\n`, "utf8");
+  if (process.platform !== "win32") {
+    const shell = path.join(directory, name);
+    const authTest = backend === "claude"
+      ? '[ "$1" = "auth" ] && [ "$2" = "status" ]'
+      : '[ "$1" = "login" ] && [ "$2" = "status" ]';
+    await fsp.writeFile(shell, `#!/bin/sh\nif ${authTest}; then echo Not authenticated; exit 1; fi\necho ${name} fake 0.0.0\n`, "utf8");
+    await fsp.chmod(shell, 0o755);
+    await fsp.chmod(cmd, 0o755);
   }
 }
 
@@ -511,10 +550,11 @@ Confidence: medium
     !appJs.includes("function scopedJsonGet") ||
     !appJs.includes("function scopedSessionSettings") ||
     !appJs.includes("function mergedProjectSessionSettings") ||
+    !appJs.includes("function persistSessionSettings") ||
     !appJs.includes('scopedGet("autoResearchComposerDraft", "", { legacyFallback: false })') ||
     !appJs.includes('scopedGet("autoResearchTargetVenue", "", { legacyFallback: false })') ||
     !appJs.includes('scopedSet("autoResearchTargetVenue", event.target.value || "")') ||
-    !appJs.includes('scopedSet("autoResearchSessionSettings", JSON.stringify(settings))') ||
+    !appJs.includes('scopedSet("autoResearchSessionSettings", JSON.stringify(sessionSettingsForStorage(settings)))') ||
     !loadSettingsBody.includes("hydrateSettingsDialog(uiSettings);") ||
     !loadSettingsBody.includes("restoreSessionSettings();") ||
     loadSettingsBody.includes("applySessionSettings(")
@@ -653,9 +693,30 @@ Confidence: medium
     !appJs.includes("launchInstruction, fileEdits") ||
     !serverPy.includes("def autoresearch_goal_prompt(launch_instruction") ||
     !serverPy.includes("Additional user instruction for this launch") ||
-    !serverPy.includes('autoresearch_goal_prompt(str(payload.get("launchInstruction", ""))[:4000])')
+    !serverPy.includes('autoresearch_goal_prompt(str(payload.get("launchInstruction", ""))[:4000], bool(settings.get("fastMode")))')
   ) {
     throw new Error("launch dialog must support an optional one-run autoresearch instruction");
+  }
+  if (
+    !indexHtml.includes('name="fastMode"') ||
+    !indexHtml.includes("Fast mode") ||
+    !appJs.includes("fastMode: Boolean(data.get(\"fastMode\"))") ||
+    !appJs.includes("if (normalized.fastMode) parts.push(\"fast\")") ||
+    !serverPy.includes('"fastMode": False') ||
+    !serverPy.includes("def fast_mode_prompt_section") ||
+    !serverPy.includes("Fast mode is enabled for this autoresearch loop")
+  ) {
+    throw new Error("launch dialog must expose a Fast mode setting and pass it into autoresearch prompts");
+  }
+  if (
+    !appJs.includes("let optimisticResearchSession = null") ||
+    !appJs.includes("function startOptimisticAutoresearchSession") ||
+    !appJs.includes("Starting autoresearch on Trial") ||
+    !appJs.includes("if (optimisticResearchSession) return optimisticResearchSession") ||
+    !appJs.includes("startOptimisticAutoresearchSession(settings)") ||
+    !appJs.includes("clearOptimisticAutoresearchSession(previousSession)")
+  ) {
+    throw new Error("launching autoresearch must show immediate optimistic running feedback");
   }
   if (
     !appJs.includes("markdownLinkHtml") ||
@@ -677,17 +738,17 @@ Confidence: medium
     appJs.includes("const activeTrial = selectedTrial(reports)") ||
     !appJs.includes('reportStatus === "reported" ? "Done"') ||
     !appJs.includes("Report pending") ||
-    !appJs.includes("Report is not available yet. Codex activity for this trial is shown below.") ||
+    !appJs.includes("Report is not available yet. Agent activity for this trial is shown below.") ||
     !appJs.includes("function isGoalPassed()") ||
     !appJs.includes("function isTrialLive(iteration)") ||
-    !appJs.includes("const liveIteration = isLiveGoalSession() ? activeRunTrialIteration() : 0") ||
+    !(appJs.includes("const liveIteration = isLiveGoalSession() ? activeRunTrialIteration() : 0") || appJs.includes("const liveIteration = activeRunTrialIteration();")) ||
     !appJs.includes("const fallback = currentTrialIndex(trials);") ||
     !appJs.includes("function runningTrialStatusHtml") ||
     !appJs.includes("activeRunStatusLabel()") ||
     !appJs.includes("workingDurationHtml()") ||
     !appJs.includes("function activeTrialHistoryHtml()") ||
     !appJs.includes("function scheduleWorkingTicker()") ||
-    !appJs.includes('class="trial-live-status"') ||
+    !appJs.includes("trial-live-status") ||
     !appJs.includes("Live trial activity") ||
     !appJs.includes("data-pause-autoresearch") ||
     !appJs.includes("Pause after current turn") ||
@@ -961,6 +1022,9 @@ Confidence: medium
   if (!doctorOutput.includes("codex fake 0.0.0")) {
     throw new Error("doctor did not resolve fake Codex executable from PATH");
   }
+  if (!doctorOutput.includes("claude fake 0.0.0")) {
+    throw new Error("doctor did not resolve fake Claude executable from PATH");
+  }
   if (!doctorOutput.includes("package-managed runtime") || !doctorOutput.includes("legacy project ui/server.py")) {
     throw new Error(`doctor should report package-managed UI runtime and legacy project UI fallback:\n${doctorOutput}`);
   }
@@ -989,7 +1053,7 @@ Confidence: medium
     env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
     encoding: "utf8"
   });
-  if (!installedDoctorOutput.includes("package-managed runtime") || !installedDoctorOutput.includes("codex fake 0.0.0")) {
+  if (!installedDoctorOutput.includes("package-managed runtime") || !installedDoctorOutput.includes("codex fake 0.0.0") || !installedDoctorOutput.includes("claude fake 0.0.0")) {
     throw new Error(`installed tarball CLI doctor output was not useful:\n${installedDoctorOutput}`);
   }
 
@@ -1004,9 +1068,11 @@ Confidence: medium
       "module = importlib.util.module_from_spec(spec)",
       "spec.loader.exec_module(module)",
       "resolved = pathlib.Path(module.resolve_codex_executable({'PATH': os.environ['COAUTO_FAKE_PATH']}, windows=True)).name.lower()",
+      "claude = pathlib.Path(module.resolve_claude_executable({'PATH': os.environ['COAUTO_FAKE_PATH']}, windows=True)).name.lower()",
       "needs_shell = module.executable_requires_windows_shell('C:/Program Files/nodejs/codex.cmd', windows=True)",
-      "print(f'{resolved}|{needs_shell}')",
+      "print(f'{resolved}|{claude}|{needs_shell}')",
       "assert resolved == 'codex.cmd', resolved",
+      "assert claude == 'claude.cmd', claude",
       "assert needs_shell is True"
     ].join("; ")
   ], {
@@ -1014,8 +1080,120 @@ Confidence: medium
     env: { ...process.env, COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"), COAUTO_FAKE_PATH: fakeBin },
     encoding: "utf8"
   }).trim();
-  if (resolverOutput !== "codex.cmd|True") {
-    throw new Error(`Python Codex resolver returned ${resolverOutput}`);
+  if (resolverOutput !== "codex.cmd|claude.cmd|True") {
+    throw new Error(`Python agent resolver returned ${resolverOutput}`);
+  }
+
+  const codexAuthFailBin = path.join(tempRoot, "fake-codex-auth-fail");
+  const claudeAuthFailBin = path.join(tempRoot, "fake-claude-auth-fail");
+  await writeFakeAuthFailureBin(codexAuthFailBin, "codex");
+  await writeFakeAuthFailureBin(claudeAuthFailBin, "claude");
+  const readinessOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    [
+      "import importlib.util, json, os, pathlib",
+      "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+      "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "project_root = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT'])",
+      "context = module.ProjectContext(project_root)",
+      "module._CONTEXT.project = context",
+      "ok_env = dict(os.environ, PATH=os.environ['COAUTO_FAKE_PATH'], COAUTO_CODEX='', CODEX_BIN='', COAUTO_CLAUDE='', CLAUDE_BIN='')",
+      "codex_ok = module.agent_setup_status('codex', ok_env)",
+      "claude_ok = module.agent_setup_status('claude', ok_env)",
+      "assert codex_ok['ok'] and codex_ok['auth'] == 'ok', codex_ok",
+      "assert claude_ok['ok'] and claude_ok['auth'] == 'ok', claude_ok",
+      "missing = module.agent_setup_status('codex', dict(os.environ, PATH='', COAUTO_CODEX='', CODEX_BIN=''))",
+      "assert missing['blocking'] and 'COAUTO_CODEX' in missing['message'], missing",
+      "codex_auth = module.agent_setup_status('codex', dict(os.environ, PATH=os.environ['COAUTO_CODEX_FAIL_PATH'], COAUTO_CODEX='', CODEX_BIN=''))",
+      "assert codex_auth['blocking'] and 'codex login' in codex_auth['message'], codex_auth",
+      "claude_auth = module.agent_setup_status('claude', dict(os.environ, PATH=os.environ['COAUTO_CLAUDE_FAIL_PATH'], COAUTO_CLAUDE='', CLAUDE_BIN=''))",
+      "assert claude_auth['blocking'] and 'claude auth login' in claude_auth['message'], claude_auth",
+      "old_path = os.environ.get('PATH', '')",
+      "old_claude = os.environ.get('COAUTO_CLAUDE', '')",
+      "old_claude_bin = os.environ.get('CLAUDE_BIN', '')",
+      "os.environ['PATH'] = os.environ['COAUTO_CLAUDE_FAIL_PATH']",
+      "os.environ['COAUTO_CLAUDE'] = ''",
+      "os.environ['CLAUDE_BIN'] = ''",
+      "module.agent_command_for_prompt = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('command generated before readiness preflight'))",
+      "try:",
+      "    module.start_research_run('hello', 'chat', False, settings_payload={'backend': 'claude'})",
+      "    raise AssertionError('auth-missing Claude should block startup')",
+      "except ValueError as exc:",
+      "    assert 'claude auth login' in str(exc), str(exc)",
+      "finally:",
+      "    os.environ['PATH'] = old_path",
+      "    os.environ['COAUTO_CLAUDE'] = old_claude",
+      "    os.environ['CLAUDE_BIN'] = old_claude_bin",
+      "print(json.dumps({'codex': codex_ok['auth'], 'claude': claude_ok['auth'], 'blocked': 'claude auth login'}))",
+    ].join("\n")
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir,
+      COAUTO_FAKE_PATH: fakeBin,
+      COAUTO_CODEX_FAIL_PATH: codexAuthFailBin,
+      COAUTO_CLAUDE_FAIL_PATH: claudeAuthFailBin
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!readinessOutput.includes('"blocked": "claude auth login"')) {
+    throw new Error(`Python readiness fixture returned unexpected output: ${readinessOutput}`);
+  }
+
+  const agentBackendOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    [
+      "import importlib.util, json, os, pathlib",
+      "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+      "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+      "module._CONTEXT.project = context",
+      "settings = module.normalize_research_settings({'backend': 'claude', 'model': 'sonnet', 'reasoningEffort': 'high', 'permissionPreset': 'full-access', 'webSearch': False, 'reviewCheckpointInterval': '25'})",
+      "context.session.update({'session_id': '00000000-0000-0000-0000-000000000123', 'backend': 'claude', 'settings': settings, 'logs': [], 'raw_logs': [], 'transcript': []})",
+      "new_cmd = module.agent_command_for_prompt(False, settings)",
+      "resume_cmd = module.agent_command_for_prompt(True, settings)",
+      "assert pathlib.Path(new_cmd[0]).name.startswith('claude'), new_cmd",
+      "assert '-p' in new_cmd and 'stream-json' in new_cmd and '--include-partial-messages' in new_cmd, new_cmd",
+      "assert '--permission-mode' in new_cmd and 'bypassPermissions' in new_cmd, new_cmd",
+      "assert '--disallowedTools' in new_cmd and 'WebSearch,WebFetch' in new_cmd, new_cmd",
+      "assert '--resume' in resume_cmd and '00000000-0000-0000-0000-000000000123' in resume_cmd, resume_cmd",
+      "system_line = json.dumps({'type': 'system', 'subtype': 'init', 'session_id': '00000000-0000-0000-0000-000000000999'})",
+      "assistant_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Final assistant text.'}], 'stop_reason': 'end_turn', 'usage': {'input_tokens': 3, 'output_tokens': 5}}})",
+      "tool_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'pwd'}}], 'stop_reason': 'tool_use'}})",
+      "result_line = json.dumps({'type': 'result', 'subtype': 'success', 'result': 'Done.', 'session_id': '00000000-0000-0000-0000-000000000999', 'total_cost_usd': 0.012})",
+      "assert module.transcript_from_claude_line(system_line) is None",
+      "assert module.transcript_from_claude_line(assistant_line)['content'] == 'Final assistant text.'",
+      "assert module.transcript_from_claude_line(tool_line)['kind'] == 'tool'",
+      "assert module.transcript_from_claude_line(result_line)['role'] == 'final'",
+      "module.append_research_log(system_line)",
+      "module.append_research_log(assistant_line)",
+      "module.append_research_log(tool_line)",
+      "module.append_research_log(result_line)",
+      "usage = module.latest_agent_usage()",
+      "assert context.session['session_id'] == '00000000-0000-0000-0000-000000000999', context.session['session_id']",
+      "assert usage['usage']['input_tokens'] == 3 and usage['cost_usd'] == 0.012, usage",
+      "print(json.dumps({'backend': settings['backend'], 'command': new_cmd[1:4], 'transcript': len(context.session['transcript']), 'cost': usage['cost_usd']}))",
+    ].join("; ")
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir,
+      COAUTO_CLAUDE: process.platform === "win32" ? path.join(fakeBin, "claude.cmd") : path.join(fakeBin, "claude")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!agentBackendOutput.includes('"backend": "claude"') || !agentBackendOutput.includes('"cost": 0.012')) {
+    throw new Error(`Python Claude backend fixture returned unexpected output: ${agentBackendOutput}`);
   }
 
   const launchPromptOutput = execFileSync(python.command, [
@@ -1032,6 +1210,8 @@ Confidence: medium
       "assert 'Additional user instruction for this launch' not in base",
       "assert 'Prioritize source-level evidence.' in custom",
       "assert 'Required reviewer gates must all be strict `pass`' in custom",
+      "assert module.infer_trial_status('Resource intake is no longer blocked by stale clues.', '', '# Report\\n\\nReplaced scaffold placeholders.') == 'reported'",
+      "assert module.infer_trial_status('Status: blocked', '', '') == 'blocked'",
       "print('launch-prompt-ok')",
     ].join("; ")
   ], {
@@ -1553,9 +1733,11 @@ Confidence: medium
       "default_cwd.mkdir(exist_ok=True)",
       "empty_dashboard = module.ProjectRegistry(default_cwd, default_projects)",
       "assert empty_dashboard.multi_project and empty_dashboard.summaries() == []",
-      "from_ui = empty_dashboard.create_project({'name': 'from ui'})",
+      "from_ui = empty_dashboard.create_project({'name': 'from ui', 'agentBackend': 'claude'})",
       "assert from_ui['display_name'] == 'from ui', from_ui",
       "assert (default_projects / 'from_ui' / 'AGENTS.md').exists()",
+      "from_ui_settings = json.loads((default_projects / 'from_ui' / 'ui' / '.runtime' / 'settings.json').read_text(encoding='utf-8'))",
+      "assert from_ui_settings['agent']['backend'] == 'claude', from_ui_settings",
       "dashboard = module.ProjectRegistry(temp_root, temp_root)",
       "names = sorted(item['display_name'] for item in dashboard.summaries())",
       "assert names == ['project', 'project-two', 'sibling project'], names",

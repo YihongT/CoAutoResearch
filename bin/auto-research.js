@@ -991,7 +991,17 @@ function findOnPath(name, env = process.env) {
 }
 
 function findCodexCommand(env = process.env) {
-  const configured = (env.COAUTO_CODEX || env.CODEX_BIN || "").trim().replace(/^"|"$/g, "");
+  return findAgentCommand("codex", env);
+}
+
+function findClaudeCommand(env = process.env) {
+  return findAgentCommand("claude", env);
+}
+
+function findAgentCommand(agent, env = process.env) {
+  const configured = agent === "claude"
+    ? (env.COAUTO_CLAUDE || env.CLAUDE_BIN || "").trim().replace(/^"|"$/g, "")
+    : (env.COAUTO_CODEX || env.CODEX_BIN || "").trim().replace(/^"|"$/g, "");
   if (configured) {
     const expanded = configured.replace(/^~(?=$|[\\/])/, process.env.HOME || process.env.USERPROFILE || "~");
     if (fs.existsSync(expanded)) return expanded;
@@ -999,11 +1009,19 @@ function findCodexCommand(env = process.env) {
     if (configuredOnPath) return configuredOnPath;
     return expanded;
   }
-  return findOnPath("codex", env) || "codex";
+  return findOnPath(agent, env) || agent;
 }
 
 function codexAvailable() {
-  const command = findCodexCommand();
+  return agentAvailable("codex");
+}
+
+function claudeAvailable() {
+  return agentAvailable("claude");
+}
+
+function agentAvailable(agent) {
+  const command = agent === "claude" ? findClaudeCommand() : findCodexCommand();
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
   const result = spawnSync(command, ["--version"], { encoding: "utf8", shell });
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
@@ -1012,6 +1030,11 @@ function codexAvailable() {
     status: result.status,
     output: output.split(/\r?\n/)[0] || command
   };
+}
+
+function selectedAgentBackend(env = process.env) {
+  const backend = String(env.COAUTO_AGENT_BACKEND || "codex").trim().toLowerCase();
+  return backend === "claude" ? "claude" : "codex";
 }
 
 function pythonCandidates() {
@@ -1156,17 +1179,25 @@ async function commandDoctor(args) {
   const host = options.host || DEFAULT_HOST;
   const port = options.port || DEFAULT_PORT;
   const python = findPythonCommand();
+  const selectedBackend = selectedAgentBackend();
+  const codex = codexAvailable();
+  const claude = claudeAvailable();
+  const anyAgent = codex.ok || claude.ok;
   const checks = [
     ["node", { ok: Number(process.versions.node.split(".")[0]) >= 18, output: process.version }],
     ["python", { ok: python.ok, output: python.output || python.label }],
     ["git", commandAvailable("git")],
-    ["codex", codexAvailable()]
+    ["codex", codex],
+    ["claude", claude]
   ];
 
   for (const [name, result] of checks) {
-    const label = result.ok ? "ok" : name === "codex" ? "warn" : "missing";
+    const selectedMissing = name === selectedBackend && !result.ok;
+    const agentMissing = (name === "codex" || name === "claude") && !result.ok;
+    const label = result.ok ? "ok" : selectedMissing || !anyAgent && agentMissing ? "warn" : agentMissing ? "optional" : "missing";
     console.log(`${label.padEnd(7)} ${name}${result.output ? ` - ${result.output}` : ""}`);
   }
+  console.log(`${anyAgent ? "ok" : "warn"}      selected agent - ${selectedBackend}${anyAgent && !checks.find(([name]) => name === selectedBackend)?.[1].ok ? " (selected backend missing; another agent is available)" : ""}`);
 
   const portCheck = await checkPort(host, port);
   console.log(`${(portCheck.ok ? "ok" : "warn").padEnd(7)} port ${host}:${port}${portCheck.error ? ` - ${portCheck.error}` : ""}`);

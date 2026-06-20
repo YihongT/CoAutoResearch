@@ -79,6 +79,7 @@ RESTART_RETAINED_PROVENANCE = {"user_explicit", "user_confirmed"}
 RESOURCE_MANIFEST_RELATIVE_PATH = "resources/user_input/RESOURCE_MANIFEST.md"
 AUTO_RESOURCE_SKIP_DIRS = {
     ".cache",
+    ".claude",
     ".codex",
     ".git",
     ".hg",
@@ -1214,6 +1215,12 @@ class ProjectRegistry:
         if not self.projects_dir:
             self.projects_dir = self.project_root.parent.resolve()
         root = create_generated_project(self.projects_dir, payload)
+        backend = (
+            payload.get("agentBackend")
+            or payload.get("backend")
+            or ((payload.get("agent") or {}).get("backend") if isinstance(payload.get("agent"), dict) else "")
+        )
+        write_default_project_ui_settings(root, backend)
         self.refresh()
         resolved = root.resolve()
         for project_id in self.order:
@@ -1294,7 +1301,7 @@ class ProjectRegistry:
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                raise ValueError("Could not stop the active Codex run before deleting this project.")
+                raise ValueError("Could not stop the active agent run before deleting this project.")
         if isinstance(thread, threading.Thread):
             thread.join(timeout=5)
         deadline = time.time() + 2
@@ -1445,10 +1452,24 @@ DEFAULT_CODEX_SETTINGS = {
     "sandbox": "workspace-write",
     "approvalPolicy": "on-request",
     "webSearch": True,
+    "fastMode": False,
     "extraConfig": "",
     "reviewCheckpointInterval": DEFAULT_REVIEW_CHECKPOINT_INTERVAL,
 }
+DEFAULT_CLAUDE_SETTINGS = {
+    "model": "sonnet",
+    "reasoningEffort": "medium",
+    "permissionPreset": "auto-review",
+    "permissionMode": "auto",
+    "webSearch": True,
+    "fastMode": False,
+    "extraConfig": "",
+    "reviewCheckpointInterval": DEFAULT_REVIEW_CHECKPOINT_INTERVAL,
+}
+DEFAULT_AGENT_SETTINGS = {"backend": "codex"}
+ALLOWED_AGENT_BACKENDS = {"codex", "claude"}
 ALLOWED_CODEX_MODELS = {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"}
+ALLOWED_CLAUDE_MODEL_ALIASES = {"sonnet", "opus", "haiku"}
 SECRET_ENV_KEYS = [
     "GITHUB_TOKEN",
     "HF_TOKEN",
@@ -1462,6 +1483,21 @@ PERMISSION_PRESETS = {
     "auto-review": {"sandbox": "workspace-write", "approvalPolicy": "never"},
     "full-access": {"sandbox": "danger-full-access", "approvalPolicy": "never"},
 }
+CLAUDE_PERMISSION_PRESETS = {
+    "default": {"permissionMode": "acceptEdits"},
+    "auto-review": {"permissionMode": "auto"},
+    "full-access": {"permissionMode": "bypassPermissions"},
+}
+
+
+def normalize_agent_backend(value: Any = "") -> str:
+    backend = str(value or "").strip().lower()
+    return backend if backend in ALLOWED_AGENT_BACKENDS else DEFAULT_AGENT_SETTINGS["backend"]
+
+
+def selected_agent_backend_from_env(env: dict[str, str] | None = None) -> str:
+    process_env = env if env is not None else os.environ
+    return normalize_agent_backend(process_env.get("COAUTO_AGENT_BACKEND") or DEFAULT_AGENT_SETTINGS["backend"])
 
 
 def infer_permission_preset(settings: dict[str, Any]) -> str:
@@ -1485,12 +1521,141 @@ def apply_permission_preset(settings: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def infer_claude_permission_preset(settings: dict[str, Any]) -> str:
+    preset = str(settings.get("permissionPreset") or "").strip()
+    if preset in CLAUDE_PERMISSION_PRESETS:
+        return preset
+    mode = str(settings.get("permissionMode") or "").strip()
+    for candidate, config in CLAUDE_PERMISSION_PRESETS.items():
+        if config["permissionMode"] == mode:
+            return candidate
+    return DEFAULT_CLAUDE_SETTINGS["permissionPreset"]
+
+
+def apply_claude_permission_preset(settings: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(settings)
+    preset = infer_claude_permission_preset(normalized)
+    normalized["permissionPreset"] = preset
+    normalized.update(CLAUDE_PERMISSION_PRESETS[preset])
+    return normalized
+
+
+def normalize_claude_model(value: Any, fallback: str | None = None) -> str:
+    model = str(value or "").strip()
+    default = fallback or DEFAULT_CLAUDE_SETTINGS["model"]
+    if not model:
+        return default
+    if model in ALLOWED_CLAUDE_MODEL_ALIASES:
+        return model
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{1,120}", model):
+        return model
+    return default
+
+
+def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -> dict[str, Any]:
+    values = payload if isinstance(payload, dict) else {}
+    settings = dict(DEFAULT_CODEX_SETTINGS)
+    if base:
+        settings.update({key: value for key, value in base.items() if key in DEFAULT_CODEX_SETTINGS})
+    for key in DEFAULT_CODEX_SETTINGS:
+        if key not in values:
+            continue
+        if key == "model":
+            model = str(values[key]).strip()
+            settings[key] = model if model in ALLOWED_CODEX_MODELS else settings.get("model") or DEFAULT_CODEX_SETTINGS["model"]
+        elif key == "approvalPolicy":
+            approval = str(values[key]).strip()
+            settings[key] = approval if approval in ALLOWED_APPROVAL_POLICIES else settings.get("approvalPolicy") or DEFAULT_CODEX_SETTINGS["approvalPolicy"]
+        elif key == "permissionPreset":
+            preset = str(values[key]).strip()
+            settings[key] = preset if preset in PERMISSION_PRESETS else infer_permission_preset(settings)
+        elif key == "reasoningEffort":
+            reasoning = str(values[key]).strip()
+            settings[key] = reasoning if reasoning in ALLOWED_REASONING_EFFORTS else settings.get("reasoningEffort") or DEFAULT_CODEX_SETTINGS["reasoningEffort"]
+        elif key == "reviewCheckpointInterval":
+            settings[key] = normalize_review_checkpoint_interval(values[key])
+        elif key == "webSearch":
+            settings[key] = bool(values[key])
+        elif key == "fastMode":
+            settings[key] = bool(values[key])
+        elif key == "extraConfig":
+            settings[key] = str(values[key] or "").strip()[:4000]
+        elif key == "sandbox":
+            sandbox = str(values[key]).strip()
+            if sandbox in ALLOWED_SANDBOXES:
+                settings[key] = sandbox
+        else:
+            settings[key] = values[key]
+    settings["reasoningEffort"] = (
+        settings["reasoningEffort"]
+        if settings["reasoningEffort"] in ALLOWED_REASONING_EFFORTS
+        else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
+    )
+    settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+    return apply_permission_preset(settings)
+
+
+def normalize_claude_settings(payload: Any, base: dict[str, Any] | None = None) -> dict[str, Any]:
+    values = payload if isinstance(payload, dict) else {}
+    settings = dict(DEFAULT_CLAUDE_SETTINGS)
+    if base:
+        settings.update({key: value for key, value in base.items() if key in DEFAULT_CLAUDE_SETTINGS})
+    for key in DEFAULT_CLAUDE_SETTINGS:
+        if key not in values:
+            continue
+        if key == "model":
+            settings[key] = normalize_claude_model(values[key], settings.get("model"))
+        elif key == "permissionPreset":
+            preset = str(values[key]).strip()
+            settings[key] = preset if preset in CLAUDE_PERMISSION_PRESETS else infer_claude_permission_preset(settings)
+        elif key == "permissionMode":
+            mode = str(values[key]).strip()
+            if mode in {item["permissionMode"] for item in CLAUDE_PERMISSION_PRESETS.values()}:
+                settings[key] = mode
+        elif key == "reasoningEffort":
+            reasoning = str(values[key]).strip()
+            settings[key] = reasoning if reasoning in ALLOWED_REASONING_EFFORTS else settings.get("reasoningEffort") or DEFAULT_CLAUDE_SETTINGS["reasoningEffort"]
+        elif key == "reviewCheckpointInterval":
+            settings[key] = normalize_review_checkpoint_interval(values[key])
+        elif key == "webSearch":
+            settings[key] = bool(values[key])
+        elif key == "fastMode":
+            settings[key] = bool(values[key])
+        elif key == "extraConfig":
+            settings[key] = str(values[key] or "").strip()[:4000]
+    settings["model"] = normalize_claude_model(settings.get("model"))
+    settings["reasoningEffort"] = (
+        settings["reasoningEffort"]
+        if settings["reasoningEffort"] in ALLOWED_REASONING_EFFORTS
+        else DEFAULT_CLAUDE_SETTINGS["reasoningEffort"]
+    )
+    settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+    return apply_claude_permission_preset(settings)
+
+
 def normalize_review_checkpoint_interval(value: Any) -> int:
     try:
         interval = int(str(value).strip())
     except (TypeError, ValueError):
         return DEFAULT_REVIEW_CHECKPOINT_INTERVAL
     return interval if interval > 0 else DEFAULT_REVIEW_CHECKPOINT_INTERVAL
+
+
+def default_ui_settings_payload(backend: Any = "") -> dict[str, Any]:
+    return {
+        "agent": {"backend": normalize_agent_backend(backend or selected_agent_backend_from_env())},
+        "codex": normalize_codex_settings({}),
+        "claude": normalize_claude_settings({}),
+        "env": {},
+    }
+
+
+def write_default_project_ui_settings(project_root: Path, backend: Any = "") -> None:
+    payload = default_ui_settings_payload(backend)
+    runtime_dir = project_root / "ui" / ".runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    settings_path = runtime_dir / "settings.json"
+    settings_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 WATCHED_PATHS = [
@@ -1561,6 +1726,7 @@ def load_research_session_runtime() -> None:
         for key in (
             "id",
             "session_id",
+            "backend",
             "mode",
             "command",
             "settings",
@@ -1585,40 +1751,29 @@ def load_research_session_runtime() -> None:
 
 
 def load_ui_settings() -> dict[str, Any]:
-    settings = {"codex": dict(DEFAULT_CODEX_SETTINGS), "env": {}}
+    settings = {
+        "agent": {"backend": selected_agent_backend_from_env()},
+        "codex": normalize_codex_settings({}),
+        "claude": normalize_claude_settings({}),
+        "env": {},
+    }
     if not UI_SETTINGS_PATH.exists():
         return settings
     try:
         payload = json.loads(UI_SETTINGS_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return settings
+    if isinstance(payload.get("agent"), dict):
+        settings["agent"]["backend"] = normalize_agent_backend(payload["agent"].get("backend"))
+    elif isinstance(payload.get("backend"), str):
+        settings["agent"]["backend"] = normalize_agent_backend(payload.get("backend"))
+    env_backend = os.environ.get("COAUTO_AGENT_BACKEND")
+    if env_backend:
+        settings["agent"]["backend"] = normalize_agent_backend(env_backend)
     if isinstance(payload.get("codex"), dict):
-        for key, value in payload["codex"].items():
-            if key not in DEFAULT_CODEX_SETTINGS:
-                continue
-            if key == "model":
-                model = str(value).strip()
-                if model in ALLOWED_CODEX_MODELS:
-                    settings["codex"][key] = model
-                continue
-            if key == "approvalPolicy":
-                approval = str(value).strip()
-                settings["codex"][key] = approval if approval in ALLOWED_APPROVAL_POLICIES else DEFAULT_CODEX_SETTINGS["approvalPolicy"]
-                continue
-            if key == "permissionPreset":
-                preset = str(value).strip()
-                settings["codex"][key] = preset if preset in PERMISSION_PRESETS else DEFAULT_CODEX_SETTINGS["permissionPreset"]
-                continue
-            if key == "reviewCheckpointInterval":
-                settings["codex"][key] = normalize_review_checkpoint_interval(value)
-                continue
-            settings["codex"][key] = value
-        settings["codex"]["reasoningEffort"] = (
-            settings["codex"]["reasoningEffort"]
-            if settings["codex"]["reasoningEffort"] in ALLOWED_REASONING_EFFORTS
-            else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
-        )
-        settings["codex"] = apply_permission_preset(settings["codex"])
+        settings["codex"] = normalize_codex_settings(payload["codex"], settings["codex"])
+    if isinstance(payload.get("claude"), dict):
+        settings["claude"] = normalize_claude_settings(payload["claude"], settings["claude"])
     if isinstance(payload.get("env"), dict):
         settings["env"] = {key: str(value) for key, value in payload["env"].items() if key in SECRET_ENV_KEYS and str(value)}
     return settings
@@ -1626,36 +1781,27 @@ def load_ui_settings() -> dict[str, Any]:
 
 def public_ui_settings() -> dict[str, Any]:
     settings = load_ui_settings()
+    agent_status = agent_backend_status_payload(settings["agent"].get("backend"))
     return {
+        "agent": settings["agent"],
         "codex": settings["codex"],
+        "claude": settings["claude"],
         "env_present": {key: bool(settings["env"].get(key)) for key in SECRET_ENV_KEYS},
         "env_masked": {key: ("Saved" if settings["env"].get(key) else "") for key in SECRET_ENV_KEYS},
+        "agent_status": agent_status,
+        "agent_env_override": agent_status.get("env_override", ""),
     }
 
 
 def save_ui_settings(payload: dict[str, Any]) -> dict[str, Any]:
     current = load_ui_settings()
+    agent_payload = payload.get("agent") if isinstance(payload.get("agent"), dict) else {}
+    merged_agent = {"backend": normalize_agent_backend(agent_payload.get("backend") or current["agent"].get("backend"))}
+
     codex = payload.get("codex") if isinstance(payload.get("codex"), dict) else {}
-    merged_codex = dict(current["codex"])
-    for key in DEFAULT_CODEX_SETTINGS:
-        if key in codex:
-            if key == "model":
-                model = str(codex[key]).strip()
-                merged_codex[key] = model if model in ALLOWED_CODEX_MODELS else DEFAULT_CODEX_SETTINGS["model"]
-            elif key == "approvalPolicy":
-                approval = str(codex[key]).strip()
-                merged_codex[key] = approval if approval in ALLOWED_APPROVAL_POLICIES else DEFAULT_CODEX_SETTINGS["approvalPolicy"]
-            elif key == "permissionPreset":
-                preset = str(codex[key]).strip()
-                merged_codex[key] = preset if preset in PERMISSION_PRESETS else DEFAULT_CODEX_SETTINGS["permissionPreset"]
-            elif key == "reasoningEffort":
-                reasoning = str(codex[key]).strip()
-                merged_codex[key] = reasoning if reasoning in ALLOWED_REASONING_EFFORTS else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
-            elif key == "reviewCheckpointInterval":
-                merged_codex[key] = normalize_review_checkpoint_interval(codex[key])
-            else:
-                merged_codex[key] = codex[key]
-    merged_codex = apply_permission_preset(merged_codex)
+    claude = payload.get("claude") if isinstance(payload.get("claude"), dict) else {}
+    merged_codex = normalize_codex_settings(codex, current["codex"])
+    merged_claude = normalize_claude_settings(claude, current["claude"])
 
     env_values = payload.get("env") if isinstance(payload.get("env"), dict) else {}
     merged_env = dict(current["env"])
@@ -1667,7 +1813,14 @@ def save_ui_settings(payload: dict[str, Any]) -> dict[str, Any]:
             merged_env[key] = str(value).strip()
 
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    UI_SETTINGS_PATH.write_text(json.dumps({"codex": merged_codex, "env": merged_env}, ensure_ascii=False, indent=2), encoding="utf-8")
+    UI_SETTINGS_PATH.write_text(
+        json.dumps(
+            {"agent": merged_agent, "codex": merged_codex, "claude": merged_claude, "env": merged_env},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     return public_ui_settings()
 
 
@@ -1796,23 +1949,46 @@ def update_framing_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return save_framing_messages(messages)
 
 
-def codex_process_env() -> dict[str, str]:
+def agent_process_env() -> dict[str, str]:
     env = os.environ.copy()
     env.update(load_ui_settings().get("env", {}))
     return env
 
 
-def codex_executable_names(windows: bool | None = None) -> list[str]:
+def codex_process_env() -> dict[str, str]:
+    return agent_process_env()
+
+
+def agent_executable_names(backend: str, windows: bool | None = None) -> list[str]:
     is_windows = os.name == "nt" if windows is None else windows
+    base = "claude" if normalize_agent_backend(backend) == "claude" else "codex"
     if is_windows:
-        return ["codex.cmd", "codex.exe", "codex.bat", "codex"]
-    return ["codex"]
+        return [f"{base}.cmd", f"{base}.exe", f"{base}.bat", base]
+    return [base]
 
 
-def resolve_codex_executable(env: dict[str, str] | None = None, windows: bool | None = None) -> str:
+def codex_executable_names(windows: bool | None = None) -> list[str]:
+    return agent_executable_names("codex", windows)
+
+
+def claude_executable_names(windows: bool | None = None) -> list[str]:
+    return agent_executable_names("claude", windows)
+
+
+def agent_executable_env_vars(backend: str) -> tuple[str, str]:
+    return ("COAUTO_CLAUDE", "CLAUDE_BIN") if normalize_agent_backend(backend) == "claude" else ("COAUTO_CODEX", "CODEX_BIN")
+
+
+def agent_display_name(backend: str) -> str:
+    return "Claude Code" if normalize_agent_backend(backend) == "claude" else "Codex"
+
+
+def resolve_agent_executable(backend: str, env: dict[str, str] | None = None, windows: bool | None = None) -> str:
+    backend = normalize_agent_backend(backend)
     process_env = env if env is not None else os.environ
     search_path = process_env.get("PATH") or None
-    configured = str(process_env.get("COAUTO_CODEX") or process_env.get("CODEX_BIN") or "").strip().strip('"')
+    primary_env, fallback_env = agent_executable_env_vars(backend)
+    configured = str(process_env.get(primary_env) or process_env.get(fallback_env) or "").strip().strip('"')
     if configured:
         expanded = os.path.expandvars(os.path.expanduser(configured))
         configured_path = Path(expanded)
@@ -1821,38 +1997,292 @@ def resolve_codex_executable(env: dict[str, str] | None = None, windows: bool | 
         found = shutil.which(expanded, path=search_path)
         if found:
             return found
+        label = agent_display_name(backend)
+        executable_hint = "claude.cmd, claude.exe, or claude" if backend == "claude" else "codex.cmd, codex.exe, or codex"
         raise FileNotFoundError(
-            f"Configured Codex executable was not found: {configured}. "
-            "Set COAUTO_CODEX to the full path of codex.cmd, codex.exe, or codex."
+            f"Configured {label} executable was not found: {configured}. "
+            f"Set {primary_env} to the full path of {executable_hint}."
         )
 
-    for name in codex_executable_names(windows):
+    for name in agent_executable_names(backend, windows):
         found = shutil.which(name, path=search_path)
         if found:
             return found
-    names = ", ".join(codex_executable_names(windows))
+    names = ", ".join(agent_executable_names(backend, windows))
+    label = agent_display_name(backend)
+    install_hint = "Install Claude Code CLI" if backend == "claude" else "Install Codex CLI"
+    env_hint = "COAUTO_CLAUDE" if backend == "claude" else "COAUTO_CODEX"
+    binary_hint = "claude.cmd/claude" if backend == "claude" else "codex.cmd/codex"
     raise FileNotFoundError(
-        f"Codex CLI executable not found on PATH. Tried: {names}. "
-        "Install Codex CLI, start the UI from a terminal where `codex --version` works, "
-        "or set COAUTO_CODEX to the full path of codex.cmd/codex."
+        f"{label} CLI executable not found on PATH. Tried: {names}. "
+        f"{install_hint}, start the UI from a terminal where `{agent_executable_names(backend, False)[0]} --version` works, "
+        f"or set {env_hint} to the full path of {binary_hint}."
     )
 
 
-def codex_start_error_message(exc: OSError, command: list[str]) -> str:
-    executable = command[0] if command else "codex"
+def resolve_codex_executable(env: dict[str, str] | None = None, windows: bool | None = None) -> str:
+    return resolve_agent_executable("codex", env, windows)
+
+
+def resolve_claude_executable(env: dict[str, str] | None = None, windows: bool | None = None) -> str:
+    return resolve_agent_executable("claude", env, windows)
+
+
+def agent_start_error_message(exc: OSError, command: list[str], backend: str) -> str:
+    backend = normalize_agent_backend(backend)
+    executable = command[0] if command else ("claude" if backend == "claude" else "codex")
+    label = agent_display_name(backend)
+    env_hint = "COAUTO_CLAUDE" if backend == "claude" else "COAUTO_CODEX"
+    shim = "claude.cmd" if backend == "claude" else "codex.cmd"
+    version_command = "claude --version" if backend == "claude" else "codex --version"
     if isinstance(exc, FileNotFoundError) or getattr(exc, "winerror", None) == 2:
         return (
-            "Failed to start Codex: executable not found. "
-            f"Tried `{executable}`. On Windows, npm installs Codex as `codex.cmd`; "
-            "start the UI from a terminal where `codex --version` works, or set "
-            "COAUTO_CODEX to the full path of codex.cmd."
+            f"Failed to start {label}: executable not found. "
+            f"Tried `{executable}`. On Windows, npm installs CLI shims as `{shim}`; "
+            f"start the UI from a terminal where `{version_command}` works, or set "
+            f"{env_hint} to the full path of {shim}."
         )
-    return f"Failed to start Codex using `{executable}`: {exc}"
+    return f"Failed to start {label} using `{executable}`: {exc}"
+
+
+def codex_start_error_message(exc: OSError, command: list[str]) -> str:
+    return agent_start_error_message(exc, command, "codex")
 
 
 def executable_requires_windows_shell(executable: str, windows: bool | None = None) -> bool:
     is_windows = os.name == "nt" if windows is None else windows
     return is_windows and Path(str(executable)).suffix.lower() in {".cmd", ".bat"}
+
+
+def agent_version_command(backend: str) -> list[str]:
+    return ["--version"]
+
+
+def agent_auth_command(backend: str) -> list[str]:
+    return ["auth", "status"] if normalize_agent_backend(backend) == "claude" else ["login", "status"]
+
+
+def agent_login_command_text(backend: str) -> str:
+    return "claude auth login" if normalize_agent_backend(backend) == "claude" else "codex login"
+
+
+def agent_auth_status_command_text(backend: str) -> str:
+    return "claude auth status" if normalize_agent_backend(backend) == "claude" else "codex login status"
+
+
+def agent_version_command_text(backend: str) -> str:
+    return "claude --version" if normalize_agent_backend(backend) == "claude" else "codex --version"
+
+
+def agent_install_hint(backend: str) -> str:
+    return "Install Claude Code CLI" if normalize_agent_backend(backend) == "claude" else "Install Codex CLI"
+
+
+def agent_env_hint(backend: str) -> str:
+    primary, fallback = agent_executable_env_vars(backend)
+    return f"{primary}/{fallback}"
+
+
+def run_agent_probe(executable: str, args: list[str], env: dict[str, str] | None = None, timeout: float = 6.0) -> dict[str, Any]:
+    command = [executable, *args]
+    try:
+        use_shell = executable_requires_windows_shell(executable)
+        popen_command: str | list[str] = subprocess.list2cmdline(command) if use_shell else command
+        completed = subprocess.run(
+            popen_command,
+            env=env if env is not None else os.environ,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            shell=use_shell,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        return {"ok": False, "returncode": 127, "output": str(exc), "error": str(exc), "timeout": False}
+    except subprocess.TimeoutExpired as exc:
+        output = "\n".join(filter(None, [str(exc.stdout or ""), str(exc.stderr or "")])).strip()
+        return {"ok": False, "returncode": None, "output": output or "Command timed out.", "error": "timeout", "timeout": True}
+    except OSError as exc:
+        return {"ok": False, "returncode": 126, "output": str(exc), "error": str(exc), "timeout": False}
+    output = "\n".join(filter(None, [completed.stdout, completed.stderr])).strip()
+    return {
+        "ok": completed.returncode == 0,
+        "returncode": completed.returncode,
+        "output": output,
+        "error": "",
+        "timeout": False,
+    }
+
+
+def auth_probe_status(backend: str, probe: dict[str, Any]) -> str:
+    if probe.get("ok"):
+        return "ok"
+    text = str(probe.get("output") or probe.get("error") or "").lower()
+    if probe.get("timeout"):
+        return "unknown"
+    unknown_markers = [
+        "unknown command",
+        "unrecognized command",
+        "unrecognised command",
+        "invalid command",
+        "no such command",
+        "unknown subcommand",
+        "unrecognized subcommand",
+        "unrecognised subcommand",
+        "unexpected argument",
+        "invalid option",
+        "unknown option",
+        "not enough arguments",
+    ]
+    if any(marker in text for marker in unknown_markers):
+        return "unknown"
+    missing_markers = [
+        "not logged",
+        "not authenticated",
+        "not signed",
+        "unauthenticated",
+        "authentication required",
+        "login required",
+        "please login",
+        "please log in",
+        "no credentials",
+        "no api key",
+        "not authorized",
+        "not authorised",
+    ]
+    if any(marker in text for marker in missing_markers):
+        return "missing"
+    return "missing" if probe.get("returncode") not in (None, 0) else "unknown"
+
+
+def agent_setup_instruction(backend: str, reason: str) -> str:
+    label = agent_display_name(backend)
+    if reason == "missing":
+        return (
+            f"{label} CLI is not available. {agent_install_hint(backend)}, verify `{agent_version_command_text(backend)}`, "
+            f"or set {agent_env_hint(backend)} to the CLI executable."
+        )
+    if reason == "version":
+        return (
+            f"{label} CLI was found but `{agent_version_command_text(backend)}` failed. "
+            f"Verify the install or set {agent_env_hint(backend)} to a working executable."
+        )
+    if reason == "auth":
+        return (
+            f"{label} is not authenticated. Run `{agent_login_command_text(backend)}` and verify "
+            f"`{agent_auth_status_command_text(backend)}` before starting a run."
+        )
+    return f"{label} readiness could not be determined."
+
+
+def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    backend = normalize_agent_backend(backend)
+    label = agent_display_name(backend)
+    process_env = env if env is not None else os.environ
+    base: dict[str, Any] = {
+        "backend": backend,
+        "label": label,
+        "ok": False,
+        "blocking": False,
+        "installed": False,
+        "auth": "unknown",
+        "executable": "",
+        "version": "",
+        "message": "",
+        "env_vars": list(agent_executable_env_vars(backend)),
+        "version_command": agent_version_command_text(backend),
+        "login_command": agent_login_command_text(backend),
+        "auth_status_command": agent_auth_status_command_text(backend),
+    }
+    try:
+        executable = resolve_agent_executable(backend, process_env)
+    except FileNotFoundError as exc:
+        base.update({
+            "blocking": True,
+            "installed": False,
+            "message": agent_setup_instruction(backend, "missing"),
+            "details": str(exc),
+        })
+        return base
+
+    base["executable"] = executable
+    version_probe = run_agent_probe(executable, agent_version_command(backend), process_env)
+    if not version_probe.get("ok"):
+        base.update({
+            "blocking": True,
+            "installed": False,
+            "message": agent_setup_instruction(backend, "version"),
+            "details": str(version_probe.get("output") or version_probe.get("error") or ""),
+        })
+        return base
+
+    base["installed"] = True
+    base["version"] = str(version_probe.get("output") or "").splitlines()[0][:240]
+    auth_probe = run_agent_probe(executable, agent_auth_command(backend), process_env)
+    auth = auth_probe_status(backend, auth_probe)
+    base["auth"] = auth
+    if auth == "missing":
+        base.update({
+            "blocking": True,
+            "message": agent_setup_instruction(backend, "auth"),
+            "details": str(auth_probe.get("output") or auth_probe.get("error") or ""),
+        })
+        return base
+    if auth == "unknown":
+        base.update({
+            "ok": True,
+            "blocking": False,
+            "message": (
+                f"{label} CLI is installed, but `{agent_auth_status_command_text(backend)}` did not return a supported "
+                "auth status. Startup will continue and report any CLI failure normally."
+            ),
+            "details": str(auth_probe.get("output") or auth_probe.get("error") or ""),
+        })
+        return base
+
+    base.update({
+        "ok": True,
+        "blocking": False,
+        "message": f"{label} CLI is installed and authenticated.",
+    })
+    return base
+
+
+def agent_backend_status_payload(selected_backend: Any = "") -> dict[str, Any]:
+    selected = normalize_agent_backend(selected_backend or selected_agent_backend_from_env())
+    statuses = {backend: agent_setup_status(backend) for backend in sorted(ALLOWED_AGENT_BACKENDS)}
+    env_override = os.environ.get("COAUTO_AGENT_BACKEND", "").strip()
+    normalized_override = normalize_agent_backend(env_override) if env_override else ""
+    return {
+        "selected": selected,
+        "env_override": normalized_override if env_override else "",
+        "env_override_raw": env_override,
+        "backends": statuses,
+    }
+
+
+def agent_unavailable_message(status: dict[str, Any], statuses: dict[str, Any] | None = None) -> str:
+    message = str(status.get("message") or "").strip() or agent_setup_instruction(status.get("backend", "codex"), "missing")
+    backend = normalize_agent_backend(status.get("backend"))
+    all_statuses = statuses or {}
+    for other_backend, other_status in all_statuses.items():
+        normalized_other = normalize_agent_backend(other_backend)
+        if normalized_other == backend:
+            continue
+        if isinstance(other_status, dict) and other_status.get("ok") and not other_status.get("blocking"):
+            message += f" {agent_display_name(normalized_other)} is available; select it in Settings if you want to use it."
+            break
+    return message
+
+
+def ensure_agent_ready(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    backend = normalize_agent_backend(backend)
+    statuses = {name: agent_setup_status(name, env) for name in sorted(ALLOWED_AGENT_BACKENDS)}
+    selected = statuses[backend]
+    if selected.get("blocking"):
+        raise ValueError(agent_unavailable_message(selected, statuses))
+    return selected
 
 
 def transcript_entry(role: str, kind: str, title: str, content: str, raw_type: str = "", editable: bool = False) -> dict[str, Any]:
@@ -1913,7 +2343,7 @@ def transcript_from_codex_line(line: str) -> dict[str, Any] | None:
         event = json.loads(stripped)
     except json.JSONDecodeError:
         if stripped.startswith("Started:"):
-            return {"role": "command", "kind": "command", "title": "Codex command", "content": stripped.removeprefix("Started:").strip(), "raw_type": "process.started", "editable": False}
+            return {"role": "command", "kind": "command", "title": "Agent command", "content": stripped.removeprefix("Started:").strip(), "raw_type": "process.started", "editable": False}
         if "error" in stripped.lower() or "failed" in stripped.lower():
             return {"role": "tool", "kind": "error", "title": "Runtime message", "content": stripped, "raw_type": "process.message", "editable": False}
         return None
@@ -1962,6 +2392,132 @@ def transcript_from_codex_line(line: str) -> dict[str, Any] | None:
             title = "Assistant"
 
     return {"role": role, "kind": kind, "title": title, "content": content[:8000], "raw_type": raw_type, "editable": editable}
+
+
+def claude_content_blocks(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        content = value.get("content")
+        if isinstance(content, list):
+            return [item for item in content if isinstance(item, dict)]
+        if isinstance(content, dict):
+            return [content]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def claude_block_text(block: dict[str, Any]) -> str:
+    block_type = str(block.get("type") or "").strip()
+    if block_type == "text":
+        return str(block.get("text") or "").strip()
+    if block_type == "tool_use":
+        name = str(block.get("name") or "tool").strip()
+        tool_input = block.get("input")
+        if isinstance(tool_input, (dict, list)):
+            detail = json.dumps(tool_input, ensure_ascii=False)
+        else:
+            detail = str(tool_input or "").strip()
+        return f"{name}: {detail}".strip()
+    if block_type == "tool_result":
+        content = event_payload_text(block.get("content"))
+        return content or event_payload_text(block)
+    return event_payload_text(block)
+
+
+def claude_message_content_text(message: Any, include_tools: bool = True) -> str:
+    blocks = claude_content_blocks(message)
+    if blocks:
+        parts = []
+        for block in blocks:
+            if not include_tools and str(block.get("type") or "") != "text":
+                continue
+            text = claude_block_text(block)
+            if text:
+                parts.append(text)
+        return "\n".join(parts).strip()
+    return event_payload_text(message)
+
+
+def claude_message_has_tool_use(message: Any) -> bool:
+    return any(str(block.get("type") or "") in {"tool_use", "tool_result"} for block in claude_content_blocks(message))
+
+
+def transcript_from_claude_line(line: str) -> dict[str, Any] | None:
+    stripped = line.strip()
+    if not stripped:
+        return None
+    try:
+        event = json.loads(stripped)
+    except json.JSONDecodeError:
+        if "error" in stripped.lower() or "failed" in stripped.lower():
+            return {"role": "tool", "kind": "error", "title": "Claude Code", "content": stripped, "raw_type": "process.message", "editable": False}
+        return None
+    if not isinstance(event, dict):
+        return None
+
+    event_type = str(event.get("type") or "event")
+    subtype = str(event.get("subtype") or "").strip()
+    raw_type = f"{event_type}.{subtype}" if subtype else event_type
+    raw_type_lower = raw_type.lower()
+    if raw_type_lower in {"system.init"}:
+        return None
+    if "delta" in raw_type_lower or "partial" in raw_type_lower:
+        return None
+
+    if event_type == "assistant":
+        message = event.get("message") if isinstance(event.get("message"), dict) else event
+        stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
+        if stop_reason in {None, ""} and not claude_message_has_tool_use(message):
+            return None
+        if claude_message_has_tool_use(message):
+            content = claude_message_content_text(message)
+            if not content:
+                return None
+            return {"role": "tool", "kind": "tool", "title": "Tool", "content": content[:8000], "raw_type": raw_type, "editable": False}
+        content = claude_message_content_text(message, include_tools=False)
+        if not content:
+            return None
+        return {"role": "assistant", "kind": "assistant", "title": "Assistant", "content": content[:8000], "raw_type": raw_type, "editable": False}
+
+    if event_type == "user":
+        message = event.get("message") if isinstance(event.get("message"), dict) else event
+        if claude_message_has_tool_use(message):
+            content = claude_message_content_text(message)
+            if content:
+                is_error = any(bool(block.get("is_error")) for block in claude_content_blocks(message))
+                return {
+                    "role": "tool",
+                    "kind": "error" if is_error else "tool",
+                    "title": "Tool result" if not is_error else "Tool error",
+                    "content": content[:8000],
+                    "raw_type": raw_type,
+                    "editable": False,
+                }
+        return None
+
+    if event_type == "result":
+        is_error = bool(event.get("is_error")) or subtype == "error"
+        content = event_payload_text(event.get("result") or event.get("error") or event.get("message") or event)
+        if not content:
+            return None
+        return {
+            "role": "tool" if is_error else "final",
+            "kind": "error" if is_error else "final",
+            "title": "Error" if is_error else "Final",
+            "content": content[:8000],
+            "raw_type": raw_type,
+            "editable": False,
+        }
+
+    if "error" in raw_type_lower or "failed" in raw_type_lower or "retry" in raw_type_lower:
+        content = event_payload_text(event)
+        if content:
+            return {"role": "tool", "kind": "error" if "retry" not in raw_type_lower else "tool", "title": "Claude Code", "content": content[:8000], "raw_type": raw_type, "editable": False}
+    return None
+
+
+def transcript_from_agent_line(line: str, backend: str) -> dict[str, Any] | None:
+    return transcript_from_claude_line(line) if normalize_agent_backend(backend) == "claude" else transcript_from_codex_line(line)
 
 
 def slugify(value: str, fallback: str = "item") -> str:
@@ -2810,10 +3366,20 @@ def current_target_venue(project_text: str, blueprint_text: str, project: dict[s
 
 
 def infer_trial_status(plan: str, review: str, report: str) -> str:
-    combined = "\n".join([plan, review, report]).lower()
-    if "blocked" in combined:
-        return "blocked"
-    if report.strip() and "placeholder" not in report.lower() and "<" not in first_meaningful_line(report, ""):
+    for text in (review, report, plan):
+        for pattern in (
+            r"^\s*(?:status|overall status|gate status)\s*:\s*`?([^`\n]+)`?\s*$",
+            r"^\s*(?:decision|gate impact)\s*:\s*`?([^`\n]+)`?\s*$",
+        ):
+            for match in re.finditer(pattern, text or "", re.IGNORECASE | re.MULTILINE):
+                if normalize_gate_status(match.group(1)) == "blocked":
+                    return "blocked"
+    report_first_line = first_meaningful_line(report, "")
+    if (
+        report.strip()
+        and "<" not in report_first_line
+        and not re.match(r"^\s*(?:#\s*)?(?:placeholder|todo|tbd)\b", report_first_line, re.IGNORECASE)
+    ):
         return "reported"
     if re.search(r"\bapprove\b", review, re.IGNORECASE):
         return "reviewed"
@@ -3220,7 +3786,7 @@ def validate_expected_trial_marker() -> None:
         update_expected_trial_marker(marker)
         stop_autoresearch_loop("trajectory_mismatch", read_autoresearch_gate())
         append_research_log(
-            f"Trajectory mismatch: expected Codex to create Trial {expected}, but active trials are {sorted(active_iterations)}."
+            f"Trajectory mismatch: expected the agent to create Trial {expected}, but active trials are {sorted(active_iterations)}."
         )
 
 
@@ -4109,19 +4675,20 @@ def cancel_resource_import(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def already_imported_resource_record(item: dict[str, Any]) -> dict[str, str] | None:
-    if not (item.get("alreadyImported") or item.get("imported")):
-        return None
     source_text = str(item.get("path", "")).strip()
+    is_project_resource = source_text.replace("\\", "/").lstrip("/").startswith("resources/")
+    if not (item.get("alreadyImported") or item.get("imported") or is_project_resource):
+        return None
     if not source_text:
         raise ValueError("Imported resource path is required.")
     source = validated_resource_destination(source_text)
     if not source.exists() and not source.is_symlink():
-        raise ValueError(f"Imported resource path does not exist: {source_text}")
+        raise ValueError(f"Resource path does not exist: {source_text}")
     category = str(item.get("category", "")).strip() or infer_resource_category(source)
     if category not in UPLOAD_TARGETS:
         category = infer_resource_category(source)
     return {
-        "mode": "imported",
+        "mode": "imported" if (item.get("alreadyImported") or item.get("imported")) else "existing",
         "category": category,
         "source": rel_path(source),
         "path": rel_path(source),
@@ -4727,7 +5294,7 @@ def write_ui_metadata(
 
     resource_lines.extend(["## Intake Decisions", ""])
     if inferred_count:
-        resource_lines.append("- Inferred text references are resource clues for Codex resource intake; they were not attached automatically by the UI server.")
+        resource_lines.append("- Inferred text references are resource clues for agent resource intake; they were not attached automatically by the UI server.")
     if explicit_count:
         resource_lines.append("- Explicit UI resources were filed as raw inputs before research reasoning.")
     if not inferred_count and not explicit_count:
@@ -4800,42 +5367,28 @@ def toml_string(value: str) -> str:
 
 def normalize_research_settings(raw: Any) -> dict[str, Any]:
     payload = raw if isinstance(raw, dict) else {}
-    settings = dict(DEFAULT_CODEX_SETTINGS)
-    settings.update(load_ui_settings().get("codex", {}))
-
-    if "model" in payload:
-        model = str(payload.get("model", "")).strip()
-        settings["model"] = model if model in ALLOWED_CODEX_MODELS else DEFAULT_CODEX_SETTINGS["model"]
-
-    if "reasoningEffort" in payload:
-        reasoning = str(payload.get("reasoningEffort", "")).strip()
-        settings["reasoningEffort"] = reasoning if reasoning in ALLOWED_REASONING_EFFORTS else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
-
-    if "permissionPreset" in payload:
-        preset = str(payload.get("permissionPreset", "")).strip()
-        settings["permissionPreset"] = preset if preset in PERMISSION_PRESETS else DEFAULT_CODEX_SETTINGS["permissionPreset"]
-
-    if "sandbox" in payload:
-        sandbox = str(payload.get("sandbox", settings["sandbox"])).strip()
-        if sandbox in ALLOWED_SANDBOXES:
-            settings["sandbox"] = sandbox
-
-    if "approvalPolicy" in payload:
-        approval = str(payload.get("approvalPolicy", settings["approvalPolicy"])).strip()
-        if approval in ALLOWED_APPROVAL_POLICIES:
-            settings["approvalPolicy"] = approval
-
-    if "webSearch" in payload:
-        settings["webSearch"] = bool(payload.get("webSearch"))
-
-    if "extraConfig" in payload:
-        extra_config = str(payload.get("extraConfig", "")).strip()
-        settings["extraConfig"] = extra_config[:4000]
-    if "reviewCheckpointInterval" in payload:
-        settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(payload.get("reviewCheckpointInterval"))
-    settings["reasoningEffort"] = settings["reasoningEffort"] if settings["reasoningEffort"] in ALLOWED_REASONING_EFFORTS else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
-    settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
-    return apply_permission_preset(settings)
+    saved = load_ui_settings()
+    requested_backend_raw = (
+        payload.get("backend")
+        or (payload.get("agent", {}) if isinstance(payload.get("agent"), dict) else {}).get("backend")
+        or ""
+    )
+    requested_backend = normalize_agent_backend(requested_backend_raw) if requested_backend_raw else ""
+    env_backend = os.environ.get("COAUTO_AGENT_BACKEND")
+    backend = normalize_agent_backend(env_backend or requested_backend or saved.get("agent", {}).get("backend"))
+    if isinstance(payload.get(backend), dict):
+        provider_payload = payload.get(backend)
+    elif not requested_backend or requested_backend == backend:
+        provider_payload = payload
+    else:
+        provider_payload = {}
+    if backend == "claude":
+        settings = normalize_claude_settings(provider_payload, saved.get("claude", {}))
+    else:
+        backend = "codex"
+        settings = normalize_codex_settings(provider_payload, saved.get("codex", {}))
+    settings["backend"] = backend
+    return settings
 
 
 def extra_config_args(extra_config: str) -> list[str]:
@@ -4881,6 +5434,22 @@ def settings_to_codex_args(settings: dict[str, Any], resume: bool) -> list[str]:
     return args
 
 
+def settings_to_claude_args(settings: dict[str, Any], resume: bool) -> list[str]:
+    args: list[str] = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+    model = normalize_claude_model(settings.get("model"))
+    if model:
+        args.extend(["--model", model])
+    reasoning = str(settings.get("reasoningEffort") or "").strip()
+    if reasoning in ALLOWED_REASONING_EFFORTS:
+        args.extend(["--effort", reasoning])
+    preset = infer_claude_permission_preset(settings)
+    permission_mode = CLAUDE_PERMISSION_PRESETS[preset]["permissionMode"]
+    args.extend(["--permission-mode", permission_mode])
+    if not settings.get("webSearch"):
+        args.extend(["--disallowedTools", "WebSearch,WebFetch"])
+    return args
+
+
 def find_uuid(value: Any) -> str:
     pattern = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
     if isinstance(value, str):
@@ -4901,6 +5470,24 @@ def find_uuid(value: Any) -> str:
             if found:
                 return found
     return ""
+
+
+def find_session_identifier(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("session_id", "conversation_id", "thread_id"):
+            candidate = str(value.get(key) or "").strip()
+            if candidate:
+                return candidate[:200]
+        for item in value.values():
+            found = find_session_identifier(item)
+            if found:
+                return found
+    if isinstance(value, list):
+        for item in value:
+            found = find_session_identifier(item)
+            if found:
+                return found
+    return find_uuid(value)
 
 
 def compact_event_text(value: Any) -> str:
@@ -4932,6 +5519,45 @@ def format_codex_event(line: str) -> str:
     if text and text != event_type:
         return f"{event_type}: {text[:900]}"
     return event_type
+
+
+def format_claude_event(line: str) -> str:
+    stripped = line.strip()
+    if not stripped:
+        return ""
+    try:
+        event = json.loads(stripped)
+    except json.JSONDecodeError:
+        return stripped
+    if not isinstance(event, dict):
+        return stripped[:900]
+    event_type = str(event.get("type") or "event")
+    subtype = str(event.get("subtype") or "").strip()
+    label = f"{event_type}.{subtype}" if subtype else event_type
+    if event_type == "system" and subtype == "init":
+        session_id = str(event.get("session_id") or "").strip()
+        return f"{label}: session {session_id[:8]}" if session_id else label
+    if event_type in {"assistant", "user"}:
+        message = event.get("message") if isinstance(event.get("message"), dict) else event
+        tool = next((block for block in claude_content_blocks(message) if str(block.get("type") or "") in {"tool_use", "tool_result"}), None)
+        if tool:
+            name = str(tool.get("name") or tool.get("tool_use_id") or "tool").strip()
+            return f"{label}: {name}"
+        text = claude_message_content_text(message, include_tools=False)
+        if text:
+            return f"{label}: {text[:900]}"
+    if event_type == "result":
+        text = event_payload_text(event.get("result") or event.get("error") or event)
+        if text:
+            return f"{label}: {text[:900]}"
+    text = compact_event_text(event)
+    if text and text != label:
+        return f"{label}: {text[:900]}"
+    return label
+
+
+def format_agent_event(line: str, backend: str) -> str:
+    return format_claude_event(line) if normalize_agent_backend(backend) == "claude" else format_codex_event(line)
 
 
 def normalize_gate_status(value: str) -> str:
@@ -5378,6 +6004,8 @@ def research_session_snapshot() -> dict[str, Any]:
             loop_iteration = latest_iteration
             RESEARCH_SESSION["loop_iteration"] = loop_iteration
         settings = dict(RESEARCH_SESSION.get("settings") or {})
+        backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or settings.get("backend") or load_ui_settings().get("agent", {}).get("backend"))
+        backend_label = agent_display_name(backend)
         review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
         loop_review_checkpoint_iteration = int(RESEARCH_SESSION.get("loop_review_checkpoint_iteration") or 0)
         if loop_review_checkpoint_iteration <= 0:
@@ -5410,9 +6038,9 @@ def research_session_snapshot() -> dict[str, Any]:
             "status_label": (
                 f"Trajectory mismatch on Trial {active_trial_iteration}"
                 if trajectory_mismatch and active_trial_iteration > 0
-                else f"Codex is working on Trial {active_trial_iteration}"
+                else f"{backend_label} is working on Trial {active_trial_iteration}"
                 if running and active_trial_iteration > 0
-                else "Codex is working"
+                else f"{backend_label} is working"
                 if running
                 else ""
             ),
@@ -5421,6 +6049,8 @@ def research_session_snapshot() -> dict[str, Any]:
         return {
             "id": RESEARCH_SESSION.get("id", ""),
             "session_id": RESEARCH_SESSION.get("session_id", ""),
+            "backend": backend,
+            "backend_label": backend_label,
             "status": RESEARCH_SESSION.get("status", "idle"),
             "mode": mode,
             "command": " ".join(RESEARCH_SESSION.get("command", [])),
@@ -5444,8 +6074,14 @@ def research_session_snapshot() -> dict[str, Any]:
 
 
 def append_research_log(line: str) -> None:
-    display = format_codex_event(line)
-    transcript = transcript_from_codex_line(line)
+    with RESEARCH_LOCK:
+        backend = normalize_agent_backend(
+            RESEARCH_SESSION.get("backend")
+            or (RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}).get("backend")
+            or load_ui_settings().get("agent", {}).get("backend")
+        )
+    display = format_agent_event(line, backend)
+    transcript = transcript_from_agent_line(line, backend)
     with RESEARCH_LOCK:
         if line.strip():
             RESEARCH_SESSION["raw_logs"].append(line.rstrip("\n"))
@@ -5455,9 +6091,9 @@ def append_research_log(line: str) -> None:
             RESEARCH_SESSION["transcript"].append(transcript_entry(**transcript))
         session_id = ""
         try:
-            session_id = find_uuid(json.loads(line))
+            session_id = find_session_identifier(json.loads(line))
         except json.JSONDecodeError:
-            session_id = find_uuid(line)
+            session_id = find_session_identifier(line)
         if session_id:
             RESEARCH_SESSION["session_id"] = session_id
         RESEARCH_SESSION["raw_logs"] = RESEARCH_SESSION["raw_logs"][-2000:]
@@ -5505,13 +6141,26 @@ def current_review_checkpoint_iteration(settings: dict[str, Any] | None = None) 
     return set_review_checkpoint_window(settings, current_iteration)
 
 
-def continue_autoresearch_loop_prompt(gate: dict[str, Any], next_iteration: int | None = None) -> str:
+def fast_mode_prompt_section(fast_mode: bool) -> str:
+    if not fast_mode:
+        return ""
+    return """
+
+Fast mode is enabled for this autoresearch loop:
+- prefer the smallest coherent trial that materially advances the current gate;
+- keep plans, reports, and progress updates concise and concrete;
+- avoid broad literature sweeps, large refactors, or exhaustive cleanup unless they are the blocking reviewer issue;
+- do not lower reviewer standards, skip required reviewer files, omit provenance, or mark partial work as pass."""
+
+
+def continue_autoresearch_loop_prompt(gate: dict[str, Any], next_iteration: int | None = None, fast_mode: bool = False) -> str:
     status = gate.get("raw_status") or gate.get("status") or "missing"
     summary = gate.get("summary") or "No reviewer gate summary yet."
     expected = int(next_iteration or next_active_trial_iteration())
     return f"""/goal resume
 
-Continue the autoresearch loop in this same Codex session.
+Continue the autoresearch loop in this same agent session.
+{fast_mode_prompt_section(fast_mode)}
 
 Current autoresearch gate status: {status}
 
@@ -5559,8 +6208,8 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         RESEARCH_SESSION["gate"] = gate
     persist_research_session()
     if returncode != 0:
-        stop_autoresearch_loop(f"codex_failed_returncode_{returncode}", gate)
-        append_research_log(f"Autoresearch loop stopped because Codex exited with return code {returncode}.")
+        stop_autoresearch_loop(f"agent_failed_returncode_{returncode}", gate)
+        append_research_log(f"Autoresearch loop stopped because the agent exited with return code {returncode}.")
         return
     if gate_has_passed(gate):
         stop_autoresearch_loop("all_reviewer_gates_passed", gate)
@@ -5578,11 +6227,11 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         )
         return
     append_research_log(
-        f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; resuming same Codex session for the next active trial."
+        f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; resuming the same agent session for the next active trial."
     )
     next_iteration = next_active_trial_iteration()
     start_research_run(
-        continue_autoresearch_loop_prompt(gate, next_iteration),
+        continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode"))),
         "goal",
         resume=True,
         settings_payload=settings,
@@ -5626,17 +6275,25 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
     maybe_continue_autoresearch_loop(returncode)
 
 
-def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str]:
+def agent_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str]:
     session_id = str(RESEARCH_SESSION.get("session_id") or "")
-    codex = resolve_codex_executable()
+    backend = normalize_agent_backend(settings.get("backend"))
+    executable = resolve_agent_executable(backend)
     if resume:
         if not session_id:
-            raise ValueError("No Codex exec session is active in this UI. Start project framing first.")
-        command = [codex, "exec", "resume", *settings_to_codex_args(settings, resume=True), "--skip-git-repo-check", "--json"]
-        command.append(session_id)
-        command.append("-")
-        return command
-    return [codex, "exec", *settings_to_codex_args(settings, resume=False), "--skip-git-repo-check", "--json", "-"]
+            raise ValueError(f"No {agent_display_name(backend)} session is active in this UI. Start project framing first.")
+        if backend == "claude":
+            return [executable, *settings_to_claude_args(settings, resume=True), "--resume", session_id]
+        return [executable, "exec", "resume", *settings_to_codex_args(settings, resume=True), "--skip-git-repo-check", "--json", session_id, "-"]
+    if backend == "claude":
+        return [executable, *settings_to_claude_args(settings, resume=False)]
+    return [executable, "exec", *settings_to_codex_args(settings, resume=False), "--skip-git-repo-check", "--json", "-"]
+
+
+def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str]:
+    codex_settings = dict(settings)
+    codex_settings["backend"] = "codex"
+    return agent_command_for_prompt(resume, codex_settings)
 
 
 def should_resume_research_session() -> bool:
@@ -5657,12 +6314,18 @@ def start_research_run(
     if not prompt:
         raise ValueError("Prompt is required.")
     settings = normalize_research_settings(settings_payload)
+    backend = normalize_agent_backend(settings.get("backend"))
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
         if proc and proc.poll() is None:
-            raise ValueError("A Codex run is already active.")
+            raise ValueError(f"A {agent_display_name(backend)} run is already active.")
+    ensure_agent_ready(backend)
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        if proc and proc.poll() is None:
+            raise ValueError(f"A {agent_display_name(backend)} run is already active.")
         previous_session_id = str(RESEARCH_SESSION.get("session_id") or "")
-        command = codex_command_for_prompt(resume, settings)
+        command = agent_command_for_prompt(resume, settings)
         protected_snapshot = create_chat_protected_snapshot() if mode == "chat" else None
         if mode == "goal":
             sync_trajectory_state("start_goal_run")
@@ -5696,6 +6359,7 @@ def start_research_run(
                 "id": f"S{now_id()}_{slugify(mode, 'research')}",
                 "session_id": previous_session_id if resume else "",
                 "status": "running",
+                "backend": backend,
                 "mode": mode,
                 "command": command,
                 "settings": settings,
@@ -5726,7 +6390,7 @@ def start_research_run(
         proc = subprocess.Popen(
             popen_command,
             cwd=REPO_ROOT,
-            env=codex_process_env(),
+            env=agent_process_env(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -5739,7 +6403,7 @@ def start_research_run(
         proc.stdin.write("\n")
         proc.stdin.close()
     except OSError as exc:
-        append_research_log(codex_start_error_message(exc, command))
+        append_research_log(agent_start_error_message(exc, command, backend))
         finish_research_run(127)
         return research_session_snapshot()
 
@@ -5830,7 +6494,7 @@ resources to use, uncertainties, and what would count as a useful result.
 When PROJECT.md is ready for human review, stop and summarize briefly."""
 
 
-def autoresearch_goal_prompt(launch_instruction: str = "") -> str:
+def autoresearch_goal_prompt(launch_instruction: str = "", fast_mode: bool = False) -> str:
     instruction = str(launch_instruction or "").strip()
     instruction_section = ""
     if instruction:
@@ -5846,6 +6510,7 @@ Start the autoresearch loop from the current PROJECT.md as the goal.
 
 This is after the user-facing framing pass. Do not rerun cold-start framing just to rewrite PROJECT.md.
 {instruction_section}
+{fast_mode_prompt_section(fast_mode)}
 
 Use the repository instructions:
 - read AGENTS.md
@@ -5918,7 +6583,7 @@ Use AGENTS.md for repository conventions, but the boundary above overrides any i
 def continue_research_prompt(message: str = "") -> str:
     extra = message.strip()
     if extra:
-        return f"""Continue the active CoAutoResearch project in this same Codex exec session.
+        return f"""Continue the active CoAutoResearch project in this same agent session.
 
 User instruction:
 {extra}
@@ -5926,7 +6591,7 @@ User instruction:
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached.
 
 If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
-    return """Continue the next coherent CoAutoResearch iteration in this same Codex exec session.
+    return """Continue the next coherent CoAutoResearch iteration in this same agent session.
 
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 
@@ -5997,7 +6662,7 @@ def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: 
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
         if proc and proc.poll() is None:
-            raise ValueError("Wait for the current Codex run to finish before continuing from a trial.")
+            raise ValueError("Wait for the current agent run to finish before continuing from a trial.")
     trial, trials, base_index = resolve_resume_trial(resume_payload)
     fork_sequence, fork_id, fork_root = create_resume_fork_root(trial)
     backup_root = fork_root / "pre_fork_state"
@@ -6247,7 +6912,7 @@ def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
         if proc and proc.poll() is None:
-            raise ValueError("Stop the current Codex run before restarting autoresearch.")
+            raise ValueError("Stop the current agent run before restarting autoresearch.")
     reason = str(payload.get("message", "")).strip()
     sequence, restart_id, restart_root = create_restart_root()
     previous_resource_entries = parse_resource_manifest_entries()
@@ -6368,7 +7033,7 @@ def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
 def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
     payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload))
     if payload.get("confirmLaunch") is not True:
-        raise ValueError("Launch must be confirmed from Step 2 before starting Codex.")
+        raise ValueError("Launch must be confirmed from Step 2 before starting the agent.")
     payload["runConversion"] = False
     file_edits = payload.get("fileEdits", [])
     saved_edits = []
@@ -6398,11 +7063,12 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
         RESEARCH_SESSION["loop_review_checkpoint_iteration"] = 0
         RESEARCH_SESSION["loop_stop_reason"] = ""
     ensure_autoresearch_gate_for_loop()
+    settings = normalize_research_settings(payload.get("settings"))
     session = start_research_run(
-        autoresearch_goal_prompt(str(payload.get("launchInstruction", ""))[:4000]),
+        autoresearch_goal_prompt(str(payload.get("launchInstruction", ""))[:4000], bool(settings.get("fastMode"))),
         "goal",
         resume=resume,
-        settings_payload=payload.get("settings"),
+        settings_payload=settings,
         display_prompt="Start autoresearch loop with /goal.",
         loop_active=True,
         reset_review_checkpoint=True,
@@ -6560,9 +7226,10 @@ def normalize_limits(value: Any) -> list[dict[str, Any]]:
     return [item for item in limits if item]
 
 
-def latest_codex_usage() -> dict[str, Any]:
+def latest_agent_usage() -> dict[str, Any]:
     usage: dict[str, Any] = {}
     limits: list[dict[str, Any]] = []
+    cost_usd: float | None = None
     with RESEARCH_LOCK:
         raw_logs = list(RESEARCH_SESSION.get("raw_logs") or [])
     for line in raw_logs:
@@ -6573,8 +7240,14 @@ def latest_codex_usage() -> dict[str, Any]:
         if not isinstance(event, dict):
             continue
         event_usage = event.get("usage")
+        if not isinstance(event_usage, dict) and isinstance(event.get("message"), dict):
+            event_usage = event["message"].get("usage")
         if isinstance(event_usage, dict) and event_usage:
             usage = dict(event_usage)
+        for key in ("total_cost_usd", "cost_usd"):
+            value = event.get(key)
+            if isinstance(value, (int, float)):
+                cost_usd = float(value)
         for candidate in (
             event.get("limits"),
             event.get("rate_limits"),
@@ -6586,13 +7259,22 @@ def latest_codex_usage() -> dict[str, Any]:
             normalized = normalize_limits(candidate)
             if normalized:
                 limits = normalized
-    return {"usage": usage, "limits": limits, "raw_log_count": len(raw_logs)}
+    result: dict[str, Any] = {"usage": usage, "limits": limits, "raw_log_count": len(raw_logs)}
+    if cost_usd is not None:
+        result["cost_usd"] = cost_usd
+    return result
+
+
+def latest_codex_usage() -> dict[str, Any]:
+    return latest_agent_usage()
 
 
 def build_status_payload() -> dict[str, Any]:
     session = research_session_snapshot()
     gate = session.get("gate") or {}
     settings = session.get("settings") or {}
+    backend = normalize_agent_backend(session.get("backend") or settings.get("backend"))
+    backend_label = agent_display_name(backend)
     goal_loop = "passed" if gate_has_passed(gate) else "active" if session.get("loop_active") else "paused"
     stop_reason = session.get("loop_stop_reason") or ""
     if gate_has_passed(gate) and not session.get("loop_active"):
@@ -6606,9 +7288,11 @@ def build_status_payload() -> dict[str, Any]:
         proc = RESEARCH_SESSION.get("process")
         pid = proc.pid if proc and proc.poll() is None else None
         command = " ".join(RESEARCH_SESSION.get("command", []))
-    codex_usage = latest_codex_usage()
+    agent_usage = latest_agent_usage()
     return {
         "kind": "status_card",
+        "backend": backend,
+        "backend_label": backend_label,
         "session_id": session.get("session_id") or "",
         "run_status": session.get("status") or "idle",
         "mode": session.get("mode") or "",
@@ -6624,11 +7308,14 @@ def build_status_payload() -> dict[str, Any]:
         "started_at": session.get("started_at") or "",
         "ended_at": session.get("ended_at") or "",
         "settings": {
+            "backend": backend,
             "model": settings.get("model") or "",
             "reasoning": settings.get("reasoningEffort") or "",
-            "permission": settings.get("permissionPreset") or infer_permission_preset(settings),
+            "permission": settings.get("permissionPreset") or (infer_claude_permission_preset(settings) if backend == "claude" else infer_permission_preset(settings)),
             "sandbox": settings.get("sandbox") or "",
             "approval": settings.get("approvalPolicy") or "",
+            "permission_mode": settings.get("permissionMode") or "",
+            "fast_mode": bool(settings.get("fastMode")),
             "web_search": bool(settings.get("webSearch")),
             "review_checkpoint_interval": normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval")),
         },
@@ -6639,11 +7326,12 @@ def build_status_payload() -> dict[str, Any]:
         },
         "events": {
             "transcript": len(session.get("transcript") or []),
-            "raw_logs": codex_usage.get("raw_log_count") or 0,
+            "raw_logs": agent_usage.get("raw_log_count") or 0,
         },
-        "usage": codex_usage.get("usage") or {},
-        "limits": codex_usage.get("limits") or [],
-        "limitations": [] if codex_usage.get("limits") else ["Not available from codex exec --json events. Use /status in an active Codex CLI session or the Codex usage dashboard for remaining limits."],
+        "usage": agent_usage.get("usage") or {},
+        "cost_usd": agent_usage.get("cost_usd"),
+        "limits": agent_usage.get("limits") or [],
+        "limitations": [] if agent_usage.get("limits") else [f"Remaining usage windows are not available from {backend_label} stream events."],
     }
 
 
@@ -6657,9 +7345,10 @@ def local_ps_message() -> str:
         pid = proc.pid if proc and proc.poll() is None else None
         command = " ".join(RESEARCH_SESSION.get("command", []))
         status = RESEARCH_SESSION.get("status", "idle")
+        backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or (RESEARCH_SESSION.get("settings") or {}).get("backend"))
     if not pid:
-        return f"No active Codex process. Session status: {status}."
-    return f"Active Codex process: pid {pid}\n{command}"
+        return f"No active {agent_display_name(backend)} process. Session status: {status}."
+    return f"Active {agent_display_name(backend)} process: pid {pid}\n{command}"
 
 
 def local_diff_message() -> str:
@@ -6713,7 +7402,7 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         persist_research_session()
         return append_local_command_result(
             command,
-            "Paused the autoresearch goal loop. If Codex is already in the middle of a turn, that turn can finish, but the UI will not auto-start the next iteration.",
+            "Paused the autoresearch goal loop. If the agent is already in the middle of a turn, that turn can finish, but the UI will not auto-start the next iteration.",
         )
     if normalized == "/goal clear":
         with RESEARCH_LOCK:
@@ -6753,11 +7442,11 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
             RESEARCH_SESSION["loop_review_checkpoint_iteration"] = current_iteration + review_checkpoint_interval
         persist_research_session()
         if running:
-            return append_local_command_result(command, "Goal loop resumed. The next iteration will start after the current Codex turn finishes.")
+            return append_local_command_result(command, "Goal loop resumed. The next iteration will start after the current agent turn finishes.")
         return {
             "local": True,
             "session": start_research_run(
-                continue_autoresearch_loop_prompt(gate, next_iteration),
+                continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode"))),
                 "goal",
                 resume=True,
                 settings_payload=settings,

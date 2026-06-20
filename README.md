@@ -30,7 +30,7 @@ Install these before creating a project:
 
 - **Node.js 18+**: install from the official [Node.js downloads page](https://nodejs.org/en/download). Node includes `npm`, which is used to install or run CoAutoResearch.
 - **Python 3**: install from the official [Python downloads page](https://www.python.org/downloads/). The CLI auto-detects `python3`, `python`, or Windows `py -3`. Set `COAUTO_PYTHON` if your Python executable uses another path.
-- **Codex CLI**: follow the official [OpenAI Codex CLI setup guide](https://developers.openai.com/codex/cli). OpenAI documents Windows support through native Windows or WSL2 in the [Codex Windows guide](https://developers.openai.com/codex/windows). On macOS/Linux and WSL2:
+- **Codex CLI**: default agent backend. Follow the official [OpenAI Codex CLI setup guide](https://developers.openai.com/codex/cli). OpenAI documents Windows support through native Windows or WSL2 in the [Codex Windows guide](https://developers.openai.com/codex/windows). On macOS/Linux and WSL2:
 
   ```bash
   curl -fsSL https://chatgpt.com/codex/install.sh | sh
@@ -42,17 +42,26 @@ Install these before creating a project:
   npm install -g @openai/codex
   ```
 
+- **Claude Code CLI**: optional agent backend. Install and authenticate Claude Code if you want to select `Claude Code` in the UI. CoAutoResearch talks to the Claude CLI directly; no SDK dependency is added.
+
 Verify your environment:
 
 ```bash
 node --version
 npm --version
 codex --version
+# optional
+claude --version
 ```
 
 On Windows, if the UI cannot start Codex but `codex --version` works in
 PowerShell, start `co-auto-research ui` from that same PowerShell session. You
 can also set `COAUTO_CODEX` to the full path of `codex.cmd`.
+For Claude Code, use `COAUTO_CLAUDE` or `CLAUDE_BIN` to pin `claude.cmd` or
+`claude`.
+
+Codex remains the default backend. Set `COAUTO_AGENT_BACKEND=claude` or choose
+Claude Code in the UI settings to use Claude for new runs.
 
 ## Documentation
 
@@ -180,8 +189,8 @@ co-auto-research ui --projects-dir .
 ```
 
 The left sidebar will list `test`, `paper-a`, and any other generated projects
-under that folder. Each project keeps its own files, runtime state, and Codex
-session.
+under that folder. Each project keeps its own files, runtime state, and selected
+agent session.
 
 The composer `+` button attaches local files to the next message. By default,
 these uploads are copied into the current project's
@@ -198,9 +207,9 @@ server-side browser copies files or symlinks folders into the matching
 
 Autoresearch controls use distinct meanings:
 
-- `Pause after current turn` lets the current Codex turn finish, then prevents
+- `Pause after current turn` lets the current agent turn finish, then prevents
   the loop from starting another trial.
-- `Stop current run` terminates the currently running Codex process.
+- `Stop current run` terminates the currently running agent process.
 - `Restart autoresearch` archives the current trials, runtime state, working
   manuscript, generated workspace, and current findings, then starts a new
   active trajectory at Trial 1. User-uploaded or user-confirmed resources remain

@@ -7,7 +7,8 @@ CoAutoResearch is designed to run on macOS, Linux, and Windows.
 - Node.js 18 or newer.
 - Python 3.
 - Git.
-- OpenAI Codex CLI.
+- OpenAI Codex CLI for the default backend.
+- Claude Code CLI for the optional Claude backend.
 
 The package CLI starts the local web UI with Python. It tries these Python
 commands in order:
@@ -43,8 +44,8 @@ python3 ui/server.py --host 127.0.0.1 --port 8765
 
 ## Windows Native
 
-Windows native use should work with Node.js, Python 3, Git, and Codex CLI on the
-Windows `PATH`.
+Windows native use should work with Node.js, Python 3, Git, and the selected
+agent CLI on the Windows `PATH`.
 
 PowerShell examples:
 
@@ -74,7 +75,10 @@ If `py -3` is unavailable but `python` works, use:
 python ui/server.py --host 127.0.0.1 --port 8765
 ```
 
-### Codex Executable Resolution
+### Agent Executable Resolution
+
+Codex remains the default backend. Set `COAUTO_AGENT_BACKEND=claude` or choose
+Claude Code in the UI settings to run new turns with Claude Code.
 
 The UI resolves Codex in this order:
 
@@ -95,6 +99,20 @@ pin the executable explicitly:
 
 ```powershell
 $env:COAUTO_CODEX = (Get-Command codex).Source
+co-auto-research ui
+```
+
+The UI resolves Claude Code similarly:
+
+1. `COAUTO_CLAUDE`, if set.
+2. `CLAUDE_BIN`, if set.
+3. `claude.cmd`, `claude.exe`, `claude.bat`, then `claude` on `PATH`.
+
+```powershell
+claude --version
+Get-Command claude
+$env:COAUTO_AGENT_BACKEND = "claude"
+$env:COAUTO_CLAUDE = (Get-Command claude).Source
 co-auto-research ui
 ```
 
@@ -127,7 +145,7 @@ by user policy.
 ## Remote Servers
 
 Remote use is OS-independent as long as the server has Node.js, Python 3, Git,
-and Codex CLI installed. Keep the UI bound to `127.0.0.1` and forward the port
+and the selected agent CLI installed. Keep the UI bound to `127.0.0.1` and forward the port
 with SSH or an equivalent secure tunnel.
 
 See [Remote server setup](remote-server.md).

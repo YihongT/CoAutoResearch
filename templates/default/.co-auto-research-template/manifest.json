@@ -17,6 +17,7 @@
   ],
   "managedPaths": [
     "AGENTS.md",
+    "CLAUDE.md",
     ".gitignore.template",
     "instructions/",
     "ui/",

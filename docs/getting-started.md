@@ -21,7 +21,8 @@ Install:
 - Node.js 18 or newer
 - Python 3
 - Git
-- OpenAI Codex CLI
+- OpenAI Codex CLI for the default backend
+- Claude Code CLI if you want to use the optional Claude backend
 
 Check the basics:
 
@@ -29,6 +30,8 @@ Check the basics:
 node --version
 python3 --version
 codex --version
+# optional
+claude --version
 ```
 
 On Windows, use `python --version` or `py -3 --version` if `python3` is not
@@ -99,9 +102,9 @@ copies files or symlinks folders into the selected `resources/` category.
 
 ## Autoresearch Controls
 
-- `Pause after current turn` lets the current Codex turn finish, then prevents
+- `Pause after current turn` lets the current agent turn finish, then prevents
   the autoresearch loop from starting another trial.
-- `Stop current run` terminates the currently running Codex process.
+- `Stop current run` terminates the currently running agent process.
 - `Restart autoresearch` archives the current trials, runtime state, working
   manuscript, generated workspace, and current findings, then starts a new
   Trial 1 in the same project.

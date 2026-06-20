@@ -1,8 +1,9 @@
 # Welcome to CoAutoResearch's documentation
 
-CoAutoResearch is a human-centered research scaffold. It helps Codex do
-substantial research work while keeping the human author able to understand,
-steer, defend, and revise the project.
+CoAutoResearch is a human-centered research scaffold. It helps a local agent
+backend do substantial research work while keeping the human author able to
+understand, steer, defend, and revise the project. Codex is the default backend;
+Claude Code is optional.
 
 The goal is not a finished artifact you cannot explain. The goal is a traceable
 research trajectory you can actually use.

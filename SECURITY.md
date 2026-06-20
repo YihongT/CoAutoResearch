@@ -14,7 +14,7 @@ or UI access-control problems.
 
 ## Local UI Security Notes
 
-The web UI can browse files, attach resources, and launch local Codex CLI
-processes inside a generated project. Bind it to `127.0.0.1` by default. Do not
-expose it directly on a public interface without an authenticated tunnel or
-other access control.
+The web UI can browse files, attach resources, and launch a local agent CLI
+process inside a generated project. Codex is the default backend; Claude Code is
+optional. Bind the UI to `127.0.0.1` by default. Do not expose it directly on a
+public interface without an authenticated tunnel or other access control.

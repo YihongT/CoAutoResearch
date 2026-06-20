@@ -40,15 +40,15 @@ overwriting it.
 ## Isolation Model
 
 Switching projects changes the active project for all file, resource, trial,
-settings, and Codex-session API calls.
+settings, and agent-session API calls.
 
 - `PROJECT.md`, `resources/`, `workspace/`, `manuscript/`, and
   `research_trajectory/` are read and written only inside the selected project.
 - UI runtime state stays under that project, usually `ui/.runtime/`.
-- Codex commands run with the selected project as the working directory.
-- Starting or stopping a Codex run affects only the selected project.
+- Agent commands run with the selected project as the working directory.
+- Starting or stopping an agent run affects only the selected project.
 
-Switching the sidebar does not merge projects and does not stop a Codex session
+Switching the sidebar does not merge projects and does not stop an agent session
 that is already running in another project.
 
 ## Single-Project Mode

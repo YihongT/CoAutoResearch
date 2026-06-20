@@ -72,5 +72,5 @@ instructions after the server picks its actual port.
 
 Prefer SSH tunnels. Avoid `--host 0.0.0.0` unless the server is protected by
 network controls and authentication. The UI can read project files and launch
-Codex CLI runs, so it should not be exposed as an unauthenticated public web
-service.
+local agent CLI runs, so it should not be exposed as an unauthenticated public
+web service.

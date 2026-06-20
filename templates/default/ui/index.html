@@ -73,7 +73,7 @@
       </aside>
 
       <main class="main-stage">
-        <section class="workspace-view chat-view is-active" id="chat-view" aria-label="Codex chat">
+        <section class="workspace-view chat-view is-active" id="chat-view" aria-label="Agent chat">
           <div class="chat-frame">
             <header class="chat-header is-framing">
               <div>
@@ -100,7 +100,7 @@
               </div>
             </header>
             <div class="resume-command-bar" id="resume-command-bar" hidden>
-              <span>Resume in Codex CLI</span>
+              <span id="resume-command-label">Resume in agent CLI</span>
               <code id="resume-command-text"></code>
               <button class="copy-command-button" id="copy-resume-command" type="button">Copy</button>
             </div>
@@ -179,7 +179,7 @@
                       </div>
 	                      <div class="editor-workbench is-source" id="cold-editor-workbench">
 	                        <div class="attachment-tray" id="brief-attachment-tray" aria-live="polite"></div>
-	                        <div class="brief-composer-row" aria-label="Codex send settings">
+	                        <div class="brief-composer-row" aria-label="Agent send settings">
 	                          <input class="composer-file-input" id="composer-file-input" type="file" multiple hidden />
 	                          <button class="composer-attach-button" id="composer-attach-button" type="button" aria-label="Attach local files" title="Attach local files">
 	                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -190,7 +190,7 @@
 	                          <div class="brief-run-controls">
 	                            <label>
 	                              <span>Model</span>
-	                              <select id="composer-model" aria-label="Codex model">
+	                              <select id="composer-model" aria-label="Agent model">
 	                                <option value="gpt-5.5">GPT-5.5</option>
 	                                <option value="gpt-5.4">GPT-5.4</option>
 	                                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
@@ -215,7 +215,7 @@
 	                        </div>
 	                        <div class="markdown-preview" id="cold-file-preview"></div>
 	                      </div>
-                      <div class="composer-suggestion-row" id="composer-suggestions" aria-label="Codex quick prompts" hidden>
+                      <div class="composer-suggestion-row" id="composer-suggestions" aria-label="Agent quick prompts" hidden>
                         <span>Try</span>
                         <button class="composer-suggestion-chip" type="button" data-pause-autoresearch>Pause after current turn</button>
                         <button class="composer-suggestion-chip" type="button" data-stop-current-run>Stop current run</button>
@@ -255,7 +255,7 @@
                   <div>
                     <p class="eyebrow">Step 3</p>
                     <h2>Chat opens after launch.</h2>
-                    <p class="setup-copy">Run cold start and launch the first Codex exec session before sending messages or slash commands.</p>
+                    <p class="setup-copy">Run cold start and launch the first agent session before sending messages or slash commands.</p>
                   </div>
                   <button class="secondary-button" type="button" data-stage-link="2">Go to launch</button>
                 </section>
@@ -264,7 +264,7 @@
                   <div id="dynamic-messages"></div>
                 </section>
 
-                <section class="control-dock" aria-label="Codex controls">
+                <section class="control-dock" aria-label="Agent controls">
                   <details class="control-panel">
                     <summary>
                       <span>Session controls</span>
@@ -293,24 +293,24 @@
 
                   <details class="session-panel" open>
                     <summary>
-                      <span>Codex session</span>
+                      <span>Agent session</span>
                       <span id="session-title">Idle</span>
                     </summary>
                     <div class="session-meta">
                       <span id="session-settings">No settings applied yet.</span>
                       <button class="text-button" id="stop-session" type="button">Stop</button>
                     </div>
-                    <div class="source-path" id="session-command">No Codex exec run yet.</div>
+                    <div class="source-path" id="session-command">No agent run yet.</div>
                     <details class="raw-log-panel">
                       <summary>Raw JSON logs</summary>
-                      <pre class="session-log" id="session-log">Cold start creates the first real Codex exec session.</pre>
+                      <pre class="session-log" id="session-log">Cold start creates the first real agent session.</pre>
                     </details>
                   </details>
                 </section>
 
-                <form id="chat-form" class="composer assistant-card" aria-label="Send message to Codex session">
+                <form id="chat-form" class="composer assistant-card" aria-label="Send message to agent session">
                   <div class="attachment-tray" id="chat-attachment-tray" aria-live="polite"></div>
-                  <textarea name="message" rows="1" placeholder="Message the current Codex session..." disabled></textarea>
+                  <textarea name="message" rows="1" placeholder="Message the current agent session..." disabled></textarea>
                   <div class="composer-actions">
                     <button class="secondary-button" id="continue-research" type="button" disabled>Continue</button>
                     <button class="send-button" type="submit" aria-label="Send" disabled>Send</button>
@@ -348,6 +348,15 @@
           <span>Project name</span>
           <input id="project-name" name="projectName" type="text" placeholder="paper-a, dissertation-chapter, benchmark-study..." autocomplete="off" required />
         </label>
+        <label class="field">
+          <span>Agent backend</span>
+          <select id="project-agent-backend" name="agentBackend">
+            <option value="codex">Codex</option>
+            <option value="claude">Claude Code</option>
+          </select>
+          <small>Codex is the default. You can change this later in Settings or for a single launch.</small>
+        </label>
+        <p class="agent-status-note" id="project-agent-backend-note"></p>
         <p class="project-dialog-note" id="project-create-note">Creates a separate project from the clean template.</p>
         <footer class="project-dialog-actions">
           <button class="secondary-button" type="button" data-project-close>Cancel</button>
@@ -392,7 +401,7 @@
         </header>
         <div class="delete-warning">
           <strong id="project-delete-name">Project</strong>
-          <p>This permanently deletes the project folder, including PROJECT.md, resources, workspace files, UI runtime state, Codex session logs, research trajectory, and manuscript files. This cannot be undone from CoAutoResearch.</p>
+          <p>This permanently deletes the project folder, including PROJECT.md, resources, workspace files, UI runtime state, agent session logs, research trajectory, and manuscript files. This cannot be undone from CoAutoResearch.</p>
         </div>
         <label class="field">
           <span>Type the project name to confirm</span>
@@ -512,56 +521,78 @@
           <div>
             <p class="eyebrow">Autoresearch loop</p>
             <h2 id="launch-dialog-title">Start autoresearch.</h2>
-            <p>Codex will continue this same session until strict reviewer gates pass, human input is needed, or the review checkpoint is reached.</p>
+            <p>The selected agent will continue this same session until strict reviewer gates pass, human input is needed, or the review checkpoint is reached.</p>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-launch-close aria-label="Close launch dialog" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
         </header>
-        <form id="session-settings-form" class="settings-grid launch-settings-grid">
-          <label class="field">
-            <span>Model</span>
-            <select name="model">
-              <option value="gpt-5.5">GPT-5.5</option>
-              <option value="gpt-5.4">GPT-5.4</option>
-              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-              <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
-              <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
-              <option value="gpt-5.2">GPT-5.2</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Reasoning</span>
-            <select name="reasoningEffort">
-              <option value="low">Low</option>
-              <option value="medium" selected>Medium</option>
-              <option value="high">High</option>
-              <option value="xhigh">Extra high</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Permissions</span>
-            <select name="permissionPreset">
-              <option value="default">Default permissions</option>
-              <option value="auto-review">Auto-review</option>
-              <option value="full-access">Full access</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Human review checkpoint</span>
-            <input name="reviewCheckpointInterval" type="number" min="1" step="1" inputmode="numeric" value="100" />
-            <small>Pause for human review after this many Codex turns if reviewer gates have not passed. You can resume afterward.</small>
-          </label>
-          <label class="toggle-field">
-            <input name="webSearch" type="checkbox" />
-            <span>Live web search</span>
-          </label>
-          <label class="field wide launch-instruction-field">
+        <form id="session-settings-form" class="launch-settings-form">
+          <div class="launch-settings-grid">
+            <label class="field">
+              <span>Agent backend</span>
+              <select name="backend">
+                <option value="codex">Codex</option>
+                <option value="claude">Claude Code</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Model</span>
+              <select name="model">
+                <option value="gpt-5.5">GPT-5.5</option>
+                <option value="gpt-5.4">GPT-5.4</option>
+                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
+                <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
+                <option value="gpt-5.2">GPT-5.2</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Reasoning</span>
+              <select name="reasoningEffort">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Permissions</span>
+              <select name="permissionPreset">
+                <option value="default">Default permissions</option>
+                <option value="auto-review">Auto-review</option>
+                <option value="full-access">Full access</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Review checkpoint</span>
+              <input name="reviewCheckpointInterval" type="number" min="1" step="1" inputmode="numeric" value="100" />
+              <small>Pause after this many agent turns if gates still need work.</small>
+            </label>
+          </div>
+          <div class="launch-mode-row">
+            <label class="toggle-field launch-toggle">
+              <input name="fastMode" type="checkbox" />
+              <span>
+                <strong>Fast mode</strong>
+                <small>Prefer short trials and concise updates; reviewer gates stay strict.</small>
+              </span>
+            </label>
+            <label class="toggle-field launch-toggle">
+              <input name="webSearch" type="checkbox" />
+              <span>
+                <strong>Live web search</strong>
+                <small>Allow current-source checks during the run.</small>
+              </span>
+            </label>
+          </div>
+          <label class="field launch-instruction-field">
             <span>Optional launch instruction</span>
             <textarea id="launch-instruction" name="launchInstruction" rows="2" placeholder="Extra instruction for this autoresearch run..."></textarea>
             <small>Used only for this launch. Leave blank to run from PROJECT.md with the standard reviewer gate.</small>
           </label>
-          <label class="field wide">
+          <p class="agent-status-note" id="launch-agent-status"></p>
+          <label class="field">
             <span>Advanced config</span>
             <textarea name="extraConfig" rows="2" placeholder='model_verbosity="low"'></textarea>
           </label>
@@ -640,7 +671,7 @@
             </button>
             <button class="settings-nav-button" type="button" data-settings-tab="codex">
               <span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8-4 4 4 4m10-8 4 4-4 4M14 4l-4 16"/></svg></span>
-              <strong>Codex</strong>
+              <strong>Agent</strong>
             </button>
           </nav>
         </aside>
@@ -648,7 +679,7 @@
           <header class="settings-titlebar">
             <div>
               <h2 id="settings-title">Settings</h2>
-              <p>Local configuration for CoAutoResearch and the Codex session runner.</p>
+              <p>Local configuration for CoAutoResearch and the selected agent runner.</p>
             </div>
             <button class="settings-save-button" type="submit">Save</button>
           </header>
@@ -684,9 +715,9 @@
             <div class="settings-row">
               <div>
                 <h3>Secrets scope</h3>
-                <p>Saved keys are injected only into Codex subprocesses launched from this UI.</p>
+                <p>Saved keys are injected only into agent subprocesses launched from this UI.</p>
               </div>
-              <span class="settings-value">Codex exec</span>
+              <span class="settings-value">Agent CLI</span>
             </div>
             <div class="settings-row">
               <div>
@@ -698,7 +729,7 @@
           </section>
 
           <section class="settings-panel" data-settings-panel="api">
-            <div class="settings-note">Add local tokens that Codex should pass to research scripts. Leave a field blank to keep the saved value.</div>
+            <div class="settings-note">Add local tokens that the selected agent should pass to research scripts. Leave a field blank to keep the saved value.</div>
             <div class="settings-secret-grid" id="settings-secret-grid"></div>
           </section>
 
@@ -706,7 +737,7 @@
             <div class="settings-doc-callout">
               <div>
                 <h3>Model and tool defaults</h3>
-                <p>Defaults used when this UI starts or resumes Codex exec sessions.</p>
+                <p>Defaults used when this UI starts or resumes agent CLI sessions.</p>
               </div>
               <div class="settings-doc-links">
                 <a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">Models</a>
@@ -714,6 +745,13 @@
               </div>
             </div>
             <div class="settings-grid modal-settings-grid">
+              <label class="field">
+                <span>Agent backend</span>
+                <select name="settingsBackend">
+                  <option value="codex">Codex</option>
+                  <option value="claude">Claude Code</option>
+                </select>
+              </label>
               <label class="field">
                 <span>Default model</span>
                 <select name="settingsModel">
@@ -745,7 +783,7 @@
               <label class="field">
                 <span>Human review checkpoint</span>
                 <input name="settingsReviewCheckpointInterval" type="number" min="1" step="1" inputmode="numeric" value="100" />
-                <small>Pause for human review after this many Codex turns if reviewer gates have not passed. You can resume afterward.</small>
+                <small>Pause for human review after this many agent turns if reviewer gates have not passed. You can resume afterward.</small>
               </label>
               <label class="toggle-field">
                 <input name="settingsWebSearch" type="checkbox" />
@@ -756,6 +794,7 @@
                 <textarea name="settingsExtraConfig" rows="4" placeholder='model_verbosity="low"'></textarea>
               </label>
             </div>
+            <p class="agent-status-note" id="settings-agent-status"></p>
           </section>
         </form>
       </section>

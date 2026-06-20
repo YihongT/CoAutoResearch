@@ -40,6 +40,7 @@ let selectedResumeTrialContext = null;
 let pendingResumeTrialConfirm = null;
 let pendingRestartAutoresearchConfirm = null;
 let activeLargeResourceImportId = "";
+let optimisticResearchSession = null;
 let composerDraft = "";
 let targetVenueProjectId = activeProjectId || "";
 const localMessages = [];
@@ -64,15 +65,56 @@ const panelTitles = {
   manuscript: "Manuscript",
 };
 
-const defaultSessionSettings = {
+const defaultAgentSettings = {
+  backend: "codex",
+};
+
+const agentBackends = {
+  codex: "Codex",
+  claude: "Claude Code",
+};
+const allowedAgentBackends = new Set(Object.keys(agentBackends));
+
+const defaultCodexSessionSettings = {
   model: "gpt-5.5",
   reasoningEffort: "medium",
   permissionPreset: "default",
   sandbox: "workspace-write",
   approvalPolicy: "on-request",
   webSearch: true,
+  fastMode: false,
   extraConfig: "",
   reviewCheckpointInterval: 100,
+};
+const defaultClaudeSessionSettings = {
+  model: "sonnet",
+  reasoningEffort: "medium",
+  permissionPreset: "auto-review",
+  permissionMode: "auto",
+  webSearch: true,
+  fastMode: false,
+  extraConfig: "",
+  reviewCheckpointInterval: 100,
+};
+const defaultSessionSettings = defaultCodexSessionSettings;
+const sessionDefaultsByBackend = {
+  codex: defaultCodexSessionSettings,
+  claude: defaultClaudeSessionSettings,
+};
+const modelOptionsByBackend = {
+  codex: [
+    ["gpt-5.5", "GPT-5.5"],
+    ["gpt-5.4", "GPT-5.4"],
+    ["gpt-5.4-mini", "GPT-5.4 Mini"],
+    ["gpt-5.3-codex", "GPT-5.3 Codex"],
+    ["gpt-5.3-codex-spark", "GPT-5.3 Codex Spark"],
+    ["gpt-5.2", "GPT-5.2"],
+  ],
+  claude: [
+    ["sonnet", "Claude Sonnet"],
+    ["opus", "Claude Opus"],
+    ["haiku", "Claude Haiku"],
+  ],
 };
 
 const defaultThemeMode = "graphite-aurora";
@@ -130,7 +172,7 @@ const secretKeyLabels = {
 };
 
 const secretKeyHelp = {
-  GITHUB_TOKEN: "Lets Codex inspect private repos or GitHub APIs when needed.",
+  GITHUB_TOKEN: "Lets the selected agent inspect private repos or GitHub APIs when needed.",
   HF_TOKEN: "Lets research scripts access private Hugging Face models, datasets, or gated artifacts.",
 };
 
@@ -208,6 +250,10 @@ function shortFileType(name, type = "") {
   return "FILE";
 }
 
+function isProjectResourcePath(path) {
+  return String(path || "").replace(/\\/g, "/").replace(/^\/+/, "").startsWith("resources/");
+}
+
 function rawFileUrl(path) {
   const params = new URLSearchParams({ path });
   if (activeProjectId) params.set("project", activeProjectId);
@@ -247,7 +293,7 @@ ${target}
 
 This project is still in framing. The immediate objective is to turn the user's topic, prior work, and attached resources into a precise research scope before launching the full autoresearch loop.
 
-## What Codex Should Clarify Next
+## What The Agent Should Clarify Next
 
 - The central research problem and why it matters.
 - The perspective, claim, or contribution that could fit the target audience.
@@ -256,7 +302,7 @@ This project is still in framing. The immediate objective is to turn the user's 
 
 ## Launch Readiness
 
-Autoresearch should launch only after this framing is specific enough for Codex to choose a coherent first research objective.
+Autoresearch should launch only after this framing is specific enough for the agent to choose a coherent first research objective.
 `;
 }
 
@@ -304,7 +350,7 @@ function normalizeFramingMessage(message) {
             const path = String(item.path || "").trim();
             if (!path) return null;
             const normalized = { kind, path, name: String(item.name || basename(path)), category };
-            if (item.alreadyImported || item.imported) normalized.alreadyImported = true;
+            if (item.alreadyImported || item.imported || isProjectResourcePath(path)) normalized.alreadyImported = true;
             return normalized;
           }
           const name = String(item.name || "").trim();
@@ -625,13 +671,150 @@ function scopedJsonGet(key, fallback = {}) {
   }
 }
 
+function normalizeAgentBackend(value) {
+  const backend = String(value || "").trim().toLowerCase();
+  return allowedAgentBackends.has(backend) ? backend : defaultAgentSettings.backend;
+}
+
+function agentLabel(backend) {
+  return agentBackends[normalizeAgentBackend(backend)] || agentBackends.codex;
+}
+
+function defaultSettingsForBackend(backend) {
+  return sessionDefaultsByBackend[normalizeAgentBackend(backend)] || defaultSessionSettings;
+}
+
+function activeSettingsBackend() {
+  return normalizeAgentBackend(uiSettings?.agent?.backend || defaultAgentSettings.backend);
+}
+
+function providerSettingsFromUi(backend) {
+  const normalized = normalizeAgentBackend(backend);
+  return uiSettings?.[normalized] || defaultSettingsForBackend(normalized);
+}
+
+function agentStatusEnvelope(settings = uiSettings || {}) {
+  const status = settings?.agent_status;
+  return status && typeof status === "object" ? status : {};
+}
+
+function envForcedBackend(settings = uiSettings || {}) {
+  const raw = agentStatusEnvelope(settings).env_override || settings?.agent_env_override || "";
+  return raw ? normalizeAgentBackend(raw) : "";
+}
+
+function effectiveBackend(backend, settings = uiSettings || {}) {
+  return envForcedBackend(settings) || normalizeAgentBackend(backend);
+}
+
+function statusForBackend(backend, settings = uiSettings || {}) {
+  const backends = agentStatusEnvelope(settings).backends || {};
+  const status = backends[normalizeAgentBackend(backend)];
+  return status && typeof status === "object" ? status : null;
+}
+
+function statusTone(status) {
+  if (!status) return "";
+  if (status.blocking) return "error";
+  if (status.auth === "unknown" || /could not|did not return/i.test(String(status.message || ""))) return "warning";
+  return "";
+}
+
+function currentLaunchBackend() {
+  const form = $("#session-settings-form");
+  return normalizeAgentBackend(form?.elements?.backend?.value || activeSettingsBackend());
+}
+
+function launchBlockingStatus() {
+  const backend = effectiveBackend(currentLaunchBackend());
+  const status = statusForBackend(backend);
+  return status?.blocking ? status : null;
+}
+
+function agentStatusText(backend, scope = "settings") {
+  const requested = normalizeAgentBackend(backend);
+  const forced = envForcedBackend();
+  const effective = forced || requested;
+  const status = statusForBackend(effective);
+  const parts = [];
+  if (forced) {
+    const forcedLabel = agentLabel(forced);
+    if (scope === "project") {
+      parts.push(`COAUTO_AGENT_BACKEND forces ${forcedLabel} while active; new projects can still save a default, but runs use the forced backend.`);
+    } else if (scope === "launch") {
+      parts.push(`COAUTO_AGENT_BACKEND forces ${forcedLabel} for runs while active; this launch uses ${forcedLabel}.`);
+    } else {
+      parts.push(`COAUTO_AGENT_BACKEND forces ${forcedLabel} while active; saved Settings choices apply after the env var is removed.`);
+    }
+  }
+  if (status?.message) {
+    const label = forced && requested !== effective ? `${agentLabel(effective)} readiness` : `${agentLabel(effective)} readiness`;
+    parts.push(`${label}: ${status.message}`);
+  }
+  return parts.join(" ");
+}
+
+function renderAgentStatusNote(selector, backend, scope = "settings") {
+  const note = $(selector);
+  if (!note) return;
+  const effective = effectiveBackend(backend);
+  const status = statusForBackend(effective);
+  const message = agentStatusText(backend, scope);
+  note.textContent = message;
+  const tone = statusTone(status);
+  if (tone) note.dataset.tone = tone;
+  else delete note.dataset.tone;
+}
+
+function renderAllAgentStatusNotes() {
+  renderAgentStatusNote("#settings-agent-status", $("#settings-form")?.elements?.settingsBackend?.value || activeSettingsBackend(), "settings");
+  renderAgentStatusNote("#launch-agent-status", currentLaunchBackend(), "launch");
+  renderAgentStatusNote("#project-agent-backend-note", $("#project-agent-backend")?.value || activeSettingsBackend(), "project");
+}
+
 function scopedSessionSettings() {
   const settings = scopedJsonGet("autoResearchSessionSettings", {});
   return settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
 }
 
-function mergedProjectSessionSettings(base = {}) {
-  return normalizeSessionSettings({ ...defaultSessionSettings, ...(base || {}), ...scopedSessionSettings() });
+function providerSettingsFromScoped(scoped, backend) {
+  if (!scoped || typeof scoped !== "object") return {};
+  const normalized = normalizeAgentBackend(backend);
+  if (scoped[normalized] && typeof scoped[normalized] === "object") return scoped[normalized];
+  if (!scoped.codex && !scoped.claude && !scoped.agent) return scoped;
+  return {};
+}
+
+function mergedProjectSessionSettings(settings = uiSettings || {}) {
+  const scoped = scopedSessionSettings();
+  const backend = normalizeAgentBackend(scoped?.agent?.backend || scoped?.backend || settings?.agent?.backend || settings?.backend);
+  return normalizeSessionSettings({
+    ...providerSettingsFromUi(backend),
+    ...(settings?.[backend] || {}),
+    ...providerSettingsFromScoped(scoped, backend),
+    backend,
+  });
+}
+
+function sessionSettingsForStorage(settings) {
+  const normalized = normalizeSessionSettings(settings);
+  const backend = normalizeAgentBackend(normalized.backend);
+  const envelope = scopedSessionSettings();
+  const next = envelope && typeof envelope === "object" && (envelope.agent || envelope.codex || envelope.claude)
+    ? { ...envelope }
+    : {
+        agent: { backend },
+        codex: normalizeSessionSettings({ ...providerSettingsFromUi("codex"), backend: "codex" }),
+        claude: normalizeSessionSettings({ ...providerSettingsFromUi("claude"), backend: "claude" }),
+      };
+  next.agent = { backend };
+  next[backend] = { ...normalized };
+  delete next[backend].backend;
+  return next;
+}
+
+function persistSessionSettings(settings) {
+  scopedSet("autoResearchSessionSettings", JSON.stringify(sessionSettingsForStorage(settings)));
 }
 
 function storedComposerDraft() {
@@ -731,6 +914,7 @@ function mergeSessionFromApiResponse(payload) {
     payload?.result?.result?.session ||
     null;
   if (!session) return false;
+  optimisticResearchSession = null;
   if (!appState) appState = {};
   appState.research_session = session;
   renderChatState();
@@ -738,6 +922,96 @@ function mergeSessionFromApiResponse(payload) {
   renderResumeCommandBar();
   renderComposerSuggestions();
   return true;
+}
+
+function clonePlainObject(value) {
+  if (!value || typeof value !== "object") return value || null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return { ...value };
+  }
+}
+
+function nextOptimisticTrialIteration() {
+  const trialIterations = (appState?.trials || [])
+    .map((trial) => trialIterationValue(trial))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const reportedLatest = Math.max(...trialIterations, 0);
+  const sessionIteration = Number(sessionState().loop_iteration || 0);
+  const trajectoryNext = Number(appState?.research_session?.trajectory?.next_trial_number || 0);
+  const latest = Math.max(reportedLatest, Number.isFinite(sessionIteration) ? sessionIteration : 0);
+  if (Number.isFinite(trajectoryNext) && trajectoryNext > latest) return trajectoryNext;
+  return Math.max(1, latest + (latest ? 1 : 0));
+}
+
+function optimisticAutoresearchSession(settings) {
+  const startedAt = new Date().toISOString();
+  const backend = normalizeAgentBackend(settings?.backend || activeSettingsBackend());
+  const iteration = nextOptimisticTrialIteration();
+  const statusLabel = `Starting autoresearch on Trial ${iteration}`;
+  return {
+    ...(clonePlainObject(appState?.research_session) || {}),
+    id: `optimistic_goal_${Date.now()}`,
+    session_id: "",
+    backend,
+    backend_label: agentLabel(backend),
+    status: "running",
+    mode: "goal",
+    command: "Starting selected agent...",
+    settings: normalizeSessionSettings(settings || {}),
+    started_at: startedAt,
+    ended_at: "",
+    returncode: null,
+    logs: [],
+    raw_logs: [],
+    transcript: [
+      {
+        id: `optimistic_goal_user_${Date.now()}`,
+        role: "user",
+        title: "User",
+        content: "Start autoresearch loop with /goal.",
+        raw_type: "ui.goal",
+        created_at: startedAt,
+        iteration,
+      },
+    ],
+    loop_active: true,
+    loop_iteration: iteration,
+    loop_max_iterations: normalizeReviewCheckpointInterval(settings?.reviewCheckpointInterval),
+    loop_review_checkpoint_iteration: iteration + normalizeReviewCheckpointInterval(settings?.reviewCheckpointInterval) - 1,
+    loop_stop_reason: "",
+    gate: { status: "continue", raw_status: "continue" },
+    active_run: {
+      running: true,
+      mode: "goal",
+      started_at: startedAt,
+      trial_iteration: iteration,
+      trial_label: `Trial ${iteration}`,
+      status_label: statusLabel,
+      trajectory_mismatch: false,
+    },
+  };
+}
+
+function startOptimisticAutoresearchSession(settings) {
+  optimisticResearchSession = optimisticAutoresearchSession(settings);
+  selectedTrialIndex = Number(optimisticResearchSession.loop_iteration || 0) || selectedTrialIndex;
+  renderStage();
+  renderChatState();
+  renderSession();
+  renderResumeCommandBar();
+  renderComposerSuggestions();
+}
+
+function clearOptimisticAutoresearchSession(previousSession = null) {
+  optimisticResearchSession = null;
+  if (previousSession && appState) appState.research_session = previousSession;
+  renderStage();
+  renderChatState();
+  renderSession();
+  renderResumeCommandBar();
+  renderComposerSuggestions();
 }
 
 function projectStatusClass(project) {
@@ -756,6 +1030,27 @@ function projectStatusLabel(project) {
   if (project?.has_session) return "session";
   if (project?.project_ready) return "ready";
   return "new";
+}
+
+function projectReviewerStatus(project) {
+  const status = project?.reviewer_status || project?.reviewerStatus || {};
+  return status && typeof status === "object" ? status : {};
+}
+
+function hasStatusItems(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function projectReviewerInstructionsOutdated(project) {
+  const status = projectReviewerStatus(project);
+  const baseline = String(status.baseline_version || "");
+  const latest = String(status.latest_baseline_version || "");
+  return Boolean(
+    hasStatusItems(status.missing) ||
+    hasStatusItems(status.changed) ||
+    hasStatusItems(status.metadata_missing) ||
+    (latest && baseline !== latest)
+  );
 }
 
 function currentProject() {
@@ -856,7 +1151,7 @@ function renderProjectList() {
       const statusClass = projectStatusClass(project);
       const label = projectStatusLabel(project);
       const menuOpen = String(project.id || "") === String(openProjectMenuId || "");
-      const reviewerOutdated = Boolean(project.reviewer_status?.outdated || project.reviewerStatus?.outdated);
+      const reviewerOutdated = projectReviewerInstructionsOutdated(project);
       return `
         <div class="project-switch-row ${selected ? "is-active" : ""}" data-project-row="${escapeHtml(project.id)}">
           <button class="project-switch" type="button" data-project-switch="${escapeHtml(project.id)}">
@@ -864,7 +1159,7 @@ function renderProjectList() {
             <span>
               <strong>${escapeHtml(project.display_name || project.title || "Project")}</strong>
               <small>${escapeHtml(label)}${project.session_id ? ` · ${escapeHtml(String(project.session_id).slice(0, 8))}` : ""}</small>
-              ${reviewerOutdated ? `<small class="project-warning-line">Reviewers outdated</small>` : ""}
+              ${reviewerOutdated ? `<small class="project-warning-line">Reviewer templates outdated</small>` : ""}
             </span>
           </button>
           <button class="project-menu-button" type="button" data-project-menu="${escapeHtml(project.id)}" aria-label="Project options" aria-haspopup="menu" aria-expanded="${menuOpen ? "true" : "false"}">
@@ -986,6 +1281,9 @@ function openProjectCreateDialog() {
   const dialog = $("#project-dialog");
   const note = $("#project-create-note");
   form?.reset();
+  const backendSelect = $("#project-agent-backend");
+  if (backendSelect) backendSelect.value = activeSettingsBackend();
+  renderAgentStatusNote("#project-agent-backend-note", backendSelect?.value || activeSettingsBackend(), "project");
   if (note) {
     note.textContent = appState?.multi_project
       ? "Creates a separate project inside the served projects folder."
@@ -1037,7 +1335,9 @@ async function renameProjectFromDialog(event) {
   if (!pendingRenameProject) return;
   const form = event.currentTarget;
   const submit = form.querySelector('button[type="submit"]');
-  const name = String(new FormData(form).get("projectName") || "").trim();
+  const data = new FormData(form);
+  const name = String(data.get("projectName") || "").trim();
+  const agentBackend = normalizeAgentBackend(data.get("agentBackend") || activeSettingsBackend());
   if (!name) {
     showToast("Project name is required.", true);
     return;
@@ -1179,7 +1479,7 @@ async function createProjectFromDialog(event) {
     $("#project-create-note")?.removeAttribute("data-tone");
     const payload = await api("/api/projects", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, agentBackend }),
     });
     const project = payload.project || {};
     activeProjectId = String(project.id || payload.active_project_id || "");
@@ -1194,9 +1494,9 @@ async function createProjectFromDialog(event) {
     closeProjectCreateDialog();
     renderProjectList();
     hydrateTargetVenueField({ force: true });
-    restoreSessionSettings();
     restoreResourceSelections();
     await loadUiSettings();
+    restoreSessionSettings();
     await loadOverview(true);
     scheduleOverviewPoll(1000);
     showToast(`Created ${project.display_name || name}.`);
@@ -1385,6 +1685,7 @@ function hydrateColdStartFiles() {
 }
 
 function sessionState() {
+  if (optimisticResearchSession) return optimisticResearchSession;
   return appState?.research_session || {};
 }
 
@@ -1411,32 +1712,45 @@ function shellQuote(value) {
   return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
-function codexResumeCommand() {
+function sessionBackend() {
+  const session = sessionState();
+  return normalizeAgentBackend(session.backend || session.settings?.backend || activeSettingsBackend());
+}
+
+function agentResumeCommand() {
   const sessionId = String(sessionState().session_id || "").trim();
   if (!sessionId) return "";
   const repoRoot = String(appState?.repo_root || "").trim();
-  const parts = ["codex", "resume", "--include-non-interactive"];
-  if (repoRoot) parts.push("-C", shellQuote(repoRoot));
+  const backend = sessionBackend();
+  const parts = backend === "claude" ? ["claude", "--resume"] : ["codex", "resume", "--include-non-interactive"];
+  if (repoRoot && backend === "codex") parts.push("-C", shellQuote(repoRoot));
+  if (repoRoot && backend === "claude") parts.push("--add-dir", shellQuote(repoRoot));
   parts.push(shellQuote(sessionId));
   return parts.join(" ");
+}
+
+function codexResumeCommand() {
+  return agentResumeCommand();
 }
 
 function renderResumeCommandBar() {
   const bar = $("#resume-command-bar");
   const text = $("#resume-command-text");
   if (!bar || !text) return;
-  const command = codexResumeCommand();
+  const command = agentResumeCommand();
   const sessionId = String(sessionState().session_id || "").trim();
   bar.hidden = !command;
+  const label = $("#resume-command-label");
+  if (label) label.textContent = `Resume in ${agentLabel(sessionBackend())} CLI`;
   text.textContent = sessionId ? `session ${sessionId.slice(0, 8)}` : "";
   text.title = command;
   bar.dataset.command = command;
 }
 
 async function copyResumeCommand() {
-  const command = codexResumeCommand();
+  const command = agentResumeCommand();
   if (!command) return;
-  await copyTextToClipboard(command, "Codex resume command copied.");
+  await copyTextToClipboard(command, `${agentLabel(sessionBackend())} resume command copied.`);
 }
 
 async function copyTextToClipboard(text, successMessage = "Copied.") {
@@ -1519,8 +1833,9 @@ function isTrialLive(iteration) {
 function activeRunStatusLabel() {
   const label = String(activeRun().status_label || "").trim();
   if (label) return label;
-  if (isAutoresearchActiveRun()) return `Codex is working on Trial ${activeRunTrialIteration()}`;
-  return "Codex is working";
+  const provider = agentLabel(sessionBackend());
+  if (isAutoresearchActiveRun()) return `${provider} is working on Trial ${activeRunTrialIteration()}`;
+  return `${provider} is working`;
 }
 
 function activeRunScopeLabel() {
@@ -1998,6 +2313,11 @@ function goalLaunchMessage() {
   });
 }
 
+function pruneStaleGoalLaunchMessages(messages) {
+  if (framingDraftPending || isSessionRunning() || hasGoalStarted() || visibleTrialReports().length) return messages;
+  return messages.filter((message) => !isGoalLaunchMessage(message));
+}
+
 function restoreFramingMessages() {
   let nextMessages = [];
   const serverMessages = appState?.framing?.messages || [];
@@ -2057,6 +2377,11 @@ function restoreFramingMessages() {
       nextMessages.splice(projectIndex >= 0 ? projectIndex + 1 : nextMessages.length, 0, message);
       shouldPersist = true;
     }
+  }
+  const prunedGoalMessages = pruneStaleGoalLaunchMessages(nextMessages);
+  if (prunedGoalMessages.length !== nextMessages.length) {
+    nextMessages = prunedGoalMessages;
+    shouldPersist = true;
   }
   const sortedMessages = sortFramingMessagesByTime(mergePendingLocalFramingMessages(nextMessages));
   const restoredMessages = collapseProjectDraftMessages(sortedMessages);
@@ -2196,7 +2521,7 @@ function framingThinkingHtml() {
     ? activeRunStatusLabel()
     : isSessionRunning()
       ? "Drafting PROJECT.md"
-      : "Starting Codex";
+      : `Starting ${agentLabel(sessionBackend())}`;
   const trialHistory = isAutoresearchActiveRun() ? activeTrialHistoryHtml() : "";
   return `
     <article class="framing-message assistant is-thinking" aria-live="polite">
@@ -2286,10 +2611,10 @@ function currentProgressEntries() {
 
 function framingProgressRowsHtml(entries) {
   if (!entries.length) {
-    return `<div class="framing-progress is-empty">Waiting for Codex events...</div>`;
+    return `<div class="framing-progress is-empty">Waiting for agent events...</div>`;
   }
   return `
-    <div class="framing-progress" aria-label="Codex progress">
+    <div class="framing-progress" aria-label="Agent progress">
       ${entries
         .map((entry) => {
           const title = framingProgressTitle(entry);
@@ -2325,7 +2650,7 @@ function framingProgressDetailsHtml() {
   const latestEntry = latestTrialProgressEntry(entries);
   const latestText = latestEntry
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : "Waiting for Codex events...";
+    : "Waiting for agent events...";
   const runControls = runControlButtonsHtml();
   const activityKey = activeRunActivityDetailsKey();
   return `
@@ -2546,31 +2871,49 @@ function scrollFramingToBottomSoon() {
   });
 }
 
+function modelOptionsForBackend(backend) {
+  return modelOptionsByBackend[normalizeAgentBackend(backend)] || modelOptionsByBackend.codex;
+}
+
+function syncModelSelectOptions(select, backend, selected = "") {
+  if (!select) return;
+  const options = modelOptionsForBackend(backend);
+  const value = String(selected || "").trim();
+  select.innerHTML = options.map(([optionValue, label]) => `<option value="${escapeHtml(optionValue)}">${escapeHtml(label)}</option>`).join("");
+  const allowed = new Set(options.map(([optionValue]) => optionValue));
+  select.value = allowed.has(value) ? value : defaultSettingsForBackend(backend).model;
+}
+
 function settingsFromForm() {
   const form = $("#session-settings-form");
   const data = new FormData(form);
-  const permissionPreset = normalizePermissionPreset(data.get("permissionPreset"));
-  const settings = {
+  const backend = normalizeAgentBackend(data.get("backend") || form?.elements?.backend?.value || activeSettingsBackend());
+  const permissionPreset = normalizePermissionPreset(data.get("permissionPreset"), { backend });
+  const settings = normalizeSessionSettings({
+    backend,
     model: String(data.get("model") || "").trim(),
-    reasoningEffort: normalizeReasoningEffort(data.get("reasoningEffort")),
+    reasoningEffort: normalizeReasoningEffort(data.get("reasoningEffort"), backend),
     permissionPreset,
     ...permissionPresets[permissionPreset],
     webSearch: Boolean(data.get("webSearch")),
+    fastMode: Boolean(data.get("fastMode")),
     extraConfig: String(data.get("extraConfig") || "").trim(),
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("reviewCheckpointInterval")),
-  };
-  scopedSet("autoResearchSessionSettings", JSON.stringify(settings));
+  });
+  persistSessionSettings(settings);
   renderSettingsSummary(settings);
   syncComposerSettings(settings);
+  renderAllAgentStatusNotes();
   return settings;
 }
 
 function syncComposerSettings(settings) {
   const merged = normalizeSessionSettings(settings);
+  const backend = normalizeAgentBackend(merged.backend);
   const model = $("#composer-model");
   const reasoning = $("#composer-reasoning");
-  if (model) model.value = merged.model || defaultSessionSettings.model;
-  if (reasoning) reasoning.value = merged.reasoningEffort || defaultSessionSettings.reasoningEffort;
+  syncModelSelectOptions(model, backend, merged.model);
+  if (reasoning) reasoning.value = merged.reasoningEffort || defaultSettingsForBackend(backend).reasoningEffort;
 }
 
 function updateSessionSettingsFromComposer() {
@@ -2578,14 +2921,15 @@ function updateSessionSettingsFromComposer() {
   const model = $("#composer-model");
   const reasoning = $("#composer-reasoning");
   if (!form || !model || !reasoning) return;
-  form.elements.model.value = model.value || defaultSessionSettings.model;
-  form.elements.reasoningEffort.value = normalizeReasoningEffort(reasoning.value);
+  const backend = normalizeAgentBackend(form.elements.backend?.value || activeSettingsBackend());
+  syncModelSelectOptions(form.elements.model, backend, model.value || defaultSettingsForBackend(backend).model);
+  form.elements.reasoningEffort.value = normalizeReasoningEffort(reasoning.value, backend);
   settingsFromForm();
 }
 
-function normalizeReasoningEffort(value) {
+function normalizeReasoningEffort(value, backend = "") {
   const reasoning = String(value || "").trim();
-  return allowedReasoningEfforts.has(reasoning) ? reasoning : defaultSessionSettings.reasoningEffort;
+  return allowedReasoningEfforts.has(reasoning) ? reasoning : defaultSettingsForBackend(backend).reasoningEffort;
 }
 
 function normalizeReviewCheckpointInterval(value) {
@@ -2594,8 +2938,15 @@ function normalizeReviewCheckpointInterval(value) {
 }
 
 function inferPermissionPreset(settings = {}) {
+  const backend = normalizeAgentBackend(settings.backend);
   const explicit = String(settings.permissionPreset || "").trim();
   if (allowedPermissionPresets.has(explicit)) return explicit;
+  if (backend === "claude") {
+    const mode = String(settings.permissionMode || "").trim();
+    if (mode === "bypassPermissions") return "full-access";
+    if (mode === "auto") return "auto-review";
+    return defaultClaudeSessionSettings.permissionPreset;
+  }
   const sandbox = String(settings.sandbox || "").trim();
   const approvalPolicy = String(settings.approvalPolicy || "").trim();
   if (sandbox === "danger-full-access" && approvalPolicy === "never") return "full-access";
@@ -2609,12 +2960,25 @@ function normalizePermissionPreset(value, settings = {}) {
 }
 
 function normalizeSessionSettings(settings = {}) {
-  const merged = { ...defaultSessionSettings, ...(settings || {}) };
-  merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort);
+  const backend = normalizeAgentBackend(settings?.backend || settings?.agent?.backend || activeSettingsBackend());
+  const defaults = defaultSettingsForBackend(backend);
+  const merged = { ...defaults, ...(settings || {}), backend };
+  const allowedModels = new Set(modelOptionsForBackend(backend).map(([value]) => value));
+  if (!merged.model || (backend === "codex" && !allowedModels.has(merged.model))) merged.model = defaults.model;
+  if (backend === "claude" && !String(merged.model || "").trim()) merged.model = defaults.model;
+  merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend);
   merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
+  merged.fastMode = Boolean(merged.fastMode);
   merged.permissionPreset = normalizePermissionPreset(merged.permissionPreset, merged);
-  Object.assign(merged, permissionPresets[merged.permissionPreset]);
-  if (!allowedApprovalPolicies.has(merged.approvalPolicy)) {
+  if (backend === "claude") {
+    const modeByPreset = { default: "acceptEdits", "auto-review": "auto", "full-access": "bypassPermissions" };
+    merged.permissionMode = modeByPreset[merged.permissionPreset] || defaultClaudeSessionSettings.permissionMode;
+    delete merged.sandbox;
+    delete merged.approvalPolicy;
+  } else {
+    Object.assign(merged, permissionPresets[merged.permissionPreset]);
+  }
+  if (backend === "codex" && !allowedApprovalPolicies.has(merged.approvalPolicy)) {
     Object.assign(merged, permissionPresets[defaultSessionSettings.permissionPreset]);
     merged.permissionPreset = defaultSessionSettings.permissionPreset;
   }
@@ -2624,27 +2988,44 @@ function normalizeSessionSettings(settings = {}) {
 function applySessionSettings(settings, persist = false) {
   const merged = normalizeSessionSettings(settings);
   const form = $("#session-settings-form");
+  const backend = normalizeAgentBackend(merged.backend);
+  if (form.elements.backend) form.elements.backend.value = backend;
+  syncModelSelectOptions(form.elements.model, backend, merged.model);
   form.elements.model.value = merged.model || "";
   form.elements.reasoningEffort.value = merged.reasoningEffort;
   form.elements.permissionPreset.value = merged.permissionPreset;
   form.elements.webSearch.checked = Boolean(merged.webSearch);
+  if (form.elements.fastMode) form.elements.fastMode.checked = Boolean(merged.fastMode);
   form.elements.extraConfig.value = merged.extraConfig || "";
   if (form.elements.reviewCheckpointInterval) form.elements.reviewCheckpointInterval.value = merged.reviewCheckpointInterval;
-  if (persist) scopedSet("autoResearchSessionSettings", JSON.stringify(merged));
+  if (persist) persistSessionSettings(merged);
   renderSettingsSummary(merged);
   syncComposerSettings(merged);
+  renderAllAgentStatusNotes();
+}
+
+function switchSessionBackend(backend) {
+  const normalized = normalizeAgentBackend(backend);
+  const scoped = scopedSessionSettings();
+  applySessionSettings({
+    ...providerSettingsFromUi(normalized),
+    ...providerSettingsFromScoped(scoped, normalized),
+    backend: normalized,
+  }, true);
 }
 
 function restoreSessionSettings() {
-  applySessionSettings(mergedProjectSessionSettings(uiSettings?.codex || defaultSessionSettings));
+  applySessionSettings(mergedProjectSessionSettings(uiSettings || {}));
 }
 
 function settingsLabel(settings) {
   const normalized = normalizeSessionSettings(settings || defaultSessionSettings);
   const parts = [];
+  parts.push(agentLabel(normalized.backend));
   if (normalized.model) parts.push(normalized.model);
   parts.push(labelForReasoning(normalized.reasoningEffort));
   parts.push(permissionPresets[normalized.permissionPreset]?.label || "Default permissions");
+  if (normalized.fastMode) parts.push("fast");
   parts.push(`review ${normalized.reviewCheckpointInterval}`);
   if (normalized.webSearch) parts.push("web");
   return parts.join(" / ");
@@ -2672,31 +3053,59 @@ function switchSettingsTab(tab) {
   });
 }
 
-function codexSettingsFromModal() {
+function stripBackendSetting(settings) {
+  const copy = { ...settings };
+  delete copy.backend;
+  return copy;
+}
+
+function settingsProviderFromModal(backend) {
   const form = $("#settings-form");
   const data = new FormData(form);
-  const permissionPreset = normalizePermissionPreset(data.get("settingsPermissionPreset"));
-  return {
+  const normalizedBackend = normalizeAgentBackend(backend);
+  const permissionPreset = normalizePermissionPreset(data.get("settingsPermissionPreset"), { backend: normalizedBackend });
+  return normalizeSessionSettings({
+    backend: normalizedBackend,
     model: String(data.get("settingsModel") || "").trim(),
-    reasoningEffort: normalizeReasoningEffort(data.get("settingsReasoningEffort")),
+    reasoningEffort: normalizeReasoningEffort(data.get("settingsReasoningEffort"), normalizedBackend),
     permissionPreset,
     ...permissionPresets[permissionPreset],
     webSearch: Boolean(data.get("settingsWebSearch")),
     extraConfig: String(data.get("settingsExtraConfig") || "").trim(),
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("settingsReviewCheckpointInterval")),
+  });
+}
+
+function settingsPayloadFromModal() {
+  const form = $("#settings-form");
+  const backend = normalizeAgentBackend(form.elements.settingsBackend?.value || activeSettingsBackend());
+  const codex = normalizeSessionSettings({ ...(uiSettings?.codex || defaultCodexSessionSettings), backend: "codex" });
+  const claude = normalizeSessionSettings({ ...(uiSettings?.claude || defaultClaudeSessionSettings), backend: "claude" });
+  const current = settingsProviderFromModal(backend);
+  return {
+    agent: { backend },
+    codex: stripBackendSetting(backend === "codex" ? current : codex),
+    claude: stripBackendSetting(backend === "claude" ? current : claude),
   };
+}
+
+function codexSettingsFromModal() {
+  return stripBackendSetting(settingsProviderFromModal("codex"));
 }
 
 function hydrateSettingsDialog(settings) {
   const form = $("#settings-form");
-  const codex = normalizeSessionSettings(settings?.codex || {});
+  const backend = normalizeAgentBackend(settings?.agent?.backend || activeSettingsBackend());
+  const provider = normalizeSessionSettings({ ...(settings?.[backend] || providerSettingsFromUi(backend)), backend });
   hydrateThemeControls();
-  form.elements.settingsModel.value = codex.model || "";
-  form.elements.settingsReasoningEffort.value = codex.reasoningEffort;
-  form.elements.settingsPermissionPreset.value = codex.permissionPreset;
-  form.elements.settingsWebSearch.checked = Boolean(codex.webSearch);
-  form.elements.settingsExtraConfig.value = codex.extraConfig || "";
-  if (form.elements.settingsReviewCheckpointInterval) form.elements.settingsReviewCheckpointInterval.value = codex.reviewCheckpointInterval;
+  if (form.elements.settingsBackend) form.elements.settingsBackend.value = backend;
+  syncModelSelectOptions(form.elements.settingsModel, backend, provider.model);
+  form.elements.settingsReasoningEffort.value = provider.reasoningEffort;
+  form.elements.settingsPermissionPreset.value = provider.permissionPreset;
+  form.elements.settingsWebSearch.checked = Boolean(provider.webSearch);
+  form.elements.settingsExtraConfig.value = provider.extraConfig || "";
+  if (form.elements.settingsReviewCheckpointInterval) form.elements.settingsReviewCheckpointInterval.value = provider.reviewCheckpointInterval;
+  renderAgentStatusNote("#settings-agent-status", backend, "settings");
 
   const envPresent = settings?.env_present || {};
   const keys = settingsSecretKeys.length ? settingsSecretKeys : Object.keys(secretKeyLabels);
@@ -2718,11 +3127,21 @@ function hydrateSettingsDialog(settings) {
             }
           </span>
           <input name="env_${escapeHtml(key)}" type="${inputType}" placeholder="${saved ? "Saved - leave blank to keep" : "Paste value"}" autocomplete="off" />
-          <span class="settings-secret-help">${escapeHtml(secretKeyHelp[key] || "Passed to Codex subprocesses.")}</span>
+          <span class="settings-secret-help">${escapeHtml(secretKeyHelp[key] || "Passed to selected agent subprocesses.")}</span>
         </label>
       `;
     })
     .join("");
+}
+
+function switchSettingsBackend(backend) {
+  const normalized = normalizeAgentBackend(backend);
+  const form = $("#settings-form");
+  if (form?.elements?.settingsBackend) form.elements.settingsBackend.value = normalized;
+  hydrateSettingsDialog({
+    ...(uiSettings || {}),
+    agent: { backend: normalized },
+  });
 }
 
 async function loadUiSettings() {
@@ -2732,6 +3151,7 @@ async function loadUiSettings() {
     settingsSecretKeys = payload.secret_keys || Object.keys(secretKeyLabels);
     hydrateSettingsDialog(uiSettings);
     restoreSessionSettings();
+    renderAllAgentStatusNotes();
   } catch (error) {
     showToast(error.message, true);
   }
@@ -2751,14 +3171,15 @@ async function saveUiSettings(event) {
         const value = String(form.elements[`env_${key}`]?.value || "").trim();
         if (value) env[key] = value;
       });
+      const settingsPayload = settingsPayloadFromModal();
       const payload = await api("/api/settings", {
         method: "POST",
-        body: JSON.stringify({ codex: codexSettingsFromModal(), env, clear_env: clearEnv }),
+        body: JSON.stringify({ ...settingsPayload, env, clear_env: clearEnv }),
       });
       uiSettings = payload.settings || {};
       settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
       hydrateSettingsDialog(uiSettings);
-      applySessionSettings(uiSettings.codex || defaultSessionSettings, true);
+      applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
       showToast("Settings saved locally.");
     });
   } catch (error) {
@@ -2768,14 +3189,15 @@ async function saveUiSettings(event) {
 
 async function clearSavedSecret(key) {
   if (!settingsSecretKeys.includes(key)) return;
+  const settingsPayload = settingsPayloadFromModal();
   const payload = await api("/api/settings", {
     method: "POST",
-    body: JSON.stringify({ codex: codexSettingsFromModal(), env: {}, clear_env: [key] }),
+    body: JSON.stringify({ ...settingsPayload, env: {}, clear_env: [key] }),
   });
   uiSettings = payload.settings || {};
   settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
   hydrateSettingsDialog(uiSettings);
-  applySessionSettings(uiSettings.codex || defaultSessionSettings, true);
+  applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
   showToast(`${secretKeyLabels[key] || key} cleared.`);
 }
 
@@ -2840,16 +3262,20 @@ function renderStage() {
     const locked = !prepareSaved && (!draft.trim() || isPlaceholderProject(draft));
     const gatePassed = sessionState()?.gate?.status === "pass";
     const resourceBlocked = hasBlockingResourceImports();
-    launchButton.disabled = locked || isSessionRunning() || gatePassed || resourceBlocked;
+    const blockedAgent = launchBlockingStatus();
+    launchButton.disabled = locked || isSessionRunning() || gatePassed || resourceBlocked || Boolean(blockedAgent);
     launchButton.textContent = gatePassed ? "Reviewer gates passed" : launched ? "Continue autoresearch" : "Start autoresearch";
     launchButton.title = resourceBlocked
       ? blockingResourceImportMessage()
       : gatePassed
       ? "All reviewer gates have passed."
+      : blockedAgent
+        ? blockedAgent.message || `${agentLabel(effectiveBackend(currentLaunchBackend()))} is not ready.`
       : locked
         ? "Finish PROJECT.md before starting autoresearch."
         : "Run the autoresearch loop until strict reviewer gates pass.";
   }
+  renderAllAgentStatusNotes();
   renderFramingConversation();
 }
 
@@ -2891,17 +3317,17 @@ function renderChatState() {
   textarea.disabled = !canMessage();
   send.disabled = !canMessage() || resourceBlocked;
   cont.disabled = !canMessage() || resourceBlocked;
-  textarea.placeholder = canMessage() ? "Message the current Codex session..." : "Run cold start before messaging...";
+  textarea.placeholder = canMessage() ? "Message the current agent session..." : "Run cold start before messaging...";
   renderComposerSuggestions();
   renderChatSummary();
 }
 
 function coldComposerPlaceholder(hasFramingThread) {
   if (hasLaunched()) {
-    return "Message Codex about the current research, ask for status, attach resources, or steer the next step...";
+    return "Message the agent about the current research, ask for status, attach resources, or steer the next step...";
   }
   return hasFramingThread
-    ? "Ask Codex to revise PROJECT.md, narrow the scope, change the target venue, or add constraints..."
+    ? "Ask the agent to revise PROJECT.md, narrow the scope, change the target venue, or add constraints..."
     : "Research topic, problem, scope, and data or materials to use...";
 }
 
@@ -3008,7 +3434,7 @@ function transcriptTitle(entry) {
   if (role === "tool") return "Tool";
   if (role === "command") return "Command";
   if (role === "final") return "Final";
-  return "Codex";
+  return agentLabel(sessionBackend());
 }
 
 function transcriptMeta(entry) {
@@ -3101,7 +3527,7 @@ function statusUsageRowsHtml(usage = {}) {
     ["Total", usage.total_tokens],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "");
   if (!rows.length) {
-    return `<p class="status-note">No token usage has been reported by Codex JSON events yet.</p>`;
+    return `<p class="status-note">No token usage has been reported by agent stream events yet.</p>`;
   }
   return `
     <div class="status-usage-grid">
@@ -3117,14 +3543,14 @@ function statusUsageRowsHtml(usage = {}) {
   `;
 }
 
-function statusLimitRowsHtml(limits = [], limitations = []) {
+function statusLimitRowsHtml(limits = [], limitations = [], backend = "codex") {
   const analyticsUrl = "https://chatgpt.com/codex/cloud/settings/analytics";
   if (!Array.isArray(limits) || !limits.length) {
-    const note = (limitations && limitations[0]) || "Remaining usage windows are not available from Codex JSON events.";
+    const note = (limitations && limitations[0]) || "Remaining usage windows are not available from agent stream events.";
     return `
       <div class="status-limit-fallback">
         <p class="status-note">${escapeHtml(note)}</p>
-        <a class="status-link-button" href="${analyticsUrl}" target="_blank" rel="noopener noreferrer">Open Codex analytics</a>
+        ${normalizeAgentBackend(backend) === "codex" ? `<a class="status-link-button" href="${analyticsUrl}" target="_blank" rel="noopener noreferrer">Open Codex analytics</a>` : ""}
       </div>
     `;
   }
@@ -3153,12 +3579,14 @@ function statusLimitRowsHtml(limits = [], limitations = []) {
 }
 
 function statusSettingsHtml(settings = {}) {
-  const permission = settings.permission || [settings.sandbox, settings.approval].filter(Boolean).join(" / ");
+  const permission = settings.permission || settings.permission_mode || [settings.sandbox, settings.approval].filter(Boolean).join(" / ");
   return `
     <div class="status-settings">
+      ${statusMetricHtml("Backend", agentLabel(settings.backend))}
       ${statusMetricHtml("Model", settings.model || "Default")}
       ${statusMetricHtml("Reasoning", settings.reasoning || "medium")}
       ${statusMetricHtml("Permissions", permission || "Default")}
+      ${statusMetricHtml("Mode", settings.fast_mode ? "Fast" : "Standard")}
       ${statusMetricHtml("Review checkpoint", `${settings.review_checkpoint_interval || 100} turns`)}
       ${statusMetricHtml("Web", settings.web_search ? "Live search" : "Off")}
     </div>
@@ -3167,6 +3595,7 @@ function statusSettingsHtml(settings = {}) {
 
 function statusCardHtml(payload, entry) {
   const sessionId = payload.session_id || "not started";
+  const provider = payload.backend_label || agentLabel(payload.backend);
   const process = payload.process || {};
   const events = payload.events || {};
   const gate = payload.gate || "missing";
@@ -3197,12 +3626,12 @@ function statusCardHtml(payload, entry) {
         </div>
         ${payload.gate_summary ? `<p class="status-note">${escapeHtml(payload.gate_summary)}</p>` : ""}
         <section>
-          <h4>Codex settings</h4>
+          <h4>${escapeHtml(provider)} settings</h4>
           ${statusSettingsHtml(payload.settings || {})}
         </section>
         <section>
           <h4>Limits</h4>
-          ${statusLimitRowsHtml(payload.limits || [], payload.limitations || [])}
+          ${statusLimitRowsHtml(payload.limits || [], payload.limitations || [], payload.backend)}
         </section>
         <details class="status-details">
           <summary>Usage</summary>
@@ -3349,7 +3778,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const finalEntry = [...entries].reverse().find((entry) => ["final", "assistant"].includes(transcriptRole(entry)) && String(entry.content || "").trim());
   const fallback = finalEntry ? compactText(finalEntry.content, 260) : "";
   const reportSummary = cleanText(report?.report_summary, "");
-  const summary = reportSummary || fallback || (report ? "Summary is not available yet." : "Report is not available yet. Codex activity for this trial is shown below.");
+  const summary = reportSummary || fallback || (report ? "Summary is not available yet." : "Report is not available yet. Agent activity for this trial is shown below.");
   const reportStatus = cleanText(report?.status, "");
   const running = isTrialLive(iteration, report);
   const status = running ? "running" : reportStatus === "reported" ? "completed" : reportStatus || (report ? "completed" : "active");
@@ -3402,7 +3831,7 @@ function runningTrialStatusHtml(trial) {
   const latestEntry = latestTrialProgressEntry(entries);
   const latestText = latestEntry
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : "Waiting for Codex events...";
+    : "Waiting for agent events...";
   const eventLabel = entries.length ? `${entries.length} event${entries.length === 1 ? "" : "s"}` : "waiting";
   return `
     <section class="trial-live-status" aria-live="polite">
@@ -3501,7 +3930,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
           <strong>Trials</strong>
           <span>${escapeHtml(countLabel)} · ${escapeHtml(selectedLabel)}</span>
           ${autoresearchCompleteBadgeHtml()}
-          <button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>
+          ${reportedCount ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>` : ""}
         </div>
         ${latestReport ? `<p>Latest: ${escapeHtml(latestReport)}</p>` : ""}
       </header>
@@ -3697,7 +4126,7 @@ function sessionTimelineHtml(entries, options = {}) {
   const trialHistory = trialTimelineContentHtml(entries, options);
   if (!trialHistory) return "";
   return `
-    <section class="transcript-timeline with-axis" aria-label="Codex transcript">
+    <section class="transcript-timeline with-axis" aria-label="Agent transcript">
       ${trialHistory}
     </section>
   `;
@@ -3869,7 +4298,7 @@ function renderChatSummary() {
   `;
   const body = transcript.length
     ? sessionTimelineHtml(transcript)
-    : `<div class="transcript-empty">Cold start creates the first real Codex exec session.</div>`;
+    : `<div class="transcript-empty">Cold start creates the first real agent session.</div>`;
   $("#dynamic-messages").innerHTML = summary + body;
 }
 
@@ -3881,11 +4310,11 @@ function renderSession() {
   const sessionId = session.session_id ? ` / ${session.session_id.slice(0, 8)}` : "";
   const loop = session.loop_active ? ` / trial ${session.loop_iteration || 0}` : session.gate?.status === "pass" ? " / gates passed" : "";
   $("#session-title").textContent = `${status}${mode}${sessionId}${loop}`;
-  $("#session-command").textContent = session.command || "No Codex exec run yet.";
+  $("#session-command").textContent = session.command || "No agent run yet.";
   const settings = Object.keys(session.settings || {}).length ? session.settings : settingsFromForm();
   renderSettingsSummary(settings);
   const rawLogs = session.raw_logs || [];
-  $("#session-log").textContent = rawLogs.length ? rawLogs.join("\n") : "No raw Codex JSON logs yet.";
+  $("#session-log").textContent = rawLogs.length ? rawLogs.join("\n") : "No raw agent logs yet.";
   $("#stop-session").disabled = !["running", "stopping"].includes(status);
 }
 
@@ -5664,7 +6093,7 @@ async function saveInlineFile(path, root = document) {
       const file = payload.file || {};
       inlineFiles[file.path || path] = file.text || editor.value || "";
       inlineFilePayloads[file.path || path] = file;
-      showToast("File saved and noted for Codex.");
+    showToast("File saved and noted for the agent.");
       await loadOverview(true);
     }, { saved: "Saved & noted" });
   } catch (error) {
@@ -5728,7 +6157,7 @@ function notifyResourceHandlingFromResponse(payload) {
     return;
   }
   if (clues.length) {
-    showToast(`${clues.length} resource ${clues.length === 1 ? "clue" : "clues"} noted for Codex intake.`);
+    showToast(`${clues.length} resource ${clues.length === 1 ? "clue" : "clues"} noted for agent intake.`);
     return;
   }
   const metadataFiles = Array.isArray(files.metadata_files) ? files.metadata_files : [];
@@ -5745,7 +6174,7 @@ function collectResourceLinks() {
   return links
     .map((item) => {
       const link = { path: item.path, category: item.category };
-      if (item.alreadyImported) link.alreadyImported = true;
+      if (item.alreadyImported || isProjectResourcePath(item.path)) link.alreadyImported = true;
       return link;
     })
     .filter((item) => {
@@ -5971,7 +6400,7 @@ async function handleRestartAutoresearch(reason = "") {
     return false;
   }
   if (isSessionRunning()) {
-    showToast("Stop the current Codex run before restarting autoresearch.", true);
+    showToast("Stop the current agent run before restarting autoresearch.", true);
     return false;
   }
   const confirmed = await confirmRestartAutoresearch(reason);
@@ -6119,6 +6548,7 @@ async function openLaunchDialog() {
   }
   try {
     await saveProjectDraft({ silent: true });
+    renderAllAgentStatusNotes();
     $("#launch-dialog").showModal();
   } catch (error) {
     showToast(error.message, true);
@@ -6140,6 +6570,13 @@ async function launchAutoresearch() {
     showToast("Frame the project before launching autoresearch.", true);
     return;
   }
+  const blockedAgent = launchBlockingStatus();
+  if (blockedAgent) {
+    const message = blockedAgent.message || `${agentLabel(effectiveBackend(currentLaunchBackend()))} is not ready.`;
+    showToast(message, true);
+    renderAllAgentStatusNotes();
+    return;
+  }
   const brief = currentBriefText().trim();
   if (!brief && !hasLaunched()) {
     showToast("Write a brief before launching.", true);
@@ -6150,19 +6587,24 @@ async function launchAutoresearch() {
   const targetVenue = String($("#target-venue")?.value || "").trim();
   const launchInstruction = String($("#launch-instruction")?.value || "").trim();
   const launchComposerText = String($("#cold-file-editor")?.value || "");
+  const settings = settingsFromForm();
+  let launchMessage = null;
+  let previousSession = null;
   try {
     framingDraftPending = true;
-    beginFramingPending();
-    if (!hasGoalLaunchMessage()) appendFramingMessage("user", "Start autoresearch.", { kind: "goal-launch" });
+    previousSession = clonePlainObject(appState?.research_session);
+    if (!hasGoalLaunchMessage()) launchMessage = appendFramingMessage("user", "Start autoresearch.", { kind: "goal-launch" });
+    beginFramingPending(launchMessage?.id || "");
+    $("#launch-dialog")?.close();
+    startOptimisticAutoresearchSession(settings);
     renderFramingConversation();
     scrollFramingToBottomSoon();
-    $("#launch-dialog")?.close();
     await persistFramingMessages();
     await saveProjectDraft({ silent: true });
     const files = await collectUploadFiles();
     const response = await api("/api/research/cold-start", {
       method: "POST",
-      body: JSON.stringify({ confirmLaunch: true, brief, targetVenue, launchInstruction, fileEdits, resourceLinks: collectResourceLinks(), files, settings: settingsFromForm() }),
+      body: JSON.stringify({ confirmLaunch: true, brief, targetVenue, launchInstruction, fileEdits, resourceLinks: collectResourceLinks(), files, settings }),
     });
     mergeSessionFromApiResponse(response);
     notifyResourceHandlingFromResponse(response);
@@ -6180,6 +6622,13 @@ async function launchAutoresearch() {
     scrollFramingToBottomSoon();
   } catch (error) {
     framingDraftPending = false;
+    clearOptimisticAutoresearchSession(previousSession);
+    const prunedMessages = pruneStaleGoalLaunchMessages(localMessages);
+    if (prunedMessages.length !== localMessages.length) {
+      localMessages.splice(0, localMessages.length, ...prunedMessages);
+      lastFramingHtml = "";
+      persistFramingMessages().catch(() => {});
+    }
     reconcileFramingPending(localMessages);
     renderFramingConversation();
     showToast(error.message, true);
@@ -6199,7 +6648,7 @@ async function sendSessionComposerMessage(message) {
   if (!text && !attachments.length && !resumeFromTrial) return false;
   const localControl = canSendLocalSlashControl(text);
   if (!canSendSessionComposerMessage() && !localControl) {
-    showToast("Wait for the current Codex run to finish before sending another message.", true);
+    showToast("Wait for the current agent run to finish before sending another message.", true);
     return false;
   }
   let isCommand = text.startsWith("/");
@@ -6338,7 +6787,7 @@ async function coldStartFromPrepare() {
       return;
     }
     if (isSessionRunning()) {
-      showToast("Codex is already running. Wait for the current run to finish.", true);
+      showToast(`${agentLabel(sessionBackend())} is already running. Wait for the current run to finish.`, true);
       return;
     }
     const attachments = currentComposerAttachments();
@@ -6364,7 +6813,7 @@ async function coldStartFromPrepare() {
     activeStage = "1";
     renderStage();
     renderChatState();
-    showToast("Codex is framing PROJECT.md.");
+    showToast(`${agentLabel(sessionBackend())} is framing PROJECT.md.`);
     await loadOverview(true);
     scrollFramingToBottomSoon();
   } catch (error) {
@@ -6381,7 +6830,7 @@ async function resendFramingMessage(id, text) {
   const next = String(text || "").trim();
   if (!message || !next) return;
   if (isSessionRunning()) {
-    showToast("Codex is already running. Wait for the current run to finish.", true);
+    showToast(`${agentLabel(sessionBackend())} is already running. Wait for the current run to finish.`, true);
     return;
   }
   const index = localMessages.findIndex((item) => item.id === id);
@@ -6405,7 +6854,7 @@ async function resendFramingMessage(id, text) {
     reconcileFramingPending(localMessages);
     renderFramingConversation();
     scrollFramingToBottomSoon();
-    showToast("Codex is reframing PROJECT.md.");
+    showToast(`${agentLabel(sessionBackend())} is reframing PROJECT.md.`);
     await loadOverview(true);
     scrollFramingToBottomSoon();
   } catch (error) {
@@ -6473,7 +6922,7 @@ async function sendCommand(command) {
   if (!ensureResourceImportsReady()) return;
   const localControl = canSendLocalSlashControl(command);
   if (!canMessage() && !localControl) {
-    showToast("Wait for the current Codex run to finish before sending another message.", true);
+    showToast("Wait for the current agent run to finish before sending another message.", true);
     return;
   }
   try {
@@ -6493,7 +6942,7 @@ async function resendTranscriptMessage(id, message) {
   const text = String(message || "").trim();
   if (!text) return;
   if (!canMessage()) {
-    showToast("Wait for the current Codex run to finish before resending.", true);
+    showToast("Wait for the current agent run to finish before resending.", true);
     return;
   }
   try {
@@ -6551,6 +7000,9 @@ function bindEvents() {
   });
   $("#open-project-create")?.addEventListener("click", openProjectCreateDialog);
   $("#project-create-form")?.addEventListener("submit", createProjectFromDialog);
+  $("#project-agent-backend")?.addEventListener("change", (event) => {
+    renderAgentStatusNote("#project-agent-backend-note", event.target.value, "project");
+  });
   $$("[data-project-close]").forEach((button) => {
     button.addEventListener("click", closeProjectCreateDialog);
   });
@@ -6645,6 +7097,8 @@ function bindEvents() {
   $("#chat-form").addEventListener("submit", handleChat);
   $("#goal-form").addEventListener("submit", handleGoal);
   $("#session-settings-form").addEventListener("input", () => settingsFromForm());
+  $("#session-settings-form")?.elements?.backend?.addEventListener("change", (event) => switchSessionBackend(event.target.value));
+  $("#settings-form")?.elements?.settingsBackend?.addEventListener("change", (event) => switchSettingsBackend(event.target.value));
   $("#composer-model")?.addEventListener("change", updateSessionSettingsFromComposer);
   $("#composer-reasoning")?.addEventListener("change", updateSessionSettingsFromComposer);
   $("#framing-scroll-bottom")?.addEventListener("click", scrollFramingToBottom);
