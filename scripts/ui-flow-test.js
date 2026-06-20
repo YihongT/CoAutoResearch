@@ -632,6 +632,18 @@ function loadAppContext() {
     };
     globalThis.__formatWorkedDuration = (seconds) => formatWorkedDuration(seconds);
     globalThis.__statusCardProbe = (payload) => statusCardHtml(payload, { id: "status-test" });
+    globalThis.__renderProjectListProbe = (payload) => {
+      appState = {
+        ...(appState || {}),
+        multi_project: true,
+        active_project_id: payload.active_project_id || "project-1",
+        projects: payload.projects || [],
+      };
+      activeProjectId = appState.active_project_id;
+      openProjectMenuId = payload.open_project_menu || "";
+      renderProjectList();
+      return document.querySelector("#project-list")?.innerHTML || "";
+    };
     globalThis.__trialStripScrollProbe = (scrollLeft, clientWidth = 300, scrollWidth = 1200) => {
       const strip = document.querySelector(".trial-strip-scroll");
       strip.clientWidth = clientWidth;
@@ -1321,7 +1333,25 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
       metadata_missing: []
     }
   })`);
-  assert.equal(changedTemplate, true, "actual reviewer template drift should still show the project-list warning");
+  assert.equal(changedTemplate, true, "actual reviewer template drift should still be detected for the project menu maintenance action");
+  const html = app.run(`__renderProjectListProbe({
+    active_project_id: "project-1",
+    open_project_menu: "project-1",
+    projects: [{
+      id: "project-1",
+      display_name: "perceived safety",
+      status: "running",
+      session_id: "019ee62",
+      reviewer_status: {
+        baseline_version: "old",
+        latest_baseline_version: "2026-06-inline-blueprint",
+        missing: [],
+        changed: ["EVIDENCE_REVIEWER.md"],
+        metadata_missing: []
+      }
+    }]
+  })`);
+  assert.equal(html.includes("Reviewer templates outdated"), false, "project sidebar card should not show maintenance reviewer-template status");
 }
 
 function testComposerPlaceholderBecomesGeneralAfterLaunch() {

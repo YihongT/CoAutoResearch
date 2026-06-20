@@ -1181,7 +1181,6 @@ function renderProjectList() {
             <span>
               <strong>${escapeHtml(project.display_name || project.title || "Project")}</strong>
               <small>${escapeHtml(label)}${project.session_id ? ` · ${escapeHtml(String(project.session_id).slice(0, 8))}` : ""}</small>
-              ${reviewerOutdated ? `<small class="project-warning-line">Reviewer templates outdated</small>` : ""}
             </span>
           </button>
           <button class="project-menu-button" type="button" data-project-menu="${escapeHtml(project.id)}" aria-label="Project options" aria-haspopup="menu" aria-expanded="${menuOpen ? "true" : "false"}">
