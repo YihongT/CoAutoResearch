@@ -26,6 +26,7 @@ let projectDraftEditMode = false;
 let editingFramingId = "";
 let projectRenderedScrollTop = 0;
 let overviewPollTimer = null;
+let workingTickerTimer = null;
 let lastFramingHtml = "";
 let framingMessagesPersisting = false;
 let framingMessagesSaveVersion = 0;
@@ -34,6 +35,11 @@ let openProjectMenuId = "";
 let pendingRenameProject = null;
 let pendingDeleteProject = null;
 let selectedTrialIndex = 0;
+let trialStripScrollLeft = 0;
+let selectedResumeTrialContext = null;
+let pendingResumeTrialConfirm = null;
+let pendingRestartAutoresearchConfirm = null;
+let composerDraft = "";
 const localMessages = [];
 let activeResourceCategory = "ongoing_work";
 const selectedResourceItems = [];
@@ -63,8 +69,19 @@ const defaultSessionSettings = {
   reviewCheckpointInterval: 100,
 };
 
-const allowedThemeModes = new Set(["light", "night"]);
+const allowedThemeModes = new Set(["light"]);
 let currentThemeMode = normalizeThemeMode(localStorage.getItem("coAutoResearchTheme") || document.documentElement.dataset.theme || "light");
+
+const localSlashCommandRegistry = {
+  "/goal": { label: "Autoresearch", value: "Show autoresearch" },
+  "/goal pause": { label: "Autoresearch", value: "Pause after current turn" },
+  "/goal resume": { label: "Autoresearch", value: "Resume autoresearch", requiresSession: true },
+  "/goal restart": { label: "Autoresearch", value: "Restart autoresearch", requiresSession: true, destructive: true },
+  "/status": { label: "Session", value: "Show status" },
+  "/ps": { label: "Session", value: "Show processes" },
+  "/diff": { label: "Session", value: "Show diff" },
+};
+const localSlashCommandSet = new Set(Object.keys(localSlashCommandRegistry));
 
 const resourceCategories = {
   user_input: "User input",
@@ -240,6 +257,24 @@ function newMessageId(prefix = "m") {
   return `${prefix}_${Date.now().toString(36)}_${random}`;
 }
 
+function normalizeResumeTrialContext(value) {
+  if (!value || typeof value !== "object") return null;
+  const id = String(value.id || "").trim();
+  const path = String(value.path || "").trim();
+  if (!id && !path) return null;
+  const iteration = Number(value.iteration || 0);
+  const name = String(value.name || id || path || "trial").trim();
+  return {
+    id,
+    path,
+    iteration: Number.isFinite(iteration) && iteration > 0 ? iteration : 0,
+    name,
+    reportPath: String(value.reportPath || value.report_path || "").trim(),
+    checkpointPath: String(value.checkpointPath || value.checkpoint_path || "").trim(),
+    checkpointExists: Boolean(value.checkpointExists ?? value.checkpoint_exists),
+  };
+}
+
 function normalizeFramingMessage(message) {
   if (!message || !["user", "assistant"].includes(message.role)) return null;
   const allowedKinds = new Set(["text", "project", "goal-launch", "command"]);
@@ -274,6 +309,7 @@ function normalizeFramingMessage(message) {
         })
         .filter(Boolean)
     : [];
+  const resumeFromTrial = normalizeResumeTrialContext(message.resumeFromTrial);
   const text = String(message.text || "").trim() || (message.role === "user" && attachments.length ? attachmentOnlyMessage(attachments) : "");
   if (kind === "project" && (!artifact?.text || isPlaceholderProject(artifact.text))) return null;
   if (!text && !(artifact?.path && artifact?.text)) return null;
@@ -286,6 +322,7 @@ function normalizeFramingMessage(message) {
     ...(String(message.edited_at || "").trim() ? { edited_at: String(message.edited_at || "").trim() } : {}),
     ...(artifact?.path && artifact?.text ? { artifact } : {}),
     ...(attachments.length ? { attachments } : {}),
+    ...(resumeFromTrial ? { resumeFromTrial } : {}),
   };
 }
 
@@ -723,6 +760,7 @@ function renderProjectList() {
       const statusClass = projectStatusClass(project);
       const label = projectStatusLabel(project);
       const menuOpen = String(project.id || "") === String(openProjectMenuId || "");
+      const reviewerOutdated = Boolean(project.reviewer_status?.outdated || project.reviewerStatus?.outdated);
       return `
         <div class="project-switch-row ${selected ? "is-active" : ""}" data-project-row="${escapeHtml(project.id)}">
           <button class="project-switch" type="button" data-project-switch="${escapeHtml(project.id)}">
@@ -730,12 +768,19 @@ function renderProjectList() {
             <span>
               <strong>${escapeHtml(project.display_name || project.title || "Project")}</strong>
               <small>${escapeHtml(label)}${project.session_id ? ` · ${escapeHtml(String(project.session_id).slice(0, 8))}` : ""}</small>
+              ${reviewerOutdated ? `<small class="project-warning-line">Reviewers outdated</small>` : ""}
             </span>
           </button>
           <button class="project-menu-button" type="button" data-project-menu="${escapeHtml(project.id)}" aria-label="Project options" aria-haspopup="menu" aria-expanded="${menuOpen ? "true" : "false"}">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
           </button>
           <div class="project-menu-popover" role="menu" data-project-menu-panel="${escapeHtml(project.id)}" ${menuOpen ? "" : "hidden"}>
+            ${reviewerOutdated ? `
+              <button type="button" role="menuitem" data-project-upgrade-reviewers="${escapeHtml(project.id)}">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+                <span>Update reviewers</span>
+              </button>
+            ` : ""}
             <button type="button" role="menuitem" data-project-rename="${escapeHtml(project.id)}">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Zm11-13 2 2"/></svg>
               <span>Rename</span>
@@ -810,6 +855,25 @@ async function loadProjects() {
   renderProjectList();
   renderProjectAvailability();
   maybeOpenInitialProjectDialog();
+}
+
+async function upgradeProjectReviewers(projectId) {
+  const id = String(projectId || activeProjectId || "").trim();
+  if (!id) return;
+  const project = projectById(id) || {};
+  const payload = await api("/api/projects/upgrade-reviewers", {
+    method: "POST",
+    body: JSON.stringify({ project: id }),
+  });
+  appState = {
+    ...(appState || {}),
+    projects: Array.isArray(payload.projects) ? payload.projects : appState?.projects || [],
+    active_project_id: payload.active_project_id || activeProjectId,
+    multi_project: Boolean(payload.multi_project ?? appState?.multi_project),
+  };
+  renderProjectList();
+  if (id === activeProjectId) await loadOverview(true);
+  showToast(`Updated reviewers for ${project.display_name || project.title || "project"}.`);
 }
 
 function openProjectCreateDialog() {
@@ -1074,6 +1138,7 @@ async function loadOverview(silent = false) {
     renderStage();
     if (!holdMaterialTree) renderContext();
     renderSession();
+    scheduleWorkingTicker();
     if (!silent) showToast("Refreshed from repository files.");
   } catch (error) {
     $("#sync-state").textContent = "Could not read files";
@@ -1088,6 +1153,19 @@ function scheduleOverviewPoll(delay) {
     else await loadProjects().catch((error) => showToast(error.message, true));
     scheduleOverviewPoll(isSessionRunning() || framingDraftPending || framingReplyPending ? 1000 : 3500);
   }, delay);
+}
+
+function updateWorkingDurations() {
+  $$("[data-working-started-at]").forEach((node) => {
+    node.textContent = workingDurationText(node.dataset.workingStartedAt || "");
+  });
+}
+
+function scheduleWorkingTicker() {
+  clearTimeout(workingTickerTimer);
+  if (!isSessionRunning()) return;
+  updateWorkingDurations();
+  workingTickerTimer = setTimeout(scheduleWorkingTicker, 1000);
 }
 
 function hasVisibleTrial(trial) {
@@ -1122,12 +1200,22 @@ function sectionHasRealContent(section) {
 
 function hasVisibleManuscript() {
   const manuscript = appState?.summaries?.manuscript || {};
-  if (hasRealText(manuscript.target) || hasRealText(manuscript.contribution) || hasRealText(manuscript.core_story)) return true;
+  if (
+    hasRealText(manuscript.target) ||
+    hasRealText(manuscript.contribution) ||
+    hasRealText(manuscript.core_story) ||
+    hasRealText(manuscript.no_table_rationale) ||
+    hasRealText(manuscript.traceability)
+  ) return true;
   const sections = [
     ...(manuscript.claims || []),
+    ...(manuscript.sections || []),
     ...(manuscript.section_blueprint || []),
+    ...(manuscript.figure_plans || []),
     ...(manuscript.figures || []),
+    ...(manuscript.table_plans || []),
     ...(manuscript.tables || []),
+    ...(manuscript.figure_specs || []),
   ];
   if (sections.some(sectionHasRealContent)) return true;
   return (manuscript.missing_evidence || []).some(hasRealText);
@@ -1239,12 +1327,18 @@ function renderResumeCommandBar() {
 async function copyResumeCommand() {
   const command = codexResumeCommand();
   if (!command) return;
+  await copyTextToClipboard(command, "Codex resume command copied.");
+}
+
+async function copyTextToClipboard(text, successMessage = "Copied.") {
+  const value = String(text || "");
+  if (!value.trim()) return;
   try {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(command);
+      await navigator.clipboard.writeText(value);
     } else {
       const textarea = document.createElement("textarea");
-      textarea.value = command;
+      textarea.value = value;
       textarea.setAttribute("readonly", "");
       textarea.style.position = "fixed";
       textarea.style.opacity = "0";
@@ -1253,9 +1347,9 @@ async function copyResumeCommand() {
       document.execCommand("copy");
       textarea.remove();
     }
-    showToast("Codex resume command copied.");
+    showToast(successMessage);
   } catch (error) {
-    showToast("Could not copy command.", true);
+    showToast("Could not copy text.", true);
   }
 }
 
@@ -1277,17 +1371,65 @@ function isGoalPassed() {
   return status === "pass" || status === "passed";
 }
 
+function autoresearchCompleteBadgeHtml() {
+  return isGoalPassed() ? `<span class="autoresearch-complete-tag">Autoresearch complete</span>` : "";
+}
+
+function activeRun() {
+  const run = sessionState().active_run || {};
+  return typeof run === "object" && run ? run : {};
+}
+
+function activeRunMode() {
+  return String(activeRun().mode || sessionState().mode || "").toLowerCase();
+}
+
+function activeRunTrialIteration() {
+  const value = Number(activeRun().trial_iteration || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function isAutoresearchActiveRun() {
+  const mode = activeRunMode();
+  return Boolean(activeRun().running) && ["goal", "research"].includes(mode) && activeRunTrialIteration() > 0 && !isGoalPassed();
+}
+
 function isLiveGoalSession() {
-  return isSessionRunning() && hasGoalStarted() && !isGoalPassed();
+  return isAutoresearchActiveRun();
 }
 
 function isTrialReported(report) {
   return cleanText(report?.status, "").toLowerCase() === "reported";
 }
 
-function isTrialLive(iteration, report = null) {
-  const liveIteration = Number(sessionState().loop_iteration || 0);
-  return isLiveGoalSession() && liveIteration > 0 && Number(iteration) === liveIteration && !isTrialReported(report);
+function isTrialLive(iteration) {
+  const liveIteration = activeRunTrialIteration();
+  return isLiveGoalSession() && liveIteration > 0 && Number(iteration) === liveIteration && !activeRun().trajectory_mismatch;
+}
+
+function activeRunStatusLabel() {
+  const label = String(activeRun().status_label || "").trim();
+  if (label) return label;
+  if (isAutoresearchActiveRun()) return `Codex is working on Trial ${activeRunTrialIteration()}`;
+  return "Codex is working";
+}
+
+function activeRunScopeLabel() {
+  const iteration = activeRunTrialIteration();
+  if (isAutoresearchActiveRun() && iteration) return `Trial ${iteration} · Running`;
+  return "Current run";
+}
+
+function canPauseActiveRunAfterCurrentTurn() {
+  return isAutoresearchActiveRun();
+}
+
+function runControlButtonsHtml() {
+  if (!isSessionRunning()) return "";
+  return `
+    ${canPauseActiveRunAfterCurrentTurn() ? `<button class="secondary-button small-button current-run-control-button" type="button" data-pause-autoresearch>Pause after current turn</button>` : ""}
+    <button class="secondary-button small-button current-run-control-button" type="button" data-stop-current-run>Stop current run</button>
+  `;
 }
 
 function canMessage() {
@@ -1306,13 +1448,13 @@ function canSendSessionComposerMessage() {
 
 function isLocalSlashControl(text) {
   const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
-  return ["/goal", "/goal pause", "/goal resume", "/goal clear", "/status", "/ps", "/diff"].includes(normalized);
+  return localSlashCommandSet.has(normalized);
 }
 
 function canSendLocalSlashControl(text) {
   const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
   if (!isLocalSlashControl(normalized)) return false;
-  if (normalized === "/goal resume") return hasLaunched() && hasSession();
+  if (localSlashCommandRegistry[normalized]?.requiresSession) return hasLaunched() && hasSession();
   return true;
 }
 
@@ -1449,6 +1591,7 @@ function framingMessagesSignature(messages) {
       text: message.text,
       attachments: message.attachments || [],
       artifact: message.artifact ? { path: message.artifact.path, text: message.artifact.text } : null,
+      resumeFromTrial: message.resumeFromTrial || null,
     }))
   );
 }
@@ -1465,6 +1608,8 @@ function framingMessageDedupeKey(message) {
   return [
     String(message?.role || ""),
     String(message?.text || "").trim(),
+    String(message?.resumeFromTrial?.id || ""),
+    String(message?.resumeFromTrial?.path || ""),
     String(message?.artifact?.path || ""),
     String(message?.artifact?.text || "").trim(),
   ].join("\n");
@@ -1812,6 +1957,14 @@ function appendFramingMessage(role, text, extras = {}) {
   return message;
 }
 
+function removeFramingMessage(id) {
+  const index = localMessages.findIndex((message) => message.id === id);
+  if (index >= 0) {
+    localMessages.splice(index, 1);
+    lastFramingHtml = "";
+  }
+}
+
 function appendProjectDraftMessage(text, summary = "I drafted PROJECT.md. Review it here, edit it directly, or keep chatting to refine the framing.") {
   const draft = String(text || "").trim();
   if (!draft) return null;
@@ -1868,15 +2021,9 @@ function framingControlMessageHtml(message) {
 }
 
 function controlMessageDisplay(message, text = String(message?.text || "").trim()) {
-  const normalized = String(text || "").trim().toLowerCase();
+  const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
   if (isGoalLaunchMessage(message)) return { label: "Autoresearch", value: "Start autoresearch" };
-  if (normalized === "/goal resume") return { label: "Autoresearch", value: "Resume autoresearch" };
-  if (normalized === "/goal pause") return { label: "Autoresearch", value: "Pause autoresearch" };
-  if (normalized === "/goal clear") return { label: "Autoresearch", value: "Clear autoresearch state" };
-  if (normalized === "/goal") return { label: "Autoresearch", value: "Show autoresearch" };
-  if (normalized === "/status") return { label: "Session", value: "Show status" };
-  if (normalized === "/ps") return { label: "Session", value: "Show processes" };
-  if (normalized === "/diff") return { label: "Session", value: "Show diff" };
+  if (localSlashCommandRegistry[normalized]) return localSlashCommandRegistry[normalized];
   return { label: "Command", value: text || "Command sent" };
 }
 
@@ -1900,7 +2047,7 @@ function framingMessageHtml(message) {
       </article>
     `;
   }
-  const actions = role === "user"
+  const actions = role === "user" && !message.resumeFromTrial
     ? `<div class="framing-actions"><button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button></div>`
     : canLaunchAutoresearchFromAssistant(message)
       ? `<div class="framing-actions"><button class="primary-button small-button" type="button" data-project-launch>Start autoresearch</button></div>`
@@ -1917,10 +2064,11 @@ function framingMessageHtml(message) {
 
 function framingThinkingHtml() {
   const status = hasLaunched()
-    ? "Codex is working"
+    ? activeRunStatusLabel()
     : isSessionRunning()
       ? "Drafting PROJECT.md"
       : "Starting Codex";
+  const trialHistory = isAutoresearchActiveRun() ? activeTrialHistoryHtml() : "";
   return `
     <article class="framing-message assistant is-thinking" aria-live="polite">
       <div class="transcript-meta">CoAutoResearch</div>
@@ -1930,8 +2078,10 @@ function framingThinkingHtml() {
           <span class="thinking-dot"></span>
           <span class="thinking-dot"></span>
           <strong>${escapeHtml(status)}</strong>
+          ${isSessionRunning() ? workingDurationHtml() : ""}
         </div>
         ${framingProgressDetailsHtml()}
+        ${trialHistory}
       </div>
     </article>
   `;
@@ -2043,11 +2193,22 @@ function framingProgressRowsHtml(entries) {
 function framingProgressDetailsHtml() {
   const entries = currentProgressEntries();
   const count = entries.length;
+  const latestEntry = latestTrialProgressEntry(entries);
+  const latestText = latestEntry
+    ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
+    : "Waiting for Codex events...";
+  const runControls = runControlButtonsHtml();
   return `
     <details class="framing-progress-details">
       <summary>
         <span>Current run activity</span>
-        <strong>${escapeHtml(count ? `${count} event${count === 1 ? "" : "s"}` : "waiting")}</strong>
+        <span class="current-run-summary">
+          ${isSessionRunning() ? workingDurationHtml() : ""}
+          <span>${escapeHtml(activeRunScopeLabel())}</span>
+          <span>${escapeHtml(compactText(latestText, 180))}</span>
+          <strong>${escapeHtml(count ? `${count} event${count === 1 ? "" : "s"}` : "waiting")}</strong>
+        </span>
+        ${runControls}
       </summary>
       ${framingProgressRowsHtml(entries)}
     </details>
@@ -2117,6 +2278,7 @@ function renderFramingConversation() {
   if (nextHtml !== lastFramingHtml) {
     const renderedDraft = document.querySelector(".project-rendered");
     if (renderedDraft) projectRenderedScrollTop = renderedDraft.scrollTop;
+    rememberTrialStripScroll();
     thread.innerHTML = nextHtml;
     lastFramingHtml = nextHtml;
     requestAnimationFrame(() => {
@@ -2124,6 +2286,7 @@ function renderFramingConversation() {
       if (nextRenderedDraft) {
         nextRenderedDraft.scrollTop = Math.min(projectRenderedScrollTop, nextRenderedDraft.scrollHeight);
       }
+      restoreTrialStripScroll();
     });
     if (pending && wasNearBottom) {
       scrollFramingToBottomSoon();
@@ -2597,6 +2760,15 @@ function renderChatState() {
   renderChatSummary();
 }
 
+function coldComposerPlaceholder(hasFramingThread) {
+  if (hasLaunched()) {
+    return "Message Codex about the current research, ask for status, attach resources, or steer the next step...";
+  }
+  return hasFramingThread
+    ? "Ask Codex to revise PROJECT.md, narrow the scope, change the target venue, or add constraints..."
+    : "Research topic, problem, scope, and data or materials to use...";
+}
+
 function renderColdStartEditor() {
   const files = appState?.cold_start_files || [];
   if (!files.length) return;
@@ -2610,10 +2782,15 @@ function renderColdStartEditor() {
     : "Saved to resources/user_input/INITIAL_BRIEF.md";
   const editor = $("#cold-file-editor");
   const hasFramingThread = localMessages.length > 0 || framingDraftPending || framingReplyPending;
-  const nextEditorValue = hasFramingThread ? "" : coldFiles[activeColdPath] ?? "";
-  editor.placeholder = hasFramingThread
-    ? "Ask Codex to revise PROJECT.md, narrow the scope, change the target venue, or add constraints..."
-    : "Research topic, problem, scope, and data or materials to use...";
+  const currentEditorValue = String(editor.value || "");
+  const sessionComposerMode = hasProjectDraftReady() || hasLaunched() || hasFramingThread;
+  if (sessionComposerMode && document.activeElement === editor) {
+    composerDraft = currentEditorValue;
+  }
+  const nextEditorValue = sessionComposerMode
+    ? (currentEditorValue || composerDraft || "")
+    : coldFiles[activeColdPath] ?? "";
+  editor.placeholder = coldComposerPlaceholder(hasFramingThread);
   if (document.activeElement !== editor && editor.value !== nextEditorValue) {
     editor.value = nextEditorValue;
   }
@@ -2966,30 +3143,40 @@ function sessionTranscriptEntries() {
   return entries;
 }
 
+function trialIterationValue(trial) {
+  const explicit = Number(trial?.iteration || 0);
+  if (explicit > 0) return explicit;
+  const match = String(trial?.id || "").match(/^0*(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
 function visibleTrialReports() {
   return (appState?.trials || [])
-    .filter((trial) => hasVisibleTrial(trial) && String(trial.report_path || "").trim())
+    .filter((trial) => hasVisibleTrial(trial) && trial?.is_archived !== true && String(trial.report_path || "").trim())
     .filter((trial) => !/^0*_?project_conversion/i.test(String(trial.id || "")))
-    .sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+    .sort((a, b) => trialIterationValue(a) - trialIterationValue(b) || String(a.id || "").localeCompare(String(b.id || "")));
 }
 
 function reportForIteration(iteration) {
-  const index = Math.max(0, Number(iteration || 1) - 1);
-  return visibleTrialReports()[index] || null;
+  const target = Number(iteration || 0);
+  return visibleTrialReports().find((trial) => trialIterationValue(trial) === target) || null;
 }
 
 function currentTrialIndex(trials = visibleTrialReports()) {
-  const loopIteration = Number(sessionState().loop_iteration || 0);
-  const count = Array.isArray(trials) ? trials.length : Number(trials || 0);
-  if (isLiveGoalSession() && loopIteration > 0) return Math.min(Math.max(loopIteration, 1), Math.max(count, loopIteration, 1));
-  return Math.max(count, 1);
+  const loopIteration = activeRunTrialIteration();
+  const items = Array.isArray(trials) ? trials : visibleTrialReports();
+  const iterations = items.map((trial) => Number(trial.iteration || trialIterationValue(trial) || 0)).filter(Boolean);
+  const latest = Math.max(...iterations, 0);
+  return Math.max(latest, 1);
 }
 
 function selectedTrial(trials = visibleTrialReports()) {
   if (!trials.length) return 0;
   const fallback = currentTrialIndex(trials);
   const value = Number(selectedTrialIndex || 0);
-  return Math.min(Math.max(value || fallback, 1), trials.length);
+  const iterations = trials.map((trial) => Number(trial.iteration || 0)).filter(Boolean);
+  if (value && iterations.includes(value)) return value;
+  return iterations.includes(fallback) ? fallback : iterations[iterations.length - 1];
 }
 
 function startsGoalIteration(entry) {
@@ -3028,17 +3215,21 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const reportStatus = cleanText(report?.status, "");
   const running = isTrialLive(iteration, report);
   const status = running ? "running" : reportStatus === "reported" ? "completed" : reportStatus || (report ? "completed" : "active");
+  const latestCompletedIteration = currentTrialIndex();
+  const marksAutoresearchComplete = isGoalPassed() && Number(iteration) === Number(latestCompletedIteration);
   return `
     <article class="trial-report-card ${running ? "is-running" : report ? "is-complete" : "is-pending"}" data-trial-panel="${escapeHtml(iteration)}">
       <div class="trial-report-head">
         <div>
           <strong>Trial ${escapeHtml(iteration)}</strong>
           <em>${escapeHtml(status)}</em>
+          ${marksAutoresearchComplete ? `<em class="is-autoresearch-complete">Autoresearch complete</em>` : ""}
         </div>
         <span>${report ? `${escapeHtml(report.id)} / ${escapeHtml(report.report_path)}` : "Report pending"}</span>
       </div>
       <p>${escapeHtml(summary)}</p>
       <div class="trial-report-actions">
+        ${report?.report_path && !running ? `<button class="secondary-button small-button" type="button" data-trial-continue="${escapeHtml(iteration)}">Continue from this trial</button>` : ""}
         ${report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : ""}
         ${report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : ""}
       </div>
@@ -3066,8 +3257,8 @@ function latestTrialProgressEntry(entries) {
 }
 
 function runningTrialStatusHtml(trial) {
-  const iteration = Number(trial?.iteration || sessionState().loop_iteration || 0);
-  if (!iteration || !isTrialLive(iteration, trial?.report)) return "";
+  const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
+  if (!iteration || !isTrialLive(iteration)) return "";
   const entries = Array.isArray(trial?.entries) ? trial.entries : [];
   const latestEntry = latestTrialProgressEntry(entries);
   const latestText = latestEntry
@@ -3081,9 +3272,13 @@ function runningTrialStatusHtml(trial) {
           <span class="thinking-dot"></span>
           <span class="thinking-dot"></span>
           <span class="thinking-dot"></span>
-          <strong>Trial ${escapeHtml(iteration)} is running</strong>
+          <strong>${escapeHtml(activeRunStatusLabel())}</strong>
+          ${workingDurationHtml()}
         </div>
-        <span>${escapeHtml(eventLabel)}</span>
+        <div class="trial-live-status-actions">
+          <span>${escapeHtml(eventLabel)}</span>
+          ${runControlButtonsHtml()}
+        </div>
       </div>
       <p>${escapeHtml(compactText(latestText, 240))}</p>
       ${
@@ -3099,6 +3294,24 @@ function runningTrialStatusHtml(trial) {
       }
     </section>
   `;
+}
+
+function clampTrialStripScrollLeft(strip, value) {
+  const requested = Math.max(0, Number(value) || 0);
+  const max = Math.max(0, Number(strip?.scrollWidth || 0) - Number(strip?.clientWidth || 0));
+  return max ? Math.min(requested, max) : requested;
+}
+
+function rememberTrialStripScroll(strip = document.querySelector(".trial-strip-scroll")) {
+  if (!strip) return;
+  trialStripScrollLeft = clampTrialStripScrollLeft(strip, strip.scrollLeft);
+}
+
+function restoreTrialStripScroll() {
+  const strip = document.querySelector(".trial-strip-scroll");
+  if (!strip) return;
+  strip.scrollLeft = clampTrialStripScrollLeft(strip, trialStripScrollLeft);
+  strip.addEventListener("scroll", () => rememberTrialStripScroll(strip), { passive: true });
 }
 
 function iterationNavHtml(trials, activeTrial) {
@@ -3137,12 +3350,18 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
   const countLabel = `${trials.length} trial${trials.length === 1 ? "" : "s"}${reportedCount ? ` · ${reportedCount} reported` : ""}`;
   const latest = trials[trials.length - 1];
   const latestReport = latest?.report?.id ? cleanText(latest.report.id, "") : "";
+  const activeTrialIsRunningWithoutReport = runningTrialData
+    && activeTrialData
+    && Number(runningTrialData.iteration) === Number(activeTrialData.iteration)
+    && !activeTrialData.report?.report_path;
+  const shouldShowActiveTrialReport = activeTrialData && !activeTrialIsRunningWithoutReport;
   return `
     <section class="trial-history-card" aria-label="Autoresearch trials">
       <header class="trial-history-head">
         <div>
           <strong>Trials</strong>
           <span>${escapeHtml(countLabel)} · ${escapeHtml(selectedLabel)}</span>
+          ${autoresearchCompleteBadgeHtml()}
           <button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>
         </div>
         ${latestReport ? `<p>Latest: ${escapeHtml(latestReport)}</p>` : ""}
@@ -3150,7 +3369,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
       <div class="trial-history-body">
         ${iterationNavHtml(trials, activeTrial)}
         ${runningTrialData ? runningTrialStatusHtml(runningTrialData) : ""}
-        ${activeTrialData ? trialReportSummaryHtml(activeTrialData.iteration, activeTrialData.entries, activeTrialData.report) : ""}
+        ${shouldShowActiveTrialReport ? trialReportSummaryHtml(activeTrialData.iteration, activeTrialData.entries, activeTrialData.report) : ""}
       </div>
     </section>
   `;
@@ -3163,13 +3382,28 @@ function entryTimeValue(entry) {
 
 function formatWorkedDuration(seconds) {
   const value = Math.max(0, Math.round(Number(seconds) || 0));
-  if (value < 60) return `${value || 1}s`;
-  const minutes = Math.floor(value / 60);
+  if (value <= 0) return "1s";
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
   const remainingSeconds = value % 60;
-  if (minutes < 60) return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes) parts.push(`${minutes}m`);
+  if (remainingSeconds || !parts.length) parts.push(`${remainingSeconds}s`);
+  return parts.join(" ");
+}
+
+function workingDurationText(startedAt = activeRun().started_at || sessionState().started_at) {
+  const start = Date.parse(String(startedAt || ""));
+  if (!Number.isFinite(start) || start <= 0) return "Working";
+  return `Working for ${formatWorkedDuration((Date.now() - start) / 1000)}`;
+}
+
+function workingDurationHtml(startedAt = activeRun().started_at || sessionState().started_at) {
+  const started = String(startedAt || "");
+  return `<span class="working-duration" data-working-started-at="${escapeHtml(started)}">${escapeHtml(workingDurationText(started))}</span>`;
 }
 
 function workedDurationLabel(userEntry, entries) {
@@ -3270,8 +3504,8 @@ function buildFramingActivityByMessage(messages, entries) {
   return { htmlBeforeMessageId, omittedEntryIds };
 }
 
-function sessionTimelineHtml(entries, options = {}) {
-  if (!entries.length && !visibleTrialReports().length) return "";
+function trialTimelineContentHtml(entries, options = {}) {
+  if (!entries.length && !visibleTrialReports().length && !activeRunTrialIteration()) return "";
   const omittedEntryIds = options.omittedEntryIds || new Set();
   const trialGroups = new Map();
   let currentIteration = 0;
@@ -3291,18 +3525,32 @@ function sessionTimelineHtml(entries, options = {}) {
   });
 
   const reports = visibleTrialReports();
-  const liveIteration = isLiveGoalSession() ? Number(sessionState().loop_iteration || 0) : 0;
-  const maxTrial = Math.max(reports.length, ...Array.from(trialGroups.keys()), liveIteration, 0);
-  const trials = [];
-  for (let index = 1; index <= maxTrial; index += 1) {
-    const trialEntries = trialGroups.get(index) || [];
-    const report = reports[index - 1] || null;
-    trials.push({ iteration: index, entries: trialEntries, report });
-  }
-  const activeTrial = selectedTrial(trials);
+  const liveIteration = isLiveGoalSession() ? activeRunTrialIteration() : 0;
+  const reportByIteration = new Map(reports.map((report) => [trialIterationValue(report), report]));
+  const iterationValues = new Set([
+    ...reports.map((report) => trialIterationValue(report)).filter(Boolean),
+    ...Array.from(trialGroups.keys()).filter(Boolean),
+  ]);
+  if (liveIteration) iterationValues.add(liveIteration);
+  const trials = Array.from(iterationValues)
+    .sort((a, b) => a - b)
+    .map((iteration) => ({
+      iteration,
+      entries: trialGroups.get(iteration) || [],
+      report: reportByIteration.get(iteration) || null,
+    }));
+  const activeTrial = liveIteration || selectedTrial(trials);
   const activeTrialData = trials.find((trial) => Number(trial.iteration) === Number(activeTrial));
-  const runningTrialData = liveIteration ? trials.find((trial) => isTrialLive(trial.iteration, trial.report)) : null;
-  const trialHistory = trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData);
+  const runningTrialData = liveIteration ? trials.find((trial) => isTrialLive(trial.iteration)) : null;
+  return trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData);
+}
+
+function activeTrialHistoryHtml() {
+  return trialTimelineContentHtml(sessionTranscriptEntries());
+}
+
+function sessionTimelineHtml(entries, options = {}) {
+  const trialHistory = trialTimelineContentHtml(entries, options);
   if (!trialHistory) return "";
   return `
     <section class="transcript-timeline with-axis" aria-label="Codex transcript">
@@ -3516,6 +3764,18 @@ function previewButton(path, label = "Preview") {
   return `<button class="mini-button" type="button" data-card-preview="${escapeHtml(path)}">${escapeHtml(label)}</button>`;
 }
 
+function copyButton(text, label = "Copy", message = "Copied.") {
+  const value = String(text || "").trim();
+  if (!value) return "";
+  return `<button class="secondary-button small-button" type="button" data-copy-text="${escapeHtml(encodeURIComponent(value))}" data-copy-label="${escapeHtml(message)}">${escapeHtml(label)}</button>`;
+}
+
+function inlineOpenButton(path, label = "Open source") {
+  const value = repoRelativePath(path);
+  if (!value || value.includes("*")) return "";
+  return `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+}
+
 function renderTree(node, depth = 0) {
   if (!node) return empty("No files here yet.");
   if (node.type === "file") {
@@ -3710,6 +3970,7 @@ function renderReviewsPanel() {
               </div>
               <p class="review-summary">${escapeHtml(reviewSummary(review))}</p>
               <p class="review-path">${escapeHtml(review.path || "")}</p>
+              <div class="card-inline-file" hidden></div>
             </article>
           `;
         })
@@ -3737,11 +3998,28 @@ const figureSpecFieldLabels = new Set([
   "Status",
   "Figure type",
   "Purpose",
+  "Argument or result role",
   "Content",
+  "Content and panel layout",
+  "Visual status",
   "Visual style",
   "Detailed generation-style prompt",
+  "Caption",
   "Caption draft",
+  "Caption draft or current caption",
+  "Caption from revised source",
   "Evidence / conceptual basis",
+  "Linked claims",
+  "Linked evidence",
+  "Source trial",
+  "Source artifact path",
+  "Existing source files",
+  "Inclusion status",
+  "Target-venue fit",
+  "Target-venue fit rationale",
+  "Remaining blocker",
+  "Result",
+  "Result shown",
   "Notes",
 ]);
 
@@ -3752,10 +4030,11 @@ function figureSpecFields(body) {
     .replaceAll(/\r\n/g, "\n")
     .split("\n")
     .forEach((line) => {
-      const label = line.trim().replace(/:$/, "");
-      if (line.trim().endsWith(":") && figureSpecFieldLabels.has(label)) {
+      const match = line.trim().match(/^(.+?):\s*(.*)$/);
+      const label = match ? match[1].trim() : line.trim().replace(/:$/, "");
+      if (match && figureSpecFieldLabels.has(label)) {
         current = label;
-        fields[current] = "";
+        fields[current] = match[2] || "";
         return;
       }
       if (!current) return;
@@ -3789,38 +4068,342 @@ function figureSpecDetail(label, value, limit = 320) {
   `;
 }
 
-function figureSpecCardsHtml(specs) {
+function normalizeManuscriptKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeFieldLabel(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/:$/, "");
+}
+
+function markdownFieldValue(body, label) {
+  const target = normalizeFieldLabel(label);
+  const values = [];
+  let collecting = false;
+  for (const rawLine of String(body || "").replaceAll(/\r\n/g, "\n").split("\n")) {
+    const trimmed = rawLine.trim();
+    const line = trimmed.replace(/^[-*]\s+/, "");
+    const match = line.match(/^([^:]{2,90}):\s*(.*)$/);
+    if (match) {
+      const current = normalizeFieldLabel(match[1]);
+      if (collecting && current !== target) break;
+      if (current === target) {
+        collecting = true;
+        if (match[2]) values.push(match[2]);
+        continue;
+      }
+    }
+    if (collecting) values.push(rawLine);
+  }
+  return cleanText(values.join("\n").trim(), "");
+}
+
+function manuscriptFieldValue(section, labels) {
+  for (const label of labels) {
+    const value = markdownFieldValue(section?.body, label);
+    if (hasRealText(value)) return value;
+  }
+  return "";
+}
+
+function figureReferenceKeys(value) {
+  const keys = new Set();
+  const text = String(value || "");
+  for (const match of text.matchAll(/\bF0*(\d{1,6})\b/gi)) {
+    const number = Number(match[1]);
+    if (!number) continue;
+    keys.add(`figure-${number}`);
+    keys.add(`f${String(number).padStart(6, "0")}`);
+  }
+  for (const match of text.matchAll(/\bFigure\s+(\d{1,6})\b/gi)) {
+    const number = Number(match[1]);
+    if (number) keys.add(`figure-${number}`);
+  }
+  return keys;
+}
+
+function figureTitleAlias(title) {
+  return normalizeManuscriptKey(
+    String(title || "")
+      .replace(/^figure\s+(?:f?\d{1,6}|\d+)\s*:?\s*/i, "")
+      .replace(/^figure\s+plan\s*:?\s*/i, "")
+  );
+}
+
+function figureMatchKeys(section) {
+  const keys = figureReferenceKeys(`${section?.title || ""}\n${section?.body || ""}`);
+  const titleKey = normalizeManuscriptKey(section?.title);
+  const alias = figureTitleAlias(section?.title);
+  if (titleKey) keys.add(titleKey);
+  if (alias) keys.add(`title-${alias}`);
+  return keys;
+}
+
+function intersectSets(left, right) {
+  for (const item of left) {
+    if (right.has(item)) return true;
+  }
+  return false;
+}
+
+function figureSpecsForSection(section, specs) {
+  const sectionKeys = figureMatchKeys(section);
+  const sectionCorpus = normalizeManuscriptKey(`${section?.title || ""}\n${section?.body || ""}`);
+  return (specs || [])
+    .filter((spec) => sectionHasRealContent(spec))
+    .filter((spec) => {
+      const specKeys = figureMatchKeys(spec);
+      if (intersectSets(sectionKeys, specKeys)) return true;
+      const alias = figureTitleAlias(spec.title);
+      return Boolean(alias && sectionCorpus.includes(alias));
+    });
+}
+
+function findFigureSpecForPlan(plan, specs) {
+  return figureSpecsForSection(plan, specs)[0] || null;
+}
+
+function figureSpecCaption(fields) {
+  return (
+    fields["Caption from revised source"] ||
+    fields["Caption draft or current caption"] ||
+    fields["Caption draft"] ||
+    fields.Caption ||
+    ""
+  );
+}
+
+function firstArtifactPath(value) {
+  const text = String(value || "");
+  const candidates = [];
+  for (const match of text.matchAll(/`([^`]+)`/g)) candidates.push(match[1]);
+  for (const match of text.matchAll(/\b(?:manuscript|research_trajectory|resources|data|analysis|figures|outputs)\/[^\s`"')\]}>,;]+/g)) {
+    candidates.push(match[0]);
+  }
+  for (const candidate of candidates) {
+    const normalized = repoRelativePath(String(candidate || "").replace(/[.,;:)]+$/, ""));
+    if (!normalized || normalized.includes("*")) continue;
+    if (/\.[A-Za-z0-9]{2,8}$/.test(normalized)) return normalized;
+  }
+  return "";
+}
+
+function figureSpecSourcePath(fields, body) {
+  return firstArtifactPath(
+    [
+      fields["Source artifact path"],
+      fields["Existing source files"],
+      fields["Visual status"],
+      fields.Notes,
+      body,
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+}
+
+function figureSpecFullText(section) {
+  return [`### ${cleanText(section?.title, "Untitled figure")}`, section?.body || ""].join("\n\n").trim();
+}
+
+function manuscriptActionsHtml(items) {
+  const buttons = items.filter(Boolean).join("");
+  return buttons ? `<div class="manuscript-actions">${buttons}</div>` : "";
+}
+
+function figureSpecCardHtml(section, options = {}) {
+  const fields = figureSpecFields(section.body);
+  const status = figureSpecExcerpt(fields.Status || fields["Inclusion status"], 90);
+  const type = figureSpecExcerpt(fields["Figure type"], 120);
+  const caption = figureSpecCaption(fields);
+  const sourcePath = figureSpecSourcePath(fields, section.body);
+  const compact = Boolean(options.compact);
+  return `
+    <article class="figure-spec-card ${compact ? "is-compact" : ""}">
+      <header class="figure-spec-head">
+        <div>
+          <p>${escapeHtml(options.label || "Figure spec")}</p>
+          <h4>${escapeHtml(cleanText(section.title, "Untitled figure"))}</h4>
+        </div>
+        ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(status)}</span>` : ""}
+      </header>
+      ${manuscriptActionsHtml([
+        copyButton(figureSpecFullText(section), "Copy spec", "Figure spec copied."),
+        caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
+        sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
+      ])}
+      ${type ? `<p class="figure-type">${escapeHtml(type)}</p>` : ""}
+      ${figureSpecDetail("Purpose", fields.Purpose)}
+      ${figureSpecDetail("Content", fields["Content and panel layout"] || fields.Content, compact ? 220 : 340)}
+      ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, compact ? 240 : 420))}</blockquote>` : ""}
+      ${figureSpecDetail("Evidence / conceptual basis", fields["Evidence / conceptual basis"] || fields["Linked evidence"], compact ? 220 : 300)}
+      ${figureSpecDetail("Target-venue fit", fields["Target-venue fit"] || fields["Target-venue fit rationale"], compact ? 180 : 260)}
+      ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
+      <details class="figure-spec-full">
+        <summary>Full spec</summary>
+        <div class="markdown-preview">${markdownToHtml(section.body)}</div>
+      </details>
+    </article>
+  `;
+}
+
+function figureSpecCardsHtml(specs, options = {}) {
   const values = (specs || []).filter((section) => sectionHasRealContent(section));
   if (!values.length) return empty("No figure descriptions recorded yet.");
   return `
     <div class="figure-spec-grid">
-      ${values
-        .map((section) => {
-          const fields = figureSpecFields(section.body);
-          const status = figureSpecExcerpt(fields.Status, 90);
-          const type = figureSpecExcerpt(fields["Figure type"], 120);
-          const caption = figureSpecExcerpt(fields["Caption draft"], 280);
-          return `
-            <article class="figure-spec-card">
-              <header class="figure-spec-head">
-                <div>
-                  <p>Figure description</p>
-                  <h4>${escapeHtml(cleanText(section.title, "Untitled figure"))}</h4>
-                </div>
-                ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(status)}</span>` : ""}
-              </header>
-              ${type ? `<p class="figure-type">${escapeHtml(type)}</p>` : ""}
-              ${figureSpecDetail("Purpose", fields.Purpose)}
-              ${figureSpecDetail("Content", fields.Content, 300)}
-              ${caption ? `<blockquote class="figure-caption">${inlineMarkup(caption)}</blockquote>` : ""}
-              ${figureSpecDetail("Evidence / conceptual basis", fields["Evidence / conceptual basis"], 260)}
-              ${figureSpecDetail("Notes", fields.Notes, 220)}
-            </article>
-          `;
-        })
-        .join("")}
+      ${values.map((section) => figureSpecCardHtml(section, options)).join("")}
     </div>
   `;
+}
+
+function paperSectionHtml(section, specs) {
+  const fields = [
+    ["Purpose", manuscriptFieldValue(section, ["Purpose"])],
+    ["Role", manuscriptFieldValue(section, ["Target-venue role", "Role", "Section role"])],
+    ["Evidence/result", manuscriptFieldValue(section, ["Evidence", "Accepted claims", "Result", "Results", "Content to include"])],
+    ["Figures/tables", manuscriptFieldValue(section, ["Figures / tables", "Figures", "Tables"])],
+  ].filter(([, value]) => hasRealText(value));
+  const relatedSpecs = figureSpecsForSection(section, specs);
+  const fallback = fields.length ? "" : `<div class="markdown-preview">${markdownToHtml(section.body)}</div>`;
+  return `
+    <article class="paper-section-row">
+      <header class="paper-section-head">
+        <p>Paper section</p>
+        <h4>${escapeHtml(cleanText(section.title, "Untitled section"))}</h4>
+      </header>
+      ${fields.length ? `
+        <dl class="paper-field-grid">
+          ${fields
+            .map(([label, value]) => `
+              <div>
+                <dt>${escapeHtml(label)}</dt>
+                <dd><div class="markdown-preview">${markdownToHtml(value)}</div></dd>
+              </div>
+            `)
+            .join("")}
+        </dl>
+      ` : ""}
+      ${fallback}
+      ${relatedSpecs.length ? `
+        <div class="paper-linked-block">
+          <h5>Figure specs at this location</h5>
+          ${figureSpecCardsHtml(relatedSpecs, { compact: true, label: "Inline figure spec" })}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function renderPaperOutline(manuscript) {
+  const sections = (manuscript.sections || manuscript.section_blueprint || []).filter(sectionHasRealContent);
+  const specs = (manuscript.figure_specs || []).filter(sectionHasRealContent);
+  if (!sections.length) return empty("No paper outline is available yet.");
+  return `
+    <section class="paper-outline">
+      ${hasRealText(manuscript.core_story) ? `<p class="paper-story">${escapeHtml(manuscript.core_story)}</p>` : ""}
+      ${sections.map((section) => paperSectionHtml(section, specs)).join("")}
+    </section>
+  `;
+}
+
+function figurePlanRowHtml(plan, specs, usedSpecs) {
+  const spec = findFigureSpecForPlan(plan, specs);
+  if (spec) usedSpecs.add(spec);
+  return `
+    <article class="figure-plan-row">
+      <header class="paper-section-head">
+        <p>Figure plan</p>
+        <h4>${escapeHtml(cleanText(plan.title, spec?.title || "Untitled figure"))}</h4>
+      </header>
+      ${manuscriptActionsHtml([
+        copyButton([`### ${plan.title}`, plan.body].join("\n\n"), "Copy plan", "Figure plan copied."),
+        spec ? copyButton(figureSpecFullText(spec), "Copy spec", "Figure spec copied.") : "",
+      ])}
+      <div class="markdown-preview">${markdownToHtml(plan.body)}</div>
+      ${spec ? figureSpecCardHtml(spec, { label: "Matched figure spec" }) : empty("No matching figure spec found in FIGURE_SPECS.md.")}
+    </article>
+  `;
+}
+
+function renderFiguresPanel(manuscript) {
+  const plans = (manuscript.figure_plans || manuscript.figures || []).filter(sectionHasRealContent);
+  const specs = (manuscript.figure_specs || []).filter(sectionHasRealContent);
+  const usedSpecs = new Set();
+  const planned = plans.map((plan) => figurePlanRowHtml(plan, specs, usedSpecs)).join("");
+  const unplannedSpecs = specs.filter((spec) => !usedSpecs.has(spec));
+  if (!planned && !unplannedSpecs.length) return empty("No figure plan or figure specs are available yet.");
+  return `
+    <section class="manuscript-figures">
+      ${planned}
+      ${unplannedSpecs.length ? `
+        <div class="paper-linked-block">
+          <h5>Additional figure specs</h5>
+          ${figureSpecCardsHtml(unplannedSpecs, { label: "Figure spec" })}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function realTablePlans(manuscript) {
+  const source = manuscript.table_plans?.length ? manuscript.table_plans : (manuscript.tables || []);
+  return source
+    .filter(sectionHasRealContent)
+    .filter((section) => !/^table\s+plan$/i.test(String(section.title || "").trim()))
+    .filter((section) => !/^no-table rationale$/i.test(String(section.title || "").trim()));
+}
+
+function renderTablesPanel(manuscript) {
+  const plans = realTablePlans(manuscript);
+  if (plans.length) {
+    return `
+      <section class="manuscript-tables">
+        ${plans
+          .map((section) => {
+            const sourcePath = firstArtifactPath(section.body);
+            return `
+              <article class="table-plan-row">
+                <header class="paper-section-head">
+                  <p>Table</p>
+                  <h4>${escapeHtml(cleanText(section.title, "Untitled table"))}</h4>
+                </header>
+                ${manuscriptActionsHtml([
+                  copyButton([`### ${section.title}`, section.body].join("\n\n"), "Copy table", "Table content copied."),
+                  sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
+                ])}
+                <div class="markdown-preview">${markdownToHtml(section.body)}</div>
+              </article>
+            `;
+          })
+          .join("")}
+      </section>
+    `;
+  }
+  const fallback = cleanText(manuscript.no_table_rationale, "No active tables are specified for this manuscript.");
+  return `
+    <section class="table-empty-rationale">
+      <div>
+        <h4>No active tables</h4>
+        <div class="markdown-preview">${markdownToHtml(fallback)}</div>
+      </div>
+      ${copyButton(fallback, "Copy rationale", "No-table rationale copied.")}
+    </section>
+  `;
+}
+
+function renderTraceabilityPanel(manuscript) {
+  const traceability = cleanText(manuscript.traceability, "");
+  if (hasRealText(traceability)) {
+    return `
+      <details class="traceability-details">
+        <summary>Claims and evidence map</summary>
+        ${copyButton(traceability, "Copy traceability", "Traceability copied.")}
+        <div class="markdown-preview">${markdownToHtml(traceability)}</div>
+      </details>
+    `;
+  }
+  return sectionList(manuscript.claims, "No traceability map is available yet.");
 }
 
 function renderManuscriptPanel() {
@@ -3832,11 +4415,10 @@ function renderManuscriptPanel() {
   `;
   return [
     contextCard("Current manuscript", blueprintViewer, "Latest manuscript blueprint synthesized from accepted findings and trial reports.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
-    contextCard("Story", `<p>${escapeHtml(cleanText(manuscript.core_story, "No manuscript story yet."))}</p>`),
-    contextCard("Claims", sectionList(manuscript.claims, "No claims yet.")),
-    contextCard("Sections", sectionList(manuscript.section_blueprint, "No section plan yet.")),
-    contextCard("Figure descriptions", figureSpecCardsHtml(manuscript.figure_specs), "Detailed figure plan from FIGURE_SPECS.md.", previewButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
-    contextCard("Figure plan", sectionList(manuscript.figures, "No figure plan yet.")),
+    contextCard("Paper outline", renderPaperOutline(manuscript), "Human-readable manuscript architecture with figures attached where they belong."),
+    contextCard("Figures", renderFiguresPanel(manuscript), "One card per planned figure, matched to FIGURE_SPECS.md.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
+    contextCard("Tables", renderTablesPanel(manuscript), "Render stable table content here; otherwise explain why no table is active."),
+    contextCard("Traceability", renderTraceabilityPanel(manuscript), "Secondary audit map for claims and evidence."),
     contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
   ].join("");
 }
@@ -4006,6 +4588,71 @@ function linkToChip(item) {
   `;
 }
 
+function resumeTrialLabel(context) {
+  const iteration = Number(context?.iteration || 0);
+  return iteration > 0 ? `Trial ${iteration}` : "selected trial";
+}
+
+function resumeTrialContextFromReport(iteration, report) {
+  if (!report?.report_path) return null;
+  const actualIteration = trialIterationValue(report) || Number(iteration || 0);
+  return normalizeResumeTrialContext({
+    id: report.id || "",
+    path: report.path || "",
+    iteration: actualIteration,
+    name: report.id || `Trial ${actualIteration}`,
+    reportPath: report.report_path || "",
+    checkpointPath: report.checkpoint_path || "",
+    checkpointExists: Boolean(report.checkpoint_exists),
+  });
+}
+
+function resumeContextChipHtml(context, options = {}) {
+  const value = normalizeResumeTrialContext(context);
+  if (!value) return "";
+  const removable = options.removable !== false;
+  const checkpointLabel = value.checkpointExists ? "checkpoint available" : "best-effort restore";
+  return `
+    <div class="attachment-chip resume-context-chip">
+      <span class="attachment-icon">TRIAL</span>
+      <span class="attachment-copy">
+        <strong>Continue from ${escapeHtml(resumeTrialLabel(value))}</strong>
+        <small>${escapeHtml(value.name)} · ${escapeHtml(checkpointLabel)}</small>
+      </span>
+      ${removable ? `<button type="button" data-resume-trial-remove aria-label="Remove continue-from-trial context">×</button>` : ""}
+    </div>
+  `;
+}
+
+function setResumeTrialContext(context) {
+  selectedResumeTrialContext = normalizeResumeTrialContext(context);
+  renderAttachmentTrays();
+  renderComposerSuggestions();
+  $("#cold-file-editor")?.focus();
+  if (selectedResumeTrialContext) showToast(`Ready to continue from ${resumeTrialLabel(selectedResumeTrialContext)}. Add instructions, then send.`);
+}
+
+function clearResumeTrialContext() {
+  selectedResumeTrialContext = null;
+  renderAttachmentTrays();
+  renderComposerSuggestions();
+}
+
+function selectedResumeTrialPayload() {
+  const context = normalizeResumeTrialContext(selectedResumeTrialContext);
+  return context ? { ...context } : null;
+}
+
+function resumeTrialOnlyMessage(context) {
+  return `Continue from ${resumeTrialLabel(context)}.`;
+}
+
+function messageResumeContextHtml(message) {
+  const context = normalizeResumeTrialContext(message?.resumeFromTrial);
+  if (!context) return "";
+  return `<div class="message-attachments">${resumeContextChipHtml(context, { removable: false })}</div>`;
+}
+
 function messageAttachmentChip(item) {
   const isLink = item.kind === "link";
   const name = isLink ? basename(item.path) : item.name;
@@ -4023,12 +4670,16 @@ function messageAttachmentChip(item) {
 
 function messageAttachmentsHtml(message) {
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-  if (!attachments.length) return "";
-  return `<div class="message-attachments">${attachments.map(messageAttachmentChip).join("")}</div>`;
+  const attachmentHtml = attachments.length ? `<div class="message-attachments">${attachments.map(messageAttachmentChip).join("")}</div>` : "";
+  return `${messageResumeContextHtml(message)}${attachmentHtml}`;
 }
 
 function renderAttachmentTrays() {
-  const html = [...selectedResourceItems.map(linkToChip), ...selectedUploadItems.map(uploadToChip)].join("");
+  const html = [
+    resumeContextChipHtml(selectedResumeTrialContext),
+    ...selectedResourceItems.map(linkToChip),
+    ...selectedUploadItems.map(uploadToChip),
+  ].filter(Boolean).join("");
   ["#brief-attachment-tray", "#chat-attachment-tray"].forEach((selector) => {
     const tray = $(selector);
     if (!tray) return;
@@ -4557,20 +5208,178 @@ function clearFramingComposerAttachments() {
   renderSelectedResources();
 }
 
+function copyComposerItems(items) {
+  return items.map((item) => ({ ...item }));
+}
+
+function replaceComposerItems(target, items) {
+  target.splice(0, target.length, ...copyComposerItems(items || []));
+}
+
+function snapshotFramingComposerState() {
+  const editor = $("#cold-file-editor");
+  return {
+    text: String(editor?.value || ""),
+    composerDraft,
+    activeColdPath,
+    activeColdText: activeColdPath ? coldFiles[activeColdPath] : undefined,
+    selectedResources: copyComposerItems(selectedResourceItems),
+    selectedUploads: copyComposerItems(selectedUploadItems),
+    sentResources: copyComposerItems(sentFramingResourceItems),
+    sentUploads: copyComposerItems(sentFramingUploadItems),
+    resumeContext: normalizeResumeTrialContext(selectedResumeTrialContext),
+  };
+}
+
+function restoreFramingComposerState(snapshot) {
+  if (!snapshot) return;
+  const editor = $("#cold-file-editor");
+  if (editor) editor.value = snapshot.text || "";
+  composerDraft = String(snapshot.composerDraft ?? snapshot.text ?? "");
+  if (snapshot.activeColdPath && !hasProjectDraftReady() && !hasLaunched()) {
+    coldFiles[snapshot.activeColdPath] = snapshot.text || snapshot.activeColdText || "";
+  }
+  replaceComposerItems(selectedResourceItems, snapshot.selectedResources);
+  replaceComposerItems(selectedUploadItems, snapshot.selectedUploads);
+  replaceComposerItems(sentFramingResourceItems, snapshot.sentResources);
+  replaceComposerItems(sentFramingUploadItems, snapshot.sentUploads);
+  selectedResumeTrialContext = normalizeResumeTrialContext(snapshot.resumeContext);
+  saveResourceSelections();
+  renderSelectedResources();
+  renderAttachmentTrays();
+  resizeColdEditor();
+  renderColdPreview();
+}
+
 function clearFramingComposerText(expectedText = "") {
   const editor = $("#cold-file-editor");
   if (!editor) return;
   const current = String(editor.value || "");
   if (expectedText && current.trim() !== String(expectedText || "").trim()) return;
   editor.value = "";
-  if (activeColdPath && hasProjectDraftReady()) coldFiles[activeColdPath] = "";
+  composerDraft = "";
   resizeColdEditor();
   renderColdPreview();
 }
 
+function closeResumeTrialDialog(confirmed = false) {
+  const pending = pendingResumeTrialConfirm;
+  pendingResumeTrialConfirm = null;
+  const dialog = $("#resume-trial-dialog");
+  if (dialog) {
+    if (dialog.close) dialog.close();
+    else dialog.removeAttribute("open");
+  }
+  if (pending) pending.resolve(Boolean(confirmed));
+}
+
+function renderResumeTrialDialog(context, text, attachments) {
+  const value = normalizeResumeTrialContext(context);
+  const trialLabel = resumeTrialLabel(value);
+  const title = $("#resume-trial-title");
+  const summary = $("#resume-trial-summary");
+  const warning = $("#resume-trial-warning");
+  const confirm = $("[data-resume-trial-confirm]");
+  if (title) title.textContent = `Continue from ${trialLabel}?`;
+  if (summary) {
+    const attachedCount = Array.isArray(attachments) ? attachments.length : 0;
+    summary.innerHTML = `
+      <p>This will fork the active trajectory from the completed boundary of <strong>${escapeHtml(trialLabel)}</strong>.</p>
+      <ul>
+        <li>Trials after ${escapeHtml(trialLabel)} will move to <code>archive/resume_forks/</code>.</li>
+        <li>Your current message and ${escapeHtml(attachedCount)} ${attachedCount === 1 ? "attachment" : "attachments"} will become the new fork instruction.</li>
+        <li>The active trials axis will continue from this selected boundary.</li>
+      </ul>
+      ${text ? `<p><strong>Instruction:</strong> ${escapeHtml(compactText(text, 180))}</p>` : ""}
+    `;
+  }
+  if (warning) {
+    warning.hidden = Boolean(value?.checkpointExists);
+    warning.textContent = value?.checkpointExists
+      ? ""
+      : "Best-effort restore: this trial has no saved checkpoint, so CoAutoResearch will archive later trials and continue from the closest available current project state.";
+  }
+  if (confirm) confirm.textContent = `Continue from ${trialLabel}`;
+}
+
+function confirmResumeTrialSend(context, text, attachments) {
+  const dialog = $("#resume-trial-dialog");
+  if (!dialog) {
+    if (typeof window.confirm === "function") {
+      return Promise.resolve(window.confirm(`Continue from ${resumeTrialLabel(context)}? Later trials will be archived.`));
+    }
+    return Promise.resolve(true);
+  }
+  renderResumeTrialDialog(context, text, attachments);
+  return new Promise((resolve) => {
+    pendingResumeTrialConfirm = { resolve };
+    if (dialog.showModal) dialog.showModal();
+    else dialog.setAttribute("open", "");
+  });
+}
+
+function closeRestartAutoresearchDialog(confirmed = false) {
+  const pending = pendingRestartAutoresearchConfirm;
+  pendingRestartAutoresearchConfirm = null;
+  const dialog = $("#restart-autoresearch-dialog");
+  if (dialog) {
+    if (dialog.close) dialog.close();
+    else dialog.removeAttribute("open");
+  }
+  if (pending) pending.resolve(Boolean(confirmed));
+}
+
+function renderRestartAutoresearchDialog(reason) {
+  const reasonBox = $("#restart-autoresearch-reason");
+  if (reasonBox) {
+    reasonBox.hidden = !String(reason || "").trim();
+    reasonBox.textContent = String(reason || "").trim();
+  }
+}
+
+function confirmRestartAutoresearch(reason = "") {
+  const dialog = $("#restart-autoresearch-dialog");
+  if (!dialog) {
+    if (typeof window.confirm === "function") {
+      return Promise.resolve(window.confirm("Restart autoresearch? Current generated trials and runtime state will be archived before a new run starts."));
+    }
+    return Promise.resolve(true);
+  }
+  renderRestartAutoresearchDialog(reason);
+  return new Promise((resolve) => {
+    pendingRestartAutoresearchConfirm = { resolve };
+    if (dialog.showModal) dialog.showModal();
+    else dialog.setAttribute("open", "");
+  });
+}
+
+async function handleRestartAutoresearch(reason = "") {
+  if (!hasActiveProject()) {
+    openProjectCreateDialog();
+    showToast("Create a project first.", true);
+    return false;
+  }
+  if (isSessionRunning()) {
+    showToast("Stop the current Codex run before restarting autoresearch.", true);
+    return false;
+  }
+  const confirmed = await confirmRestartAutoresearch(reason);
+  if (!confirmed) return false;
+  const response = await api("/api/research/restart", {
+    method: "POST",
+    body: JSON.stringify({ message: String(reason || "").trim(), settings: settingsFromForm() }),
+  });
+  mergeSessionFromApiResponse(response);
+  notifyResourceHandlingFromResponse(response);
+  showToast("Restarted autoresearch.");
+  await loadOverview(true);
+  scrollFramingToBottomSoon();
+  return true;
+}
+
 function currentBriefText() {
   const editorValue = String($("#cold-file-editor")?.value || "");
-  if (activeColdPath && (!hasProjectDraftReady() || editorValue.trim())) coldFiles[activeColdPath] = editorValue;
+  if (activeColdPath && !hasProjectDraftReady() && !hasLaunched()) coldFiles[activeColdPath] = editorValue;
   const savedBrief = String(coldFiles["resources/user_input/INITIAL_BRIEF.md"] || "").trim();
   if (savedBrief) return savedBrief;
   const lastUser = [...localMessages].reverse().find((message) => message.role === "user" && String(message.text || "").trim());
@@ -4627,15 +5436,30 @@ function renderComposerSuggestions() {
   const interrupted = isSessionInterrupted();
   const loopActive = Boolean(session.loop_active);
   const gateStatus = String(session.gate?.status || session.gate?.raw_status || "").toLowerCase();
+  const gateOverallStatus = String(session.gate?.overall_status || session.gate?.raw_status || "").toLowerCase();
+  const gateIncompletePass = gateOverallStatus === "pass" && gateStatus !== "pass";
+  const resumeFromTrial = selectedResumeTrialPayload();
   const chips = [];
   const addChip = (label, prompt) => chips.push(`<button class="composer-suggestion-chip" type="button" data-composer-prompt="${escapeHtml(prompt)}">${escapeHtml(label)}</button>`);
+  const addActionChip = (label, action) => chips.push(`<button class="composer-suggestion-chip" type="button" ${action}>${escapeHtml(label)}</button>`);
 
-  if (gateStatus === "pass") {
+  if (resumeFromTrial) {
+    addActionChip(`Continue from ${resumeTrialLabel(resumeFromTrial)}`, "data-resume-trial-submit");
+    addActionChip("Cancel trial continue", "data-resume-trial-remove");
+  } else if (gateStatus === "pass") {
+    addChip("Show autoresearch", "/goal");
+    addActionChip("Restart autoresearch", "data-restart-autoresearch");
+    addChip("Status", "/status");
+    addChip("Diff", "/diff");
+  } else if (gateIncompletePass) {
+    addChip("Resume autoresearch", "/goal resume");
+    addActionChip("Restart autoresearch", "data-restart-autoresearch");
     addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
     addChip("Diff", "/diff");
   } else if (running) {
-    if (loopActive) addChip("Pause autoresearch", "/goal pause");
+    if (canPauseActiveRunAfterCurrentTurn()) addActionChip("Pause after current turn", "data-pause-autoresearch");
+    addActionChip("Stop current run", "data-stop-current-run");
     addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
     addChip("Processes", "/ps");
@@ -4650,6 +5474,7 @@ function renderComposerSuggestions() {
     } else {
       addChip("Resume autoresearch", "/goal resume");
     }
+    addActionChip("Restart autoresearch", "data-restart-autoresearch");
     addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
     if (running) addChip("Processes", "/ps");
@@ -4657,7 +5482,7 @@ function renderComposerSuggestions() {
   }
 
   row.classList.toggle("is-running", running);
-  const label = gateStatus === "pass" ? "Goal passed" : running ? "Running" : interrupted ? "Goal interrupted" : loopActive ? "Goal active" : "Goal paused";
+  const label = resumeFromTrial ? "Trial continue" : gateStatus === "pass" ? "Autoresearch complete" : gateIncompletePass ? "Gate incomplete" : running ? "Running" : interrupted ? "Goal interrupted" : loopActive ? "Goal active" : "Goal paused";
   row.innerHTML = `<span>${label}</span>${chips.join("")}`;
   requestAnimationFrame(() => {
     updateBriefDockGeometry();
@@ -4745,25 +5570,43 @@ async function sendSessionComposerMessage(message) {
   if (!hasActiveProject()) {
     openProjectCreateDialog();
     showToast("Create a project first.", true);
-    return;
+    return false;
   }
   const text = String(message || "").trim();
   const attachments = currentComposerAttachments();
-  if (!text && !attachments.length) return;
+  let resumeFromTrial = selectedResumeTrialPayload();
+  if (!text && !attachments.length && !resumeFromTrial) return false;
   const localControl = canSendLocalSlashControl(text);
   if (!canSendSessionComposerMessage() && !localControl) {
     showToast("Wait for the current Codex run to finish before sending another message.", true);
-    return;
+    return false;
   }
-  const isCommand = text.startsWith("/");
-  const displayText = isCommand ? text : text || attachmentOnlyMessage(attachments);
+  let isCommand = text.startsWith("/");
+  const normalizedCommand = isCommand ? text.toLowerCase().replace(/\s+/g, " ").trim() : "";
+  let messageText = text;
+  if (resumeFromTrial && isCommand) {
+    showToast("Remove the Continue from Trial chip before sending a slash command, or send a normal instruction for this fork.", true);
+    return false;
+  }
+  if (resumeFromTrial) {
+    const confirmed = await confirmResumeTrialSend(resumeFromTrial, messageText, attachments);
+    if (!confirmed) return false;
+  }
+  if (normalizedCommand === "/goal restart") {
+    const confirmed = await confirmRestartAutoresearch(text);
+    if (!confirmed) return false;
+  }
+  const composerSnapshot = snapshotFramingComposerState();
+  const displayText = isCommand ? text : messageText || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
   let appendedMessage = null;
   if (!isCommand) {
-    appendedMessage = appendFramingMessage("user", displayText, { attachments });
+    appendedMessage = appendFramingMessage("user", displayText, { attachments, resumeFromTrial });
     framingReplyPending = true;
     beginFramingPending(appendedMessage?.id || "");
     clearFramingComposerText(text || displayText);
     clearFramingComposerAttachments();
+    selectedResumeTrialContext = null;
+    renderAttachmentTrays();
     renderFramingConversation();
     scrollFramingToBottomSoon();
   } else {
@@ -4774,21 +5617,32 @@ async function sendSessionComposerMessage(message) {
     renderFramingConversation();
     scrollFramingToBottomSoon();
   }
-  const endpoint = isCommand ? "/api/research/command" : "/api/research/chat";
+  const endpoint = normalizedCommand === "/goal restart"
+    ? "/api/research/restart"
+    : isCommand
+      ? "/api/research/command"
+      : resumeFromTrial
+        ? "/api/research/resume-from-trial"
+        : "/api/research/chat";
   let response = null;
   try {
     const files = await collectUploadFiles();
-    const body = isCommand
+    const body = normalizedCommand === "/goal restart"
+      ? { message: text, settings: settingsFromForm() }
+      : isCommand
       ? { command: text, settings: settingsFromForm() }
-      : { message: text || displayText, files, resourceLinks: collectResourceLinks(), settings: settingsFromForm() };
+      : { message: messageText || displayText, files, resourceLinks: collectResourceLinks(), resumeFromTrial, settings: settingsFromForm() };
     if (appendedMessage) await persistFramingMessages();
     response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
   } catch (error) {
     if (appendedMessage) {
+      removeFramingMessage(appendedMessage.id);
       framingReplyPending = false;
       if (pendingFramingUserMessageId === appendedMessage?.id) pendingFramingUserMessageId = "";
+      restoreFramingComposerState(composerSnapshot);
       reconcileFramingPending(localMessages);
       renderFramingConversation();
+      persistFramingMessages().catch(() => {});
     }
     throw error;
   }
@@ -4797,6 +5651,7 @@ async function sendSessionComposerMessage(message) {
   reconcileFramingPending(localMessages);
   renderFramingConversation();
   renderSelectedResources();
+  return true;
 }
 
 async function startFramingRun(brief) {
@@ -4835,28 +5690,25 @@ async function coldStartFromPrepare() {
   }
   const input = String($("#cold-file-editor")?.value || "").trim();
   const attachments = currentComposerAttachments();
-  if (!input && !attachments.length) {
+  const resumeFromTrial = selectedResumeTrialPayload();
+  if (!input && !attachments.length && !resumeFromTrial) {
     showToast(hasProjectDraftReady() ? "Write a message to refine the project." : "Write a research brief before framing.", true);
     setColdViewMode("source");
     $("#cold-file-editor")?.focus();
     return;
   }
-  const displayInput = input || attachmentOnlyMessage(attachments);
+  const displayInput = input || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
   try {
     if (canSendLocalSlashControl(input)) {
-      await sendSessionComposerMessage(input);
-      $("#cold-file-editor").value = "";
-      clearFramingComposerAttachments();
-      resizeColdEditor();
+      const sent = await sendSessionComposerMessage(input);
+      if (!sent) return;
       await loadOverview(true);
       scrollFramingToBottomSoon();
       return;
     }
     if (hasLaunched() || canChatWithFramingDraft()) {
-      await sendSessionComposerMessage(displayInput);
-      $("#cold-file-editor").value = "";
-      clearFramingComposerAttachments();
-      resizeColdEditor();
+      const sent = await sendSessionComposerMessage(input);
+      if (!sent) return;
       await loadOverview(true);
       scrollFramingToBottomSoon();
       return;
@@ -4961,11 +5813,12 @@ async function handleChat(event) {
   const form = event.currentTarget;
   const data = new FormData(form);
   const message = String(data.get("message") || "").trim();
-  if (!message && !currentComposerAttachments().length) return;
-  form.reset();
-  resizeComposer();
+  if (hasNoChatFormContent(message)) return;
   try {
-    await sendSessionComposerMessage(message);
+    const sent = await sendSessionComposerMessage(message);
+    if (!sent) return;
+    form.reset();
+    resizeComposer();
     await loadOverview(true);
     scrollThread();
   } catch (error) {
@@ -5048,10 +5901,19 @@ async function handleStopSession() {
   }
 }
 
+async function handlePauseAutoresearch() {
+  await sendCommand("/goal pause");
+}
+
 function resizeComposer() {
   const textarea = $("#chat-form textarea");
   textarea.style.height = "auto";
   textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+}
+
+function hasNoChatFormContent(message) {
+  if (!message && !currentComposerAttachments().length) return !selectedResumeTrialPayload();
+  return false;
 }
 
 function bindEvents() {
@@ -5105,6 +5967,20 @@ function bindEvents() {
   $$("[data-launch-close]").forEach((button) => {
     button.addEventListener("click", () => $("#launch-dialog").close());
   });
+  $("#resume-trial-dialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeResumeTrialDialog(false);
+  });
+  $("#resume-trial-dialog")?.addEventListener("close", () => {
+    if (pendingResumeTrialConfirm) closeResumeTrialDialog(false);
+  });
+  $("#restart-autoresearch-dialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeRestartAutoresearchDialog(false);
+  });
+  $("#restart-autoresearch-dialog")?.addEventListener("close", () => {
+    if (pendingRestartAutoresearchConfirm) closeRestartAutoresearchDialog(false);
+  });
   $("#prepare-cold-start").addEventListener("click", coldStartFromPrepare);
   $("#save-project-draft").addEventListener("click", (event) => {
     withButtonFeedback(event.currentTarget, () => saveProjectDraft(), { saved: "Draft saved" })
@@ -5116,8 +5992,11 @@ function bindEvents() {
     renderFramingConversation();
   });
   $("#cold-file-editor").addEventListener("input", () => {
-    if (!hasProjectDraftReady() && activeColdPath) {
-      coldFiles[activeColdPath] = $("#cold-file-editor").value;
+    const value = $("#cold-file-editor").value;
+    if (hasProjectDraftReady() || hasLaunched()) {
+      composerDraft = value;
+    } else if (activeColdPath) {
+      coldFiles[activeColdPath] = value;
       coldDirty = true;
       markPrepareSaved(false);
       scheduleColdAutosave();
@@ -5203,6 +6082,12 @@ function bindEvents() {
       openProjectDeleteDialog(projectDelete.dataset.projectDelete);
       return;
     }
+    const projectUpgradeReviewers = event.target.closest("[data-project-upgrade-reviewers]");
+    if (projectUpgradeReviewers) {
+      upgradeProjectReviewers(projectUpgradeReviewers.dataset.projectUpgradeReviewers)
+        .catch((error) => showToast(error.message, true));
+      return;
+    }
     if (openProjectMenuId && !event.target.closest(".project-menu-popover")) {
       openProjectMenuId = "";
       renderProjectList();
@@ -5267,6 +6152,61 @@ function bindEvents() {
       removeUploadFile(removeUpload.dataset.uploadRemove);
       return;
     }
+    const copyText = event.target.closest("[data-copy-text]");
+    if (copyText) {
+      event.preventDefault();
+      let text = copyText.dataset.copyText || "";
+      try {
+        text = decodeURIComponent(text);
+      } catch {
+        text = copyText.dataset.copyText || "";
+      }
+      copyTextToClipboard(text, copyText.dataset.copyLabel || "Copied.").catch((error) => showToast(error.message, true));
+      return;
+    }
+    const removeResumeTrial = event.target.closest("[data-resume-trial-remove]");
+    if (removeResumeTrial) {
+      clearResumeTrialContext();
+      return;
+    }
+    const stopCurrentRun = event.target.closest("[data-stop-current-run]");
+    if (stopCurrentRun) {
+      event.preventDefault();
+      event.stopPropagation();
+      handleStopSession();
+      return;
+    }
+    const pauseAutoresearch = event.target.closest("[data-pause-autoresearch]");
+    if (pauseAutoresearch) {
+      event.preventDefault();
+      event.stopPropagation();
+      handlePauseAutoresearch();
+      return;
+    }
+    const restartAutoresearch = event.target.closest("[data-restart-autoresearch]");
+    if (restartAutoresearch) {
+      event.preventDefault();
+      event.stopPropagation();
+      handleRestartAutoresearch().catch((error) => showToast(error.message, true));
+      return;
+    }
+    const restartConfirm = event.target.closest("[data-restart-autoresearch-confirm]");
+    if (restartConfirm) {
+      event.preventDefault();
+      closeRestartAutoresearchDialog(true);
+      return;
+    }
+    const restartCancel = event.target.closest("[data-restart-autoresearch-cancel]");
+    if (restartCancel) {
+      event.preventDefault();
+      closeRestartAutoresearchDialog(false);
+      return;
+    }
+    const submitResumeTrial = event.target.closest("[data-resume-trial-submit]");
+    if (submitResumeTrial) {
+      coldStartFromPrepare();
+      return;
+    }
     const browserOpen = event.target.closest("[data-browser-open]");
     if (browserOpen) {
       if (browserOpen.dataset.browserType === "directory") loadLocalBrowser(browserOpen.dataset.browserOpen);
@@ -5295,7 +6235,7 @@ function bindEvents() {
     }
     const cardPreview = event.target.closest("[data-card-preview]");
     if (cardPreview) {
-      const card = cardPreview.closest(".context-card");
+      const card = cardPreview.closest(".context-card, .review-card");
       const target = card?.querySelector(".card-inline-file");
       if (target) {
         target.hidden = !target.hidden;
@@ -5304,6 +6244,7 @@ function bindEvents() {
           loadInlineFile(cardPreview.dataset.cardPreview, target, true);
         }
       }
+      return;
     }
     const composerPrompt = event.target.closest("[data-composer-prompt]");
     if (composerPrompt) {
@@ -5319,23 +6260,41 @@ function bindEvents() {
     if (trialScroll) {
       const strip = trialScroll.closest(".trial-strip")?.querySelector(".trial-strip-scroll");
       if (strip) {
-        strip.scrollBy({
-          left: Number(trialScroll.dataset.trialScroll || 1) * Math.max(180, strip.clientWidth * 0.72),
-          behavior: "smooth",
-        });
+        const delta = Number(trialScroll.dataset.trialScroll || 1) * Math.max(180, strip.clientWidth * 0.72);
+        trialStripScrollLeft = clampTrialStripScrollLeft(strip, strip.scrollLeft + delta);
+        strip.scrollLeft = trialStripScrollLeft;
       }
       return;
     }
     const trialSelect = event.target.closest("[data-trial-select]");
     if (trialSelect) {
       const strip = trialSelect.closest(".trial-strip")?.querySelector(".trial-strip-scroll");
-      const scrollLeft = strip ? strip.scrollLeft : 0;
+      rememberTrialStripScroll(strip);
       selectedTrialIndex = Number(trialSelect.dataset.trialSelect || 0);
       renderFramingConversation();
-      requestAnimationFrame(() => {
-        const nextStrip = document.querySelector(".trial-strip-scroll");
-        if (nextStrip) nextStrip.scrollLeft = scrollLeft;
-      });
+      requestAnimationFrame(restoreTrialStripScroll);
+      return;
+    }
+    const trialContinue = event.target.closest("[data-trial-continue]");
+    if (trialContinue) {
+      const iteration = Number(trialContinue.dataset.trialContinue || 0);
+      const report = reportForIteration(iteration);
+      const context = resumeTrialContextFromReport(iteration, report);
+      if (!context) {
+        showToast("This trial does not have a completed report to continue from.", true);
+        return;
+      }
+      setResumeTrialContext(context);
+      return;
+    }
+    const resumeTrialCancel = event.target.closest("[data-resume-trial-cancel]");
+    if (resumeTrialCancel) {
+      closeResumeTrialDialog(false);
+      return;
+    }
+    const resumeTrialConfirm = event.target.closest("[data-resume-trial-confirm]");
+    if (resumeTrialConfirm) {
+      closeResumeTrialDialog(true);
       return;
     }
     const framingEdit = event.target.closest("[data-framing-edit]");

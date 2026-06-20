@@ -112,9 +112,21 @@ Maintain `resources/user_input/RESOURCE_MANIFEST.md` as a raw intake record. It 
 - explicit UI resources and their categories;
 - inferred resource references from user text;
 - attached resources with source, destination, mode, and reason;
+- resource provenance for each material when known:
+  - `user_explicit`: selected, uploaded, pasted, dragged, or directly linked by the user;
+  - `user_confirmed`: discovered or inferred by the system and then confirmed by the user as active input;
+  - `autoresearch_discovered`: found by an autoresearch run without explicit user confirmation;
+  - `autoresearch_generated`: created by an autoresearch run;
+  - `unknown`: legacy or ambiguous provenance;
 - embedded resources surfaced from filed bundles, including source bundle, destination, mode, and reason;
 - unresolved or ambiguous resources;
 - intake decisions, including why a clue was ignored or deferred.
+
+Restart behavior depends on provenance: a full autoresearch restart keeps
+`user_explicit` and `user_confirmed` materials available as active inputs, while
+`autoresearch_discovered`, `autoresearch_generated`, and `unknown` materials
+become archived prior-run context until the user explicitly reattaches or
+confirms them.
 
 The manifest is provenance and intake state. It is not current research truth until promoted into `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report.
 

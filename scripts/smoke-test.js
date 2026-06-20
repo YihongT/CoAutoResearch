@@ -56,6 +56,85 @@ function closeServer(server) {
   });
 }
 
+function parseThemeTokens(stylesCss, theme) {
+  const selector = theme === "light" ? ":root" : `html[data-theme="${theme}"]`;
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = [...stylesCss.matchAll(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\n\\}`, "g"))];
+  const match = matches.at(-1);
+  if (!match) throw new Error(`missing CSS token block for ${theme} theme`);
+  const tokens = {};
+  for (const tokenMatch of match[1].matchAll(/--([a-z0-9-]+):\s*([^;]+);/gi)) {
+    tokens[tokenMatch[1]] = tokenMatch[2].trim();
+  }
+  return tokens;
+}
+
+function hexToRgb(hex) {
+  const normalized = hex.trim().replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) {
+    throw new Error(`expected a six-digit hex color, got ${hex}`);
+  }
+  return [0, 2, 4].map((offset) => parseInt(normalized.slice(offset, offset + 2), 16) / 255);
+}
+
+function relativeLuminance(hex) {
+  const [r, g, b] = hexToRgb(hex).map((channel) => (
+    channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  ));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(foreground, background) {
+  const fg = relativeLuminance(foreground);
+  const bg = relativeLuminance(background);
+  return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+}
+
+function assertThemeContrast(stylesCss) {
+  const requiredPairs = [
+    ["ink", "bg", 4.5],
+    ["ink", "surface", 4.5],
+    ["muted", "surface", 4.5],
+    ["rail-ink", "rail", 4.5],
+    ["primary-ink", "accent", 4.5],
+    ["primary-ink", "danger", 4.5],
+    ["danger-primary-ink", "danger", 4.5],
+    ["danger-primary-ink", "danger-hover", 4.5],
+    ["feedback-saving-ink", "feedback-saving-bg", 4.5],
+    ["success", "feedback-saved-bg", 4.5],
+    ["danger", "feedback-failed-bg", 4.5],
+    ["page-ink", "page-bg", 4.5],
+    ["panel-ink", "panel-bg", 4.5],
+    ["panel-muted", "panel-bg", 4.5],
+    ["assistant-ink", "assistant-bg", 4.5],
+    ["user-bubble-ink", "user-bubble-bg", 4.5],
+    ["composer-ink", "composer-bg", 4.5],
+    ["control-ink", "control-bg", 4.5],
+    ["primary-text", "primary-bg", 4.5],
+    ["secondary-text", "secondary-bg", 4.5],
+    ["code-ink", "code-bg", 4.5],
+    ["code-block-ink", "code-block-bg", 4.5],
+    ["link", "assistant-bg", 4.5],
+    ["complete-ink", "complete-bg", 4.5],
+    ["warning-ink", "warning-bg", 4.5],
+    ["danger-ink", "danger-bg", 4.5],
+  ];
+  for (const theme of ["light"]) {
+    const tokens = parseThemeTokens(stylesCss, theme);
+    for (const [foregroundToken, backgroundToken, minimum] of requiredPairs) {
+      const foreground = tokens[foregroundToken];
+      const background = tokens[backgroundToken];
+      if (!foreground || !background) {
+        throw new Error(`${theme} theme is missing ${foregroundToken}/${backgroundToken} contrast tokens`);
+      }
+      const ratio = contrastRatio(foreground, background);
+      if (ratio < minimum) {
+        throw new Error(`${theme} theme ${foregroundToken} on ${backgroundToken} contrast ${ratio.toFixed(2)} is below ${minimum}`);
+      }
+    }
+  }
+}
+
 async function reserveFallbackTestPort() {
   for (let port = 31000; port < 32000; port += 1) {
     const occupied = await tryReservePort(port);
@@ -176,6 +255,40 @@ try {
   const manifest = JSON.parse(await fsp.readFile(path.join(projectDir, ".co-auto-research-template", "manifest.json"), "utf8"));
   if (manifest.templateVersion !== "0.1.0") {
     throw new Error(`unexpected template version ${manifest.templateVersion}`);
+  }
+  const reviewerMetadataPath = path.join(projectDir, "instructions", ".co-auto-research-instructions.json");
+  const reviewerMetadata = JSON.parse(await fsp.readFile(reviewerMetadataPath, "utf8"));
+  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-final-blueprint") {
+    throw new Error("new projects should record the reviewer baseline");
+  }
+  const staleReviewerFixtureRoot = path.join(tempRoot, "upgrade-fixtures");
+  await fsp.mkdir(staleReviewerFixtureRoot, { recursive: true });
+  const staleReviewerProject = path.join(staleReviewerFixtureRoot, "stale-reviewers");
+  execFileSync("node", [cli, "init", staleReviewerProject], { cwd: root, stdio: "pipe" });
+  const customReviewer = path.join(staleReviewerProject, "instructions", "reviewers", "CUSTOM_REVIEWER.md");
+  await fsp.writeFile(customReviewer, "# Custom Reviewer\n", "utf8");
+  await fsp.rm(path.join(staleReviewerProject, "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"));
+  await fsp.rm(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"));
+  const dryRunUpgrade = execFileSync("node", [cli, "upgrade-project", staleReviewerProject, "--dry-run"], { cwd: root, encoding: "utf8" });
+  if (!dryRunUpgrade.includes("would sync core reviewers")) {
+    throw new Error(`upgrade-project --dry-run should report planned reviewer sync:\n${dryRunUpgrade}`);
+  }
+  const reviewerUpgradeOutput = execFileSync("node", [cli, "upgrade-project", staleReviewerProject], { cwd: root, encoding: "utf8" });
+  if (!reviewerUpgradeOutput.includes("synced 9 core reviewers")) {
+    throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
+  }
+  const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
+  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-final-blueprint") {
+    throw new Error("upgrade-project should write reviewer baseline metadata");
+  }
+  try {
+    await fsp.access(customReviewer);
+  } catch {
+    throw new Error("upgrade-project should preserve custom extra reviewers");
+  }
+  const migrationDirs = await fsp.readdir(path.join(staleReviewerProject, "archive", "template_migrations"));
+  if (!migrationDirs.length) {
+    throw new Error("upgrade-project should create a template migration backup");
   }
   const packageManifest = JSON.parse(await fsp.readFile(path.join(root, "package.json"), "utf8"));
   const resourceIntakeInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "RESOURCE_INTAKE.md"), "utf8");
@@ -304,19 +417,26 @@ try {
   }
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
+  const themeOptionValues = [...indexHtml.matchAll(/name="themeMode"\s+value="([^"]+)"/g)].map((match) => match[1]);
+  const explicitThemeBlocks = [...stylesCss.matchAll(/html\[data-theme="([^"]+)"\]/g)].map((match) => match[1]);
   if (
-    !indexHtml.includes('name="themeMode" value="light"') ||
-    !indexHtml.includes('name="themeMode" value="night"') ||
-    !indexHtml.includes('document.documentElement.dataset.theme = theme === "night" ? "night" : "light"') ||
+    themeOptionValues.length !== 1 ||
+    themeOptionValues[0] !== "light" ||
+    explicitThemeBlocks.length ||
+    !indexHtml.includes('document.documentElement.dataset.theme = "light"') ||
     !appJs.includes('localStorage.getItem("coAutoResearchTheme")') ||
     !appJs.includes('localStorage.setItem("coAutoResearchTheme", mode)') ||
     !appJs.includes("function applyThemeMode") ||
+    !appJs.includes('new Set(["light"])') ||
     !appJs.includes('$$("[data-theme-option]")') ||
-    !stylesCss.includes('html[data-theme="night"]') ||
-    !stylesCss.includes(".theme-mode-control")
+    !stylesCss.includes(".theme-mode-control") ||
+    !readme.includes("currently uses the Light theme") ||
+    !gettingStartedDocs.includes("currently uses the Light theme") ||
+    !cliDocs.includes("currently uses the Light theme")
   ) {
-    throw new Error("settings must support persisted Light/Night theme switching");
+    throw new Error("settings must expose only the persisted Light theme");
   }
+  assertThemeContrast(stylesCss);
   if (
     !serverPy.includes('{"text", "project", "goal-launch", "command"}') ||
     !serverPy.includes('clean["text"] = f"Attached {count}') ||
@@ -413,7 +533,12 @@ try {
     throw new Error("Codex assistant responses must render Markdown in framing chat");
   }
   if (
-    !appJs.includes("const activeTrial = selectedTrial(trials)") ||
+    !serverPy.includes('"active_run": active_run') ||
+    !serverPy.includes('"trial_iteration": active_trial_iteration if active_trial_iteration > 0 else None') ||
+    !appJs.includes("function activeRun()") ||
+    !appJs.includes("function activeRunTrialIteration()") ||
+    !appJs.includes("function isAutoresearchActiveRun()") ||
+    !appJs.includes("const activeTrial = liveIteration || selectedTrial(trials)") ||
     !appJs.includes("const countLabel = `${trials.length} trial") ||
     !appJs.includes("reportedCount ? ` · ${reportedCount} reported`") ||
     appJs.includes("const activeTrial = selectedTrial(reports)") ||
@@ -421,14 +546,25 @@ try {
     !appJs.includes("Report pending") ||
     !appJs.includes("Report is not available yet. Codex activity for this trial is shown below.") ||
     !appJs.includes("function isGoalPassed()") ||
-    !appJs.includes("function isTrialLive(iteration, report = null)") ||
-    !appJs.includes("if (isGoalPassed()) return false;") ||
-    !appJs.includes("const liveIteration = isLiveGoalSession() ? Number(sessionState().loop_iteration || 0) : 0") ||
+    !appJs.includes("function isTrialLive(iteration)") ||
+    !appJs.includes("const liveIteration = isLiveGoalSession() ? activeRunTrialIteration() : 0") ||
     !appJs.includes("const fallback = currentTrialIndex(trials);") ||
     !appJs.includes("function runningTrialStatusHtml") ||
+    !appJs.includes("activeRunStatusLabel()") ||
+    !appJs.includes("workingDurationHtml()") ||
+    !appJs.includes("function activeTrialHistoryHtml()") ||
+    !appJs.includes("function scheduleWorkingTicker()") ||
     !appJs.includes('class="trial-live-status"') ||
     !appJs.includes("Live trial activity") ||
+    !appJs.includes("data-pause-autoresearch") ||
+    !appJs.includes("Pause after current turn") ||
+    !appJs.includes("data-stop-current-run") ||
+    !appJs.includes("Stop current run") ||
+    !appJs.includes("trial-live-status-actions") ||
+    !stylesCss.includes(".current-run-control-button") ||
     !stylesCss.includes(".trial-live-status") ||
+    !stylesCss.includes(".trial-live-status-actions") ||
+    appJs.includes("const liveIteration = isLiveGoalSession() ? Number(sessionState().loop_iteration || 0) : 0") ||
     appJs.includes("isSessionRunning() && hasGoalStarted() ? Number(sessionState().loop_iteration || 0) : 0") ||
     appJs.includes("const running = isSessionRunning() && Number(sessionState().loop_iteration || 0) === Number(iteration)")
   ) {
@@ -437,6 +573,7 @@ try {
   if (
     !appJs.includes("function isSessionInterrupted()") ||
     !appJs.includes('addChip("Resume autoresearch", "/goal resume");') ||
+    !appJs.includes('"Gate incomplete"') ||
     !appJs.includes('interrupted ? "Goal interrupted"')
   ) {
     throw new Error("interrupted goal sessions must show resume controls instead of pause controls");
@@ -448,13 +585,17 @@ try {
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
     !appJs.includes("function framingControlMessageHtml(message)") ||
     !appJs.includes("function controlMessageDisplay(message") ||
+    !appJs.includes("const localSlashCommandRegistry = {") ||
     !appJs.includes('return { label: "Autoresearch", value: "Start autoresearch" }') ||
-    !appJs.includes('return { label: "Autoresearch", value: "Resume autoresearch" }') ||
+    !appJs.includes('"/goal resume": { label: "Autoresearch", value: "Resume autoresearch"') ||
+    !appJs.includes('"/goal restart": { label: "Autoresearch", value: "Restart autoresearch"') ||
     !indexHtml.includes(">Start autoresearch<") ||
     !indexHtml.includes(">Resume autoresearch<") ||
     !indexHtml.includes(">Show autoresearch<") ||
+    !indexHtml.includes(">Pause after current turn<") ||
+    !indexHtml.includes(">Stop current run<") ||
     !indexHtml.includes(">Pause autoresearch<") ||
-    !indexHtml.includes(">Clear autoresearch state<") ||
+    !indexHtml.includes(">Restart autoresearch<") ||
     />\/goal(?:\s+\w+)?<\/button>/.test(indexHtml) ||
     appJs.includes("Start with /goal") ||
     appJs.includes("Start /goal") ||
@@ -473,7 +614,8 @@ try {
     !appJs.includes("function isControlFramingMessage(message)") ||
     !appJs.includes("if (isControlFramingMessage(message)) continue;") ||
     !appJs.includes("if (appendedMessage) await persistFramingMessages();") ||
-    !appJs.includes("if (!message && !currentComposerAttachments().length) return;") ||
+    !appJs.includes("function hasNoChatFormContent(message)") ||
+    !appJs.includes("return !selectedResumeTrialPayload();") ||
     !stylesCss.includes(".framing-message.control") ||
     !stylesCss.includes(".framing-control-pill")
   ) {
@@ -555,14 +697,73 @@ try {
   if (
     !appJs.includes("function figureSpecCardsHtml") ||
     !appJs.includes("function figureSpecFields") ||
-    !appJs.includes('contextCard("Figure descriptions"') ||
+    !appJs.includes("function renderPaperOutline") ||
+    !appJs.includes("function renderFiguresPanel") ||
+    !appJs.includes("function renderTablesPanel") ||
+    !appJs.includes("function renderTraceabilityPanel") ||
+    !appJs.includes('contextCard("Paper outline"') ||
+    !appJs.includes('contextCard("Figures"') ||
+    !appJs.includes('contextCard("Tables"') ||
+    !appJs.includes('contextCard("Traceability"') ||
+    !appJs.includes("data-copy-text") ||
+    !appJs.includes("Copy spec") ||
+    !appJs.includes("Copy caption") ||
     !appJs.includes("figureSpecDetail(\"Purpose\"") ||
     !appJs.includes("figureSpecDetail(\"Evidence / conceptual basis\"") ||
+    !serverPy.includes('"figure_plans"') ||
+    !serverPy.includes('"table_plans"') ||
+    !serverPy.includes('"no_table_rationale"') ||
+    !serverPy.includes('"traceability"') ||
     !stylesCss.includes(".figure-spec-card") ||
     !stylesCss.includes(".figure-caption") ||
-    !stylesCss.includes(".figure-status.is-caution")
+    !stylesCss.includes(".figure-status.is-caution") ||
+    !stylesCss.includes(".paper-outline") ||
+    !stylesCss.includes(".manuscript-actions") ||
+    !stylesCss.includes(".table-empty-rationale") ||
+    !stylesCss.includes(".traceability-details")
   ) {
-    throw new Error("manuscript panel must render framed figure descriptions from FIGURE_SPECS.md");
+    throw new Error("manuscript panel must render a paper-like outline with inline figure specs, tables, traceability, and copy/open controls");
+  }
+  if (
+    !appJs.includes("selectedResumeTrialContext") ||
+    !appJs.includes("function normalizeResumeTrialContext") ||
+    !appJs.includes("resumeFromTrial") ||
+    !appJs.includes("data-trial-continue") ||
+    !appJs.includes("data-resume-trial-submit") ||
+    !appJs.includes("function confirmResumeTrialSend") ||
+    !appJs.includes("data-resume-trial-confirm") ||
+    !appJs.includes('"/api/research/resume-from-trial"') ||
+    !appJs.includes("Remove the Continue from Trial chip before sending a slash command") ||
+    !appJs.includes('"Trial continue"') ||
+    !indexHtml.includes('id="resume-trial-dialog"') ||
+    !indexHtml.includes("Trajectory fork") ||
+    !stylesCss.includes(".resume-context-chip") ||
+    !stylesCss.includes(".resume-trial-warning") ||
+    !serverPy.includes("def start_resume_from_trial") ||
+    !serverPy.includes('"archive"') ||
+    !serverPy.includes('"resume_forks"') ||
+    !serverPy.includes("def trial_checkpoint_dir") ||
+    !serverPy.includes("resumeFromTrial") ||
+    !serverPy.includes('"/api/research/resume-from-trial"') ||
+    !serverPy.includes("TRAJECTORY.json") ||
+    !serverPy.includes("The next active trial is Trial {next_iteration}")
+  ) {
+    throw new Error("UI/server must support confirmed continue-from-trial fork contexts");
+  }
+  if (
+    !indexHtml.includes('id="restart-autoresearch-dialog"') ||
+    !indexHtml.includes('data-command="/goal restart"') ||
+    !appJs.includes('"/goal restart"') ||
+    !appJs.includes("function confirmRestartAutoresearch") ||
+    !appJs.includes('"/api/research/restart"') ||
+    !appJs.includes("data-restart-autoresearch") ||
+    !serverPy.includes("def start_restart_autoresearch") ||
+    !serverPy.includes('"/api/research/restart"') ||
+    !serverPy.includes('REPO_ROOT / "archive" / "restarts"') ||
+    !serverPy.includes("restart_manifest.json") ||
+    !serverPy.includes("RESTART_RETAINED_PROVENANCE")
+  ) {
+    throw new Error("UI/server must support confirmed restart autoresearch flow");
   }
   if (
     appJs.includes("projectCards") ||
@@ -654,6 +855,38 @@ try {
     throw new Error(`Python Codex resolver returned ${resolverOutput}`);
   }
 
+  const legacyFileReferenceScript = [
+    "import importlib.util, json, os, pathlib",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "module._CONTEXT.project = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+    "legacy_project = module.read_text_file('/Users/example/legacy/local-projects/demo/PROJECT.md')",
+    "legacy_manifest = module.read_text_file('/Users/example/legacy/local-projects/demo/resources/user_input/RESOURCE_MANIFEST.md')",
+    "basename_manifest = module.read_text_file('RESOURCE_MANIFEST.md')",
+    "assert legacy_project.get('exists') is True and legacy_project.get('path') == 'PROJECT.md', legacy_project",
+    "assert legacy_manifest.get('exists') is True and legacy_manifest.get('path') == 'resources/user_input/RESOURCE_MANIFEST.md', legacy_manifest",
+    "assert basename_manifest.get('exists') is True and basename_manifest.get('path') == 'resources/user_input/RESOURCE_MANIFEST.md', basename_manifest",
+    "print(json.dumps({'project': legacy_project['path'], 'manifest': basename_manifest['path']}))"
+  ].join("\n");
+  const legacyFileReferenceOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    legacyFileReferenceScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!legacyFileReferenceOutput.includes("RESOURCE_MANIFEST.md")) {
+    throw new Error(`legacy file reference resolver returned ${legacyFileReferenceOutput}`);
+  }
+
   const externalRepo = path.join(tempRoot, "LLMShopper-TBS-Test");
   await fsp.mkdir(externalRepo, { recursive: true });
   await fsp.writeFile(path.join(externalRepo, "README.md"), "external repo material\n", "utf8");
@@ -687,6 +920,11 @@ try {
     "ongoing_tree = next(child for child in tree['children'] if child['name'] == 'ongoing_work')",
     "linked_tree = next(child for child in ongoing_tree['children'] if child['name'] == 'LLMShopper-TBS-Test')",
     "assert linked_tree.get('is_symlink') is True and any(child['name'] == 'README.md' for child in linked_tree['children']), linked_tree",
+    "workspace_tree = module.directory_tree('.', max_depth=4, exclude_names={'node_modules', '.venv', 'venv', 'dist', 'build', '.pytest_cache', '.mypy_cache', '.ruff_cache'})",
+    "instructions_tree = next(child for child in workspace_tree['children'] if child['name'] == 'instructions')",
+    "assert any(child['name'] == 'COLD_START.md' for child in instructions_tree['children']), instructions_tree",
+    "trajectory_tree = next(child for child in workspace_tree['children'] if child['name'] == 'research_trajectory')",
+    "assert any(child['name'] == 'STATE.md' for child in trajectory_tree['children']), trajectory_tree",
     "explicit_text = manifest.read_text(encoding='utf-8')",
     "assert 'Explicit UI Resources' in explicit_text and 'Attached Resources' in explicit_text, explicit_text",
     "print(json.dumps({'clues': len(clues), 'saved': explicit_saved[0]['path']}))"
@@ -719,11 +957,18 @@ try {
     "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
     "module._CONTEXT.project = context",
     "state = context.research_state_path",
+    "blueprint = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'manuscript' / 'BLUEPRINT.md'",
+    "review_dir = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'manuscript' / 'reviews'",
+    "review_dir.mkdir(parents=True, exist_ok=True)",
+    "def write_final_artifacts():",
+    "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected figure/table style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Accepted Claims And Evidence Map\n\n| Claim ID | Claim | Evidence IDs | Evidence strength | Required qualification | Manuscript location |\n|---|---|---|---|---|---|\n| C000001 | A bounded accepted claim. | R000001 | qualified | none | Introduction |\n\n---\n\n## Section-By-Section Architecture\n\n### Section 1: Introduction\n\nPurpose: Establish the problem.\n\nTarget-venue role: Open the perspective.\n\nContent to include: Bounded motivation.\n\nAccepted claims: C000001.\n\nEvidence: R000001.\n\nFigures / tables: none.\n\nRequired qualifications: none.\n\n---\n\n## Figure Plan\n\nNo active figures are required for the final scoped deliverable.\n\n---\n\n## Table Plan\n\nNo active tables are required for the final scoped deliverable.\n\n### No-Table Rationale\n\nNo table is needed because the accepted claim/evidence mapping is compact and carried by prose in the section architecture.\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence.\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
+    "    (review_dir / 'FINAL_GATE_REVIEW.md').write_text(\"\"\"Reviewer: Final gate reviewer\nScope: final-gate\nDecision: pass\nGate impact: pass\nConfidence: high\n\n## Artifact Consistency Audit\n\n- reviewer baseline status: current\n- final blueprint section completeness: complete\n- accepted claims vs candidate claims status: accepted\n- blocking missing evidence status: none\n- figure plan completeness: complete\n- table plan or no-table rationale completeness: complete\n- reference/literature grounding completeness: complete\n- appendix/supplement plan completeness: complete\n- stale contradiction scan result: none\n- exact reason the gate can pass: all required checks passed\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\", encoding='utf-8')",
     "assert module.normalize_gate_status('ready for targeted revision') == 'continue'",
     "assert module.normalize_gate_status('completed') == 'continue'",
     "assert module.normalize_gate_status('approved') == 'continue'",
     "assert module.normalize_gate_status('pass for display inventory') == 'continue'",
     "assert module.normalize_gate_status('pass - architecture coherent; targeted revision required') == 'continue'",
+    "assert module.normalize_gate_status('pass - all completed trials have approved plans and reports.') == 'pass'",
     "assert module.normalize_gate_status('pass - no blockers remain') == 'pass'",
     "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\", encoding='utf-8')",
     "gate = module.read_autoresearch_gate()",
@@ -737,6 +982,12 @@ try {
     "assert missing_final['status'] == 'continue', missing_final",
     "assert 'final_gate' in missing_final['missing_reviewers'], missing_final",
     "assert module.gate_has_passed(missing_final) is False, missing_final",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
+    "stale = module.read_autoresearch_gate()",
+    "assert stale['status'] == 'continue', stale",
+    "assert stale['consistency_blockers'], stale",
+    "assert module.gate_has_passed(stale) is False, stale",
+    "write_final_artifacts()",
     "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
     "passed = module.read_autoresearch_gate()",
     "assert passed['status'] == 'pass', passed",
@@ -793,7 +1044,7 @@ try {
     "resumed = module.handle_local_slash_command('/goal resume', '/goal resume', {'reviewCheckpointInterval': 25})",
     "assert resumed and resumed.get('local') is True, resumed",
     "assert context.session['loop_active'] is True, context.session",
-    "assert context.session['loop_review_checkpoint_iteration'] == 125, context.session",
+    "assert context.session['loop_review_checkpoint_iteration'] == 25, context.session",
     "print(json.dumps({'default': module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL, 'checkpoint_stop': 'review_checkpoint_reached', 'resumed_checkpoint': context.session['loop_review_checkpoint_iteration']}))"
   ].join("\n");
   const checkpointOutput = execFileSync(python.command, [
@@ -812,9 +1063,182 @@ try {
   if (
     !checkpointOutput.includes('"default": 100') ||
     !checkpointOutput.includes('"checkpoint_stop": "review_checkpoint_reached"') ||
-    !checkpointOutput.includes('"resumed_checkpoint": 125')
+    !checkpointOutput.includes('"resumed_checkpoint": 25')
   ) {
     throw new Error(`checkpoint smoke test returned unexpected output: ${checkpointOutput}`);
+  }
+
+  const resumeForkScript = [
+    "import importlib.util, json, os, pathlib, shutil",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+    "module._CONTEXT.project = context",
+    "root = context.root",
+    "trials_root = root / 'research_trajectory' / 'trials'",
+    "checkpoints_root = root / 'research_trajectory' / 'checkpoints'",
+    "archive_root = root / 'archive' / 'resume_forks'",
+    "shutil.rmtree(trials_root, ignore_errors=True)",
+    "shutil.rmtree(checkpoints_root, ignore_errors=True)",
+    "shutil.rmtree(archive_root, ignore_errors=True)",
+    "trials_root.mkdir(parents=True, exist_ok=True)",
+    "def make_trial(name, summary):",
+    "    path = trials_root / name",
+    "    path.mkdir(parents=True, exist_ok=True)",
+    "    (path / 'PLAN.md').write_text('# Plan\\n', encoding='utf-8')",
+    "    (path / 'REPORT.md').write_text('# Report\\n\\n## Summary\\n\\n' + summary + '\\n', encoding='utf-8')",
+    "    (path / 'REVIEW.md').write_text('# Review\\n', encoding='utf-8')",
+    "    return path",
+    "base = make_trial('000001_base_boundary', 'Base checkpoint trial.')",
+    "later = make_trial('000002_later_superseded', 'Later trial to archive.')",
+    "(root / 'PROJECT.md').write_text('# Checkpoint project\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'STATE.md').write_text('# Research State\\n\\n## Autoresearch Goal Gate\\n\\nStatus: continue\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'CURRENT_FINDINGS.md').write_text('# Findings at checkpoint\\n', encoding='utf-8')",
+    "(root / 'manuscript' / 'BLUEPRINT.md').write_text('# Manuscript at checkpoint\\n', encoding='utf-8')",
+    "(root / 'resources' / 'user_input' / 'RESOURCE_MANIFEST.md').write_text('# Manifest at checkpoint\\n', encoding='utf-8')",
+    "base_trial = module.active_reported_trials()[0]",
+    "checkpoint = module.write_trial_checkpoint(base_trial)",
+    "assert checkpoint['created'] is True, checkpoint",
+    "(root / 'PROJECT.md').write_text('# Later project should be restored away\\n', encoding='utf-8')",
+    "calls = []",
+    "def fake_start(prompt, *args, **kwargs):",
+    "    calls.append({'prompt': prompt, 'kwargs': kwargs})",
+    "    return {'ok': True, 'kwargs': kwargs}",
+    "module.start_research_run = fake_start",
+    "context.session.update({'process': None, 'loop_active': False, 'mode': 'goal', 'loop_iteration': 0, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "result = module.start_resume_from_trial({'resumeFromTrial': {'id': '000001_base_boundary', 'path': 'research_trajectory/trials/000001_base_boundary'}, 'settings': {'reviewCheckpointInterval': 5}}, 'resume from checkpoint', {'saved_files': [], 'resource_links': [], 'resource_clues': [], 'metadata_files': []})",
+    "fork = result['files']['resume_fork']",
+    "assert fork['fork_sequence'] == 1, fork",
+    "assert pathlib.Path(root / fork['fork_manifest']).read_text(encoding='utf-8').startswith('# Resume Fork F0001'), fork",
+    "assert fork['restore_mode'] == 'checkpoint', fork",
+    "assert not later.exists(), 'later checkpoint trial should be archived'",
+    "assert fork['archived_trials'] and fork['archived_trials'][0]['from'].endswith('000002_later_superseded'), fork",
+    "assert '# Checkpoint project' in (root / 'PROJECT.md').read_text(encoding='utf-8')",
+    "assert calls and calls[0]['kwargs']['resume'] is False, calls",
+    "assert 'archived' in calls[0]['prompt'].lower(), calls[0]['prompt']",
+    "assert 'The next active trial is Trial 2' in calls[0]['prompt'], calls[0]['prompt']",
+    "shutil.rmtree(trials_root, ignore_errors=True)",
+    "shutil.rmtree(checkpoints_root, ignore_errors=True)",
+    "trials_root.mkdir(parents=True, exist_ok=True)",
+    "best_base = make_trial('000010_best_effort_base', 'Best effort base trial.')",
+    "best_later = make_trial('000011_best_effort_later', 'Best effort later trial.')",
+    "(root / 'PROJECT.md').write_text('# Best effort current project\\n', encoding='utf-8')",
+    "calls.clear()",
+    "context.session.update({'process': None, 'loop_active': False, 'mode': 'goal', 'loop_iteration': 0, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "best = module.start_resume_from_trial({'resumeFromTrial': {'id': '000010_best_effort_base', 'path': 'research_trajectory/trials/000010_best_effort_base'}, 'settings': {}}, 'resume without checkpoint', {'saved_files': [], 'resource_links': [], 'resource_clues': [], 'metadata_files': []})",
+    "best_fork = best['files']['resume_fork']",
+    "assert best_fork['fork_sequence'] == 2, best_fork",
+    "assert best_fork['restore_mode'] == 'best_effort', best_fork",
+    "assert not best_later.exists(), 'later best-effort trial should be archived'",
+    "assert '# Best effort current project' in (root / 'PROJECT.md').read_text(encoding='utf-8')",
+    "assert 'best-effort fork' in calls[0]['prompt'].lower(), calls[0]['prompt']",
+    "index_text = pathlib.Path(root / best_fork['fork_index']).read_text(encoding='utf-8')",
+    "assert '## F0001' in index_text and '## F0002' in index_text, index_text",
+    "assert 'resume from checkpoint' in index_text and 'resume without checkpoint' in index_text, index_text",
+    "print(json.dumps({'checkpoint': fork['restore_mode'], 'best_effort': best_fork['restore_mode'], 'archived': len(fork['archived_trials']) + len(best_fork['archived_trials']), 'sequences': [fork['fork_sequence'], best_fork['fork_sequence']]}))"
+  ].join("\n");
+  const resumeForkOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    resumeForkScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!resumeForkOutput.includes('"checkpoint": "checkpoint"') || !resumeForkOutput.includes('"best_effort": "best_effort"')) {
+    throw new Error(`resume-from-trial smoke test returned unexpected output: ${resumeForkOutput}`);
+  }
+
+  const restartScript = [
+    "import importlib.util, json, os, pathlib, shutil",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+    "module._CONTEXT.project = context",
+    "root = context.root",
+    "trials_root = root / 'research_trajectory' / 'trials'",
+    "checkpoints_root = root / 'research_trajectory' / 'checkpoints'",
+    "workspace_root = root / 'workspace'",
+    "restart_root = root / 'archive' / 'restarts'",
+    "user_resource = root / 'resources' / 'user_input' / 'attachments' / 'user_note.md'",
+    "unknown_resource = root / 'resources' / 'target_venue' / 'unknown_seed.md'",
+    "generated_resource = root / 'resources' / 'literature' / 'generated_source.md'",
+    "shutil.rmtree(trials_root, ignore_errors=True)",
+    "shutil.rmtree(checkpoints_root, ignore_errors=True)",
+    "shutil.rmtree(workspace_root, ignore_errors=True)",
+    "shutil.rmtree(restart_root, ignore_errors=True)",
+    "trials_root.mkdir(parents=True, exist_ok=True)",
+    "checkpoints_root.mkdir(parents=True, exist_ok=True)",
+    "workspace_root.mkdir(parents=True, exist_ok=True)",
+    "for name in ['000001_old', '000002_old']:",
+    "    path = trials_root / name",
+    "    path.mkdir(parents=True, exist_ok=True)",
+    "    (path / 'PLAN.md').write_text('# Plan\\n', encoding='utf-8')",
+    "    (path / 'REPORT.md').write_text('# Report\\n', encoding='utf-8')",
+    "(checkpoints_root / '000001_old').mkdir(parents=True, exist_ok=True)",
+    "(workspace_root / 'generated_note.md').write_text('generated\\n', encoding='utf-8')",
+    "user_resource.parent.mkdir(parents=True, exist_ok=True)",
+    "unknown_resource.parent.mkdir(parents=True, exist_ok=True)",
+    "generated_resource.parent.mkdir(parents=True, exist_ok=True)",
+    "user_resource.write_text('user\\n', encoding='utf-8')",
+    "unknown_resource.write_text('unknown\\n', encoding='utf-8')",
+    "generated_resource.write_text('generated\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'CURRENT_FINDINGS.md').write_text('# Old findings\\n', encoding='utf-8')",
+    "(root / 'resources' / 'user_input' / 'RESOURCE_MANIFEST.md').write_text(\"\"\"# Old manifest\n\n## Attached Resources\n\n- upload copied: `resources/user_input/attachments/user_note.md`\n  - Provenance: `user_explicit`\n- discovered seed: `resources/target_venue/unknown_seed.md`\n  - Provenance: `unknown`\n- generated source: `resources/literature/generated_source.md`\n  - Provenance: `autoresearch_generated`\n\"\"\", encoding='utf-8')",
+    "calls = []",
+    "def fake_start(prompt, *args, **kwargs):",
+    "    calls.append({'prompt': prompt, 'kwargs': kwargs})",
+    "    return {'ok': True, 'kwargs': kwargs}",
+    "module.start_research_run = fake_start",
+    "context.session.update({'process': None, 'loop_active': False, 'mode': 'goal', 'loop_iteration': 12, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "result = module.start_restart_autoresearch({'message': 'clean restart', 'settings': {'reviewCheckpointInterval': 7}})",
+    "restart = result['files']['restart']",
+    "manifest = json.loads((root / restart['restart_manifest']).read_text(encoding='utf-8'))",
+    "assert restart['restart_sequence'] == 1, restart",
+    "assert manifest['resource_policy']['retained'] == ['user_confirmed', 'user_explicit'], manifest",
+    "assert len(manifest['retained_resource_entries']) == 1, manifest",
+    "assert len(manifest['inactive_resource_entries']) == 2, manifest",
+    "assert not any(path.is_dir() for path in trials_root.iterdir() if path.name != '.gitkeep'), list(trials_root.iterdir())",
+    "assert not any(path.is_dir() for path in checkpoints_root.iterdir() if path.name != '.gitkeep'), list(checkpoints_root.iterdir())",
+    "assert not (workspace_root / 'generated_note.md').exists(), 'workspace generated artifact should be archived'",
+    "assert user_resource.exists(), 'user-explicit resource should remain active'",
+    "assert not unknown_resource.exists(), 'unknown resource should be moved out of active resources'",
+    "assert not generated_resource.exists(), 'autoresearch-generated resource should be moved out of active resources'",
+    "inactive_root = root / 'archive' / 'restarts' / pathlib.Path(restart['restart_manifest']).parent.name / 'inactive_resources'",
+    "assert (inactive_root / 'resources' / 'target_venue' / 'unknown_seed.md').exists(), inactive_root",
+    "assert (inactive_root / 'resources' / 'literature' / 'generated_source.md').exists(), inactive_root",
+    "assert (root / 'archive' / 'restarts' / pathlib.Path(restart['restart_manifest']).parent.name / 'archived_trials').exists(), restart",
+    "trajectory = json.loads((root / 'research_trajectory' / 'TRAJECTORY.json').read_text(encoding='utf-8'))",
+    "assert trajectory['next_trial_number'] == 1 and trajectory['restart_id'] == restart['restart_id'], trajectory",
+    "assert 'Restart Resource Policy' in (root / 'resources' / 'user_input' / 'RESOURCE_MANIFEST.md').read_text(encoding='utf-8')",
+    "assert calls and calls[0]['kwargs']['loop_iteration_override'] == 1, calls",
+    "assert 'Start a new active trajectory at Trial 1' in calls[0]['prompt'], calls[0]['prompt']",
+    "print(json.dumps({'restart_id': restart['restart_id'], 'moved': len(restart['moved_paths']), 'next': trajectory['next_trial_number']}))"
+  ].join("\n");
+  const restartOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    restartScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!restartOutput.includes('"next": 1') || !restartOutput.includes('"moved":')) {
+    throw new Error(`restart smoke test returned unexpected output: ${restartOutput}`);
   }
 
   const occupied = await reserveFallbackTestPort();

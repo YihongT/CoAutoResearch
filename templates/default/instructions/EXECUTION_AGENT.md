@@ -259,9 +259,31 @@ Use this section to decide whether the autoresearch loop should continue or stop
 
 The autoresearch goal is complete only when `Status: pass` and every required reviewer gate is a strict `pass`, including the Final gate reviewer.
 
+For manuscript-facing projects, a pass also requires a final synthesis step
+before the gate is marked pass. That step must update:
+
+- `manuscript/BLUEPRINT.md`
+- `research_trajectory/CURRENT_FINDINGS.md`
+- `manuscript/figures/FIGURE_SPECS.md`, when figures or tables are active
+- any manuscript review notes needed to make current status clear
+
+`manuscript/BLUEPRINT.md` must be self-contained and target-venue-ready before
+final pass. It must include target venue/audience/article type, organization
+rationale, core story, accepted claims and evidence map, section architecture,
+figure plan, table plan or no-table rationale, reference/literature grounding
+plan, appendix/supplement plan, blocking missing evidence, required
+qualifications, deprecated ideas, and submission-readiness summary.
+
+The blueprint must not contain stale contradictions. Examples that block pass:
+active claims presented as final while the section says there are no active
+claims, `Blocking Missing Evidence` containing real unresolved blockers,
+figures or tables missing captions/source paths/evidence links/venue rationale,
+or wording such as "tentative until source-level evidence checks are completed"
+after evidence/final gates are claimed as pass.
+
 Before marking any gate as `pass`, read `instructions/reviewers/REVIEW_TAXONOMY.md`. Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results and require `continue` unless the relevant reviewer standard is fully satisfied.
 
-The Final gate reviewer is required before the loop can stop. It must confirm that all other required reviewers passed under the shared output schema and that no blocking issues, required actions, unresolved qualifications, active revision constraints, or critical unassessed areas remain.
+The Final gate reviewer is required before the loop can stop. It must confirm that all other required reviewers passed under the shared output schema and that no blocking issues, required actions, unresolved qualifications, active revision constraints, critical unassessed areas, outdated reviewer instructions, incomplete final blueprint sections, or stale pass-conflicting language remain.
 
 If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a human decision is genuinely required, mark `Status: needs_human` and state the exact question.
 

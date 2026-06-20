@@ -16,6 +16,16 @@ It is not current research truth until promoted into `PROJECT.md`, `research_tra
 
 - <source, destination, category, mode, and reason>
 
+## Resource Provenance
+
+Use one of these values when recording a resource:
+
+- `user_explicit`: selected, uploaded, pasted, dragged, or directly linked by the user.
+- `user_confirmed`: inferred or discovered by the system, then confirmed by the user as active input.
+- `autoresearch_discovered`: found by an autoresearch run without explicit user confirmation.
+- `autoresearch_generated`: created by an autoresearch run.
+- `unknown`: legacy or ambiguous provenance.
+
 ## Embedded Resource Surfacing
 
 - <nested bibliographies, literature, venue materials, or data artifacts surfaced from filed bundles, with source bundle, destination, mode, and reason>

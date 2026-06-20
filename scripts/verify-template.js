@@ -79,9 +79,60 @@ if (!stateTemplate.includes("Final gate reviewer")) {
   failures.push("research_trajectory/STATE.md: missing Final gate reviewer");
 }
 
+const manifest = JSON.parse(await fsp.readFile(path.join(template, ".co-auto-research-template", "manifest.json"), "utf8"));
+if (manifest.reviewerBaselineVersion !== "2026-06-final-blueprint") {
+  failures.push(".co-auto-research-template/manifest.json: missing reviewer baseline version");
+}
+const coreReviewerFiles = Array.isArray(manifest.coreReviewerFiles) ? manifest.coreReviewerFiles : [];
+for (const name of [
+  "REVIEW_TAXONOMY.md",
+  "FINAL_GATE_REVIEWER.md",
+  "PLAN_REVIEWER.md",
+  "PROCESS_REVIEWER.md",
+  "EVIDENCE_REVIEWER.md",
+  "VENUE_FIT_REVIEWER.md",
+  "MANUSCRIPT_REVIEWER.md",
+  "FIGURE_TABLE_REVIEWER.md",
+  "REVIEWER_SPAWNING.md"
+]) {
+  if (!coreReviewerFiles.includes(name)) {
+    failures.push(`.co-auto-research-template/manifest.json: missing core reviewer ${name}`);
+  }
+}
+
+const blueprintTemplate = await fsp.readFile(path.join(template, "manuscript", "BLUEPRINT.md"), "utf8");
+for (const heading of [
+  "## Target Venue / Audience / Article Type",
+  "## Target-Venue Organization Rationale",
+  "## Core Story",
+  "## Accepted Claims And Evidence Map",
+  "## Section-By-Section Architecture",
+  "## Figure Plan",
+  "## Table Plan",
+  "### No-Table Rationale",
+  "## Reference / Literature Grounding Plan",
+  "## Appendix / Supplement Plan",
+  "## Blocking Missing Evidence",
+  "## Required Qualifications / Claim Constraints",
+  "## Deprecated Or Superseded Ideas",
+  "## Submission-Readiness Summary"
+]) {
+  if (!blueprintTemplate.includes(heading)) {
+    failures.push(`manuscript/BLUEPRINT.md: missing ${heading}`);
+  }
+}
+
+const finalGateReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
+if (!finalGateReviewer.includes("## Artifact Consistency Audit")) {
+  failures.push("instructions/reviewers/FINAL_GATE_REVIEWER.md: missing artifact consistency audit");
+}
+
 const serverTemplate = await fsp.readFile(path.join(template, "ui", "server.py"), "utf8");
 if (!serverTemplate.includes('"final_gate": "Final gate reviewer"')) {
   failures.push("ui/server.py: missing Final gate reviewer parser entry");
+}
+if (!serverTemplate.includes("final_blueprint_consistency_blockers")) {
+  failures.push("ui/server.py: missing final blueprint consistency guard");
 }
 
 if (failures.length) {

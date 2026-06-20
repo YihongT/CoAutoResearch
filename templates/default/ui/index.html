@@ -7,8 +7,7 @@
     <script>
       (() => {
         try {
-          const theme = localStorage.getItem("coAutoResearchTheme");
-          document.documentElement.dataset.theme = theme === "night" ? "night" : "light";
+          document.documentElement.dataset.theme = "light";
         } catch {
           document.documentElement.dataset.theme = "light";
         }
@@ -216,7 +215,8 @@
 	                      </div>
                       <div class="composer-suggestion-row" id="composer-suggestions" aria-label="Codex quick prompts" hidden>
                         <span>Try</span>
-                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal pause">Pause autoresearch</button>
+                        <button class="composer-suggestion-chip" type="button" data-pause-autoresearch>Pause after current turn</button>
+                        <button class="composer-suggestion-chip" type="button" data-stop-current-run>Stop current run</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal resume">Resume autoresearch</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal">Show autoresearch</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/status">Status</button>
@@ -276,7 +276,7 @@
                         <button class="command-chip" type="button" data-command="/goal">Show autoresearch</button>
                         <button class="command-chip" type="button" data-command="/goal pause">Pause autoresearch</button>
                         <button class="command-chip" type="button" data-command="/goal resume">Resume autoresearch</button>
-                        <button class="command-chip" type="button" data-command="/goal clear">Clear autoresearch state</button>
+                        <button class="command-chip" type="button" data-command="/goal restart">Restart autoresearch</button>
                         <button class="command-chip" type="button" data-command="/permissions">Permissions</button>
                         <button class="command-chip" type="button" data-command="/model">Model</button>
                         <button class="command-chip" type="button" data-command="/plan">Plan</button>
@@ -429,7 +429,7 @@
         <div class="browser-pathbar">
           <button class="mini-button" id="browser-up" type="button">Up</button>
           <code id="browser-current-path"></code>
-          <button class="secondary-button small-button" id="browser-add-current" type="button">Use this folder</button>
+          <button class="secondary-button small-button" id="browser-add-current" type="button" data-resource-add-path="">Use this folder</button>
         </div>
         <label class="browser-search-field" aria-label="Search current folder">
           <span aria-hidden="true">
@@ -536,6 +536,56 @@
       </section>
     </dialog>
 
+    <dialog class="project-dialog resume-trial-dialog" id="resume-trial-dialog" aria-labelledby="resume-trial-title">
+      <section class="project-dialog-shell">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Trajectory fork</p>
+            <h2 id="resume-trial-title">Continue from this trial?</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-resume-trial-cancel aria-label="Close continue dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="resume-trial-body">
+          <div class="resume-trial-summary" id="resume-trial-summary"></div>
+          <div class="resume-trial-warning" id="resume-trial-warning" hidden></div>
+        </div>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-resume-trial-cancel>Cancel</button>
+          <button class="primary-button" type="button" data-resume-trial-confirm>Continue from trial</button>
+        </footer>
+      </section>
+    </dialog>
+
+    <dialog class="project-dialog restart-autoresearch-dialog" id="restart-autoresearch-dialog" aria-labelledby="restart-autoresearch-title">
+      <section class="project-dialog-shell">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Autoresearch restart</p>
+            <h2 id="restart-autoresearch-title">Restart autoresearch?</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-restart-autoresearch-cancel aria-label="Close restart dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="restart-autoresearch-body">
+          <p>This archives the current autoresearch trajectory and starts a new run in the same project.</p>
+          <ul>
+            <li>Current trials, runtime state, working manuscript snapshots, and generated findings move under <code>archive/restarts/</code>.</li>
+            <li>User-uploaded or explicitly selected resources stay available to the new run.</li>
+            <li>Autoresearch-discovered, generated, or unknown resources are archived as prior-run context, not active inputs.</li>
+            <li>The active Trial axis starts again at Trial 1.</li>
+          </ul>
+          <p class="restart-autoresearch-reason" id="restart-autoresearch-reason" hidden></p>
+        </div>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-restart-autoresearch-cancel>Cancel</button>
+          <button class="primary-button danger-primary-button" type="button" data-restart-autoresearch-confirm>Restart autoresearch</button>
+        </footer>
+      </section>
+    </dialog>
+
     <dialog class="settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
       <section class="settings-shell">
         <aside class="settings-sidebar" aria-label="Settings sections">
@@ -570,16 +620,12 @@
             <div class="settings-row">
               <div>
                 <h3>Theme</h3>
-                <p>Switch the workspace appearance for the current browser.</p>
+                <p>CoAutoResearch currently ships with the Light dashboard theme.</p>
               </div>
               <fieldset class="theme-mode-control" aria-label="Theme mode">
                 <label>
                   <input type="radio" name="themeMode" value="light" data-theme-option />
                   <span>Light</span>
-                </label>
-                <label>
-                  <input type="radio" name="themeMode" value="night" data-theme-option />
-                  <span>Night</span>
                 </label>
               </fieldset>
             </div>

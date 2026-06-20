@@ -1,0 +1,470 @@
+#!/usr/bin/env node
+
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { pathToFileURL, fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const root = path.resolve(__dirname, "..");
+const outDir = path.join(root, "tmp", "theme-screenshots");
+const stylesHref = pathToFileURL(path.join(root, "templates", "default", "ui", "styles.css")).href;
+const rmOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 150 };
+
+const themes = [
+  ["light", "Light"],
+];
+
+const shots = [
+  { name: "dashboard-desktop", width: 1440, height: 1000, kind: "dashboard" },
+  { name: "dashboard-mobile", width: 390, height: 844, kind: "dashboard" },
+  { name: "settings-desktop", width: 1440, height: 1000, kind: "settings" },
+];
+
+function findChrome() {
+  const explicit = process.env.CHROME_BIN || process.env.CHROME || "";
+  const candidates = [
+    explicit,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "msedge",
+    "chrome",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    if (result.status === 0) return candidate;
+  }
+
+  throw new Error(
+    "Could not find Chrome/Chromium for screenshots. Set CHROME_BIN to a Chrome executable and rerun npm run visual:themes."
+  );
+}
+
+function chromeArgs({ width, height, userDataDir }) {
+  return [
+    "--headless=new",
+    "--disable-gpu",
+    "--disable-background-networking",
+    "--disable-extensions",
+    "--disable-sync",
+    "--metrics-recording-only",
+    "--mute-audio",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-dev-shm-usage",
+    "--disable-features=CalculateNativeWinOcclusion",
+    "--hide-scrollbars",
+    "--run-all-compositor-stages-before-draw",
+    "--remote-debugging-port=0",
+    `--user-data-dir=${userDataDir}`,
+    `--window-size=${width},${height}`,
+    "about:blank",
+  ];
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForDevToolsUrl(child, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    let stderr = "";
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out waiting for Chrome DevTools URL. Output:\n${stderr}`));
+    }, timeoutMs);
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+      if (match) {
+        clearTimeout(timer);
+        resolve(match[1]);
+      }
+    });
+
+    child.on("exit", (code, signal) => {
+      clearTimeout(timer);
+      reject(new Error(`Chrome exited before DevTools was ready, code ${code ?? ""}${signal ? ` signal ${signal}` : ""}.\n${stderr}`));
+    });
+  });
+}
+
+class CdpClient {
+  constructor(wsUrl) {
+    this.wsUrl = wsUrl;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.listeners = new Map();
+  }
+
+  connect() {
+    return new Promise((resolve, reject) => {
+      this.ws = new WebSocket(this.wsUrl);
+      this.ws.addEventListener("open", () => resolve());
+      this.ws.addEventListener("error", (event) => reject(event.error || new Error("Chrome DevTools WebSocket failed")));
+      this.ws.addEventListener("message", (event) => this.handleMessage(event.data));
+    });
+  }
+
+  handleMessage(raw) {
+    const message = JSON.parse(raw);
+    if (message.id && this.pending.has(message.id)) {
+      const { resolve, reject } = this.pending.get(message.id);
+      this.pending.delete(message.id);
+      if (message.error) reject(new Error(`${message.error.message || "CDP error"} ${message.error.data || ""}`.trim()));
+      else resolve(message.result || {});
+      return;
+    }
+
+    const listeners = this.listeners.get(message.method);
+    if (!listeners) return;
+    for (const listener of [...listeners]) listener(message);
+  }
+
+  send(method, params = {}, sessionId = undefined) {
+    const id = this.nextId++;
+    const payload = { id, method, params };
+    if (sessionId) payload.sessionId = sessionId;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.ws.send(JSON.stringify(payload));
+    });
+  }
+
+  waitFor(method, predicate = () => true, timeoutMs = 8000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timed out waiting for CDP event ${method}`));
+      }, timeoutMs);
+      const listener = (message) => {
+        if (!predicate(message)) return;
+        cleanup();
+        resolve(message);
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        const listeners = this.listeners.get(method);
+        if (listeners) listeners.delete(listener);
+      };
+      if (!this.listeners.has(method)) this.listeners.set(method, new Set());
+      this.listeners.get(method).add(listener);
+    });
+  }
+
+  close() {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.close();
+  }
+}
+
+async function captureScreenshot(chrome, { width, height, url, screenshot, userDataDir }) {
+  const child = spawn(chrome, chromeArgs({ width, height, userDataDir }), {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let client;
+  try {
+    const wsUrl = await waitForDevToolsUrl(child);
+    client = new CdpClient(wsUrl);
+    await client.connect();
+    const { targetId } = await client.send("Target.createTarget", { url: "about:blank" });
+    const { sessionId } = await client.send("Target.attachToTarget", { targetId, flatten: true });
+    await client.send("Page.enable", {}, sessionId);
+    await client.send("Runtime.enable", {}, sessionId);
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: width <= 760,
+      screenWidth: width,
+      screenHeight: height,
+    }, sessionId);
+    const loadPromise = client.waitFor("Page.loadEventFired", (message) => message.sessionId === sessionId, 8000);
+    await client.send("Page.navigate", { url }, sessionId);
+    await loadPromise;
+    await client.send("Runtime.evaluate", {
+      expression: "document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true",
+      awaitPromise: true,
+    }, sessionId);
+    await wait(120);
+    const { data } = await client.send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: false,
+      fromSurface: true,
+    }, sessionId);
+    await fsp.writeFile(screenshot, Buffer.from(data, "base64"));
+  } finally {
+    client?.close();
+    if (!child.killed) child.kill("SIGTERM");
+    await wait(100);
+    if (!child.killed) child.kill("SIGKILL");
+  }
+}
+
+function baseHead(theme, title) {
+  return `<!doctype html>
+<html lang="en" data-theme="${theme}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <link rel="stylesheet" href="${stylesHref}" />
+    <style>
+      body { min-height: 100vh; }
+      .visual-fixture .main-stage { min-height: 100vh; }
+      .visual-fixture .chat-frame { min-height: 100vh; padding-bottom: 220px; }
+      .visual-fixture .framing-thread { display: grid; gap: 28px; width: min(1180px, calc(100% - 56px)); margin: 0 auto; padding: 72px 0 40px; }
+      .visual-fixture .framing-message { display: grid; gap: 8px; }
+      .visual-fixture .framing-message.user { justify-items: end; }
+      .visual-fixture .framing-message.assistant, .visual-fixture .trial-history-card, .visual-fixture .file-viewer-shell { width: min(1040px, 100%); justify-self: center; }
+      .visual-fixture .framing-message.user .transcript-body { max-width: min(760px, 82%); }
+      .visual-fixture .brief-editor-shell.is-framing-dock { position: fixed; left: max(260px, 50%); bottom: 34px; transform: translateX(-50%); width: min(1040px, calc(100vw - 320px)); min-height: 148px; z-index: 20; }
+      .visual-fixture .file-viewer-shell { overflow: hidden; border-radius: 24px; }
+      .visual-fixture .file-viewer-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr); min-height: 260px; }
+      .visual-fixture .settings-dialog { position: relative; display: block; margin: 42px auto; }
+      @media (max-width: 820px) {
+        .visual-fixture .app-shell { display: block; }
+        .visual-fixture .rail { display: none; }
+        .visual-fixture .main-stage,
+        .visual-fixture .chat-frame,
+        .visual-fixture .framing-thread { width: 100%; max-width: 100vw; min-width: 0; overflow-x: hidden; box-sizing: border-box; }
+        .visual-fixture .framing-thread { margin: 0; padding: 24px 12px 260px; }
+        .visual-fixture .framing-message,
+        .visual-fixture .framing-message.assistant,
+        .visual-fixture .trial-history-card,
+        .visual-fixture .file-viewer-shell { justify-self: stretch; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+        .visual-fixture .framing-message.user { width: 100%; max-width: 100%; justify-items: end; }
+        .visual-fixture .framing-message.user .transcript-body { width: fit-content; max-width: min(100%, calc(100vw - 36px)); overflow-wrap: anywhere; }
+        .visual-fixture .trial-history-head { display: grid; align-items: stretch; gap: 12px; }
+        .visual-fixture .trial-history-head > div { display: grid; grid-template-columns: 1fr; gap: 5px; min-width: 0; }
+        .visual-fixture .trial-history-head strong { white-space: nowrap; }
+        .visual-fixture .trial-history-head p,
+        .visual-fixture .trial-history-head span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .visual-fixture .trial-report-actions { flex-wrap: wrap; }
+        .visual-fixture .trial-report-actions button { flex: 1 1 150px; min-width: 0; }
+        .visual-fixture .brief-editor-shell.is-framing-dock { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: calc(100vw - 24px); transform: none; }
+        .visual-fixture .brief-editor-shell.is-framing-dock .brief-composer-row { align-items: flex-start; flex-wrap: wrap; min-height: 0; }
+        .visual-fixture .brief-editor-shell.is-framing-dock .composer-attach-button { order: 1; }
+        .visual-fixture .brief-editor-shell.is-framing-dock textarea { order: 2; flex: 1 1 calc(100% - 112px); }
+        .visual-fixture .brief-editor-shell.is-framing-dock .send-button { order: 3; flex: 0 0 44px; }
+        .visual-fixture .brief-editor-shell.is-framing-dock .brief-run-controls { order: 4; flex: 1 1 calc(100% - 58px); width: calc(100% - 58px); margin-left: 58px; justify-content: flex-start; }
+        .visual-fixture .brief-editor-shell.is-framing-dock .brief-run-controls label { flex: 1 1 112px; min-width: 112px; }
+        .visual-fixture .composer-suggestion-row { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; }
+        .visual-fixture .composer-suggestion-chip { flex: 0 0 auto; max-width: 220px; }
+        .visual-fixture .file-viewer-body { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body class="visual-fixture">`;
+}
+
+function railHtml() {
+  return `<aside class="rail" aria-label="CoAutoResearch navigation">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">A</div>
+      <div>
+        <div class="brand-title">CoAutoResearch</div>
+        <div class="brand-subtitle">Research agent</div>
+      </div>
+    </div>
+    <nav class="rail-nav" aria-label="Views">
+      <div class="rail-section-label">Current project</div>
+      <button class="rail-action is-active" type="button">Agents</button>
+      <button class="rail-action" type="button">Project files</button>
+      <button class="rail-action" type="button">Resources</button>
+      <button class="rail-action" type="button">Trials</button>
+    </nav>
+    <div class="rail-footer">
+      <button class="rail-settings-button" type="button"><span>Settings</span></button>
+      <div class="rail-sync-row"><span class="sync-dot"></span><span>Synced now</span></div>
+    </div>
+  </aside>`;
+}
+
+function composerHtml() {
+  return `<section class="brief-editor-shell is-framing-dock" aria-label="Composer">
+    <div class="brief-composer-row">
+      <button class="composer-attach-button" type="button" aria-label="Attach file">+</button>
+      <textarea aria-label="Message" placeholder="Message Codex about the current research, ask for status, attach resources, or steer the next step..."></textarea>
+      <div class="brief-run-controls">
+        <label><select><option>GPT-5.5</option></select></label>
+        <label><select><option>Medium</option></select></label>
+      </div>
+      <button class="send-button" type="button" aria-label="Send">Up</button>
+    </div>
+    <div class="composer-suggestion-row">
+      <span>Goal paused</span>
+      <button class="composer-suggestion-chip" type="button">Resume autoresearch</button>
+      <button class="composer-suggestion-chip" type="button">Restart autoresearch</button>
+      <button class="composer-suggestion-chip" type="button">Show autoresearch</button>
+      <button class="composer-suggestion-chip" type="button">Status</button>
+      <button class="composer-suggestion-chip" type="button">Diff</button>
+    </div>
+  </section>`;
+}
+
+function dashboardHtml(theme, label) {
+  return `${baseHead(theme, `${label} dashboard`)}
+    <div class="app-shell">
+      ${railHtml()}
+      <main class="main-stage">
+        <section class="chat-frame">
+          <section class="framing-thread">
+            <article class="framing-message user">
+              <div class="transcript-meta">You</div>
+              <div class="transcript-body">Continue from Trial 1.</div>
+            </article>
+            <article class="framing-message assistant">
+              <div class="transcript-meta">CoAutoResearch</div>
+              <div class="transcript-body">
+                <div class="markdown-preview transcript-markdown">
+                  <p>Updated the project and kept the active manuscript reviewable.</p>
+                  <p>The current contribution is a <strong>target-venue-ready research blueprint</strong> with traceable claims, figures, tables, references, and reviewer gates.</p>
+                  <ul>
+                    <li><a href="#">PROJECT.md</a> and <a href="#">BLUEPRINT.md</a> remain linked.</li>
+                    <li>Evidence notes use <code>resources/</code> and trial reports for provenance.</li>
+                  </ul>
+                </div>
+              </div>
+            </article>
+            <section class="trial-history-card">
+              <header class="trial-history-head">
+                <div>
+                  <strong>Trials</strong>
+                  <span>8 trials - 8 reported - <em class="autoresearch-complete-tag">Autoresearch complete</em></span>
+                  <p>Latest: 000008_active_fork_post_revision_final_gate_review</p>
+                </div>
+                <button class="secondary-button small-button" type="button">Open latest manuscript</button>
+              </header>
+              <div class="trial-history-body">
+                <nav class="trial-strip" aria-label="Autoresearch trials">
+                  <button class="trial-scroll-button" type="button">&lt;</button>
+                  <div class="trial-strip-scroll">
+                    <button class="trial-chip" type="button"><span class="trial-chip-number">1</span><strong>blocked</strong></button>
+                    <button class="trial-chip" type="button"><span class="trial-chip-number">2</span><strong>Done</strong></button>
+                    <button class="trial-chip" type="button"><span class="trial-chip-number">3</span><strong>Done</strong></button>
+                    <button class="trial-chip is-active" type="button"><span class="trial-chip-number">8</span><strong>Done</strong></button>
+                  </div>
+                  <button class="trial-scroll-button" type="button">&gt;</button>
+                </nav>
+                <article class="trial-report-card is-complete">
+                  <div class="trial-report-head"><h3>Trial 8 <em>completed</em></h3></div>
+                  <p>Reviewed the revised working manuscript and final autoresearch gate after targeted revision.</p>
+                  <div class="trial-report-actions">
+                    <button class="secondary-button small-button" type="button">Continue from this trial</button>
+                    <button class="secondary-button small-button" type="button">Open report</button>
+                    <button class="secondary-button small-button" type="button">Open review</button>
+                  </div>
+                </article>
+              </div>
+            </section>
+            <section class="file-viewer-shell">
+              <header class="file-viewer-head"><div><p class="eyebrow">File preview</p><h2>BLUEPRINT.md</h2></div><button class="dialog-close-button" type="button">x</button></header>
+              <div class="file-viewer-body">
+                <div class="markdown-preview">
+                  <h1>Final Blueprint</h1>
+                  <p>This preview checks markdown text, links, code, tables, captions, and prose density.</p>
+                  <table><thead><tr><th>Claim</th><th>Evidence</th><th>Status</th></tr></thead><tbody><tr><td>C01</td><td>R00001</td><td>accepted</td></tr></tbody></table>
+                </div>
+                <pre class="file-code-preview"># Figure Plan\\n\\nFigure 1: calibration map\\nCaption: A self-contained visual argument.</pre>
+              </div>
+            </section>
+          </section>
+          ${composerHtml()}
+        </section>
+      </main>
+    </div>
+  </body>
+</html>`;
+}
+
+function settingsHtml(theme, label) {
+  return `${baseHead(theme, `${label} settings`)}
+    <dialog class="settings-dialog" open>
+      <section class="settings-shell">
+        <aside class="settings-sidebar">
+          <button class="settings-close" type="button">x</button>
+          <nav class="settings-nav">
+            <button class="settings-nav-button is-active" type="button"><span>G</span><strong>General</strong></button>
+            <button class="settings-nav-button" type="button"><span>{}</span><strong>Codex</strong></button>
+          </nav>
+        </aside>
+        <form class="settings-content">
+          <header class="settings-titlebar">
+            <div><h2>Settings</h2><p>Local configuration for CoAutoResearch and the Codex session runner.</p></div>
+            <button class="settings-save-button" type="button">Save</button>
+          </header>
+          <section class="settings-panel is-active">
+            <div class="settings-row">
+              <div><h3>Theme</h3><p>CoAutoResearch currently uses the Light theme.</p></div>
+              <fieldset class="theme-mode-control">
+                <label><input type="radio" checked /><span>${label}</span></label>
+              </fieldset>
+            </div>
+            <div class="settings-row">
+              <div><h3>Runtime storage</h3><p>Settings and tokens are stored locally and ignored by git.</p></div>
+              <span class="settings-value">Local only</span>
+            </div>
+            <section class="settings-secret-card">
+              <div class="settings-secret-head"><div><strong>OpenAI API key</strong><em>OPENAI_API_KEY</em></div><span class="secret-status is-saved">Saved</span></div>
+              <input type="password" value="sk-visual-fixture" />
+              <div class="settings-secret-help">This fixture checks settings contrast, form controls, and saved status.</div>
+            </section>
+            <div class="settings-doc-callout">
+              <div><h3>Documentation</h3><p>Open local and published docs from the dashboard.</p></div>
+              <div class="settings-doc-links"><a href="#">README</a><a href="#">Docs</a></div>
+            </div>
+          </section>
+        </form>
+      </section>
+    </dialog>
+  </body>
+</html>`;
+}
+
+async function main() {
+  const chrome = findChrome();
+  await fsp.rm(outDir, rmOptions);
+  await fsp.mkdir(outDir, { recursive: true });
+
+  for (const [theme, label] of themes) {
+    for (const shot of shots) {
+      const html = shot.kind === "settings" ? settingsHtml(theme, label) : dashboardHtml(theme, label);
+      const htmlPath = path.join(outDir, `${theme}-${shot.name}.html`);
+      const pngPath = path.join(outDir, `${theme}-${shot.name}.png`);
+      const userDataDir = path.join(os.tmpdir(), `co-auto-research-chrome-${process.pid}-${theme}-${shot.name}`);
+      await fsp.writeFile(htmlPath, html, "utf8");
+      await fsp.rm(userDataDir, rmOptions);
+      await captureScreenshot(chrome, {
+        width: shot.width,
+        height: shot.height,
+        url: pathToFileURL(htmlPath).href,
+        screenshot: pngPath,
+        userDataDir,
+      });
+      await fsp.rm(userDataDir, rmOptions);
+      const stat = await fsp.stat(pngPath).catch(() => null);
+      if (!stat?.size) {
+        throw new Error(`Chrome screenshot did not create ${pngPath}`);
+      }
+    }
+  }
+
+  console.log(`Theme screenshots written to ${path.relative(root, outDir)}/`);
+  for (const [theme] of themes) {
+    console.log(`- ${theme}: dashboard desktop/mobile, settings desktop`);
+  }
+}
+
+main().catch((error) => {
+  console.error(error?.stack || error);
+  process.exit(1);
+});

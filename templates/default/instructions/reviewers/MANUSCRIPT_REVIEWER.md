@@ -27,11 +27,14 @@ Do not write manuscript reviews into trial folders unless the manuscript review 
 Evaluate:
 
 - target venue fit;
+- target-venue organization rationale;
 - research problem motivation;
 - novelty and contribution clarity;
 - story coherence;
 - claim/evidence alignment;
 - sufficiency of figures and tables;
+- reference and literature grounding posture;
+- appendix and supplement posture;
 - treatment of limitations and alternatives;
 - whether the manuscript can stand on its own without hidden trial details.
 
@@ -41,7 +44,11 @@ Use `Decision: pass` only for submission-readiness or declared final-deliverable
 readiness. The manuscript must have no unresolved required revision constraints
 for the declared scope, and the review must account for contribution, evidence,
 venue fit, figures/tables, limitations, references, and self-contained
-readability.
+readability. For manuscript-facing final pass, `manuscript/BLUEPRINT.md` must be
+self-contained and target-venue-ready: accepted claims, evidence, sections,
+figures, tables, references, appendix/supplement posture, blocking missing
+evidence, required qualifications, and submission-readiness must all be explicit
+and mutually consistent.
 
 If the manuscript architecture is coherent, the story is plausible, or the
 deliverable is ready for targeted revision, use `Decision: continue` and record

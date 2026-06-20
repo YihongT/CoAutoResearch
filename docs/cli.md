@@ -32,6 +32,7 @@ Source-checkout development commands are covered in the contributor guide.
 | `ui --projects-dir <dir>` | Start a dashboard over several generated projects. |
 | `doctor` | Check local prerequisites and port availability. |
 | `upgrade` | Print installed version, detected project template version, and npm update command. |
+| `upgrade-project` | Sync core reviewer instructions in an existing project, with backup. |
 | `version` | Print the installed CLI package version. |
 
 ## Start the UI
@@ -75,6 +76,49 @@ If you keep projects somewhere else:
 co-auto-research ls --projects-dir ./projects
 co-auto-research attach my-project --projects-dir ./projects
 ```
+
+## Autoresearch Commands
+
+The dashboard exposes these as buttons, and the composer also accepts the same
+slash commands:
+
+| Command | Meaning |
+| --- | --- |
+| `/goal` | Show the current autoresearch state. |
+| `/goal resume` | Resume the loop from the latest active trial. |
+| `/goal pause` | Let the current turn finish, then prevent the next trial from starting. |
+| `/goal restart` | Confirm, archive the current trajectory, and start a new Trial 1. |
+| `/status` | Show session and gate status. |
+| `/ps` | Show running process state. |
+| `/diff` | Show changed files. |
+
+`/goal restart` is not a lightweight reset. It archives existing trials, runtime
+state, working manuscript, generated workspace, and current findings under
+`archive/restarts/`. User-uploaded or user-confirmed resources remain available;
+autoresearch-discovered or generated resources become prior-run context until
+you explicitly reattach or confirm them.
+
+The dashboard currently uses the Light theme. The setting is local to the
+browser and does not clear composer text, attachments, or context chips.
+
+## Update Project Reviewers
+
+The npm package updates the CLI and UI runtime. Existing project research files
+are not rewritten automatically, but core reviewer instructions can be synced
+when `doctor` or the UI reports an outdated reviewer baseline:
+
+```bash
+co-auto-research upgrade-project
+```
+
+For a dashboard folder:
+
+```bash
+co-auto-research upgrade-project --all --projects-dir co-autoresearch-projects
+```
+
+The command backs up previous core reviewer files under
+`archive/template_migrations/` and preserves custom extra reviewer files.
 
 ## Port and Browser Options
 

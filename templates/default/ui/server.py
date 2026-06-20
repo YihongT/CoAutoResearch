@@ -37,6 +37,34 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 AUTO_RESOURCE_SEARCH_MAX_RESULTS = 8
 AUTO_RESOURCE_SEARCH_MAX_DIRS = 2500
 AUTO_RESOURCE_SEARCH_MAX_DEPTH = 5
+RESUME_SNAPSHOT_PATHS = [
+    "PROJECT.md",
+    "research_trajectory/STATE.md",
+    "research_trajectory/CURRENT_FINDINGS.md",
+    "manuscript",
+    "resources/user_input/RESOURCE_MANIFEST.md",
+]
+RESTART_SNAPSHOT_PATHS = [
+    "PROJECT.md",
+    "research_trajectory/STATE.md",
+    "research_trajectory/CURRENT_FINDINGS.md",
+    "research_trajectory/TRAJECTORY.json",
+    "research_trajectory/NEXT_TRIAL.json",
+    "research_trajectory/trials",
+    "research_trajectory/checkpoints",
+    "manuscript",
+    "workspace",
+    "resources/user_input/RESOURCE_MANIFEST.md",
+]
+RESOURCE_PROVENANCE_VALUES = {
+    "user_explicit",
+    "user_confirmed",
+    "autoresearch_discovered",
+    "autoresearch_generated",
+    "unknown",
+}
+RESTART_RETAINED_PROVENANCE = {"user_explicit", "user_confirmed"}
+RESOURCE_MANIFEST_RELATIVE_PATH = "resources/user_input/RESOURCE_MANIFEST.md"
 AUTO_RESOURCE_SKIP_DIRS = {
     ".cache",
     ".codex",
@@ -90,6 +118,78 @@ PDF_PREVIEW_SUFFIXES = {".pdf"}
 PREVIEWABLE_SUFFIXES = TEXT_PREVIEW_SUFFIXES | IMAGE_PREVIEW_SUFFIXES | PDF_PREVIEW_SUFFIXES
 COLD_START_EDIT_FILES = [
     "resources/user_input/INITIAL_BRIEF.md",
+]
+REVIEWER_BASELINE_VERSION = "2026-06-per-reviewer-files"
+CORE_REVIEWER_FILES = [
+    "REVIEW_TAXONOMY.md",
+    "FINAL_GATE_REVIEWER.md",
+    "PLAN_REVIEWER.md",
+    "PROCESS_REVIEWER.md",
+    "EVIDENCE_REVIEWER.md",
+    "VENUE_FIT_REVIEWER.md",
+    "MANUSCRIPT_REVIEWER.md",
+    "FIGURE_TABLE_REVIEWER.md",
+    "REVIEWER_SPAWNING.md",
+]
+REVIEWER_BASELINE_RELATIVE_PATH = "instructions/.co-auto-research-instructions.json"
+REVIEW_STORAGE_VERSION = "per-reviewer-files-v1"
+REQUIRED_REVIEWER_OUTPUTS = {
+    "plan": {
+        "label": "Plan reviewer",
+        "file": "PLAN_REVIEW.md",
+        "scope": "plan",
+        "instruction": "instructions/reviewers/PLAN_REVIEWER.md",
+    },
+    "process": {
+        "label": "Process reviewer",
+        "file": "PROCESS_REVIEW.md",
+        "scope": "process",
+        "instruction": "instructions/reviewers/PROCESS_REVIEWER.md",
+    },
+    "evidence": {
+        "label": "Evidence reviewer",
+        "file": "EVIDENCE_REVIEW.md",
+        "scope": "evidence",
+        "instruction": "instructions/reviewers/EVIDENCE_REVIEWER.md",
+    },
+    "venue_fit": {
+        "label": "Venue fit reviewer",
+        "file": "VENUE_FIT_REVIEW.md",
+        "scope": "venue",
+        "instruction": "instructions/reviewers/VENUE_FIT_REVIEWER.md",
+    },
+    "manuscript": {
+        "label": "Manuscript reviewer",
+        "file": "MANUSCRIPT_REVIEW.md",
+        "scope": "manuscript",
+        "instruction": "instructions/reviewers/MANUSCRIPT_REVIEWER.md",
+    },
+    "figure_table": {
+        "label": "Figure/table reviewer",
+        "file": "FIGURE_TABLE_REVIEW.md",
+        "scope": "figure-table",
+        "instruction": "instructions/reviewers/FIGURE_TABLE_REVIEWER.md",
+    },
+    "final_gate": {
+        "label": "Final gate reviewer",
+        "file": "FINAL_GATE_REVIEW.md",
+        "scope": "final-gate",
+        "instruction": "instructions/reviewers/FINAL_GATE_REVIEWER.md",
+    },
+}
+REQUIRED_BLUEPRINT_SECTIONS = [
+    "Target Venue / Audience / Article Type",
+    "Target-Venue Organization Rationale",
+    "Core Story",
+    "Section-By-Section Architecture",
+    "Figure Plan",
+    "Table Plan",
+    "Reference / Literature Grounding Plan",
+    "Appendix / Supplement Plan",
+    "Blocking Missing Evidence",
+    "Required Qualifications / Claim Constraints",
+    "Deprecated Or Superseded Ideas",
+    "Submission-Readiness Summary",
 ]
 
 
@@ -197,6 +297,615 @@ def template_copy_ignore(template_root: Path):
     return ignore
 
 
+def clean_template_root() -> Path:
+    candidates = [PACKAGE_TEMPLATE_ROOT, DEFAULT_PROJECT_ROOT]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        root = candidate.resolve()
+        if (root / ".co-auto-research-template" / "manifest.json").exists() and not (root / ".co-auto-research" / "project.json").exists():
+            return root
+    return DEFAULT_PROJECT_ROOT.resolve()
+
+
+def reviewer_template_dir(template_root: Path | None = None) -> Path:
+    return (template_root or clean_template_root()).resolve() / "instructions" / "reviewers"
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def reviewer_template_hashes(template_root: Path | None = None) -> dict[str, str]:
+    root = reviewer_template_dir(template_root)
+    hashes: dict[str, str] = {}
+    for name in CORE_REVIEWER_FILES:
+        path = root / name
+        if path.exists() and path.is_file():
+            hashes[name] = file_sha256(path)
+    return hashes
+
+
+def write_reviewer_baseline_metadata(project_root: Path, template_root: Path | None = None) -> dict[str, Any]:
+    hashes = reviewer_template_hashes(template_root)
+    payload = {
+        "schemaVersion": 1,
+        "reviewerBaselineVersion": REVIEWER_BASELINE_VERSION,
+        "syncedAt": now_iso(),
+        "coreReviewerFiles": hashes,
+    }
+    target = project_root / REVIEWER_BASELINE_RELATIVE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
+    return payload
+
+
+def reviewer_key_for_label(label: str) -> str:
+    clean = re.sub(r"[^a-z/ ]+", " ", str(label or "").lower())
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if clean.startswith("plan"):
+        return "plan"
+    if clean.startswith("process"):
+        return "process"
+    if clean.startswith("evidence"):
+        return "evidence"
+    if clean.startswith("venue"):
+        return "venue_fit"
+    if clean.startswith("manuscript"):
+        return "manuscript"
+    if clean.startswith("figure") or clean.startswith("table") or "figure/table" in clean:
+        return "figure_table"
+    if clean.startswith("final"):
+        return "final_gate"
+    return ""
+
+
+def project_relative_path(project_root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(project_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def read_trajectory_archived_ids(project_root: Path) -> set[str]:
+    path = project_root / "research_trajectory" / "TRAJECTORY.json"
+    if not path.exists():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    archived = payload.get("archived_trial_ids") if isinstance(payload, dict) else []
+    return {str(item) for item in archived} if isinstance(archived, list) else set()
+
+
+def project_active_trial_dirs(project_root: Path) -> list[Path]:
+    root = project_root / "research_trajectory" / "trials"
+    if not root.is_dir():
+        return []
+    archived_ids = read_trajectory_archived_ids(project_root)
+    dirs: list[Path] = []
+    for path in root.iterdir():
+        if not path.is_dir() or path.name in archived_ids:
+            continue
+        if re.match(r"^0*_?project_conversion", path.name, re.IGNORECASE):
+            continue
+        if not any((path / name).exists() for name in ("PLAN.md", "REVIEW.md", "REPORT.md", "artifacts", "reviews")):
+            continue
+        dirs.append(path)
+    return sorted(dirs, key=lambda path: (trial_iteration_from_id(path.name), path.name))
+
+
+def reviewer_output_path(trial_dir: Path, key: str) -> Path:
+    return trial_dir / "reviews" / REQUIRED_REVIEWER_OUTPUTS[key]["file"]
+
+
+def parse_reviewer_sections(text: str, source_path: str = "") -> list[dict[str, Any]]:
+    matches = list(re.finditer(r"^Reviewer:\s*`?([^`\n]+?)`?\s*$", text, re.MULTILINE))
+    sections: list[dict[str, Any]] = []
+    for index, match in enumerate(matches):
+        reviewer = match.group(1).strip()
+        key = reviewer_key_for_label(reviewer)
+        if not key:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[match.start():end].strip()
+        block = re.sub(r"\n-{3,}\s*$", "", block).strip()
+        sections.append({
+            "key": key,
+            "reviewer": reviewer,
+            "path": source_path,
+            "text": block,
+            "decision": regex_first_value(block, [r"Decision:\s*`?([^`\n]+)`?", r"Status:\s*`?([^`\n]+)`?"]),
+            "gate": regex_first_value(block, [r"Gate impact:\s*`?([^`\n]+)`?", r"Gate:\s*`?([^`\n]+)`?"]),
+            "confidence": regex_first_value(block, [r"Confidence:\s*`?([^`\n]+)`?"]) or "medium",
+        })
+    return sections
+
+
+def strip_reviewer_metadata(text: str) -> str:
+    lines = []
+    metadata = {
+        "reviewer",
+        "scope",
+        "decision",
+        "gate impact",
+        "gate",
+        "confidence",
+        "source trial",
+        "generated at",
+        "instruction file",
+        "migration source",
+    }
+    for line in text.splitlines():
+        label = line.split(":", 1)[0].strip().lower()
+        if label in metadata:
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def reviewed_inputs_for_trial(project_root: Path, trial_dir: Path, key: str) -> list[str]:
+    candidates = [
+        trial_dir / "PLAN.md",
+        trial_dir / "REPORT.md",
+        project_root / "PROJECT.md",
+        project_root / "research_trajectory" / "STATE.md",
+        project_root / "research_trajectory" / "CURRENT_FINDINGS.md",
+    ]
+    if key in {"evidence", "venue_fit", "manuscript", "figure_table", "final_gate"}:
+        candidates.append(project_root / "manuscript" / "BLUEPRINT.md")
+    if key in {"figure_table", "final_gate"}:
+        candidates.append(project_root / "manuscript" / "figures" / "FIGURE_SPECS.md")
+    if key in {"venue_fit", "figure_table", "final_gate"}:
+        candidates.extend([
+            project_root / "resources" / "target_venue" / "SEED_PAPERS.md",
+            project_root / "resources" / "target_venue" / "STYLE_NOTES.md",
+            project_root / "resources" / "target_venue" / "FIGURE_TABLE_NOTES.md",
+        ])
+    paths: list[str] = []
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            relative = project_relative_path(project_root, candidate)
+            if relative not in paths:
+                paths.append(relative)
+    return paths
+
+
+def default_missing_review_body(label: str) -> str:
+    return "\n".join([
+        "## Blocking Issues",
+        "",
+        f"- {label} was not run for this trial before the per-reviewer migration.",
+        "",
+        "## Required Actions Before Pass",
+        "",
+        f"- Run the {label} for this trial and replace this migration record.",
+        "",
+        "## Qualified / Partial Passes",
+        "",
+        "- none",
+        "",
+        "## Unassessed Areas",
+        "",
+        f"- {label} was not assessed for this trial.",
+    ])
+
+
+def format_reviewer_file(
+    project_root: Path,
+    trial_dir: Path,
+    key: str,
+    *,
+    decision: str,
+    gate: str,
+    confidence: str,
+    migration_source: str,
+    context_summary: str,
+    body: str = "",
+) -> str:
+    config = REQUIRED_REVIEWER_OUTPUTS[key]
+    label = config["label"]
+    clean_body = strip_reviewer_metadata(body) if body else default_missing_review_body(label)
+    reviewed_inputs = reviewed_inputs_for_trial(project_root, trial_dir, key)
+    lines = [
+        f"# {label} Review",
+        "",
+        f"Reviewer: {label}",
+        f"Scope: {config['scope']}",
+        f"Decision: {normalize_gate_status(decision)}",
+        f"Gate impact: {normalize_gate_status(gate or decision)}",
+        f"Confidence: {confidence.strip() or 'medium'}",
+        f"Source trial: `{trial_dir.name}`",
+        f"Generated at: {now_iso()}",
+        f"Instruction file: `{config['instruction']}`",
+        f"Migration source: `{migration_source}`",
+        "",
+        "## Reviewed Inputs",
+        "",
+    ]
+    lines.extend(f"- `{item}`" for item in reviewed_inputs)
+    if not reviewed_inputs:
+        lines.append("- none recorded")
+    lines.extend(["", "## Context Summary", "", context_summary.strip() or "No context summary recorded.", "", clean_body.strip(), ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def backup_project_file(project_root: Path, source: Path, migration_dir: Path, backed_up: list[str]) -> None:
+    if not source.exists() or not source.is_file():
+        return
+    relative = project_relative_path(project_root, source)
+    destination = migration_dir / "review_storage_backups" / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    if relative not in backed_up:
+        backed_up.append(relative)
+
+
+def latest_saved_pass_sections(project_root: Path, trial_dirs: list[Path]) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    review_sources = [trial / "REVIEW.md" for trial in trial_dirs]
+    manuscript_reviews = project_root / "manuscript" / "reviews"
+    if manuscript_reviews.is_dir():
+        review_sources.extend(sorted(path for path in manuscript_reviews.glob("*.md") if path.name != ".gitkeep"))
+    for source in review_sources:
+        if not source.exists() or not source.is_file():
+            continue
+        relative = project_relative_path(project_root, source)
+        trial_iteration = 10**9 if "manuscript/reviews" in relative else trial_iteration_from_id(source.parent.name)
+        for section in parse_reviewer_sections(source.read_text(encoding="utf-8", errors="replace"), relative):
+            if normalize_gate_status(str(section.get("decision") or "")) != "pass" or normalize_gate_status(str(section.get("gate") or section.get("decision") or "")) != "pass":
+                continue
+            key = str(section.get("key") or "")
+            existing = latest.get(key)
+            if not existing or int(existing.get("iteration") or 0) <= trial_iteration:
+                section["iteration"] = trial_iteration
+                latest[key] = section
+    return latest
+
+
+def project_gate_text_passed(project_root: Path) -> bool:
+    state_path = project_root / "research_trajectory" / "STATE.md"
+    if not state_path.exists():
+        return False
+    text = state_path.read_text(encoding="utf-8", errors="replace")
+    section = re.search(r"^##\s+Autoresearch Goal Gate\s*$.*?(?=^##\s+|\Z)", text, re.MULTILINE | re.DOTALL)
+    if not section:
+        return False
+    body = section.group(0)
+    status_match = re.search(r"^\s*Status:\s*(.+?)\s*$", body, re.IGNORECASE | re.MULTILINE)
+    if not status_match or normalize_gate_status(status_match.group(1)) != "pass":
+        return False
+    for key, config in REQUIRED_REVIEWER_OUTPUTS.items():
+        gate_match = re.search(rf"^\s*[-*]\s*{re.escape(config['label'])}\s*:\s*(.+?)\s*$", body, re.IGNORECASE | re.MULTILINE)
+        if not gate_match or normalize_gate_status(gate_match.group(1)) != "pass":
+            return False
+    return True
+
+
+def normalize_state_gate_references(project_root: Path, latest_trial: Path | None, migration_dir: Path, backed_up: list[str], dry_run: bool = False) -> str:
+    if latest_trial is None:
+        return ""
+    state_path = project_root / "research_trajectory" / "STATE.md"
+    if not state_path.exists():
+        return ""
+    text = state_path.read_text(encoding="utf-8", errors="replace")
+    changed = False
+
+    def replace_line(match: re.Match[str]) -> str:
+        nonlocal changed
+        prefix = match.group(1)
+        status = match.group(2).strip()
+        key = reviewer_key_for_label(prefix)
+        if not key:
+            return match.group(0)
+        reference = project_relative_path(project_root, reviewer_output_path(latest_trial, key))
+        if f"`{reference}`" in status:
+            return match.group(0)
+        changed = True
+        return f"- {REQUIRED_REVIEWER_OUTPUTS[key]['label']}: {status} - `{reference}`"
+
+    updated = re.sub(
+        r"^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure/table reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$",
+        replace_line,
+        text,
+        flags=re.MULTILINE,
+    )
+    if not changed:
+        return ""
+    if not dry_run:
+        backup_project_file(project_root, state_path, migration_dir, backed_up)
+        state_path.write_text(updated.rstrip() + "\n", encoding="utf-8")
+    return project_relative_path(project_root, state_path)
+
+
+def migrate_active_review_storage(project_root: Path, migration_dir: Path, dry_run: bool = False) -> dict[str, Any]:
+    trial_dirs = project_active_trial_dirs(project_root)
+    latest_trial = trial_dirs[-1] if trial_dirs else None
+    allow_latest_backfill = bool(latest_trial and project_gate_text_passed(project_root))
+    latest_pass = latest_saved_pass_sections(project_root, trial_dirs)
+    backed_up: list[str] = []
+    created: list[str] = []
+    backfilled: list[str] = []
+    placeholders: list[str] = []
+
+    for trial_dir in trial_dirs:
+        legacy_path = trial_dir / "REVIEW.md"
+        legacy_sections: dict[str, dict[str, Any]] = {}
+        if legacy_path.exists():
+            relative = project_relative_path(project_root, legacy_path)
+            for section in parse_reviewer_sections(legacy_path.read_text(encoding="utf-8", errors="replace"), relative):
+                legacy_sections[str(section["key"])] = section
+        for key, config in REQUIRED_REVIEWER_OUTPUTS.items():
+            target = reviewer_output_path(trial_dir, key)
+            if target.exists():
+                continue
+            source = legacy_sections.get(key)
+            context = "Created from the legacy trial REVIEW.md section during per-reviewer migration."
+            if not source and allow_latest_backfill and latest_trial == trial_dir and key in latest_pass:
+                source = latest_pass[key]
+                context = (
+                    "Backfilled from the latest saved passing reviewer output for the current active gate. "
+                    "This preserves pass provenance but is not a fresh reviewer run for this trial."
+                )
+                backfilled.append(project_relative_path(project_root, target))
+            elif not source:
+                placeholders.append(project_relative_path(project_root, target))
+            if dry_run:
+                created.append(project_relative_path(project_root, target))
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if legacy_path.exists():
+                backup_project_file(project_root, legacy_path, migration_dir, backed_up)
+            if target.exists():
+                backup_project_file(project_root, target, migration_dir, backed_up)
+            if source:
+                decision = str(source.get("decision") or "continue")
+                gate = str(source.get("gate") or decision)
+                confidence = str(source.get("confidence") or "medium")
+                migration_source = str(source.get("path") or project_relative_path(project_root, legacy_path))
+                body = str(source.get("text") or "")
+            else:
+                decision = "continue"
+                gate = "continue"
+                confidence = "low"
+                migration_source = f"missing legacy {config['label']} section"
+                body = ""
+                context = "No legacy reviewer section existed for this active trial. This file records the missing review explicitly."
+            target.write_text(
+                format_reviewer_file(
+                    project_root,
+                    trial_dir,
+                    key,
+                    decision=decision,
+                    gate=gate,
+                    confidence=confidence,
+                    migration_source=migration_source,
+                    context_summary=context,
+                    body=body,
+                ),
+                encoding="utf-8",
+            )
+            created.append(project_relative_path(project_root, target))
+
+    normalized_manuscript_reviews: list[str] = []
+    manuscript_reviews = project_root / "manuscript" / "reviews"
+    if manuscript_reviews.is_dir():
+        for path in sorted(manuscript_reviews.glob("*.md")):
+            if path.name == ".gitkeep":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "Source trial:" in text and "## Reviewed Inputs" in text and "Migration source:" in text:
+                continue
+            sections = parse_reviewer_sections(text, project_relative_path(project_root, path))
+            section = sections[0] if sections else {}
+            key = str(section.get("key") or "manuscript")
+            source_trial = regex_first_value(text, [r"Source trial:\s*`?([^`\n]+)`?"])
+            if not source_trial:
+                trial_match = re.match(r"0*(\d+)", path.stem)
+                source_trial = trial_match.group(1) if trial_match else path.stem
+            insertion = "\n".join([
+                f"Source trial: `{source_trial}`",
+                f"Generated at: {now_iso()}",
+                f"Instruction file: `{REQUIRED_REVIEWER_OUTPUTS.get(key, REQUIRED_REVIEWER_OUTPUTS['manuscript'])['instruction']}`",
+                f"Migration source: `{project_relative_path(project_root, path)}`",
+                "",
+                "## Reviewed Inputs",
+                "",
+                "- `manuscript/BLUEPRINT.md`",
+                "- `research_trajectory/STATE.md`",
+                "- `research_trajectory/CURRENT_FINDINGS.md`",
+                "",
+                "## Context Summary",
+                "",
+                "Normalized active manuscript review metadata during per-reviewer migration.",
+                "",
+            ])
+            if dry_run:
+                normalized_manuscript_reviews.append(project_relative_path(project_root, path))
+                continue
+            backup_project_file(project_root, path, migration_dir, backed_up)
+            if re.search(r"^Confidence:\s*.+?$", text, re.MULTILINE):
+                text = re.sub(r"(^Confidence:\s*.+?$)", r"\1\n" + insertion, text, count=1, flags=re.MULTILINE)
+            else:
+                text = insertion + "\n" + text
+            path.write_text(text.rstrip() + "\n", encoding="utf-8")
+            normalized_manuscript_reviews.append(project_relative_path(project_root, path))
+
+    normalized_state = normalize_state_gate_references(project_root, latest_trial, migration_dir, backed_up, dry_run)
+
+    return {
+        "storage_version": REVIEW_STORAGE_VERSION,
+        "trial_count": len(trial_dirs),
+        "created": created,
+        "backfilled": backfilled,
+        "placeholders": placeholders,
+        "normalized_manuscript_reviews": normalized_manuscript_reviews,
+        "normalized_state": normalized_state,
+        "backed_up": backed_up,
+        "outdated": bool(created or normalized_manuscript_reviews or normalized_state),
+    }
+
+
+def project_review_storage_status(project_root: Path) -> dict[str, Any]:
+    missing: dict[str, list[str]] = {}
+    nonpassing_latest: list[str] = []
+    trial_dirs = project_active_trial_dirs(project_root)
+    latest_trial = trial_dirs[-1] if trial_dirs else None
+    for trial_dir in trial_dirs:
+        trial_missing = []
+        for key, config in REQUIRED_REVIEWER_OUTPUTS.items():
+            path = reviewer_output_path(trial_dir, key)
+            if not path.exists() or not path.is_file():
+                trial_missing.append(config["file"])
+                continue
+            if latest_trial == trial_dir and project_gate_text_passed(project_root):
+                text = path.read_text(encoding="utf-8", errors="replace")
+                decision = normalize_gate_status(regex_first_value(text, [r"Decision:\s*`?([^`\n]+)`?"]))
+                gate = normalize_gate_status(regex_first_value(text, [r"Gate impact:\s*`?([^`\n]+)`?"]))
+            if decision != "pass" or gate != "pass":
+                nonpassing_latest.append(config["file"])
+        if trial_missing:
+            missing[trial_dir.name] = trial_missing
+    state_missing_references: list[str] = []
+    state_path = project_root / "research_trajectory" / "STATE.md"
+    state_text = state_path.read_text(encoding="utf-8", errors="replace") if state_path.exists() else ""
+    if latest_trial and state_text:
+        for key, config in REQUIRED_REVIEWER_OUTPUTS.items():
+            expected = project_relative_path(project_root, reviewer_output_path(latest_trial, key))
+            if expected not in state_text:
+                state_missing_references.append(expected)
+    manuscript_missing = []
+    manuscript_reviews = project_root / "manuscript" / "reviews"
+    if manuscript_reviews.is_dir():
+        for path in manuscript_reviews.glob("*.md"):
+            if path.name == ".gitkeep":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "Source trial:" not in text or "## Reviewed Inputs" not in text or "Migration source:" not in text:
+                manuscript_missing.append(project_relative_path(project_root, path))
+    return {
+        "schema_version": 1,
+        "storage_version": REVIEW_STORAGE_VERSION,
+        "required_files": [config["file"] for config in REQUIRED_REVIEWER_OUTPUTS.values()],
+        "missing_by_trial": missing,
+        "nonpassing_latest": nonpassing_latest,
+        "state_missing_references": state_missing_references,
+        "manuscript_reviews_missing_metadata": manuscript_missing,
+        "outdated": bool(missing or nonpassing_latest or state_missing_references or manuscript_missing),
+    }
+
+
+def project_reviewer_baseline_status(project_root: Path) -> dict[str, Any]:
+    template_hashes = reviewer_template_hashes()
+    project_dir = project_root / "instructions" / "reviewers"
+    missing: list[str] = []
+    changed: list[str] = []
+    project_hashes: dict[str, str] = {}
+    for name in CORE_REVIEWER_FILES:
+        template_hash = template_hashes.get(name, "")
+        project_path = project_dir / name
+        if not project_path.exists() or not project_path.is_file():
+            missing.append(name)
+            continue
+        project_hash = file_sha256(project_path)
+        project_hashes[name] = project_hash
+        if template_hash and project_hash != template_hash:
+            changed.append(name)
+    metadata_path = project_root / REVIEWER_BASELINE_RELATIVE_PATH
+    metadata: dict[str, Any] = {}
+    if metadata_path.exists():
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata = payload if isinstance(payload, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            metadata = {}
+    metadata_hashes = metadata.get("coreReviewerFiles") if isinstance(metadata.get("coreReviewerFiles"), dict) else {}
+    metadata_missing = [name for name in CORE_REVIEWER_FILES if metadata_hashes.get(name) != template_hashes.get(name)]
+    baseline_version = str(metadata.get("reviewerBaselineVersion") or "")
+    review_storage = project_review_storage_status(project_root)
+    outdated = bool(missing or changed or metadata_missing or baseline_version != REVIEWER_BASELINE_VERSION or review_storage.get("outdated"))
+    return {
+        "schema_version": 1,
+        "baseline_version": baseline_version,
+        "latest_baseline_version": REVIEWER_BASELINE_VERSION,
+        "outdated": outdated,
+        "missing": missing,
+        "changed": changed,
+        "metadata_missing": metadata_missing,
+        "metadata_path": REVIEWER_BASELINE_RELATIVE_PATH,
+        "core_reviewer_files": CORE_REVIEWER_FILES,
+        "hashes": project_hashes,
+        "review_storage": review_storage,
+    }
+
+
+def sync_project_reviewers(project_root: Path) -> dict[str, Any]:
+    template_dir = reviewer_template_dir()
+    project_dir = project_root / "instructions" / "reviewers"
+    if not template_dir.exists():
+        raise ValueError("Package reviewer template directory is missing.")
+    project_dir.mkdir(parents=True, exist_ok=True)
+    before = project_reviewer_baseline_status(project_root)
+    migration_id = f"{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
+    backup_root = project_root / "archive" / "template_migrations" / migration_id / "instructions" / "reviewers"
+    copied: list[str] = []
+    backed_up: list[str] = []
+    for name in CORE_REVIEWER_FILES:
+        source = template_dir / name
+        if not source.exists() or not source.is_file():
+            raise ValueError(f"Package reviewer file is missing: {name}")
+        target = project_dir / name
+        if target.exists() and target.is_file():
+            backup_root.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, backup_root / name)
+            backed_up.append(name)
+        shutil.copy2(source, target)
+        copied.append(name)
+    metadata = write_reviewer_baseline_metadata(project_root, clean_template_root())
+    manifest_path = project_root / "archive" / "template_migrations" / migration_id / "MIGRATION.md"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    review_storage = migrate_active_review_storage(project_root, manifest_path.parent)
+    manifest_path.write_text(
+        "\n".join(
+            [
+                f"# Reviewer Migration {migration_id}",
+                "",
+                f"- Created: {now_iso()}",
+                f"- Reviewer baseline: `{REVIEWER_BASELINE_VERSION}`",
+                f"- Copied core reviewers: {len(copied)}",
+                f"- Backed up previous core reviewers: {len(backed_up)}",
+                f"- Metadata: `{REVIEWER_BASELINE_RELATIVE_PATH}`",
+                f"- Review storage version: `{REVIEW_STORAGE_VERSION}`",
+                f"- Created per-reviewer files: {len(review_storage['created'])}",
+                f"- Backfilled latest-gate files: {len(review_storage['backfilled'])}",
+                f"- Explicit missing-review placeholders: {len(review_storage['placeholders'])}",
+                f"- Normalized manuscript reviews: {len(review_storage['normalized_manuscript_reviews'])}",
+                "",
+                "Custom reviewer files outside the core reviewer set were preserved.",
+                "Archived restart/resume history was not rewritten.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "migration_id": migration_id,
+        "backup_path": str((backup_root.parent.parent.parent).relative_to(project_root)) if backup_root.exists() else "",
+        "copied": copied,
+        "backed_up": backed_up,
+        "review_storage": review_storage,
+        "before": before,
+        "after": project_reviewer_baseline_status(project_root),
+        "metadata": metadata,
+    }
+
+
 def finalize_created_project(target: Path, display_name: str, template_root: Path) -> None:
     template_gitignore = target / ".gitignore.template"
     gitignore = target / ".gitignore"
@@ -224,16 +933,13 @@ def finalize_created_project(target: Path, display_name: str, template_root: Pat
             "templateVersion": str(manifest.get("templateVersion") or "0.1.0"),
         }
         metadata_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+    write_reviewer_baseline_metadata(target, template_root)
 
 
 def template_root_for_project_creation() -> Path:
-    candidates = [PACKAGE_TEMPLATE_ROOT, DEFAULT_PROJECT_ROOT]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        root = candidate.resolve()
-        if (root / ".co-auto-research-template" / "manifest.json").exists() and not (root / ".co-auto-research" / "project.json").exists():
-            return root
+    root = clean_template_root()
+    if (root / ".co-auto-research-template" / "manifest.json").exists() and not (root / ".co-auto-research" / "project.json").exists():
+        return root
     raise ValueError(
         "Clean package template is not available to this UI server. "
         "Start the UI with `co-auto-research ui --projects-dir <dir>` or set COAUTO_TEMPLATE_ROOT."
@@ -302,6 +1008,7 @@ class ProjectContext:
         self.ui_settings_path = self.runtime_dir / "settings.json"
         self.framing_messages_path = self.runtime_dir / "framing_messages.json"
         self.research_state_path = self.root / "research_trajectory" / "STATE.md"
+        self.trajectory_path = self.root / "research_trajectory" / "TRAJECTORY.json"
         self.session = new_research_session()
         self.lock = threading.Lock()
         self.refresh_metadata()
@@ -372,6 +1079,7 @@ class ProjectContext:
             "has_session": bool(session_id),
             "loop_active": loop_active,
             "project_ready": has_project and project_path.stat().st_size > 0 if has_project else False,
+            "reviewer_status": project_reviewer_baseline_status(self.root),
         }
 
 
@@ -637,6 +1345,7 @@ SESSION_STATE_PATH = DynamicPath(lambda: current_project_context().session_state
 UI_SETTINGS_PATH = DynamicPath(lambda: current_project_context().ui_settings_path)
 FRAMING_MESSAGES_PATH = DynamicPath(lambda: current_project_context().framing_messages_path)
 RESEARCH_STATE_PATH = DynamicPath(lambda: current_project_context().research_state_path)
+TRAJECTORY_PATH = DynamicPath(lambda: current_project_context().trajectory_path)
 RESEARCH_SESSION = DynamicDict(lambda: current_project_context().session)
 RESEARCH_LOCK = DynamicLock()
 
@@ -933,6 +1642,24 @@ def sanitize_framing_message(item: Any) -> dict[str, Any] | None:
             if role == "user" and not clean["text"]:
                 count = len(clean_attachments)
                 clean["text"] = f"Attached {count} {'resource' if count == 1 else 'resources'}."
+    resume_from_trial = item.get("resumeFromTrial")
+    if isinstance(resume_from_trial, dict):
+        resume_id = str(resume_from_trial.get("id") or "").strip()
+        resume_path = str(resume_from_trial.get("path") or "").strip()
+        if resume_id or resume_path:
+            try:
+                resume_iteration = int(resume_from_trial.get("iteration") or 0)
+            except (TypeError, ValueError):
+                resume_iteration = 0
+            clean["resumeFromTrial"] = {
+                "id": resume_id[:240],
+                "path": resume_path[:800],
+                "iteration": resume_iteration,
+                "name": str(resume_from_trial.get("name") or resume_id or resume_path).strip()[:240],
+                "reportPath": str(resume_from_trial.get("reportPath") or resume_from_trial.get("report_path") or "").strip()[:800],
+                "checkpointPath": str(resume_from_trial.get("checkpointPath") or resume_from_trial.get("checkpoint_path") or "").strip()[:800],
+                "checkpointExists": bool(resume_from_trial.get("checkpointExists") or resume_from_trial.get("checkpoint_exists")),
+            }
     if not clean["text"] and not clean.get("artifact"):
         return None
     return {key: value for key, value in clean.items() if value is not None and value != ""}
@@ -1166,6 +1893,70 @@ def repo_path(relative_path: str | Path) -> Path:
     return path
 
 
+def repo_file_reference_candidates(reference: str | Path) -> list[str]:
+    text = unquote(str(reference or "")).strip().strip("`'\"")
+    text = re.sub(r"^file://", "", text, flags=re.IGNORECASE)
+    text = text.replace("\\", "/").split("#", 1)[0].split("?", 1)[0].strip()
+    if not text:
+        return []
+
+    candidates: list[str] = []
+
+    def add(candidate: str) -> None:
+        normalized = candidate.replace("\\", "/").strip().lstrip("/")
+        normalized = re.sub(r"/+", "/", normalized)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    root = REPO_ROOT.resolve().as_posix().rstrip("/")
+    if text == root:
+        add(".")
+    elif text.startswith(f"{root}/"):
+        add(text[len(root) + 1 :])
+    add(text)
+
+    parts = [part for part in text.split("/") if part]
+    for index in range(len(parts)):
+        add("/".join(parts[index:]))
+
+    basename = parts[-1] if parts else Path(text).name
+    canonical_basename_paths = {
+        "PROJECT.md": "PROJECT.md",
+        "RESOURCE_MANIFEST.md": RESOURCE_MANIFEST_RELATIVE_PATH,
+        "STATE.md": "research_trajectory/STATE.md",
+        "CURRENT_FINDINGS.md": "research_trajectory/CURRENT_FINDINGS.md",
+        "BLUEPRINT.md": "manuscript/BLUEPRINT.md",
+        "FIGURE_SPECS.md": "manuscript/figures/FIGURE_SPECS.md",
+    }
+    if basename in canonical_basename_paths:
+        add(canonical_basename_paths[basename])
+    return candidates
+
+
+def resolve_repo_file_reference(reference: str | Path, prefer_existing: bool = True) -> tuple[Path, str]:
+    candidates = repo_file_reference_candidates(reference)
+    if not candidates:
+        raise ValueError("File path is required")
+    first_valid: tuple[Path, str] | None = None
+    first_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            path = repo_path(candidate)
+        except ValueError as exc:
+            if first_error is None:
+                first_error = exc
+            continue
+        if first_valid is None:
+            first_valid = (path, candidate)
+        if not prefer_existing or path.exists():
+            return path, rel_path(path) if path.exists() else candidate
+    if first_valid is not None:
+        return first_valid
+    if first_error is not None:
+        raise first_error
+    raise ValueError("Path escapes repository root")
+
+
 def rel_path(path: Path) -> str:
     root = REPO_ROOT.absolute()
     absolute = path if path.is_absolute() else REPO_ROOT / path
@@ -1219,7 +2010,7 @@ def file_raw_url(relative_path: str) -> str:
 def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str, Any]:
     display_path = str(relative_path).replace("\\", "/").lstrip("/")
     try:
-        path = repo_path(relative_path)
+        path, display_path = resolve_repo_file_reference(relative_path)
     except ValueError as exc:
         return {"path": relative_path, "exists": False, "error": str(exc)}
 
@@ -1514,13 +2305,22 @@ def tree_node(name: str, path: str, node_type: str, is_symlink: bool = False) ->
     return node
 
 
+def tree_lookup_key(relative_path: str) -> str:
+    normalized = str(relative_path).replace("\\", "/").strip()
+    normalized = re.sub(r"/+", "/", normalized)
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    normalized = normalized.strip("/")
+    return normalized or "."
+
+
 def directory_tree(relative_dir: str, max_depth: int | None = None, exclude_names: set[str] | None = None) -> dict[str, Any]:
     root_path = repo_path(relative_dir)
     root = tree_node(Path(relative_dir).name or relative_dir, relative_dir, "directory")
     if not root_path.exists() or not root_path.is_dir():
         return root
 
-    nodes: dict[str, dict[str, Any]] = {relative_dir: root}
+    nodes: dict[str, dict[str, Any]] = {tree_lookup_key(relative_dir): root}
     follow_symlinks = is_resources_relative_path(relative_dir)
     for path, relative, _depth in iter_tree_paths(
         root_path,
@@ -1534,7 +2334,7 @@ def directory_tree(relative_dir: str, max_depth: int | None = None, exclude_name
         parent_relative = str(Path(relative).parent).replace("\\", "/")
         if parent_relative == ".":
             parent_relative = relative_dir
-        parent = nodes.get(parent_relative)
+        parent = nodes.get(tree_lookup_key(parent_relative))
         if not parent:
             continue
         node_type = "directory" if path.is_dir() else "file"
@@ -1544,7 +2344,7 @@ def directory_tree(relative_dir: str, max_depth: int | None = None, exclude_name
                 node.update(file_card(path, relative))
             except OSError:
                 continue
-        nodes[relative] = node
+        nodes[tree_lookup_key(relative)] = node
         parent["children"].append(node)
     return root
 
@@ -1698,6 +2498,7 @@ def state_summary(state_text: str) -> dict[str, Any]:
 
 def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     sections = extract_sections(blueprint_text)
+
     def real_section(section: dict[str, Any]) -> bool:
         title = str(section.get("title", ""))
         body = str(section.get("body", ""))
@@ -1705,18 +2506,57 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
             return False
         return meaningful_summary_value(body) or meaningful_summary_value(title)
 
+    def title_starts(section: dict[str, Any], prefix: str) -> bool:
+        return str(section.get("title", "")).strip().lower().startswith(prefix)
+
+    def figure_plan_section(section: dict[str, Any]) -> bool:
+        title = str(section.get("title", "")).strip()
+        if not title.lower().startswith("figure"):
+            return False
+        if re.match(r"^figure\s+plan$", title, re.IGNORECASE):
+            return False
+        return bool(re.search(r"\b(?:f\d{3,}|figure\s+\d+)\b", title, re.IGNORECASE))
+
+    def table_plan_section(section: dict[str, Any]) -> bool:
+        title = str(section.get("title", "")).strip()
+        if not title.lower().startswith("table"):
+            return False
+        if re.match(r"^table\s+plan$", title, re.IGNORECASE):
+            return False
+        return bool(re.search(r"\b(?:t\d{3,}|table\s+\d+)\b", title, re.IGNORECASE))
+
     claims = [section for section in sections if section["title"].lower().startswith("c") and real_section(section)]
-    figure_sections = [section for section in sections if section["title"].lower().startswith("figure") and real_section(section)]
-    table_sections = [section for section in sections if section["title"].lower().startswith("table") and real_section(section)]
-    figure_specs = [section for section in extract_sections(figure_text) if real_section(section)]
+    section_blueprint = [section for section in sections if title_starts(section, "section") and real_section(section)]
+    figure_sections = [section for section in sections if title_starts(section, "figure") and real_section(section)]
+    table_sections = [section for section in sections if title_starts(section, "table") and real_section(section)]
+    figure_plans = [section for section in sections if figure_plan_section(section) and real_section(section)]
+    table_plans = [section for section in sections if table_plan_section(section) and real_section(section)]
+    no_table_rationale = clean_summary_value(extract_section(blueprint_text, "No-Table Rationale", level=3)) or clean_summary_value(extract_section(blueprint_text, "No-Table Rationale"))
+    traceability = (
+        clean_summary_value(extract_section(blueprint_text, "Accepted Claims And Evidence Map"))
+        or clean_summary_value(extract_section(blueprint_text, "Accepted Claims and Evidence Map"))
+        or clean_summary_value(extract_section(blueprint_text, "Active Claims and Evidence Map"))
+        or clean_summary_value(extract_section(blueprint_text, "Candidate Claims And Evidence Map"))
+        or clean_summary_value(extract_section(blueprint_text, "Candidate Claims and Evidence Map"))
+    )
+    figure_specs = [
+        section
+        for section in extract_sections(figure_text)
+        if real_section(section) and str(section.get("title", "")).strip().lower() not in {"figures", "figure specs", "figure specifications"}
+    ]
     return {
         "target": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Target Venue / Audience"))),
         "contribution": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Contribution Style"))),
         "core_story": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Core Story"))),
         "claims": claims,
-        "section_blueprint": [section for section in sections if section["title"].lower().startswith("section") and real_section(section)],
+        "sections": section_blueprint,
+        "section_blueprint": section_blueprint,
         "figures": figure_sections,
+        "figure_plans": figure_plans or figure_sections,
         "tables": table_sections,
+        "table_plans": table_plans,
+        "no_table_rationale": no_table_rationale,
+        "traceability": traceability,
         "missing_evidence": [item for item in list_section_items(extract_section(blueprint_text, "Missing Evidence")) if meaningful_summary_value(item)][:12],
         "figure_specs": figure_specs[:10],
     }
@@ -1745,6 +2585,12 @@ def review_verdict(review: str) -> str:
 
 
 def trial_review_path(trial_dir: Path) -> Path | None:
+    review_dir = trial_dir / "reviews"
+    if review_dir.is_dir():
+        for config in REQUIRED_REVIEWER_OUTPUTS.values():
+            path = review_dir / config["file"]
+            if path.exists():
+                return path
     for name in ("REVIEW.md", "PLAN_REVIEW.md"):
         path = trial_dir / name
         if path.exists():
@@ -1768,8 +2614,410 @@ def trial_report_summary(report: str) -> str:
     return first_meaningful_line(report, "No report summary yet")
 
 
+def trial_checkpoint_dir(trial_id: str) -> Path:
+    return REPO_ROOT / "research_trajectory" / "checkpoints" / slugify(trial_id, "trial")
+
+
+def copy_snapshot_path(relative_path: str, destination_root: Path) -> str:
+    source = REPO_ROOT / relative_path
+    if not source.exists():
+        return ""
+    destination = destination_root / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        if destination.exists() or destination.is_symlink():
+            if destination.is_dir() and not destination.is_symlink():
+                shutil.rmtree(destination)
+            else:
+                destination.unlink()
+        shutil.copytree(source, destination, symlinks=True)
+    else:
+        shutil.copy2(source, destination)
+    return relative_path
+
+
+def copy_resume_snapshot(destination_root: Path) -> list[str]:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for relative_path in RESUME_SNAPSHOT_PATHS:
+        copied_path = copy_snapshot_path(relative_path, destination_root)
+        if copied_path:
+            copied.append(copied_path)
+    return copied
+
+
+def copy_project_snapshot(paths: list[str], destination_root: Path) -> list[str]:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for relative_path in paths:
+        copied_path = copy_snapshot_path(relative_path, destination_root)
+        if copied_path:
+            copied.append(copied_path)
+    return copied
+
+
+def archive_runtime_snapshot(destination_root: Path) -> list[str]:
+    copied: list[str] = []
+    runtime_root = destination_root / "ui/.runtime"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    for path in [SESSION_STATE_PATH, FRAMING_MESSAGES_PATH]:
+        if not path.exists():
+            continue
+        destination = runtime_root / path.name
+        shutil.copy2(path, destination)
+        copied.append(f"ui/.runtime/{path.name}")
+    return copied
+
+
+def normalize_project_resource_path(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw.startswith("<"):
+        return ""
+    try:
+        candidate = Path(raw).expanduser()
+    except (OSError, ValueError):
+        return ""
+    if candidate.is_absolute():
+        try:
+            relative = candidate.resolve().relative_to(REPO_ROOT.resolve())
+        except (OSError, ValueError):
+            return ""
+    else:
+        relative = Path(raw)
+    parts = relative.parts
+    if not parts or parts[0] != "resources":
+        return ""
+    normalized = relative.as_posix()
+    if normalized == RESOURCE_MANIFEST_RELATIVE_PATH:
+        return ""
+    return normalized
+
+
+def parse_resource_manifest_entries(manifest_path: Path | None = None) -> list[dict[str, Any]]:
+    path = manifest_path or (REPO_ROOT / RESOURCE_MANIFEST_RELATIVE_PATH)
+    if not path.exists() or not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    entries: list[dict[str, Any]] = []
+    current_section = ""
+    current_section_for_entry = ""
+    current: list[str] = []
+
+    def flush() -> None:
+        nonlocal current, current_section_for_entry
+        if not current:
+            return
+        block = "\n".join(current).strip()
+        provenance_match = re.search(r"Provenance:\s*`([^`]+)`", block)
+        provenance = provenance_match.group(1).strip() if provenance_match else "unknown"
+        if provenance not in RESOURCE_PROVENANCE_VALUES:
+            provenance = "unknown"
+        resource_paths: list[str] = []
+        for value in re.findall(r"`([^`]+)`", block):
+            resource_path = normalize_project_resource_path(value)
+            if resource_path and resource_path not in resource_paths:
+                resource_paths.append(resource_path)
+        entries.append({
+            "section": current_section_for_entry,
+            "text": block,
+            "provenance": provenance,
+            "project_resource_paths": resource_paths,
+        })
+        current = []
+        current_section_for_entry = ""
+
+    for line in text.splitlines():
+        if line.startswith("## "):
+            flush()
+            current_section = line.strip("# ").strip()
+            continue
+        if line.startswith("- "):
+            flush()
+            current = [line]
+            current_section_for_entry = current_section
+            continue
+        if current and (line.startswith("  ") or not line.strip()):
+            current.append(line)
+    flush()
+    return entries
+
+
+def archive_inactive_resource_entries(restart_root: Path, entries: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    retained: list[dict[str, Any]] = []
+    inactive: list[dict[str, Any]] = []
+    moved_sources: set[str] = set()
+    for entry in entries:
+        provenance = str(entry.get("provenance") or "unknown")
+        if provenance in RESTART_RETAINED_PROVENANCE:
+            retained.append(entry)
+            continue
+        archived_paths: list[dict[str, str]] = []
+        for resource_path in entry.get("project_resource_paths") or []:
+            if not isinstance(resource_path, str) or not resource_path or resource_path in moved_sources:
+                continue
+            source = REPO_ROOT / resource_path
+            if not source.exists():
+                continue
+            destination = restart_root / "inactive_resources" / resource_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            final_destination = unique_path(destination.parent, destination.name)
+            shutil.move(str(source), str(final_destination))
+            moved_sources.add(resource_path)
+            archived_paths.append({
+                "from": resource_path,
+                "to": rel_path(final_destination),
+            })
+        cloned = dict(entry)
+        cloned["archived_paths"] = archived_paths
+        inactive.append(cloned)
+    return retained, inactive
+
+
+def restore_snapshot_from(checkpoint_root: Path) -> list[str]:
+    restored = []
+    for relative_path in RESUME_SNAPSHOT_PATHS:
+        source = checkpoint_root / relative_path
+        if not source.exists():
+            continue
+        destination = REPO_ROOT / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            if destination.exists() or destination.is_symlink():
+                if destination.is_dir() and not destination.is_symlink():
+                    shutil.rmtree(destination)
+                else:
+                    destination.unlink()
+            shutil.copytree(source, destination, symlinks=True)
+        else:
+            shutil.copy2(source, destination)
+        restored.append(relative_path)
+    return restored
+
+
+TRAJECTORY_SCHEMA_VERSION = 1
+GATE_SCHEMA_VERSION = 1
+
+
+def trial_iteration_from_id(trial_id: str) -> int:
+    match = re.match(r"0*(\d+)", str(trial_id or ""))
+    return int(match.group(1)) if match else 0
+
+
+def default_trajectory_state() -> dict[str, Any]:
+    return {
+        "schema_version": TRAJECTORY_SCHEMA_VERSION,
+        "active_epoch": "current",
+        "fork_id": "",
+        "base_trial": "",
+        "latest_active_trial": "",
+        "next_trial_number": 1,
+        "archived_trial_ids": [],
+        "gate_schema_version": GATE_SCHEMA_VERSION,
+        "updated_at": now_iso(),
+    }
+
+
+def read_trajectory_state() -> dict[str, Any]:
+    state = default_trajectory_state()
+    if TRAJECTORY_PATH.exists():
+        try:
+            payload = json.loads(TRAJECTORY_PATH.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                state.update(payload)
+        except (OSError, json.JSONDecodeError):
+            pass
+    archived = state.get("archived_trial_ids")
+    state["archived_trial_ids"] = [str(item) for item in archived] if isinstance(archived, list) else []
+    state["next_trial_number"] = max(1, int(state.get("next_trial_number") or 1))
+    state["schema_version"] = TRAJECTORY_SCHEMA_VERSION
+    state["gate_schema_version"] = GATE_SCHEMA_VERSION
+    return state
+
+
+def write_trajectory_state(state: dict[str, Any]) -> dict[str, Any]:
+    payload = default_trajectory_state()
+    payload.update({key: value for key, value in state.items() if value is not None})
+    payload["schema_version"] = TRAJECTORY_SCHEMA_VERSION
+    payload["gate_schema_version"] = GATE_SCHEMA_VERSION
+    payload["archived_trial_ids"] = sorted({str(item) for item in payload.get("archived_trial_ids", []) if str(item).strip()})
+    payload["next_trial_number"] = max(1, int(payload.get("next_trial_number") or 1))
+    payload["updated_at"] = now_iso()
+    TRAJECTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TRAJECTORY_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return payload
+
+
+def active_trial_dirs() -> list[Path]:
+    root = REPO_ROOT / "research_trajectory" / "trials"
+    if not root.is_dir():
+        return []
+    archived_ids = set(read_trajectory_state().get("archived_trial_ids") or [])
+    dirs: list[Path] = []
+    for path in root.iterdir():
+        if not path.is_dir():
+            continue
+        if path.name in archived_ids:
+            continue
+        if not any((path / name).exists() for name in ("PLAN.md", "PLAN_REVIEW.md", "REPORT.md", "artifacts")):
+            continue
+        if re.match(r"^0*_?project_conversion", path.name, re.IGNORECASE):
+            continue
+        dirs.append(path)
+    return sorted(dirs, key=lambda path: (trial_iteration_from_id(path.name), path.name))
+
+
+def latest_active_trial_iteration() -> int:
+    return max([trial_iteration_from_id(path.name) for path in active_trial_dirs()], default=0)
+
+
+def next_active_trial_iteration() -> int:
+    state = read_trajectory_state()
+    return max(latest_active_trial_iteration() + 1, int(state.get("next_trial_number") or 1))
+
+
+def sync_trajectory_state(reason: str = "") -> dict[str, Any]:
+    state = read_trajectory_state()
+    active = active_trial_dirs()
+    latest = active[-1].name if active else ""
+    next_number = trial_iteration_from_id(latest) + 1 if latest else 1
+    if (
+        state.get("latest_active_trial") != latest
+        or int(state.get("next_trial_number") or 1) != next_number
+        or not TRAJECTORY_PATH.exists()
+    ):
+        state["latest_active_trial"] = latest
+        state["next_trial_number"] = next_number
+        if reason:
+            state["last_sync_reason"] = reason
+        state = write_trajectory_state(state)
+    return state
+
+
+def set_resume_fork_trajectory(base_trial: dict[str, Any], fork_id: str, archived_trials: list[dict[str, str]]) -> dict[str, Any]:
+    base_id = str(base_trial.get("id") or "")
+    base_iteration = trial_iteration_from_id(base_id)
+    prior = read_trajectory_state()
+    archived_ids = set(prior.get("archived_trial_ids") or [])
+    archived_ids.update(str(item.get("id") or "") for item in archived_trials if str(item.get("id") or "").strip())
+    return write_trajectory_state(
+        {
+            **prior,
+            "active_epoch": "current",
+            "fork_id": fork_id,
+            "base_trial": base_id,
+            "latest_active_trial": base_id,
+            "next_trial_number": base_iteration + 1,
+            "archived_trial_ids": sorted(archived_ids),
+            "last_sync_reason": "resume_from_trial",
+        }
+    )
+
+
+def expected_trial_marker_path() -> Path:
+    return REPO_ROOT / "research_trajectory" / "NEXT_TRIAL.json"
+
+
+def write_expected_trial_marker(iteration: int, reason: str, base_trial: str = "", fork_id: str = "") -> dict[str, Any]:
+    payload = {
+        "schema_version": TRAJECTORY_SCHEMA_VERSION,
+        "status": "pending",
+        "expected_iteration": int(iteration),
+        "reason": reason,
+        "base_trial": base_trial,
+        "fork_id": fork_id,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    path = expected_trial_marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return payload
+
+
+def read_expected_trial_marker() -> dict[str, Any]:
+    path = expected_trial_marker_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def update_expected_trial_marker(payload: dict[str, Any]) -> None:
+    payload = dict(payload)
+    payload["updated_at"] = now_iso()
+    path = expected_trial_marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def validate_expected_trial_marker() -> None:
+    marker = read_expected_trial_marker()
+    if not marker or marker.get("status") != "pending":
+        return
+    expected = int(marker.get("expected_iteration") or 0)
+    if expected <= 0:
+        return
+    active_iterations = [trial_iteration_from_id(path.name) for path in active_trial_dirs()]
+    if expected in active_iterations:
+        marker["status"] = "fulfilled"
+        update_expected_trial_marker(marker)
+        sync_trajectory_state("expected_trial_fulfilled")
+        return
+    higher = [value for value in active_iterations if value > expected]
+    if higher:
+        marker["status"] = "mismatch"
+        marker["actual_iterations"] = sorted(active_iterations)
+        update_expected_trial_marker(marker)
+        stop_autoresearch_loop("trajectory_mismatch", read_autoresearch_gate())
+        append_research_log(
+            f"Trajectory mismatch: expected Codex to create Trial {expected}, but active trials are {sorted(active_iterations)}."
+        )
+
+
+def write_trial_checkpoint(trial: dict[str, Any]) -> dict[str, Any]:
+    trial_id = str(trial.get("id") or "").strip()
+    if not trial_id or not trial.get("report_path"):
+        return {"created": False, "path": "", "files": []}
+    checkpoint_root = trial_checkpoint_dir(trial_id)
+    checkpoint_root.mkdir(parents=True, exist_ok=True)
+    files = copy_resume_snapshot(checkpoint_root)
+    manifest = checkpoint_root / "MANIFEST.md"
+    manifest.write_text(
+        "\n".join(
+            [
+                f"# Checkpoint for {trial_id}",
+                "",
+                f"Created: {now_iso()}",
+                f"Trial path: `{trial.get('path', '')}`",
+                f"Report path: `{trial.get('report_path', '')}`",
+                "",
+                "Snapshot files:",
+                *[f"- `{path}`" for path in files],
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return {"created": True, "path": rel_path(checkpoint_root), "files": files}
+
+
+def maybe_checkpoint_latest_trial() -> dict[str, Any]:
+    trials = active_reported_trials()
+    if not trials:
+        return {"created": False, "path": "", "files": []}
+    with RESEARCH_LOCK:
+        iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+    trial = next((item for item in trials if int(item.get("iteration") or 0) == iteration), trials[-1])
+    return write_trial_checkpoint(trial)
+
+
 def collect_trials() -> list[dict[str, Any]]:
     direct_root = REPO_ROOT / "research_trajectory" / "trials"
+    trajectory = read_trajectory_state()
+    archived_ids = set(trajectory.get("archived_trial_ids") or [])
     trial_roots = []
     if direct_root.is_dir():
         trial_roots.append(direct_root)
@@ -1782,6 +3030,8 @@ def collect_trials() -> list[dict[str, Any]]:
         for trial_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
             if not any((trial_dir / name).exists() for name in ("PLAN.md", "PLAN_REVIEW.md", "REPORT.md", "artifacts")):
                 continue
+            iteration = trial_iteration_from_id(trial_dir.name)
+            is_active = epoch == "current" and trial_dir.name not in archived_ids
             plan = safe_read(trial_dir / "PLAN.md")
             review_path = trial_review_path(trial_dir)
             review = safe_read(review_path) if review_path else ""
@@ -1791,10 +3041,15 @@ def collect_trials() -> list[dict[str, Any]]:
             artifacts = []
             if artifacts_dir.exists():
                 artifacts = [file_card(p) for p in artifacts_dir.rglob("*") if p.is_file() and p.name != ".gitkeep"]
+            checkpoint_path = trial_checkpoint_dir(trial_dir.name)
             trials.append(
                 {
                     "id": trial_dir.name,
+                    "iteration": iteration,
                     "epoch": epoch,
+                    "fork_id": str(trajectory.get("fork_id") or "") if is_active else "",
+                    "is_active": is_active,
+                    "is_archived": not is_active,
                     "path": rel_path(trial_dir),
                     "objective": objective,
                     "status": infer_trial_status(plan, review, report),
@@ -1804,10 +3059,345 @@ def collect_trials() -> list[dict[str, Any]]:
                     "report_path": rel_path(trial_dir / "REPORT.md") if (trial_dir / "REPORT.md").exists() else "",
                     "report_summary": trial_report_summary(report),
                     "manuscript_implications": first_meaningful_line(extract_section(report, "Manuscript Implications"), "No manuscript implications recorded"),
+                    "checkpoint_path": rel_path(checkpoint_path) if checkpoint_path.exists() else "",
+                    "checkpoint_exists": checkpoint_path.exists(),
                     "artifacts": artifacts,
                 }
             )
     return trials
+
+
+def trial_sort_key(trial: dict[str, Any]) -> tuple[int, str]:
+    trial_id = str(trial.get("id") or "")
+    iteration = int(trial.get("iteration") or trial_iteration_from_id(trial_id) or 10**9)
+    return (iteration, trial_id)
+
+
+def active_reported_trials() -> list[dict[str, Any]]:
+    return sorted(
+        [
+            trial
+            for trial in collect_trials()
+            if trial.get("is_active")
+            and str(trial.get("path") or "").startswith("research_trajectory/trials/")
+            and str(trial.get("report_path") or "").strip()
+            and not re.match(r"^0*_?project_conversion", str(trial.get("id") or ""), re.IGNORECASE)
+        ],
+        key=trial_sort_key,
+    )
+
+
+def resolve_resume_trial(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+    requested_id = str(payload.get("id") or "").strip()
+    requested_path = str(payload.get("path") or "").strip().replace("\\", "/")
+    if not requested_id and not requested_path:
+        raise ValueError("Choose a trial to continue from.")
+    trials = active_reported_trials()
+    for index, trial in enumerate(trials):
+        if requested_id and str(trial.get("id") or "") == requested_id:
+            return trial, trials, index
+        if requested_path and str(trial.get("path") or "") == requested_path:
+            return trial, trials, index
+    raise ValueError("The selected trial is not an active completed trial.")
+
+
+def unique_child_path(parent: Path, name: str) -> Path:
+    candidate = parent / name
+    if not candidate.exists() and not candidate.is_symlink():
+        return candidate
+    suffix = now_id()
+    candidate = parent / f"{name}_{suffix}"
+    counter = 2
+    while candidate.exists() or candidate.is_symlink():
+        candidate = parent / f"{name}_{suffix}_{counter}"
+        counter += 1
+    return candidate
+
+
+def archive_later_trials(active_trials: list[dict[str, Any]], base_index: int, fork_root: Path) -> list[dict[str, str]]:
+    target_root = fork_root / "superseded_trials"
+    target_root.mkdir(parents=True, exist_ok=True)
+    archived: list[dict[str, str]] = []
+    base_trial = active_trials[base_index] if 0 <= base_index < len(active_trials) else {}
+    base_iteration = int(base_trial.get("iteration") or trial_iteration_from_id(str(base_trial.get("id") or "")) or base_index + 1)
+    candidates = [
+        path
+        for path in active_trial_dirs()
+        if trial_iteration_from_id(path.name) > base_iteration
+    ]
+    for source_path in candidates:
+        if not source_path.exists():
+            continue
+        destination = unique_child_path(target_root, source_path.name)
+        shutil.move(str(source_path), str(destination))
+        archived.append({"id": source_path.name, "from": rel_path(source_path), "to": rel_path(destination)})
+    return archived
+
+
+def resume_forks_root() -> Path:
+    return REPO_ROOT / "archive" / "resume_forks"
+
+
+def restarts_root() -> Path:
+    return REPO_ROOT / "archive" / "restarts"
+
+
+def next_resume_fork_sequence(root: Path | None = None) -> int:
+    root = root or resume_forks_root()
+    highest = 0
+    if root.exists():
+        for path in root.iterdir():
+            if not path.is_dir():
+                continue
+            match = re.match(r"F0*(\d+)_", path.name)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def next_restart_sequence(root: Path | None = None) -> int:
+    root = root or restarts_root()
+    highest = 0
+    if root.exists():
+        for path in root.iterdir():
+            if not path.is_dir():
+                continue
+            match = re.match(r"R0*(\d+)_", path.name)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def compact_single_line(text: str, limit: int = 140) -> str:
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)].rstrip() + "…"
+
+
+def create_resume_fork_root(trial: dict[str, Any]) -> tuple[int, str, Path]:
+    root = resume_forks_root()
+    root.mkdir(parents=True, exist_ok=True)
+    sequence = next_resume_fork_sequence(root)
+    base_slug = slugify(str(trial.get("id") or "trial"), "trial")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    base_id = f"F{sequence:04d}_{timestamp}_from_{base_slug}"
+    fork_id = base_id
+    fork_root = root / fork_id
+    counter = 2
+    while fork_root.exists() or fork_root.is_symlink():
+        fork_id = f"{base_id}_{counter}"
+        fork_root = root / fork_id
+        counter += 1
+    return sequence, fork_id, fork_root
+
+
+def create_restart_root() -> tuple[int, str, Path]:
+    root = restarts_root()
+    root.mkdir(parents=True, exist_ok=True)
+    sequence = next_restart_sequence(root)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    restart_id = f"R{sequence:04d}_{timestamp}"
+    restart_root = root / restart_id
+    counter = 2
+    while restart_root.exists() or restart_root.is_symlink():
+        restart_id = f"R{sequence:04d}_{timestamp}_{counter}"
+        restart_root = root / restart_id
+        counter += 1
+    restart_root.mkdir(parents=True, exist_ok=False)
+    return sequence, restart_id, restart_root
+
+
+def move_path_to_archive(relative_path: str, destination_root: Path) -> list[dict[str, str]]:
+    source = REPO_ROOT / relative_path
+    if not source.exists():
+        return []
+    destination_root.mkdir(parents=True, exist_ok=True)
+    moved: list[dict[str, str]] = []
+    if source.is_dir():
+        source.mkdir(parents=True, exist_ok=True)
+        for child in sorted(source.iterdir()):
+            if child.name == ".gitkeep":
+                continue
+            destination = unique_child_path(destination_root, child.name)
+            shutil.move(str(child), str(destination))
+            moved.append({"from": rel_path(child), "to": rel_path(destination)})
+        source.mkdir(parents=True, exist_ok=True)
+        gitkeep = source / ".gitkeep"
+        if not any(source.iterdir()) and not gitkeep.exists():
+            gitkeep.touch()
+        return moved
+    destination = unique_child_path(destination_root, source.name)
+    shutil.move(str(source), str(destination))
+    moved.append({"from": relative_path, "to": rel_path(destination)})
+    return moved
+
+
+def next_intervention_id() -> int:
+    root = REPO_ROOT / "research_trajectory" / "human_interventions"
+    highest = 0
+    if root.exists():
+        for path in root.glob("I*.md"):
+            match = re.match(r"I0*(\d+)", path.name)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def write_resume_intervention(
+    fork_id: str,
+    fork_sequence: int,
+    trial: dict[str, Any],
+    user_instruction: str,
+    attachments: dict[str, Any],
+    restore_mode: str,
+    archived_trials: list[dict[str, str]],
+) -> str:
+    root = REPO_ROOT / "research_trajectory" / "human_interventions"
+    root.mkdir(parents=True, exist_ok=True)
+    intervention_number = next_intervention_id()
+    title_slug = slugify(f"resume_from_{trial.get('id', 'trial')}", "resume_from_trial")
+    path = root / f"I{intervention_number:04d}_{title_slug}.md"
+    uploaded = attachments.get("saved_files", []) if isinstance(attachments, dict) else []
+    linked = attachments.get("resource_links", []) if isinstance(attachments, dict) else []
+    clues = attachments.get("resource_clues", []) if isinstance(attachments, dict) else []
+    lines = [
+        f"# I{intervention_number:04d} Resume From Trial",
+        "",
+        f"Created: {now_iso()}",
+        f"Fork number: `F{fork_sequence:04d}`",
+        f"Fork id: `{fork_id}`",
+        f"Base trial: `{trial.get('id', '')}`",
+        f"Base trial path: `{trial.get('path', '')}`",
+        f"Restore mode: `{restore_mode}`",
+        "",
+        "## User Instruction",
+        "",
+        user_instruction.strip() or "Continue from the selected trial boundary.",
+        "",
+        "## Attached Context",
+        "",
+    ]
+    if not uploaded and not linked and not clues:
+        lines.append("- No additional files or resources were attached with this continue request.")
+    for item in uploaded:
+        lines.append(f"- Uploaded file: `{item}`")
+    for item in linked:
+        if isinstance(item, dict):
+            lines.append(f"- {item.get('mode', 'linked')} {item.get('category', 'resource')}: `{item.get('path', '')}`")
+    for item in clues:
+        if isinstance(item, dict):
+            lines.append(f"- Resource clue: `{item.get('reference', '')}` ({item.get('status', '')})")
+    lines.extend(
+        [
+            "",
+            "## Effective Consequence",
+            "",
+            "- Treat the selected base trial as the active trajectory boundary.",
+            "- Later active trials were superseded by this human fork request.",
+            "- Start the next coherent autoresearch iteration from this boundary.",
+            "",
+            "## Superseded Trials",
+            "",
+        ]
+    )
+    if archived_trials:
+        lines.extend(f"- `{item['from']}` -> `{item['to']}`" for item in archived_trials)
+    else:
+        lines.append("- No later active trials were present.")
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+    index_path = root / "INDEX.md"
+    existing = safe_read(index_path) if index_path.exists() else "# Human Interventions\n"
+    entry = f"- `I{intervention_number:04d}` Resume from `{trial.get('id', '')}`: `{rel_path(path)}`"
+    if entry not in existing:
+        index_path.write_text(existing.rstrip() + "\n" + entry + "\n", encoding="utf-8")
+    return rel_path(path)
+
+
+def write_resume_fork_manifest(
+    fork_root: Path,
+    fork_id: str,
+    fork_sequence: int,
+    trial: dict[str, Any],
+    restore_mode: str,
+    backup_files: list[str],
+    restored_files: list[str],
+    archived_trials: list[dict[str, str]],
+    intervention_path: str,
+    user_instruction: str,
+) -> str:
+    fork_root.mkdir(parents=True, exist_ok=True)
+    path = fork_root / "MANIFEST.md"
+    lines = [
+        f"# Resume Fork F{fork_sequence:04d}",
+        "",
+        f"Created: {now_iso()}",
+        f"Fork id: `{fork_id}`",
+        f"Fork number: `F{fork_sequence:04d}`",
+        f"Base trial: `{trial.get('id', '')}`",
+        f"Base trial path: `{trial.get('path', '')}`",
+        f"Restore mode: `{restore_mode}`",
+        f"Intervention: `{intervention_path}`",
+        "",
+        "## User Instruction",
+        "",
+        user_instruction.strip() or "Continue from the selected trial boundary.",
+        "",
+        "## Pre-Fork Backup",
+        "",
+        *[f"- `{path}`" for path in backup_files],
+        "",
+        "## Restored Files",
+        "",
+    ]
+    if restored_files:
+        lines.extend(f"- `{path}`" for path in restored_files)
+    else:
+        lines.append("- No checkpoint files were restored; this was a best-effort fork.")
+    lines.extend(["", "## Archived Later Trials", ""])
+    if archived_trials:
+        lines.extend(f"- `{item['from']}` -> `{item['to']}`" for item in archived_trials)
+    else:
+        lines.append("- No later active trials were present.")
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return rel_path(path)
+
+
+def update_resume_forks_index(
+    fork_id: str,
+    fork_sequence: int,
+    trial: dict[str, Any],
+    restore_mode: str,
+    fork_manifest: str,
+    intervention_path: str,
+    archived_trials: list[dict[str, str]],
+    user_instruction: str,
+) -> str:
+    root = resume_forks_root()
+    root.mkdir(parents=True, exist_ok=True)
+    index_path = root / "RESUME_FORKS.md"
+    existing = safe_read(index_path) if index_path.exists() else "# Resume Forks\n\nFork history for human-directed continue-from-trial branches.\n"
+    instruction = compact_single_line(user_instruction, 180) or "Continue from the selected trial boundary."
+    entry = "\n".join(
+        [
+            "",
+            f"## F{fork_sequence:04d} · {trial.get('id', '')}",
+            "",
+            f"- Created: {now_iso()}",
+            f"- Fork id: `{fork_id}`",
+            f"- Base trial: `{trial.get('id', '')}`",
+            f"- Base trial path: `{trial.get('path', '')}`",
+            f"- Restore mode: `{restore_mode}`",
+            f"- Manifest: `{fork_manifest}`",
+            f"- Intervention: `{intervention_path}`",
+            f"- Archived later trials: {len(archived_trials)}",
+            f"- User instruction: {instruction}",
+        ]
+    )
+    if f"## F{fork_sequence:04d} ·" not in existing:
+        index_path.write_text(existing.rstrip() + entry + "\n", encoding="utf-8")
+    return rel_path(index_path)
 
 
 def regex_first_value(text: str, patterns: list[str]) -> str:
@@ -1909,10 +3499,20 @@ def review_summary_line(text: str) -> str:
 
 def collect_reviews() -> list[dict[str, Any]]:
     review_paths: list[tuple[str, Path]] = []
-    review_paths.extend(("trial_review", path) for path in REPO_ROOT.glob("research_trajectory/trials/*/REVIEW.md"))
-    review_paths.extend(("trial_review", path) for path in REPO_ROOT.glob("research_trajectory/trials/*/PLAN_REVIEW.md"))
-    review_paths.extend(("trial_review", path) for path in REPO_ROOT.glob("research_trajectory/*/trials/*/REVIEW.md"))
-    review_paths.extend(("trial_review", path) for path in REPO_ROOT.glob("research_trajectory/*/trials/*/PLAN_REVIEW.md"))
+    review_paths.extend(("trial_review", path) for path in REPO_ROOT.glob("research_trajectory/trials/*/reviews/*_REVIEW.md"))
+    review_paths.extend(("trial_review", path) for path in REPO_ROOT.glob("research_trajectory/*/trials/*/reviews/*_REVIEW.md"))
+    for legacy in REPO_ROOT.glob("research_trajectory/trials/*/REVIEW.md"):
+        if not list((legacy.parent / "reviews").glob("*_REVIEW.md")):
+            review_paths.append(("trial_review", legacy))
+    for legacy in REPO_ROOT.glob("research_trajectory/trials/*/PLAN_REVIEW.md"):
+        if not list((legacy.parent / "reviews").glob("*_REVIEW.md")):
+            review_paths.append(("trial_review", legacy))
+    for legacy in REPO_ROOT.glob("research_trajectory/*/trials/*/REVIEW.md"):
+        if not list((legacy.parent / "reviews").glob("*_REVIEW.md")):
+            review_paths.append(("trial_review", legacy))
+    for legacy in REPO_ROOT.glob("research_trajectory/*/trials/*/PLAN_REVIEW.md"):
+        if not list((legacy.parent / "reviews").glob("*_REVIEW.md")):
+            review_paths.append(("trial_review", legacy))
     review_paths.extend(("process_review", path) for path in REPO_ROOT.glob("research_trajectory/*/process_reviews/*.md"))
     review_paths.extend(("manuscript_review", path) for path in REPO_ROOT.glob("manuscript/reviews/*.md"))
     review_paths.extend(("figure_table_review", path) for path in REPO_ROOT.glob("manuscript/figures/*REVIEW*.md"))
@@ -1986,6 +3586,7 @@ def build_overview() -> dict[str, Any]:
     if PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project:
         PROJECT_REGISTRY.refresh()
     context = current_project_context()
+    trajectory = sync_trajectory_state("overview")
     project = read_text_file("PROJECT.md")
     state = read_text_file("research_trajectory/STATE.md")
     blueprint = read_text_file("manuscript/BLUEPRINT.md")
@@ -2002,6 +3603,7 @@ def build_overview() -> dict[str, Any]:
         "multi_project": bool(PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project),
         "repo_root": str(REPO_ROOT),
         "generated_at": now_iso(),
+        "trajectory": trajectory,
         "files": {
             "project": project,
             "state": state,
@@ -2421,6 +4023,7 @@ def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
             "category": category,
             "source": str(source),
             "path": rel_path(destination),
+            "provenance": "user_explicit",
             "auto_detected": "true" if item.get("autoDetected") else "false",
             "source_text": str(item.get("sourceText", "")).strip(),
             "resolution_status": str(item.get("resolutionStatus", "")).strip(),
@@ -2563,6 +4166,8 @@ def write_ui_metadata(
         "",
         "It is not current research truth until promoted into `PROJECT.md`, `research_trajectory/STATE.md`, `research_trajectory/CURRENT_FINDINGS.md`, or a trial report.",
         "",
+        "Provenance values: `user_explicit`, `user_confirmed`, `autoresearch_discovered`, `autoresearch_generated`, `unknown`.",
+        "",
     ]
     links = payload.get("resourceLinks", [])
     uploads = payload.get("files", [])
@@ -2582,6 +4187,7 @@ def write_ui_metadata(
                 continue
             category = str(item.get("category", "")).strip() or "unclassified"
             resource_lines.append(f"- `{category}` local selection: `{path}`")
+            resource_lines.append("  - Provenance: `user_explicit`")
             explicit_count += 1
     if isinstance(uploads, list) and uploads:
         for item in uploads:
@@ -2592,6 +4198,7 @@ def write_ui_metadata(
                 continue
             category = str(item.get("category", "")).strip() or "unclassified"
             resource_lines.append(f"- `{category}` upload: `{name}`")
+            resource_lines.append("  - Provenance: `user_explicit`")
             explicit_count += 1
     if explicit_count == 0:
         resource_lines.append("- <none recorded>")
@@ -2610,14 +4217,17 @@ def write_ui_metadata(
             candidates = item.get("candidates", [])
             if path:
                 resource_lines.append(f"- `{status}` clue: `{reference}`; candidate: `{path}`")
+                resource_lines.append("  - Provenance: `unknown`")
                 inferred_count += 1
                 continue
             if isinstance(candidates, list) and candidates:
                 limited = ", ".join(f"`{candidate}`" for candidate in candidates[:5])
                 resource_lines.append(f"- `{status}` clue: `{reference}`; candidates: {limited}")
+                resource_lines.append("  - Provenance: `unknown`")
                 inferred_count += 1
             elif reference:
                 resource_lines.append(f"- `{status}` clue: `{reference}`")
+                resource_lines.append("  - Provenance: `unknown`")
                 inferred_count += 1
     if inferred_count == 0:
         resource_lines.append("- <none recorded>")
@@ -2634,10 +4244,15 @@ def write_ui_metadata(
         path = str(item.get("path", "")).strip()
         if path:
             resource_lines.append(f"- `{category}` {mode}: `{path}` from `{source}`")
+            provenance = str(item.get("provenance") or "user_explicit").strip()
+            if provenance not in RESOURCE_PROVENANCE_VALUES:
+                provenance = "unknown"
+            resource_lines.append(f"  - Provenance: `{provenance}`")
             attached_count += 1
     for path in saved_files:
         if path:
             resource_lines.append(f"- upload copied: `{path}`")
+            resource_lines.append("  - Provenance: `user_explicit`")
             attached_count += 1
     if attached_count == 0:
         resource_lines.append("- <none recorded>")
@@ -2873,47 +4488,26 @@ def normalize_gate_status(value: str) -> str:
         return "missing"
     if re.search(r"\b(blocked|needs_human|human|clarification)\b", text):
         return "blocked"
+    if re.match(r"^(all[_\s-]?passed)(?:\s*$|\s*[:.;,]\s*|\s+-\s+)", text):
+        return "pass"
+    if re.match(r"^(strict\s+)?pass(?:\s*$|\s*[:.;,]\s*|\s+-\s+)", text):
+        pass_tail = re.sub(r"^(strict\s+)?pass(?:\s*$|\s*[:.;,]\s*|\s+-\s+)", "", text).replace("_", " ").replace("-", " ")
+        if re.search(r"\b(not\s+pass|not\s+passed|not\s+ready|needs\s+work|needs\s+follow\s+up|follow\s+up|continue|running|revise|revision\s+required|targeted\s+revision|architecture\s+only|partial|qualified|qualification|supported\s+with\s+qualification|plausible|pass\s+for)\b", pass_tail):
+            return "continue"
+        return "pass"
     normalized = text.replace("_", " ").replace("-", " ")
     if re.search(r"\b(not\s+pass|not\s+passed|not\s+ready|needs\s+work|needs\s+follow\s+up|follow\s+up|continue|running|revise|revision\s+required|targeted\s+revision|architecture|partial|qualified|qualification|supported\s+with\s+qualification|plausible|approved|complete|completed|ready|pass\s+for)\b", normalized):
         return "continue"
-    if re.match(r"^(strict\s+)?pass(?:\s*$|\s*[:.;,]\s*|\s+-\s+)", text):
-        return "pass"
-    if re.match(r"^(all[_\s-]?passed)(?:\s*$|\s*[:.;,]\s*|\s+-\s+)", text):
-        return "pass"
     if re.search(r"\b(fail|failed)\b", text):
         return "continue"
     return text.split()[0]
 
 
-REQUIRED_REVIEWER_GATES = {
-    "plan": "Plan reviewer",
-    "process": "Process reviewer",
-    "evidence": "Evidence reviewer",
-    "venue_fit": "Venue fit reviewer",
-    "manuscript": "Manuscript reviewer",
-    "figure_table": "Figure/table reviewer",
-    "final_gate": "Final gate reviewer",
-}
+REQUIRED_REVIEWER_GATES = {key: config["label"] for key, config in REQUIRED_REVIEWER_OUTPUTS.items()}
 
 
 def reviewer_gate_key(label: str) -> str:
-    clean = re.sub(r"[^a-z/ ]+", " ", label.lower())
-    clean = re.sub(r"\s+", " ", clean).strip()
-    if clean.startswith("plan"):
-        return "plan"
-    if clean.startswith("process"):
-        return "process"
-    if clean.startswith("evidence"):
-        return "evidence"
-    if clean.startswith("venue"):
-        return "venue_fit"
-    if clean.startswith("manuscript"):
-        return "manuscript"
-    if clean.startswith("figure") or clean.startswith("table") or "figure/table" in clean:
-        return "figure_table"
-    if clean.startswith("final"):
-        return "final_gate"
-    return ""
+    return reviewer_key_for_label(label)
 
 
 def parse_reviewer_gate_line(line: str) -> tuple[str, str, str]:
@@ -2942,6 +4536,163 @@ def upsert_markdown_section(text: str, heading: str, section: str) -> str:
     if insert_before:
         return (text[: insert_before.start()].rstrip() + "\n\n" + clean_section + "\n" + text[insert_before.start():].lstrip()).rstrip() + "\n"
     return text.rstrip() + "\n\n" + clean_section
+
+
+def section_body(section: str) -> str:
+    lines = section.splitlines()
+    if lines and lines[0].lstrip().startswith("## "):
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
+def meaningful_section_lines(section: str) -> list[str]:
+    lines: list[str] = []
+    for raw_line in section_body(section).splitlines():
+        line = raw_line.strip()
+        if not line or line == "---" or line.startswith("#"):
+            continue
+        if re.fullmatch(r"[-*]\s*(none|n/a|not applicable)\.?", line, re.IGNORECASE):
+            continue
+        if re.fullmatch(r"(none|n/a|not applicable)\.?", line, re.IGNORECASE):
+            continue
+        lines.append(line)
+    return lines
+
+
+def section_has_unresolved_placeholder(section: str) -> bool:
+    return bool(re.search(r"<[^>\n]+>", section))
+
+
+def final_gate_review_schema_blockers() -> list[str]:
+    review_paths = list(REPO_ROOT.glob("research_trajectory/trials/*/reviews/FINAL_GATE_REVIEW.md"))
+    review_paths.extend(REPO_ROOT.glob("research_trajectory/*/trials/*/reviews/FINAL_GATE_REVIEW.md"))
+    review_paths.extend(REPO_ROOT.glob("research_trajectory/trials/*/REVIEW.md"))
+    review_paths.extend(REPO_ROOT.glob("research_trajectory/*/trials/*/REVIEW.md"))
+    review_paths.extend(REPO_ROOT.glob("manuscript/reviews/*.md"))
+    final_gate_seen = False
+    for path in review_paths:
+        if not path.exists() or not path.is_file():
+            continue
+        text = safe_read(path)
+        if not re.search(r"Reviewer:\s*`?Final gate reviewer`?", text, re.IGNORECASE) and not re.search(r"\bfinal[- ]gate\b", text, re.IGNORECASE):
+            continue
+        final_gate_seen = True
+        if (
+            re.search(r"Decision:\s*`?pass`?", text, re.IGNORECASE)
+            and re.search(r"Gate impact:\s*`?pass`?", text, re.IGNORECASE)
+            and re.search(r"Artifact Consistency Audit", text, re.IGNORECASE)
+        ):
+            return []
+    if final_gate_seen:
+        return ["Final gate review is missing `Decision: pass`, `Gate impact: pass`, or an Artifact Consistency Audit."]
+    return ["No final gate reviewer output using the required taxonomy schema was found."]
+
+
+def current_trial_reviewer_file_blockers() -> list[str]:
+    trials = active_trial_dirs()
+    if not trials:
+        return ["No active trial exists for current reviewer file validation."]
+    latest = trials[-1]
+    blockers: list[str] = []
+    for key, config in REQUIRED_REVIEWER_OUTPUTS.items():
+        path = reviewer_output_path(latest, key)
+        relative = rel_path(path)
+        if not path.exists() or not path.is_file():
+            blockers.append(f"Current trial is missing `{relative}`.")
+            continue
+        text = safe_read(path)
+        decision = normalize_gate_status(regex_first_value(text, [r"Decision:\s*`?([^`\n]+)`?"]))
+        gate = normalize_gate_status(regex_first_value(text, [r"Gate impact:\s*`?([^`\n]+)`?"]))
+        if decision != "pass" or gate != "pass":
+            blockers.append(f"`{relative}` is not strict pass (`Decision: {decision or 'missing'}`, `Gate impact: {gate or 'missing'}`).")
+    return blockers
+
+
+def final_blueprint_consistency_blockers() -> list[str]:
+    blockers: list[str] = []
+    blueprint_path = REPO_ROOT / "manuscript" / "BLUEPRINT.md"
+    if not blueprint_path.exists():
+        return ["manuscript/BLUEPRINT.md is missing."]
+    text = safe_read(blueprint_path)
+    if not text.strip():
+        return ["manuscript/BLUEPRINT.md is empty."]
+    for heading in REQUIRED_BLUEPRINT_SECTIONS:
+        section = markdown_section(text, heading)
+        if not section:
+            blockers.append(f"BLUEPRINT.md is missing required section `{heading}`.")
+        elif section_has_unresolved_placeholder(section):
+            blockers.append(f"BLUEPRINT.md section `{heading}` still contains template placeholders.")
+    if not markdown_section(text, "Accepted Claims And Evidence Map"):
+        blockers.append("BLUEPRINT.md must use `Accepted Claims And Evidence Map` before final pass; candidate claims cannot pass.")
+    if re.search(r"Main Claim Candidates", text, re.IGNORECASE):
+        blockers.append("BLUEPRINT.md still uses `Main Claim Candidates`; final pass requires accepted or explicitly candidate claims.")
+    if re.search(r"No active claims", text, re.IGNORECASE) and re.search(r"\bactive with qualification\b|\bAccepted Claims\b", text, re.IGNORECASE):
+        blockers.append("BLUEPRINT.md contains contradictory active-claim language.")
+    if re.search(r"tentative until source-level evidence checks are completed", text, re.IGNORECASE):
+        blockers.append("BLUEPRINT.md contains stale tentative evidence-check language.")
+    blocking_missing = markdown_section(text, "Blocking Missing Evidence")
+    if blocking_missing and meaningful_section_lines(blocking_missing):
+        blockers.append("BLUEPRINT.md has non-empty `Blocking Missing Evidence`.")
+
+    figure_plan = markdown_section(text, "Figure Plan")
+    active_figure = bool(re.search(r"Inclusion status:\s*active\b", figure_plan, re.IGNORECASE))
+    if active_figure:
+        for label in (
+            "Argument or result role:",
+            "Content and panel layout:",
+            "Caption draft or current caption:",
+            "Source artifact path:",
+            "Linked claims:",
+            "Linked evidence:",
+            "Target-venue fit rationale:",
+            "Remaining blocker:",
+        ):
+            if label not in figure_plan:
+                blockers.append(f"Active figure plan is missing `{label}`.")
+    table_plan = markdown_section(text, "Table Plan")
+    active_table = bool(re.search(r"Inclusion status:\s*active\b", table_plan, re.IGNORECASE))
+    if active_table:
+        for label in (
+            "Argument or result role:",
+            "Content, columns, rows, or comparison logic:",
+            "Caption draft or current caption:",
+            "Source artifact path:",
+            "Linked claims:",
+            "Linked evidence:",
+            "Target-venue fit rationale:",
+            "Remaining blocker:",
+        ):
+            if label not in table_plan:
+                blockers.append(f"Active table plan is missing `{label}`.")
+    else:
+        no_table = re.search(r"###\s+No-Table Rationale\s*(.*?)(?=^###\s+|\Z)", table_plan, re.MULTILINE | re.DOTALL)
+        if not no_table or not meaningful_section_lines(no_table.group(0)):
+            blockers.append("BLUEPRINT.md must include a substantive no-table rationale when no active table is planned.")
+    return blockers
+
+
+def final_gate_consistency_blockers() -> list[str]:
+    blockers: list[str] = []
+    reviewer_status = project_reviewer_baseline_status(REPO_ROOT)
+    if reviewer_status.get("outdated"):
+        parts = []
+        if reviewer_status.get("missing"):
+            parts.append(f"missing {', '.join(reviewer_status['missing'])}")
+        if reviewer_status.get("changed"):
+            parts.append(f"changed {', '.join(reviewer_status['changed'])}")
+        if reviewer_status.get("metadata_missing"):
+            parts.append("baseline metadata is missing or stale")
+        detail = "; ".join(parts) or "baseline is outdated"
+        blockers.append(f"Reviewer instructions are outdated ({detail}).")
+    blockers.extend(final_gate_review_schema_blockers())
+    blockers.extend(current_trial_reviewer_file_blockers())
+    blockers.extend(final_blueprint_consistency_blockers())
+    findings_path = REPO_ROOT / "research_trajectory" / "CURRENT_FINDINGS.md"
+    if findings_path.exists():
+        findings = safe_read(findings_path)
+        if re.search(r"tentative until source-level evidence checks are completed", findings, re.IGNORECASE):
+            blockers.append("CURRENT_FINDINGS.md contains stale tentative evidence-check language.")
+    return blockers
 
 
 def read_autoresearch_gate() -> dict[str, Any]:
@@ -2998,9 +4749,14 @@ def read_autoresearch_gate() -> dict[str, Any]:
         if reviewer_statuses.get(key) != "pass"
     ]
     all_reviewers_passed = not missing_reviewers and not incomplete_reviewers
+    consistency_blockers: list[str] = []
     status = overall_status
     if overall_status == "pass" and not all_reviewers_passed:
         status = "continue"
+    elif overall_status == "pass":
+        consistency_blockers = final_gate_consistency_blockers()
+        if consistency_blockers:
+            status = "continue"
     return {
         "exists": True,
         "status": status,
@@ -3011,6 +4767,8 @@ def read_autoresearch_gate() -> dict[str, Any]:
         "missing_reviewers": missing_reviewers,
         "incomplete_reviewers": incomplete_reviewers,
         "all_reviewers_passed": all_reviewers_passed,
+        "consistency_blockers": consistency_blockers,
+        "reviewer_baseline": project_reviewer_baseline_status(REPO_ROOT),
         "summary": "\n".join(reviewer_lines) if reviewer_lines else first_meaningful_line(section, "Gate section exists."),
         "path": str(RESEARCH_STATE_PATH.relative_to(REPO_ROOT)),
     }
@@ -3021,6 +4779,8 @@ def gate_has_passed(gate: dict[str, Any]) -> bool:
         return False
     reviewer_statuses = gate.get("reviewer_statuses")
     if not isinstance(reviewer_statuses, dict):
+        return False
+    if gate.get("consistency_blockers"):
         return False
     return all(reviewer_statuses.get(key) == "pass" for key in REQUIRED_REVIEWER_GATES)
 
@@ -3049,19 +4809,71 @@ Next action: start or continue the next coherent autoresearch iteration.
     RESEARCH_STATE_PATH.write_text(upsert_markdown_section(existing, "Autoresearch Goal Gate", section), encoding="utf-8")
 
 
+def repair_autoresearch_gate_if_needed() -> dict[str, Any]:
+    gate = read_autoresearch_gate()
+    if not gate.get("exists"):
+        return gate
+    consistency_blockers = gate.get("consistency_blockers") if isinstance(gate.get("consistency_blockers"), list) else []
+    if gate.get("overall_status") != "pass" or (gate.get("all_reviewers_passed") and not consistency_blockers):
+        return gate
+    raw_statuses = gate.get("reviewer_raw_statuses") if isinstance(gate.get("reviewer_raw_statuses"), dict) else {}
+    repair_reason = (
+        "Server repair: top-level `Status: pass` was downgraded because final blueprint, reviewer baseline, or final-gate consistency checks did not pass."
+        if consistency_blockers
+        else "Server repair: top-level `Status: pass` was downgraded because not every required reviewer gate was a strict `pass`."
+    )
+    lines = [
+        "## Autoresearch Goal Gate",
+        "",
+        "Status: continue",
+        f"Updated: {now_iso()}",
+        "",
+        repair_reason,
+        "",
+        "Required reviewer gates:",
+    ]
+    for key, label in REQUIRED_REVIEWER_GATES.items():
+        raw = str(raw_statuses.get(key) or "").strip()
+        status = "pass" if normalize_gate_status(raw) == "pass" else "continue"
+        lines.append(f"- {label}: {status}")
+    if consistency_blockers:
+        lines.extend(["", "Consistency blockers:"])
+        for blocker in consistency_blockers[:12]:
+            lines.append(f"- {blocker}")
+    lines.extend(
+        [
+            "",
+            "Next action: update reviewers if needed, run final synthesis, and continue autoresearch until every required reviewer gate and final blueprint consistency check is a strict pass.",
+            "",
+        ]
+    )
+    existing = RESEARCH_STATE_PATH.read_text(encoding="utf-8") if RESEARCH_STATE_PATH.exists() else "# Research State\n"
+    RESEARCH_STATE_PATH.write_text(upsert_markdown_section(existing, "Autoresearch Goal Gate", "\n".join(lines)), encoding="utf-8")
+    return read_autoresearch_gate()
+
+
 def ensure_autoresearch_gate_for_loop() -> None:
     gate = read_autoresearch_gate()
-    if not gate.get("exists") or gate.get("status") == "pass":
+    if not gate.get("exists"):
         write_initial_autoresearch_gate()
+        return
+    repair_autoresearch_gate_if_needed()
 
 
 def research_session_snapshot() -> dict[str, Any]:
-    gate = read_autoresearch_gate()
+    gate = repair_autoresearch_gate_if_needed()
+    trajectory = sync_trajectory_state("snapshot")
     with RESEARCH_LOCK:
         RESEARCH_SESSION["gate"] = gate
         loop_active = bool(RESEARCH_SESSION.get("loop_active"))
         loop_stop_reason = RESEARCH_SESSION.get("loop_stop_reason", "")
         loop_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        proc = RESEARCH_SESSION.get("process")
+        running = bool(proc and proc.poll() is None)
+        latest_iteration = latest_active_trial_iteration()
+        if not running and latest_iteration > 0:
+            loop_iteration = latest_iteration
+            RESEARCH_SESSION["loop_iteration"] = loop_iteration
         settings = dict(RESEARCH_SESSION.get("settings") or {})
         review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
         loop_review_checkpoint_iteration = int(RESEARCH_SESSION.get("loop_review_checkpoint_iteration") or 0)
@@ -3072,14 +4884,46 @@ def research_session_snapshot() -> dict[str, Any]:
             loop_stop_reason = "all_reviewer_gates_passed"
             RESEARCH_SESSION["loop_active"] = False
             RESEARCH_SESSION["loop_stop_reason"] = loop_stop_reason
+        elif loop_stop_reason == "all_reviewer_gates_passed":
+            loop_stop_reason = ""
+            RESEARCH_SESSION["loop_stop_reason"] = ""
+        mode = str(RESEARCH_SESSION.get("mode", "") or "")
+        run_id = str(RESEARCH_SESSION.get("id", "") or "")
+        started_at = str(RESEARCH_SESSION.get("started_at", "") or "")
+        active_trial_iteration = 0
+        trajectory_mismatch = False
+        if running and mode in {"goal", "research"} and not gate_has_passed(gate):
+            marker = read_expected_trial_marker()
+            expected_iteration = int(marker.get("expected_iteration") or 0) if marker else 0
+            if marker.get("status") == "mismatch":
+                trajectory_mismatch = True
+            active_trial_iteration = expected_iteration or loop_iteration
+        active_run = {
+            "running": running,
+            "mode": mode,
+            "run_id": run_id,
+            "started_at": started_at,
+            "trial_iteration": active_trial_iteration if active_trial_iteration > 0 else None,
+            "trial_label": f"Trial {active_trial_iteration}" if active_trial_iteration > 0 else "",
+            "status_label": (
+                f"Trajectory mismatch on Trial {active_trial_iteration}"
+                if trajectory_mismatch and active_trial_iteration > 0
+                else f"Codex is working on Trial {active_trial_iteration}"
+                if running and active_trial_iteration > 0
+                else "Codex is working"
+                if running
+                else ""
+            ),
+            "trajectory_mismatch": trajectory_mismatch,
+        }
         return {
             "id": RESEARCH_SESSION.get("id", ""),
             "session_id": RESEARCH_SESSION.get("session_id", ""),
             "status": RESEARCH_SESSION.get("status", "idle"),
-            "mode": RESEARCH_SESSION.get("mode", ""),
+            "mode": mode,
             "command": " ".join(RESEARCH_SESSION.get("command", [])),
             "settings": dict(RESEARCH_SESSION.get("settings") or {}),
-            "started_at": RESEARCH_SESSION.get("started_at", ""),
+            "started_at": started_at,
             "ended_at": RESEARCH_SESSION.get("ended_at", ""),
             "returncode": RESEARCH_SESSION.get("returncode"),
             "logs": list(RESEARCH_SESSION.get("logs", []))[-500:],
@@ -3092,6 +4936,8 @@ def research_session_snapshot() -> dict[str, Any]:
             "review_checkpoint_interval": review_checkpoint_interval,
             "loop_stop_reason": loop_stop_reason,
             "gate": gate,
+            "trajectory": trajectory,
+            "active_run": active_run,
         }
 
 
@@ -3156,14 +5002,17 @@ def current_review_checkpoint_iteration(settings: dict[str, Any] | None = None) 
     return set_review_checkpoint_window(settings, current_iteration)
 
 
-def continue_autoresearch_loop_prompt(gate: dict[str, Any]) -> str:
+def continue_autoresearch_loop_prompt(gate: dict[str, Any], next_iteration: int | None = None) -> str:
     status = gate.get("raw_status") or gate.get("status") or "missing"
     summary = gate.get("summary") or "No reviewer gate summary yet."
+    expected = int(next_iteration or next_active_trial_iteration())
     return f"""/goal resume
 
 Continue the autoresearch loop in this same Codex session.
 
 Current autoresearch gate status: {status}
+
+Next active trial must be Trial {expected}. Create it under `research_trajectory/trials/` with an id beginning `{expected:06d}_`. Do not skip ahead because old runtime state or archived/superseded trials had higher numbers.
 
 Gate summary:
 {summary}
@@ -3225,15 +5074,17 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         )
         return
     append_research_log(
-        f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; resuming same Codex session for iteration {iteration + 1}."
+        f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; resuming same Codex session for the next active trial."
     )
+    next_iteration = next_active_trial_iteration()
     start_research_run(
-        continue_autoresearch_loop_prompt(gate),
+        continue_autoresearch_loop_prompt(gate, next_iteration),
         "goal",
         resume=True,
         settings_payload=settings,
-        display_prompt=f"Continue autoresearch loop (iteration {iteration + 1}).",
+        display_prompt=f"Continue autoresearch loop (Trial {next_iteration}).",
         loop_active=True,
+        loop_iteration_override=next_iteration,
     )
 
 
@@ -3247,6 +5098,13 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
         append_research_log(f"UI session error: {exc}")
         returncode = proc.poll()
     finish_research_run(returncode)
+    if returncode == 0:
+        try:
+            validate_expected_trial_marker()
+            maybe_checkpoint_latest_trial()
+            sync_trajectory_state("run_completed")
+        except Exception as exc:  # pragma: no cover - checkpointing should not kill the UI loop
+            append_research_log(f"Trajectory/checkpoint warning: {exc}")
     maybe_continue_autoresearch_loop(returncode)
 
 
@@ -3275,6 +5133,7 @@ def start_research_run(
     display_prompt: str | None = None,
     loop_active: bool | None = None,
     reset_review_checkpoint: bool = False,
+    loop_iteration_override: int | None = None,
 ) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt:
@@ -3286,13 +5145,29 @@ def start_research_run(
             raise ValueError("A Codex run is already active.")
         previous_session_id = str(RESEARCH_SESSION.get("session_id") or "")
         command = codex_command_for_prompt(resume, settings)
-        previous_loop_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        if mode == "goal":
+            sync_trajectory_state("start_goal_run")
+        previous_loop_iteration = latest_active_trial_iteration() if mode == "goal" else int(RESEARCH_SESSION.get("loop_iteration") or 0)
         next_loop_active = bool(RESEARCH_SESSION.get("loop_active")) if loop_active is None else bool(loop_active)
-        next_loop_iteration = previous_loop_iteration + 1 if next_loop_active and mode == "goal" else previous_loop_iteration
+        if loop_iteration_override is not None:
+            next_loop_iteration = max(0, int(loop_iteration_override))
+        elif next_loop_active and mode == "goal":
+            next_loop_iteration = next_active_trial_iteration()
+        else:
+            next_loop_iteration = previous_loop_iteration
         review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
         loop_review_checkpoint_iteration = int(RESEARCH_SESSION.get("loop_review_checkpoint_iteration") or 0)
         if next_loop_active and (reset_review_checkpoint or loop_review_checkpoint_iteration <= 0):
-            loop_review_checkpoint_iteration = previous_loop_iteration + review_checkpoint_interval
+            checkpoint_base = max(0, next_loop_iteration - 1) if mode == "goal" else previous_loop_iteration
+            loop_review_checkpoint_iteration = checkpoint_base + review_checkpoint_interval
+        if next_loop_active and mode == "goal" and next_loop_iteration > 0:
+            trajectory = read_trajectory_state()
+            write_expected_trial_marker(
+                next_loop_iteration,
+                reason=mode,
+                base_trial=str(trajectory.get("base_trial") or ""),
+                fork_id=str(trajectory.get("fork_id") or ""),
+            )
         if not resume:
             RESEARCH_SESSION["logs"] = []
             RESEARCH_SESSION["raw_logs"] = []
@@ -3469,6 +5344,19 @@ Required reviewer gates must all be strict `pass` before the autoresearch goal i
 
 Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results unless the relevant reviewer standard and Final gate standard are fully satisfied.
 
+Before any final pass in a manuscript-facing project, run a final synthesis step:
+update `manuscript/BLUEPRINT.md`, `research_trajectory/CURRENT_FINDINGS.md`,
+and `manuscript/figures/FIGURE_SPECS.md` as needed. The final blueprint must be
+self-contained and target-venue-ready: accepted claims and evidence map,
+section architecture, figure plan with captions/content/source/evidence/venue
+rationale, table plan or no-table rationale, reference/literature grounding,
+appendix/supplement posture, blocking missing evidence, required
+qualifications, deprecated ideas, and submission-readiness summary must all be
+current. If `Blocking Missing Evidence` is non-empty, if a figure/table lacks
+caption/content/source/evidence/venue rationale, if reviewer instructions are
+outdated, or if stale language such as "tentative until source-level evidence
+checks are completed" remains, keep `Status: continue`.
+
 Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message and set `Status: needs_human` instead of silently inventing a different project."""
 
 
@@ -3486,6 +5374,408 @@ If the user is asking a question, asking for an explanation, or asking what the 
     return """Continue the next coherent CoAutoResearch iteration in this same Codex exec session.
 
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+
+
+def resume_from_trial_prompt(
+    trial: dict[str, Any],
+    user_instruction: str,
+    restore_mode: str,
+    fork_manifest: str,
+    intervention_path: str,
+    archived_trials: list[dict[str, str]],
+    base_iteration: int,
+    next_iteration: int,
+) -> str:
+    archived_text = "\n".join(f"- `{item['from']}` archived to `{item['to']}`" for item in archived_trials) or "- None"
+    best_effort_note = ""
+    if restore_mode == "best_effort":
+        best_effort_note = """
+This selected trial did not have a saved checkpoint. Treat this as a best-effort fork:
+- the later active trials have been archived and are no longer current trajectory truth;
+- verify STATE.md, CURRENT_FINDINGS.md, manuscript files, and resources before relying on them;
+- if the restored state is inconsistent, repair the project state before creating substantive new claims.
+"""
+    return f"""/goal resume from trial
+
+The user confirmed a human-directed fork of the autoresearch trajectory.
+
+Base trial:
+- iteration: Trial {base_iteration}
+- id: `{trial.get('id', '')}`
+- path: `{trial.get('path', '')}`
+- report: `{trial.get('report_path', '')}`
+- checkpoint: `{trial.get('checkpoint_path', '') or 'none'}`
+- restore mode: `{restore_mode}`
+
+Fork records:
+- fork manifest: `{fork_manifest}`
+- human intervention: `{intervention_path}`
+
+Archived later trials:
+{archived_text}
+
+User instruction for the resumed trajectory:
+{user_instruction.strip() or "Continue from the selected trial boundary."}
+
+{best_effort_note}
+Read:
+- AGENTS.md
+- instructions/EXECUTION_AGENT.md
+- instructions/INTERVENTION_PROTOCOL.md
+- PROJECT.md
+- research_trajectory/STATE.md
+- research_trajectory/CURRENT_FINDINGS.md
+- the base trial PLAN/REVIEW/REPORT files
+- instructions/reviewers/REVIEW_TAXONOMY.md
+- relevant reviewer instructions under instructions/reviewers/
+- instructions/reviewers/FINAL_GATE_REVIEWER.md
+
+Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do. Update the autoresearch gate, and stop only when the strict reviewer gate standard is met or human input is required."""
+
+
+def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: dict[str, Any]) -> dict[str, Any]:
+    resume_payload = payload.get("resumeFromTrial")
+    if not isinstance(resume_payload, dict):
+        raise ValueError("Missing resume-from-trial context.")
+    if message.strip().startswith("/"):
+        raise ValueError("Remove the trial continue context before sending a slash command.")
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        if proc and proc.poll() is None:
+            raise ValueError("Wait for the current Codex run to finish before continuing from a trial.")
+    trial, trials, base_index = resolve_resume_trial(resume_payload)
+    fork_sequence, fork_id, fork_root = create_resume_fork_root(trial)
+    backup_root = fork_root / "pre_fork_state"
+    backup_files = copy_resume_snapshot(backup_root)
+    checkpoint_path = REPO_ROOT / str(trial.get("checkpoint_path") or "")
+    restore_mode = "checkpoint" if trial.get("checkpoint_exists") and checkpoint_path.exists() else "best_effort"
+    archived_trials = archive_later_trials(trials, base_index, fork_root)
+    restored_files = restore_snapshot_from(checkpoint_path) if restore_mode == "checkpoint" else []
+    trajectory = set_resume_fork_trajectory(trial, fork_id, archived_trials)
+    ensure_autoresearch_gate_for_loop()
+    intervention_path = write_resume_intervention(
+        fork_id,
+        fork_sequence,
+        trial,
+        message,
+        attachments,
+        restore_mode,
+        archived_trials,
+    )
+    fork_manifest = write_resume_fork_manifest(
+        fork_root,
+        fork_id,
+        fork_sequence,
+        trial,
+        restore_mode,
+        backup_files,
+        restored_files,
+        archived_trials,
+        intervention_path,
+        message,
+    )
+    fork_index = update_resume_forks_index(
+        fork_id,
+        fork_sequence,
+        trial,
+        restore_mode,
+        fork_manifest,
+        intervention_path,
+        archived_trials,
+        message,
+    )
+    settings = normalize_research_settings(payload.get("settings"))
+    review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+    base_iteration = int(trial.get("iteration") or trial_iteration_from_id(str(trial.get("id") or "")) or base_index + 1)
+    next_iteration = base_iteration + 1
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["session_id"] = ""
+        RESEARCH_SESSION["loop_iteration"] = base_iteration
+        RESEARCH_SESSION["loop_active"] = True
+        RESEARCH_SESSION["loop_stop_reason"] = ""
+        RESEARCH_SESSION["settings"] = settings
+        RESEARCH_SESSION["loop_max_iterations"] = review_checkpoint_interval
+        RESEARCH_SESSION["loop_review_checkpoint_iteration"] = base_iteration + review_checkpoint_interval
+    persist_research_session()
+    session = start_research_run(
+        resume_from_trial_prompt(
+            trial,
+            message,
+            restore_mode,
+            fork_manifest,
+            intervention_path,
+            archived_trials,
+            base_iteration,
+            next_iteration,
+        ),
+        "goal",
+        resume=False,
+        settings_payload=settings,
+        display_prompt=f"Continue autoresearch from Trial {base_iteration}.",
+        loop_active=True,
+        reset_review_checkpoint=True,
+        loop_iteration_override=next_iteration,
+    )
+    return {
+        "files": {
+            **attachments,
+            "resume_fork": {
+                "fork_id": fork_id,
+                "fork_sequence": fork_sequence,
+                "base_trial": trial,
+                "restore_mode": restore_mode,
+                "fork_manifest": fork_manifest,
+                "fork_index": fork_index,
+                "intervention_path": intervention_path,
+                "archived_trials": archived_trials,
+                "restored_files": restored_files,
+                "trajectory": trajectory,
+            },
+        },
+        "session": session,
+    }
+
+
+def template_file_text(relative_path: str) -> str:
+    for root in [PACKAGE_TEMPLATE_ROOT, DEFAULT_PROJECT_ROOT]:
+        if not root:
+            continue
+        source = Path(root) / relative_path
+        if source.exists() and source.is_file():
+            return source.read_text(encoding="utf-8", errors="replace")
+    return ""
+
+
+def reset_text_file_from_template(relative_path: str, fallback: str) -> str:
+    path = REPO_ROOT / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = template_file_text(relative_path) or fallback
+    path.write_text(text.rstrip() + "\n", encoding="utf-8")
+    return relative_path
+
+
+def manifest_entry_lines(entries: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for entry in entries:
+        text = str(entry.get("text") or "").strip()
+        if not text:
+            continue
+        lines.extend(text.splitlines())
+        archived_paths = entry.get("archived_paths") or []
+        if isinstance(archived_paths, list):
+            for archived in archived_paths:
+                if not isinstance(archived, dict):
+                    continue
+                source = str(archived.get("from") or "").strip()
+                destination = str(archived.get("to") or "").strip()
+                if source and destination:
+                    lines.append(f"  - Archived path: `{source}` -> `{destination}`")
+    return lines or ["- <none recorded>"]
+
+
+def write_restart_resource_manifest(restart_id: str, restart_root: Path, retained_entries: list[dict[str, Any]], inactive_entries: list[dict[str, Any]]) -> str:
+    manifest_path = REPO_ROOT / "resources/user_input/RESOURCE_MANIFEST.md"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    archive_manifest = restart_root / "pre_restart_state/resources/user_input/RESOURCE_MANIFEST.md"
+    lines = [
+        "# Resource Manifest",
+        "",
+        "This manifest was reset by `Restart autoresearch`.",
+        "",
+        "## Restart Resource Policy",
+        "",
+        f"- Restart id: `{restart_id}`",
+        f"- Prior manifest snapshot: `{rel_path(archive_manifest)}`" if archive_manifest.exists() else "- Prior manifest snapshot: <none recorded>",
+        "- Retained active provenance: `user_explicit`, `user_confirmed`.",
+        "- Autoresearch-discovered, autoresearch-generated, and unknown resources are prior-run context after restart; they are not active inputs unless the user explicitly reattaches or confirms them.",
+        "",
+        "## Retained Active Resources",
+        "",
+        *manifest_entry_lines(retained_entries),
+        "",
+        "## Archived Prior-Run Resources",
+        "",
+        *manifest_entry_lines(inactive_entries),
+        "",
+        "## Explicit UI Resources",
+        "",
+        "- See Retained Active Resources above.",
+        "",
+        "## Inferred Resource References",
+        "",
+        "- <none recorded after restart>",
+        "",
+        "## Attached Resources",
+        "",
+        "- See Retained Active Resources above.",
+        "",
+        "## Unresolved Or Ambiguous Resources",
+        "",
+        "- <none recorded after restart>",
+        "",
+        "## Intake Decisions",
+        "",
+        "- Restart completed; user-origin resources remain available on disk, but the next run must promote resources through normal intake before treating them as evidence.",
+        "",
+    ]
+    manifest_path.write_text("\n".join(lines), encoding="utf-8")
+    return rel_path(manifest_path)
+
+
+def write_restart_manifest(
+    restart_root: Path,
+    restart_id: str,
+    sequence: int,
+    reason: str,
+    snapshot_files: list[str],
+    runtime_files: list[str],
+    moved_paths: list[dict[str, str]],
+    reset_files: list[str],
+    resource_manifest: str,
+    retained_resource_entries: list[dict[str, Any]],
+    inactive_resource_entries: list[dict[str, Any]],
+) -> str:
+    manifest = {
+        "schema_version": 1,
+        "restart_id": restart_id,
+        "restart_sequence": sequence,
+        "created_at": now_iso(),
+        "reason": reason,
+        "resource_policy": {
+            "retained": sorted(RESTART_RETAINED_PROVENANCE),
+            "archived_or_inactive": sorted(RESOURCE_PROVENANCE_VALUES - RESTART_RETAINED_PROVENANCE),
+        },
+        "retained_resource_entries": retained_resource_entries,
+        "inactive_resource_entries": inactive_resource_entries,
+        "snapshot_files": snapshot_files,
+        "runtime_files": runtime_files,
+        "moved_paths": moved_paths,
+        "reset_files": reset_files,
+        "resource_manifest": resource_manifest,
+    }
+    path = restart_root / "restart_manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return rel_path(path)
+
+
+def restart_autoresearch_prompt(restart_id: str, manifest_path: str, reason: str) -> str:
+    return f"""/goal restart
+
+The user confirmed a full autoresearch restart.
+
+Restart manifest: `{manifest_path}`
+Restart id: `{restart_id}`
+
+User restart instruction:
+{reason.strip() or "Restart autoresearch from a clean active trajectory."}
+
+Semantics:
+- Treat archived trials, prior runtime state, prior working manuscript revisions, and prior current findings as superseded context.
+- Start a new active trajectory at Trial 1 under `research_trajectory/trials/`.
+- Use only user-explicit or user-confirmed resources as active inputs. Autoresearch-discovered, autoresearch-generated, or unknown-provenance resources from the previous run require explicit user confirmation before use.
+- Rebuild the research plan, reviewer gates, evidence status, target-venue blueprint, figure/table plan, and final gate from the current project brief and retained user inputs.
+
+Read:
+- AGENTS.md
+- PROJECT.md
+- resources/user_input/RESOURCE_MANIFEST.md
+- instructions/EXECUTION_AGENT.md
+- instructions/RESOURCE_INTAKE.md
+- instructions/MANUSCRIPT.md
+- instructions/reviewers/REVIEW_TAXONOMY.md
+- all required reviewer instructions under instructions/reviewers/
+
+Stop only when the strict autoresearch final gate passes, or when human input is required."""
+
+
+def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        if proc and proc.poll() is None:
+            raise ValueError("Stop the current Codex run before restarting autoresearch.")
+    reason = str(payload.get("message", "")).strip()
+    sequence, restart_id, restart_root = create_restart_root()
+    previous_resource_entries = parse_resource_manifest_entries()
+    snapshot_root = restart_root / "pre_restart_state"
+    snapshot_files = copy_project_snapshot(RESTART_SNAPSHOT_PATHS, snapshot_root)
+    runtime_files = archive_runtime_snapshot(snapshot_root)
+    retained_resource_entries, inactive_resource_entries = archive_inactive_resource_entries(restart_root, previous_resource_entries)
+    moved_paths: list[dict[str, str]] = []
+    moved_paths.extend(move_path_to_archive("research_trajectory/trials", restart_root / "archived_trials"))
+    moved_paths.extend(move_path_to_archive("research_trajectory/checkpoints", restart_root / "archived_checkpoints"))
+    moved_paths.extend(move_path_to_archive("workspace", restart_root / "archived_workspace"))
+    if expected_trial_marker_path().exists():
+        expected_trial_marker_path().unlink()
+    reset_files = [
+        reset_text_file_from_template("research_trajectory/CURRENT_FINDINGS.md", "# Current Findings\n\nRestarted. No current findings have been promoted in the new active trajectory yet.\n"),
+        reset_text_file_from_template("manuscript/BLUEPRINT.md", "# Manuscript Blueprint\n\nRestarted. The next autoresearch run must rebuild a self-contained target-venue blueprint.\n"),
+    ]
+    write_initial_autoresearch_gate()
+    reset_files.append("research_trajectory/STATE.md")
+    trajectory = write_trajectory_state({
+        **default_trajectory_state(),
+        "active_epoch": "current",
+        "fork_id": "",
+        "base_trial": "",
+        "latest_active_trial": "",
+        "next_trial_number": 1,
+        "archived_trial_ids": [],
+        "last_sync_reason": "restart_autoresearch",
+        "restart_id": restart_id,
+    })
+    reset_files.append("research_trajectory/TRAJECTORY.json")
+    resource_manifest = write_restart_resource_manifest(restart_id, restart_root, retained_resource_entries, inactive_resource_entries)
+    reset_files.append(resource_manifest)
+    manifest_path = write_restart_manifest(
+        restart_root,
+        restart_id,
+        sequence,
+        reason,
+        snapshot_files,
+        runtime_files,
+        moved_paths,
+        reset_files,
+        resource_manifest,
+        retained_resource_entries,
+        inactive_resource_entries,
+    )
+    settings = normalize_research_settings(payload.get("settings"))
+    review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["session_id"] = ""
+        RESEARCH_SESSION["loop_iteration"] = 0
+        RESEARCH_SESSION["loop_active"] = True
+        RESEARCH_SESSION["loop_stop_reason"] = ""
+        RESEARCH_SESSION["settings"] = settings
+        RESEARCH_SESSION["loop_max_iterations"] = review_checkpoint_interval
+        RESEARCH_SESSION["loop_review_checkpoint_iteration"] = review_checkpoint_interval
+    persist_research_session()
+    ensure_autoresearch_gate_for_loop()
+    session = start_research_run(
+        restart_autoresearch_prompt(restart_id, manifest_path, reason),
+        "goal",
+        resume=False,
+        settings_payload=settings,
+        display_prompt="Restart autoresearch.",
+        loop_active=True,
+        reset_review_checkpoint=True,
+        loop_iteration_override=1,
+    )
+    return {
+        "files": {
+            "restart": {
+                "restart_id": restart_id,
+                "restart_sequence": sequence,
+                "restart_manifest": manifest_path,
+                "snapshot_files": snapshot_files,
+                "runtime_files": runtime_files,
+                "moved_paths": moved_paths,
+                "reset_files": reset_files,
+                "trajectory": trajectory,
+            }
+        },
+        "session": session,
+    }
 
 
 def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3619,6 +5909,8 @@ def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str
 
 def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
     message = str(payload.get("message", "")).strip()
+    if isinstance(payload.get("resumeFromTrial"), dict):
+        raise ValueError("Use the resume-from-trial endpoint for confirmed trial forks.")
     if message.startswith("/"):
         return start_research_command({"command": message, "settings": payload.get("settings")})
     display_message = message
@@ -3635,6 +5927,12 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
             display_prompt=display_message,
         ),
     }
+
+
+def start_research_resume_from_trial(payload: dict[str, Any]) -> dict[str, Any]:
+    message = str(payload.get("message", "")).strip()
+    message, attachments = attach_message_resources(payload, message)
+    return start_resume_from_trial(payload, message, attachments)
 
 
 def append_local_command_result(command: str, message: str) -> dict[str, Any]:
@@ -3747,7 +6045,7 @@ def build_status_payload() -> dict[str, Any]:
     completed_trials = [
         trial
         for trial in collect_trials()
-        if trial.get("report_path") and not re.match(r"^0*_?project_conversion", str(trial.get("id") or ""), re.IGNORECASE)
+        if trial.get("is_active") and trial.get("report_path") and not re.match(r"^0*_?project_conversion", str(trial.get("id") or ""), re.IGNORECASE)
     ]
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
@@ -3872,6 +6170,10 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
             command,
             "Cleared the UI goal loop state. The project files and STATE.md gate were not deleted.",
         )
+    if normalized == "/goal restart":
+        result = start_restart_autoresearch({"message": command, "settings": settings_payload})
+        result["local"] = True
+        return result
     if normalized == "/goal resume":
         ensure_autoresearch_gate_for_loop()
         gate = read_autoresearch_gate()
@@ -3884,10 +6186,11 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
             return append_local_command_result(command, "The autoresearch goal is already passed; no new iteration was started.")
         settings = normalize_research_settings(settings_payload)
         review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+        current_iteration = latest_active_trial_iteration()
+        next_iteration = max(1, current_iteration + 1)
         with RESEARCH_LOCK:
             proc = RESEARCH_SESSION.get("process")
             running = bool(proc and proc.poll() is None)
-            current_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
             RESEARCH_SESSION["loop_active"] = True
             RESEARCH_SESSION["loop_stop_reason"] = ""
             RESEARCH_SESSION["settings"] = settings
@@ -3899,13 +6202,14 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         return {
             "local": True,
             "session": start_research_run(
-                continue_autoresearch_loop_prompt(gate),
+                continue_autoresearch_loop_prompt(gate, next_iteration),
                 "goal",
                 resume=True,
                 settings_payload=settings,
                 display_prompt=command,
                 loop_active=True,
                 reset_review_checkpoint=True,
+                loop_iteration_override=next_iteration,
             ),
         }
     return None
@@ -4070,6 +6374,23 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                 result = PROJECT_REGISTRY.delete_project(payload)
                 self.send_json({"ok": True, **result})
                 return
+            if parsed.path == "/api/projects/upgrade-reviewers":
+                project_id = self.request_project_id(parsed, payload)
+                with using_project(project_id):
+                    context = current_project_context()
+                    result = sync_project_reviewers(context.root)
+                    context.refresh_metadata()
+                    if PROJECT_REGISTRY:
+                        PROJECT_REGISTRY.refresh()
+                    self.send_json({
+                        "ok": True,
+                        "result": result,
+                        "active_project_id": context.id,
+                        "project": context.summary(),
+                        "projects": PROJECT_REGISTRY.summaries() if PROJECT_REGISTRY else [context.summary()],
+                        "multi_project": bool(PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project),
+                    })
+                return
             with using_project(self.request_project_id(parsed, payload)):
                 if parsed.path == "/api/cold-start":
                     self.send_json({"ok": True, "result": write_cold_start(payload)})
@@ -4085,6 +6406,12 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/research/chat":
                     self.send_json({"ok": True, "result": start_research_chat(payload)})
+                    return
+                if parsed.path == "/api/research/resume-from-trial":
+                    self.send_json({"ok": True, "result": start_research_resume_from_trial(payload)})
+                    return
+                if parsed.path == "/api/research/restart":
+                    self.send_json({"ok": True, "result": start_restart_autoresearch(payload)})
                     return
                 if parsed.path == "/api/research/command":
                     self.send_json({"ok": True, "result": start_research_command(payload)})
@@ -4113,7 +6440,7 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
 
     def serve_repo_file(self, relative_path: str) -> None:
         try:
-            path = repo_path(relative_path)
+            path, _display_path = resolve_repo_file_reference(relative_path)
         except ValueError:
             self.send_error(403)
             return

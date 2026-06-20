@@ -1,8 +1,8 @@
 # Manuscript Blueprint
 
-This file is the target-aware architecture for a manuscript or deliverable.
-
-It is not necessarily final prose.
+This file is the self-contained, target-venue-aware architecture for the active
+manuscript or deliverable. It must be useful to a human author without reading
+hidden trial logs.
 
 Read before editing:
 
@@ -15,78 +15,169 @@ Read before editing:
 
 ---
 
-## Target Venue / Audience
+## Target Venue / Audience / Article Type
 
-<Copy or summarize from `PROJECT.md`.>
+Target venue:
+
+Audience:
+
+Article type:
+
+Contribution posture:
+
+Evidence standard:
+
+Expected figure/table style:
 
 ---
 
-## Contribution Style
+## Target-Venue Organization Rationale
 
-<new method / empirical finding / mechanism / benchmark / dataset / theory / system / perspective / other>
+Explain why the section order, claim strength, figure/table density, citation
+posture, and appendix/supplement plan fit the declared target venue.
 
 ---
 
 ## Core Story
 
-<What this manuscript or deliverable is trying to establish.>
+State the manuscript's central argument in self-contained prose. Do not leave
+stale statements such as "tentative until source-level evidence checks are
+completed" after the evidence gate has passed.
 
 ---
 
-## Main Claims
+## Accepted Claims And Evidence Map
 
-| Claim ID | Claim | Evidence | Status | Missing Evidence |
-|---|---|---|---|---|
-| C000000 | <claim> | R000000 | tentative | <missing> |
+Use this section only when claims are accepted for the current manuscript. If
+claims are not accepted yet, rename this section to `Candidate Claims And
+Evidence Map` and keep the autoresearch gate on `continue`.
 
-Evidence should reference `research_trajectory/CURRENT_FINDINGS.md` and source trials.
+| Claim ID | Claim | Evidence IDs | Evidence strength | Required qualification | Manuscript location |
+|---|---|---|---|---|---|
+| C000000 | <accepted claim> | R000000 | <strong / qualified / limited> | <none or exact qualification already reflected in prose> | <section / figure / table> |
+
+Evidence IDs must resolve to `research_trajectory/CURRENT_FINDINGS.md` and the
+source trials or artifacts cited there.
 
 ---
 
-## Venue-Specific Structure
+## Section-By-Section Architecture
 
 ### Section 1: <title>
 
 Purpose:
 
+Target-venue role:
+
 Content to include:
+
+Accepted claims:
 
 Evidence:
 
-Figures / Tables:
+Figures / tables:
 
-Missing evidence:
-
-Caveats:
+Required qualifications:
 
 ---
 
 ## Figure Plan
 
-Conceptual figures should be specified in `manuscript/figures/FIGURE_SPECS.md`.
+Every active figure must be self-contained here, even if detailed specs also
+live in `manuscript/figures/FIGURE_SPECS.md`.
 
-Result figures should trace back to trial artifacts and current findings.
+### Figure F000000: <title>
+
+Inclusion status: <active / candidate / supplement / deprecated>
+
+Argument or result role:
+
+Content and panel layout:
+
+Caption draft or current caption:
+
+Source artifact path:
+
+Linked claims:
+
+Linked evidence:
+
+Target-venue fit rationale:
+
+Remaining blocker: <none, or exact blocker>
 
 ---
 
 ## Table Plan
 
-<Table plan.>
+Every active table must be self-contained here.
+
+### Table T000000: <title>
+
+Inclusion status: <active / candidate / supplement / deprecated>
+
+Argument or result role:
+
+Content, columns, rows, or comparison logic:
+
+Caption draft or current caption:
+
+Source artifact path:
+
+Linked claims:
+
+Linked evidence:
+
+Target-venue fit rationale:
+
+Remaining blocker: <none, or exact blocker>
+
+### No-Table Rationale
+
+If there are no active tables, explain why no table is needed for the target
+venue and current argument, whether candidate tables were considered, and which
+figures or prose sections carry the claim/evidence mapping instead.
+
+---
+
+## Reference / Literature Grounding Plan
+
+Describe the reference posture required by the target venue. Name the current
+seed papers, core literatures, source audits, and any remaining bibliography
+work.
 
 ---
 
 ## Appendix / Supplement Plan
 
-<Appendix plan.>
+State whether appendix or supplement material is needed. If not needed, explain
+why that is appropriate for the target venue and current deliverable.
 
 ---
 
-## Missing Evidence
+## Blocking Missing Evidence
 
-<List evidence needed before the manuscript can be considered strong.>
+List only blockers that prevent final gate pass. If any item remains here, the
+autoresearch gate must be `continue`.
+
+- none
 
 ---
 
-## Deprecated Manuscript Ideas
+## Required Qualifications / Claim Constraints
 
-<List ideas that should not be used unless revived by current state.>
+List non-blocking qualifications that must already be reflected in manuscript
+prose, figure/table captions, and accepted-claim wording.
+
+---
+
+## Deprecated Or Superseded Ideas
+
+List ideas that should not be used unless revived by current state.
+
+---
+
+## Submission-Readiness Summary
+
+State whether the blueprint is ready for the declared scope, what reviewer gates
+passed, and what optional human preference or submission-packaging work remains.

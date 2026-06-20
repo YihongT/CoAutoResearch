@@ -28,7 +28,11 @@ standard because the work is early.
    publication ethics, and misleading communication risks are handled.
 7. Communication / deliverable quality: outputs are clear, self-contained, and
    useful for the intended audience.
-8. Readiness / blocking issues: all required actions are resolved for the
+8. Deliverable completeness: final-facing artifacts include the expected
+   format, organization, claim/evidence map, figures, tables, references,
+   appendix/supplement posture, limitations, and target-venue rationale for the
+   declared scope.
+9. Readiness / blocking issues: all required actions are resolved for the
    declared scope.
 
 ## Canonical Decisions
@@ -89,6 +93,8 @@ declared scope:
 - no required actions before pass remain;
 - no unresolved qualification is being treated as accepted;
 - no critical area required for the scope is unassessed;
+- final-facing artifacts are self-contained enough for a human to inspect,
+  defend, and revise without relying on hidden trial logs;
 - the output would still be defensible if a skeptical human reviewer inspected
   the cited files and artifacts.
 

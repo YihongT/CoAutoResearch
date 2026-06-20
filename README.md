@@ -104,6 +104,22 @@ If you are developing from a source checkout, see [CONTRIBUTING.md](CONTRIBUTING
 Updating the npm package updates the CLI, dashboard, and default UI runtime. It
 does not rewrite existing project research files.
 
+If `doctor` or the UI says an older project has outdated reviewer instructions,
+sync only the core reviewer files with:
+
+```bash
+co-auto-research upgrade-project
+```
+
+For a dashboard folder:
+
+```bash
+co-auto-research upgrade-project --all --projects-dir co-autoresearch-projects
+```
+
+This backs up previous core reviewer files under `archive/template_migrations/`
+and preserves project research content and custom extra reviewers.
+
 The printed URL will look like:
 
 ```text
@@ -174,6 +190,21 @@ the attachment chip before sending, and uploaded or linked materials are indexed
 in `resources/user_input/RESOURCE_MANIFEST.md` so the agent can cite the same
 project-local record later.
 
+Autoresearch controls use distinct meanings:
+
+- `Pause after current turn` lets the current Codex turn finish, then prevents
+  the loop from starting another trial.
+- `Stop current run` terminates the currently running Codex process.
+- `Restart autoresearch` archives the current trials, runtime state, working
+  manuscript, generated workspace, and current findings, then starts a new
+  active trajectory at Trial 1. User-uploaded or user-confirmed resources remain
+  available; autoresearch-discovered, generated, or unknown-provenance resources
+  become archived prior-run context until you explicitly reattach or confirm
+  them.
+
+The dashboard currently uses the Light theme. The setting is local to the
+browser and does not clear the composer, attached files, or context chips.
+
 In dashboard mode, the sidebar `+` button can also create a new project from the
 same immutable template. This is the simplest path for normal use; `init`
 remains available for scripting.
@@ -188,6 +219,7 @@ co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--rem
 co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
 co-auto-research doctor [--host 127.0.0.1] [--port 8765]
 co-auto-research upgrade
+co-auto-research upgrade-project [project-name-or-path] [--all] [--projects-dir <dir>] [--dry-run]
 co-auto-research version
 ```
 
@@ -214,6 +246,8 @@ co-auto-research version
 - `upgrade` prints the installed CLI version, detected project template version,
   and the npm update command. Existing project research files are not rewritten
   automatically.
+- `upgrade-project` updates core reviewer instructions in an existing project,
+  backing up previous core reviewer files under `archive/template_migrations/`.
 - `version` prints the installed CLI package version.
 
 ## Project Model

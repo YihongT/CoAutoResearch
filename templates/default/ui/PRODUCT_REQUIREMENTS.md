@@ -59,7 +59,7 @@ The UI exposes common Codex slash commands:
 - `/goal`
 - `/goal pause`
 - `/goal resume`
-- `/goal clear`
+- `/goal restart`
 - `/permissions`
 - `/model`
 - `/plan`

@@ -17,6 +17,7 @@ function assertJsonEqual(actual, expected, message) {
 function loadAppContext() {
   const elements = new Map();
   const storage = new Map();
+  const clipboardWrites = [];
   const element = (extra = {}) => ({
     value: "",
     hidden: false,
@@ -39,12 +40,29 @@ function loadAppContext() {
   });
   const coldEditor = element();
   const projectEditor = element({ value: "# Project\n\nReady." });
+  const trialStripScroll = element({
+    clientWidth: 300,
+    scrollWidth: 1200,
+    scrollLeft: 0,
+  });
   const launchDialog = element({
+    close() { this.closed = true; },
+    showModal() { this.open = true; },
+  });
+  const restartDialog = element({
     close() { this.closed = true; },
     showModal() { this.open = true; },
   });
   [
     ["#cold-file-editor", coldEditor],
+    ["#launch-files", element()],
+    ["#cold-file-tabs", element()],
+    ["#cold-editor-title", element()],
+    ["#cold-editor-path", element()],
+    ["#cold-save-status", element()],
+    ["#cold-file-preview", element()],
+    ["#cold-editor-workbench", element()],
+    [".trial-strip-scroll", trialStripScroll],
     ["#project-draft-editor", projectEditor],
     ["#target-venue", element()],
     ["#framing-thread", element()],
@@ -57,6 +75,8 @@ function loadAppContext() {
     ["#open-launch-dialog-inline", element()],
     ["#composer-suggestions", element()],
     ["#launch-dialog", launchDialog],
+    ["#restart-autoresearch-dialog", restartDialog],
+    ["#restart-autoresearch-reason", element()],
     ["#chat-thread", element()],
   ].forEach(([selector, value]) => elements.set(selector, value));
 
@@ -79,6 +99,7 @@ function loadAppContext() {
     },
     window: {
       location: { search: "?project=p1" },
+      innerHeight: 900,
       addEventListener() {},
       scrollTo() {},
     },
@@ -104,7 +125,7 @@ function loadAppContext() {
       setItem(key, value) { storage.set(key, String(value)); },
       removeItem(key) { storage.delete(key); },
     },
-    navigator: { clipboard: { writeText: async () => {} } },
+    navigator: { clipboard: { writeText: async (text) => { clipboardWrites.push(String(text)); } } },
     requestAnimationFrame(callback) {
       callback();
     },
@@ -192,6 +213,7 @@ function loadAppContext() {
       return [];
     };
     api = async (endpoint, options = {}) => {
+      if (globalThis.__apiError) throw new Error(globalThis.__apiError);
       const body = options.body ? JSON.parse(options.body) : {};
       globalThis.__apiCalls.push({ endpoint, body });
       return globalThis.__apiResponse || {
@@ -215,6 +237,7 @@ function loadAppContext() {
       text: message.text,
       edited_at: message.edited_at || "",
       attachments: message.attachments || [],
+      resumeFromTrial: message.resumeFromTrial || null,
       artifact: message.artifact || null,
     }));
     globalThis.__setMessages = (messages) => {
@@ -233,6 +256,7 @@ function loadAppContext() {
     globalThis.__setSelectedResources = (items) => {
       selectedResourceItems.splice(0, selectedResourceItems.length, ...items);
     };
+    globalThis.__selectedResources = () => selectedResourceItems.map((item) => ({ ...item }));
     globalThis.__setSelectedUploads = (items) => {
       selectedUploadItems.splice(0, selectedUploadItems.length, ...items);
     };
@@ -251,7 +275,15 @@ function loadAppContext() {
       sentFramingUploadItems.splice(0);
       selectedResourceItems.splice(0);
       selectedUploadItems.splice(0);
+      selectedResumeTrialContext = null;
+      pendingResumeTrialConfirm = null;
+      pendingRestartAutoresearchConfirm = null;
       globalThis.__apiCalls = [];
+      globalThis.__apiError = "";
+      globalThis.__confirmCalls = [];
+      globalThis.__confirmResume = true;
+      globalThis.__restartConfirmCalls = [];
+      globalThis.__confirmRestart = true;
       globalThis.__renderCount = 0;
       globalThis.__persistCount = 0;
       globalThis.__collectSeen = null;
@@ -275,6 +307,22 @@ function loadAppContext() {
       pendingId: pendingFramingUserMessageId,
       since: framingPendingSince,
     });
+    globalThis.__setResumeTrialContext = (context) => {
+      selectedResumeTrialContext = normalizeResumeTrialContext(context);
+    };
+    globalThis.__resumeTrialContext = () => selectedResumeTrialContext;
+    globalThis.__confirmCalls = [];
+    globalThis.__confirmResume = true;
+    confirmResumeTrialSend = async (context, text, attachments) => {
+      globalThis.__confirmCalls.push({ context, text, attachments });
+      return globalThis.__confirmResume;
+    };
+    globalThis.__restartConfirmCalls = [];
+    globalThis.__confirmRestart = true;
+    confirmRestartAutoresearch = async (reason) => {
+      globalThis.__restartConfirmCalls.push(reason);
+      return globalThis.__confirmRestart;
+    };
     globalThis.__latestUnansweredText = () => latestUnansweredUserMessage(localMessages)?.text || "";
     globalThis.__restore = () => restoreFramingMessages();
     globalThis.__activityProbe = () => {
@@ -291,7 +339,25 @@ function loadAppContext() {
     };
     globalThis.__messageHtml = (index = 0) => framingMessageHtml(localMessages[index]);
     globalThis.__sessionTimelineProbe = () => sessionTimelineHtml(sessionTranscriptEntries());
+    globalThis.__thinkingProbe = () => framingThinkingHtml();
+    globalThis.__progressDetailsProbe = () => framingProgressDetailsHtml();
+    globalThis.__formatWorkedDuration = (seconds) => formatWorkedDuration(seconds);
     globalThis.__statusCardProbe = (payload) => statusCardHtml(payload, { id: "status-test" });
+    globalThis.__trialStripScrollProbe = (scrollLeft, clientWidth = 300, scrollWidth = 1200) => {
+      const strip = document.querySelector(".trial-strip-scroll");
+      strip.clientWidth = clientWidth;
+      strip.scrollWidth = scrollWidth;
+      strip.scrollLeft = scrollLeft;
+      rememberTrialStripScroll(strip);
+      strip.scrollLeft = 0;
+      restoreTrialStripScroll();
+      return strip.scrollLeft;
+    };
+    globalThis.__renderManuscriptPanelProbe = (payload) => {
+      appState.summaries = { ...(appState.summaries || {}), manuscript: payload };
+      return renderManuscriptPanel();
+    };
+    globalThis.__copyTextProbe = async (text) => copyTextToClipboard(text, "Probe copied.");
     `,
     context
   );
@@ -302,7 +368,85 @@ function loadAppContext() {
     },
     coldEditor,
     launchDialog,
+    clipboardWrites,
   };
+}
+
+function sourceText(relativePath) {
+  return fs.readFileSync(path.join(root, relativePath), "utf8");
+}
+
+function extractButtonTags(text) {
+  return [...text.matchAll(/<button\b[\s\S]*?<\/button>/gi)].map((match) => match[0]);
+}
+
+function extractDataAttrs(tag) {
+  return [...tag.matchAll(/\bdata-([a-z0-9-]+)(?:=|\s|>)/gi)].map((match) => match[1]);
+}
+
+function extractClassNames(tag) {
+  const match = tag.match(/\bclass=(["'])(.*?)\1/s);
+  return match ? match[2].split(/\s+/).filter(Boolean) : [];
+}
+
+function extractId(tag) {
+  return tag.match(/\bid=(["'])(.*?)\1/s)?.[2] || "";
+}
+
+function extractType(tag) {
+  return tag.match(/\btype=(["'])(.*?)\1/s)?.[2] || "";
+}
+
+function handledButtonDataAttrs(appJs) {
+  const attrs = new Set();
+  for (const match of appJs.matchAll(/closest\("\[data-([a-z0-9-]+)(?:[=\]"])/gi)) attrs.add(match[1]);
+  for (const match of appJs.matchAll(/\$\$\("\[data-([a-z0-9-]+)(?:[=\]"])/gi)) attrs.add(match[1]);
+  return attrs;
+}
+
+function directlyHandledButtonIds(appJs) {
+  const ids = new Set();
+  for (const match of appJs.matchAll(/\$\("#([^"]+)"\)\??\.addEventListener\("click"/g)) ids.add(match[1]);
+  for (const match of appJs.matchAll(/closest\("#([^"]+)"\)/g)) ids.add(match[1]);
+  return ids;
+}
+
+function testButtonInventoryHasHandlers() {
+  const appJs = sourceText("templates/default/ui/app.js");
+  const indexHtml = sourceText("templates/default/ui/index.html");
+  const handledData = handledButtonDataAttrs(appJs);
+  const handledIds = directlyHandledButtonIds(appJs);
+  const handledClasses = new Set(["rail-action", "settings-nav-button", "stage-pill"]);
+  const passiveDataAttrs = new Set(["inline-path"]);
+  const issues = [];
+  const dynamicActionAttrs = [...appJs.matchAll(/addActionChip\([^,]+,\s*"data-([a-z0-9-]+)"/g)].map((match) => match[1]);
+  const buttons = [
+    ...extractButtonTags(indexHtml).map((tag) => ({ tag, source: "index.html" })),
+    ...extractButtonTags(appJs).map((tag) => ({ tag, source: "app.js" })),
+  ];
+
+  for (const { tag, source } of buttons) {
+    if (/\bdisabled\b/i.test(tag)) continue;
+    if (tag.includes("${action}") && tag.includes("composer-suggestion-chip")) continue;
+    const type = extractType(tag).toLowerCase();
+    if (type === "submit" || /\bformmethod=(["'])dialog\1/i.test(tag)) continue;
+    const id = extractId(tag);
+    const dataAttrs = extractDataAttrs(tag).filter((attr) => !passiveDataAttrs.has(attr));
+    const classes = extractClassNames(tag);
+    const hasHandledData = dataAttrs.some((attr) => handledData.has(attr));
+    const hasHandledId = id && handledIds.has(id);
+    const hasHandledClass = classes.some((name) => handledClasses.has(name));
+    if (!hasHandledData && !hasHandledId && !hasHandledClass) {
+      issues.push(`${source}: ${tag.replace(/\s+/g, " ").slice(0, 180)}`);
+    }
+  }
+
+  assert.deepEqual(issues, [], "all enabled buttons should have a direct handler, delegated handler, submit role, dialog role, or explicit disabled state");
+  assert.deepEqual(dynamicActionAttrs.filter((attr) => !handledData.has(attr)), [], "dynamic composer action chips should only use delegated data handlers");
+  assert.equal(appJs.includes('const card = cardPreview.closest(".context-card, .review-card")'), true, "Preview buttons must search both manuscript/context and review cards");
+  assert.equal(appJs.includes('String(action || "").includes("data-card-preview")'), true, "context card previews must allocate an inline target slot");
+  assert.equal(appJs.includes("[data-copy-text]"), true, "copy controls must have a delegated handler");
+  assert.equal(appJs.includes("[data-inline-fullscreen]"), true, "open controls must use the inline fullscreen handler");
 }
 
 async function testImmediateUserMessage() {
@@ -344,6 +488,103 @@ async function testAttachmentOnlyMessage() {
   assertJsonEqual(app.context.__apiCalls[0].body.resourceLinks, [{ path: "/tmp/paper.pdf", category: "literature" }]);
 }
 
+async function testResumeFromTrialRequiresConfirmationAndSendsPayload() {
+  const app = loadAppContext();
+  app.coldEditor.value = "Try a stricter reviewer pass from here.";
+  app.run(`
+    __setResumeTrialContext({
+      id: "000003_evidence_audit",
+      path: "research_trajectory/trials/000003_evidence_audit",
+      iteration: 3,
+      name: "000003_evidence_audit",
+      reportPath: "research_trajectory/trials/000003_evidence_audit/REPORT.md",
+      checkpointExists: false
+    });
+  `);
+  app.run("__installBlockingCollect()");
+  const pending = app.run('sendSessionComposerMessage("Try a stricter reviewer pass from here.")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(app.context.__confirmCalls.length, 1, "resume-from-trial sends must ask for confirmation");
+  assert.equal(app.context.__confirmCalls[0].context.id, "000003_evidence_audit");
+  assert.equal(app.coldEditor.value, "", "confirmed resume send should clear the composer before upload collection");
+  const [message] = app.context.__messages();
+  assert.equal(message.resumeFromTrial.id, "000003_evidence_audit", "visible user message should retain resume context");
+  assert.equal(app.context.__resumeTrialContext(), null, "confirmed resume send should remove the staged chip");
+  app.context.__resolveCollect();
+  await pending;
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/resume-from-trial");
+  assert.equal(app.context.__apiCalls[0].body.resumeFromTrial.id, "000003_evidence_audit");
+  assert.equal(app.context.__apiCalls[0].body.resumeFromTrial.checkpointExists, false);
+}
+
+async function testResumeFromTrialCancelPreservesComposer() {
+  const app = loadAppContext();
+  app.coldEditor.value = "Do not submit yet.";
+  app.context.__confirmResume = false;
+  app.run(`
+    __setResumeTrialContext({
+      id: "000002_style_review",
+      path: "research_trajectory/trials/000002_style_review",
+      iteration: 2,
+      name: "000002_style_review",
+      reportPath: "research_trajectory/trials/000002_style_review/REPORT.md",
+      checkpointExists: true
+    });
+  `);
+  const sent = await app.run('sendSessionComposerMessage("Do not submit yet.")');
+  assert.equal(sent, false, "cancelled resume send should report that nothing was submitted");
+  assert.equal(app.context.__apiCalls.length, 0, "cancelled resume send must not call the backend");
+  assert.equal(app.context.__messages().length, 0, "cancelled resume send must not append a user message");
+  assert.equal(app.coldEditor.value, "Do not submit yet.", "cancelled resume send should preserve typed text");
+  assert.equal(app.context.__resumeTrialContext().id, "000002_style_review", "cancelled resume send should preserve the staged chip");
+}
+
+async function testResumeTrialSlashCommandIsBlocked() {
+  const app = loadAppContext();
+  app.coldEditor.value = "/goal resume";
+  app.run(`
+    __setResumeTrialContext({
+      id: "000001_uploaded_manuscript_baseline_audit",
+      path: "research_trajectory/trials/000001_uploaded_manuscript_baseline_audit",
+      iteration: 1,
+      name: "000001_uploaded_manuscript_baseline_audit",
+      reportPath: "research_trajectory/trials/000001_uploaded_manuscript_baseline_audit/REPORT.md",
+      checkpointExists: true
+    });
+  `);
+  const sent = await app.run('sendSessionComposerMessage("/goal resume")');
+  assert.equal(sent, false, "/goal resume with a staged trial must not be converted into a fork send");
+  assert.equal(app.coldEditor.value, "/goal resume", "blocked slash command should preserve composer text");
+  assert.equal(app.context.__resumeTrialContext().id, "000001_uploaded_manuscript_baseline_audit", "blocked slash command should preserve the staged trial chip");
+  assert.equal(app.context.__messages().length, 0, "blocked slash command must not append a user message");
+  assert.equal(app.context.__apiCalls.length, 0, "blocked slash command must not call the backend");
+}
+
+async function testFailedSessionSendRestoresComposerState() {
+  const app = loadAppContext();
+  app.coldEditor.value = "Continue from here with a stricter pass.";
+  app.context.__apiError = "Backend rejected the fork.";
+  app.run(`
+    __setSelectedResources([{ path: "/tmp/evidence.pdf", category: "literature" }]);
+    __setResumeTrialContext({
+      id: "000003_evidence_audit",
+      path: "research_trajectory/trials/000003_evidence_audit",
+      iteration: 3,
+      name: "000003_evidence_audit",
+      reportPath: "research_trajectory/trials/000003_evidence_audit/REPORT.md",
+      checkpointExists: false
+    });
+  `);
+  await assert.rejects(
+    app.run('sendSessionComposerMessage("Continue from here with a stricter pass.")'),
+    /Backend rejected the fork/
+  );
+  assert.equal(app.coldEditor.value, "Continue from here with a stricter pass.", "backend failure must restore the typed text");
+  assert.equal(app.context.__resumeTrialContext().id, "000003_evidence_audit", "backend failure must restore the staged trial chip");
+  assertJsonEqual(app.context.__selectedResources(), [{ path: "/tmp/evidence.pdf", category: "literature" }], "backend failure must restore selected resources");
+  assert.equal(app.context.__messages().length, 0, "backend failure must remove the optimistic user message");
+}
+
 async function testSlashCommandVisibleAndIgnoredAsUnanswered() {
   const app = loadAppContext();
   app.coldEditor.value = "/goal resume";
@@ -366,6 +607,36 @@ async function testSlashCommandVisibleAndIgnoredAsUnanswered() {
   await pending;
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/command");
   assert.equal(app.run("__latestUnansweredText()"), "", "slash command should not create a fake unanswered chat state");
+}
+
+async function testRestartCommandRequiresConfirmationAndSendsRestartEndpoint() {
+  const app = loadAppContext();
+  app.coldEditor.value = "/goal restart";
+  app.run("__installBlockingCollect()");
+  const pending = app.run('sendSessionComposerMessage("/goal restart")');
+  assert.equal(app.context.__restartConfirmCalls.length, 1, "restart must ask for explicit confirmation");
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(app.coldEditor.value, "", "confirmed restart should clear composer before backend work");
+  const [message] = app.context.__messages();
+  assert.equal(message.kind, "command", "restart command should render as a command control row");
+  const html = app.run("__messageHtml(0)");
+  assert.equal(html.includes("Restart autoresearch"), true, "restart command should use human-facing copy");
+  app.context.__resolveCollect();
+  await pending;
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/restart");
+  assert.equal(app.context.__apiCalls[0].body.message, "/goal restart");
+}
+
+async function testRestartCancelPreservesComposer() {
+  const app = loadAppContext();
+  app.context.__confirmRestart = false;
+  app.coldEditor.value = "/goal restart";
+  const sent = await app.run('sendSessionComposerMessage("/goal restart")');
+  assert.equal(sent, false, "cancelled restart should not submit");
+  assert.equal(app.context.__apiCalls.length, 0, "cancelled restart must not call backend");
+  assert.equal(app.context.__messages().length, 0, "cancelled restart must not append a command row");
+  assert.equal(app.coldEditor.value, "/goal restart", "cancelled restart should preserve typed command");
 }
 
 function testStaleOverviewDoesNotSwallowPendingUser() {
@@ -448,14 +719,7 @@ async function testLaunchGoalMessageBeforeBackendWork() {
 function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   const app = loadAppContext();
   app.run(`
-    appState.trials = [
-      {
-        id: "000001_source_evidence_audit",
-        status: "running",
-        report_path: "research_trajectory/trials/000001_source_evidence_audit/REPORT.md",
-        report_summary: "Checked the source evidence."
-      }
-    ];
+    appState.trials = [];
     __setSession({
       id: "s1",
       session_id: "sid",
@@ -464,6 +728,15 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
       loop_active: true,
       loop_iteration: 1,
       started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "goal",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z",
+        trial_iteration: 1,
+        trial_label: "Trial 1",
+        status_label: "Codex is working on Trial 1"
+      },
       transcript: [
         { id: "tu1", role: "user", kind: "user", raw_type: "ui.goal", content: "Start autoresearch loop with /goal.", created_at: "2026-06-17T10:00:00.000Z" },
         { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "codex exec resume", created_at: "2026-06-17T10:00:01.000Z" },
@@ -474,9 +747,20 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   const html = app.run("__sessionTimelineProbe()");
   assert.equal(html.includes("Current session activity"), false, "trial timeline must not append the old current-session activity card");
   assert.equal(html.includes("Latest session activity"), false, "trial timeline must not append legacy session activity labels");
-  assert.equal(html.includes("Trial 1 is running"), true, "running trials should have a visible live status row");
+  assert.equal(html.includes("Codex is working on Trial 1"), true, "running trials should use the server-provided active run label");
+  assert.equal(html.includes("Pause after current turn"), true, "running trial live status should expose a loop pause button");
+  assert.equal(html.includes("data-pause-autoresearch"), true, "contextual pause button should pause the loop after the current turn");
+  assert.equal(html.includes("Stop current run"), true, "running trial live status should expose a contextual stop button");
+  assert.equal(html.includes("data-stop-current-run"), true, "contextual stop button should stop the active Codex process");
   assert.equal(html.includes("Live trial activity"), true, "running trial event details should be folded under the live status row");
-  assert.equal(html.includes("Trial activity"), true, "live Codex events should stay inside the selected trial activity fold");
+  assert.equal(html.includes("Report pending"), false, "running trial should not render a low-information pending report card");
+  assert.equal(html.includes("Report is not available yet."), false, "running trial should not render a low-information pending report card");
+  assert.equal(html.includes("<span>Trial activity</span>"), false, "running trial details should stay in the live status row instead of a duplicate report card");
+  const thinkingHtml = app.run("__thinkingProbe()");
+  assert.equal(thinkingHtml.includes("Codex is working on Trial 1"), true, "working bubble should name the active trial");
+  assert.equal(thinkingHtml.includes("Working for"), true, "working bubble should show elapsed running time");
+  assert.equal(thinkingHtml.includes("Trial 1"), true, "working bubble should include the trial axis for autoresearch runs");
+  assert.equal(thinkingHtml.includes("Update: Checking sources."), true, "current run activity summary should expose the latest update");
 }
 
 function testPassedGoalDoesNotShowStaleRunningTrial() {
@@ -511,6 +795,62 @@ function testPassedGoalDoesNotShowStaleRunningTrial() {
   assert.equal(html.includes("Live trial activity"), false, "passed goals must not show live activity for stale trial events");
   assert.equal(html.includes(">Running<"), false, "reported trials must not retain the Running chip label after gates pass");
   assert.equal(html.includes("Trial 6"), true, "passed goals should default to the latest reported trial");
+  assert.equal(html.includes("Autoresearch complete"), true, "passed goals should mark the whole autoresearch trajectory complete");
+  app.run(`
+    appState.research_session.gate = { status: "continue" };
+  `);
+  const continuingHtml = app.run("__sessionTimelineProbe()");
+  assert.equal(continuingHtml.includes("Autoresearch complete"), false, "incomplete gates must not show the autoresearch complete tag");
+}
+
+function testCurrentRunActivityShowsPauseForChatRun() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "chat",
+      loop_active: false,
+      loop_iteration: 0,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "chat",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z",
+        trial_iteration: null,
+        trial_label: "",
+        status_label: "Codex is working"
+      },
+      transcript: [
+        { id: "tr1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking the selected trial boundary.", created_at: "2026-06-17T10:00:02.000Z" }
+      ]
+    });
+  `);
+  const html = app.run("__progressDetailsProbe()");
+  assert.equal(html.includes("Current run activity"), true, "running chat sessions should still show current run activity");
+  assert.equal(html.includes("Pause after current turn"), false, "running chat sessions should not show autoresearch loop pause");
+  assert.equal(html.includes("data-pause-autoresearch"), false, "chat runs do not have an autoresearch next turn to pause");
+  assert.equal(html.includes("Stop current run"), true, "running chat sessions should expose a current-run stop control");
+  assert.equal(html.includes("data-stop-current-run"), true, "current-run stop must terminate the active process");
+  assert.equal(html.includes("Current run"), true, "chat run summary should identify the scope without showing a trial");
+  assert.equal(html.includes("Update: Checking the selected trial boundary."), true, "chat run summary should expose the latest update");
+}
+
+function testWorkingDurationFormatter() {
+  const app = loadAppContext();
+  assert.equal(app.run("__formatWorkedDuration(45)"), "45s");
+  assert.equal(app.run("__formatWorkedDuration(192)"), "3m 12s");
+  assert.equal(app.run("__formatWorkedDuration(7440)"), "2h 4m");
+  assert.equal(app.run("__formatWorkedDuration(108120)"), "1d 6h 2m");
+  assert.equal(app.run("__formatWorkedDuration(93784)"), "1d 2h 3m 4s");
+}
+
+function testTrialStripScrollRestoresAcrossRender() {
+  const app = loadAppContext();
+  assert.equal(app.run("__trialStripScrollProbe(420)"), 420, "trial strip scroll should restore after DOM rerender");
+  assert.equal(app.run("__trialStripScrollProbe(2400)"), 900, "trial strip scroll restore should clamp to the maximum scrollable offset");
 }
 
 function testStatusCardShowsReviewCheckpoint() {
@@ -540,16 +880,73 @@ function testStatusCardShowsReviewCheckpoint() {
   assert.equal(html.includes("Review checkpoint"), true, "Codex settings should show checkpoint interval");
 }
 
+function testComposerPlaceholderBecomesGeneralAfterLaunch() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "framing",
+      started_at: "2026-06-17T10:00:00.000Z",
+      transcript: []
+    });
+  `);
+  const framingPlaceholder = app.run("coldComposerPlaceholder(true)");
+  assert.equal(framingPlaceholder.includes("PROJECT.md"), true, "prelaunch framing placeholder should mention PROJECT.md");
+  app.run(`
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 1,
+      started_at: "2026-06-17T10:00:00.000Z",
+      transcript: []
+    });
+  `);
+  const launchedPlaceholder = app.run("coldComposerPlaceholder(true)");
+  assert.equal(launchedPlaceholder.includes("PROJECT.md"), false, "launched placeholder should not be limited to PROJECT.md edits");
+  assert.equal(launchedPlaceholder.includes("current research"), true, "launched placeholder should describe general research-session chat");
+}
+
+function testSettingsRenderPreservesComposerDraft() {
+  const app = loadAppContext();
+  app.run(`
+    appState.cold_start_files = [{ path: "resources/user_input/INITIAL_BRIEF.md", text: "" }];
+    activeColdPath = "resources/user_input/INITIAL_BRIEF.md";
+    __setMessages([{ id: "u1", role: "user", kind: "text", text: "previous message", created_at: "2026-06-17T10:00:00.000Z" }]);
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 1,
+      started_at: "2026-06-17T10:00:00.000Z",
+      transcript: []
+    });
+  `);
+  app.coldEditor.value = "Do not wipe this draft when reasoning changes.";
+  app.run("renderColdStartEditor()");
+  assert.equal(
+    app.coldEditor.value,
+    "Do not wipe this draft when reasoning changes.",
+    "rendering settings/chat state must not clear an unsent composer draft"
+  );
+}
+
 function testThemeModePersistsAndApplies() {
   const app = loadAppContext();
   let theme = app.run('__themeState()');
   assert.equal(theme.mode, "light");
   assert.equal(theme.dataset, "light");
-  app.run('applyThemeMode("night")');
+  app.run('applyThemeMode("unsupported")');
   theme = app.run('__themeState()');
-  assert.equal(theme.mode, "night", "theme mode should update client state");
-  assert.equal(theme.dataset, "night", "theme mode should update the document theme attribute");
-  assert.equal(theme.stored, "night", "theme mode should persist in localStorage");
+  assert.equal(theme.mode, "light", "unsupported theme modes should normalize to Light");
+  assert.equal(theme.dataset, "light", "unsupported theme modes should leave the document on Light");
+  assert.equal(theme.stored, "light", "unsupported theme modes should persist as Light");
   app.run('applyThemeMode("light")');
   theme = app.run('__themeState()');
   assert.equal(theme.dataset, "light");
@@ -577,66 +974,127 @@ function testComposerPromptInsertionIsIdempotent() {
   app.coldEditor.value = "Please explain this run\n/goal";
   app.run('insertComposerPrompt("/status")');
   assert.equal(app.coldEditor.value, "Please explain this run\n/status", "the trailing command line should be replaced while preserving user text");
+
+  app.run(`
+    __setResumeTrialContext({
+      id: "000001_uploaded_manuscript_baseline_audit",
+      path: "research_trajectory/trials/000001_uploaded_manuscript_baseline_audit",
+      iteration: 1,
+      name: "000001_uploaded_manuscript_baseline_audit",
+      reportPath: "research_trajectory/trials/000001_uploaded_manuscript_baseline_audit/REPORT.md",
+      checkpointExists: true
+    });
+  `);
+  app.coldEditor.value = "";
+  app.run('insertComposerPrompt("/goal restart")');
+  assert.equal(app.coldEditor.value, "/goal restart", "restart prompt should insert the selected command once");
+  app.run('insertComposerPrompt("/goal restart")');
+  assert.equal(app.coldEditor.value, "/goal restart", "restart prompt should not duplicate");
+  app.run('insertComposerPrompt("/goal resume")');
+  assert.equal(app.coldEditor.value, "/goal resume", "command prompt should replace an existing slash command");
+  assert.equal(app.context.__resumeTrialContext().id, "000001_uploaded_manuscript_baseline_audit", "command prompt should not discard staged continue-from-trial context");
 }
 
-function testManuscriptPanelRendersFigureDescriptions() {
+async function testCopyTextHelperWritesClipboard() {
   const app = loadAppContext();
-  app.run(`
-    appState.summaries = {
-      manuscript: {
-        core_story: "A manuscript story.",
-        claims: [],
-        section_blueprint: [],
-        figures: [],
-        missing_evidence: [],
-        figure_specs: [{
+  await app.run('__copyTextProbe("copy me")');
+  assert.equal(app.clipboardWrites.at(-1), "copy me", "copy helper should write the requested text to the clipboard");
+  assert.equal(app.context.__toastMessages.at(-1).message, "Probe copied.");
+}
+
+function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
+  const app = loadAppContext();
+  const payload = {
+    core_story: "A manuscript story.",
+    claims: [],
+    sections: [{
+      title: "Section 2: Calibration result",
+      body: [
+        "Purpose: Explain the calibrated perceived-safety result.",
+        "Target-venue role: Results-like argument.",
+        "Figures / tables: Figure 1 active.",
+        "Content to include: Put the result beside Figure 1."
+      ].join("\n")
+    }],
+    figure_plans: [{
+      title: "Figure F000001: Calibration Map",
+      body: [
+        "Status: active",
+        "Caption: Calibration map caption.",
+        "Source artifact path: `manuscript/figures/calibration_map.pdf`"
+      ].join("\n")
+    }],
+    table_plans: [],
+    no_table_rationale: "No active tables are present because the current evidence is figure-led.",
+    traceability: "Claim C1 maps to calibration evidence E1.",
+    missing_evidence: [],
+    figure_specs: [{
           title: "Figure F000001: Calibration Map",
           body: [
             "Status:",
-            "",
             "generated / needs source-level review",
-            "",
             "Figure type:",
-            "",
             "conceptual diagram / taxonomy",
-            "",
             "Purpose:",
-            "",
             "Show that calibrated perceived safety is an action standard.",
-            "",
-            "Caption draft:",
-            "",
+            "Show that calibrated perceived safety is an action standard.",
+            "Caption from revised source:",
             "Calibrated perceived safety is an action standard, not a comfort score.",
-            "",
+            "Existing source files:",
+            "`manuscript/figures/calibration_map.pdf`",
             "Evidence / conceptual basis:",
-            "",
             "- Source trial: Trial 000001."
-          ].join("\\n")
-        }]
-      }
-    };
-  `);
-  const html = app.run("renderManuscriptPanel()");
-  assert.equal(html.includes("Figure descriptions"), true);
+          ].join("\n")
+    }]
+  };
+  const html = app.run(`__renderManuscriptPanelProbe(${JSON.stringify(payload)})`);
+  assert.equal(html.includes("Paper outline"), true);
+  assert.equal(html.includes("Figures"), true);
+  assert.equal(html.includes("Tables"), true);
+  assert.equal(html.includes("Traceability"), true);
+  assert.equal(html.includes("Section 2: Calibration result"), true);
+  assert.equal(html.includes("Figure specs at this location"), true);
+  assert.equal(html.indexOf("Section 2: Calibration result") < html.indexOf("Inline figure spec"), true, "figure spec should render beside the relevant paper section");
   assert.equal(html.includes("figure-spec-card"), true);
   assert.equal(html.includes("Figure F000001: Calibration Map"), true);
   assert.equal(html.includes("generated / needs source-level review"), true);
   assert.equal(html.includes("Show that calibrated perceived safety is an action standard."), true);
   assert.equal(html.includes("Calibrated perceived safety is an action standard"), true);
+  assert.equal(html.includes("Copy spec"), true);
+  assert.equal(html.includes("Copy caption"), true);
+  assert.equal(html.includes("Open source"), true);
+  assert.equal(html.includes("manuscript/figures/calibration_map.pdf"), true);
+  assert.equal(html.includes("No active tables"), true);
+  assert.equal(html.includes("No active tables are present because the current evidence is figure-led."), true);
+  assert.equal(html.includes("Claim C1 maps to calibration evidence E1."), true);
+  assert.equal(html.includes("Figure descriptions"), false);
 }
 
+testButtonInventoryHasHandlers();
 await testImmediateUserMessage();
 await testAttachmentOnlyMessage();
+await testResumeFromTrialRequiresConfirmationAndSendsPayload();
+await testResumeFromTrialCancelPreservesComposer();
+await testResumeTrialSlashCommandIsBlocked();
+await testFailedSessionSendRestoresComposerState();
 await testSlashCommandVisibleAndIgnoredAsUnanswered();
+await testRestartCommandRequiresConfirmationAndSendsRestartEndpoint();
+await testRestartCancelPreservesComposer();
 testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 await testEditTruncatesLaterConversationBeforeResend();
 await testLaunchGoalMessageBeforeBackendWork();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
 testPassedGoalDoesNotShowStaleRunningTrial();
+testCurrentRunActivityShowsPauseForChatRun();
+testWorkingDurationFormatter();
+testTrialStripScrollRestoresAcrossRender();
 testStatusCardShowsReviewCheckpoint();
+testComposerPlaceholderBecomesGeneralAfterLaunch();
+testSettingsRenderPreservesComposerDraft();
 testThemeModePersistsAndApplies();
 testComposerPromptInsertionIsIdempotent();
-testManuscriptPanelRendersFigureDescriptions();
+await testCopyTextHelperWritesClipboard();
+testManuscriptPanelRendersPaperFiguresTablesAndTraceability();
 
 console.log("UI flow test passed.");

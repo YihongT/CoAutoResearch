@@ -3,6 +3,18 @@
   "templateVersion": "0.1.0",
   "templateName": "default",
   "createdBy": "CoAutoResearch",
+  "reviewerBaselineVersion": "2026-06-final-blueprint",
+  "coreReviewerFiles": [
+    "REVIEW_TAXONOMY.md",
+    "FINAL_GATE_REVIEWER.md",
+    "PLAN_REVIEWER.md",
+    "PROCESS_REVIEWER.md",
+    "EVIDENCE_REVIEWER.md",
+    "VENUE_FIT_REVIEWER.md",
+    "MANUSCRIPT_REVIEWER.md",
+    "FIGURE_TABLE_REVIEWER.md",
+    "REVIEWER_SPAWNING.md"
+  ],
   "managedPaths": [
     "AGENTS.md",
     ".gitignore.template",

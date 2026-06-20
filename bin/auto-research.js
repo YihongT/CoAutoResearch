@@ -6,7 +6,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +18,29 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = "8765";
 const DEFAULT_PROJECTS_DIR = "co-autoresearch-projects";
 const LEGACY_PROJECTS_DIR = "local-projects";
+const REVIEWER_BASELINE_VERSION = "2026-06-per-reviewer-files";
+const CORE_REVIEWER_FILES = [
+  "REVIEW_TAXONOMY.md",
+  "FINAL_GATE_REVIEWER.md",
+  "PLAN_REVIEWER.md",
+  "PROCESS_REVIEWER.md",
+  "EVIDENCE_REVIEWER.md",
+  "VENUE_FIT_REVIEWER.md",
+  "MANUSCRIPT_REVIEWER.md",
+  "FIGURE_TABLE_REVIEWER.md",
+  "REVIEWER_SPAWNING.md"
+];
+const REVIEWER_BASELINE_PATH = path.join("instructions", ".co-auto-research-instructions.json");
+const REVIEW_STORAGE_VERSION = "per-reviewer-files-v1";
+const REQUIRED_REVIEWER_OUTPUTS = {
+  plan: { label: "Plan reviewer", file: "PLAN_REVIEW.md", scope: "plan", instruction: "instructions/reviewers/PLAN_REVIEWER.md" },
+  process: { label: "Process reviewer", file: "PROCESS_REVIEW.md", scope: "process", instruction: "instructions/reviewers/PROCESS_REVIEWER.md" },
+  evidence: { label: "Evidence reviewer", file: "EVIDENCE_REVIEW.md", scope: "evidence", instruction: "instructions/reviewers/EVIDENCE_REVIEWER.md" },
+  venue_fit: { label: "Venue fit reviewer", file: "VENUE_FIT_REVIEW.md", scope: "venue", instruction: "instructions/reviewers/VENUE_FIT_REVIEWER.md" },
+  manuscript: { label: "Manuscript reviewer", file: "MANUSCRIPT_REVIEW.md", scope: "manuscript", instruction: "instructions/reviewers/MANUSCRIPT_REVIEWER.md" },
+  figure_table: { label: "Figure/table reviewer", file: "FIGURE_TABLE_REVIEW.md", scope: "figure-table", instruction: "instructions/reviewers/FIGURE_TABLE_REVIEWER.md" },
+  final_gate: { label: "Final gate reviewer", file: "FINAL_GATE_REVIEW.md", scope: "final-gate", instruction: "instructions/reviewers/FINAL_GATE_REVIEWER.md" }
+};
 
 function usage() {
   return `CoAutoResearch
@@ -30,6 +53,7 @@ Usage:
   co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
   co-auto-research upgrade
+  co-auto-research upgrade-project [project-name-or-path] [--all] [--projects-dir <dir>] [--dry-run]
   co-auto-research version
   co-auto-research help
 
@@ -52,7 +76,7 @@ function parseOptions(args) {
       index += 1;
       continue;
     }
-    if (arg === "--open" || arg === "--no-open" || arg === "--remote") {
+    if (arg === "--open" || arg === "--no-open" || arg === "--remote" || arg === "--all" || arg === "--dry-run") {
       options[arg.slice(2)] = true;
       continue;
     }
@@ -100,6 +124,537 @@ function packageMetadata() {
 
 function packageVersion() {
   return String(packageMetadata().version || "unknown");
+}
+
+function sha256FileSync(target) {
+  return createHash("sha256").update(fs.readFileSync(target)).digest("hex");
+}
+
+function reviewerTemplateDir() {
+  return path.join(TEMPLATE_ROOT, "instructions", "reviewers");
+}
+
+function reviewerTemplateHashesSync() {
+  const hashes = {};
+  for (const name of CORE_REVIEWER_FILES) {
+    const target = path.join(reviewerTemplateDir(), name);
+    if (fs.existsSync(target)) hashes[name] = sha256FileSync(target);
+  }
+  return hashes;
+}
+
+function writeReviewerBaselineMetadataSync(projectRoot) {
+  const metadataPath = path.join(projectRoot, REVIEWER_BASELINE_PATH);
+  const payload = {
+    schemaVersion: 1,
+    reviewerBaselineVersion: REVIEWER_BASELINE_VERSION,
+    syncedAt: new Date().toISOString(),
+    coreReviewerFiles: reviewerTemplateHashesSync()
+  };
+  fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
+  fs.writeFileSync(metadataPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return payload;
+}
+
+function trialIterationFromId(value) {
+  const match = String(value || "").match(/^0*(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function normalizeGateStatus(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "missing";
+  if (/\b(blocked|needs_human|human|clarification)\b/.test(text)) return "blocked";
+  if (/^(all[_\s-]?passed)(?:\s*$|\s*[:.;,]\s*|\s+-\s+)/.test(text)) return "pass";
+  if (/^(strict\s+)?pass(?:\s*$|\s*[:.;,]\s*|\s+-\s+)/.test(text)) {
+    const tail = text.replace(/^(strict\s+)?pass(?:\s*$|\s*[:.;,]\s*|\s+-\s+)/, "").replaceAll("_", " ").replaceAll("-", " ");
+    if (/\b(not\s+pass|not\s+passed|not\s+ready|needs\s+work|needs\s+follow\s+up|follow\s+up|continue|running|revise|revision\s+required|targeted\s+revision|architecture\s+only|partial|qualified|qualification|supported\s+with\s+qualification|plausible|pass\s+for)\b/.test(tail)) return "continue";
+    return "pass";
+  }
+  const normalized = text.replaceAll("_", " ").replaceAll("-", " ");
+  if (/\b(not\s+pass|not\s+passed|not\s+ready|needs\s+work|needs\s+follow\s+up|follow\s+up|continue|running|revise|revision\s+required|targeted\s+revision|architecture|partial|qualified|qualification|supported\s+with\s+qualification|plausible|approved|complete|completed|ready|pass\s+for)\b/.test(normalized)) return "continue";
+  if (/\b(fail|failed)\b/.test(text)) return "continue";
+  return text.split(/\s+/)[0];
+}
+
+function reviewerKeyForLabel(label) {
+  const clean = String(label || "").toLowerCase().replace(/[^a-z/ ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (clean.startsWith("plan")) return "plan";
+  if (clean.startsWith("process")) return "process";
+  if (clean.startsWith("evidence")) return "evidence";
+  if (clean.startsWith("venue")) return "venue_fit";
+  if (clean.startsWith("manuscript")) return "manuscript";
+  if (clean.startsWith("figure") || clean.startsWith("table") || clean.includes("figure/table")) return "figure_table";
+  if (clean.startsWith("final")) return "final_gate";
+  return "";
+}
+
+function projectRelativePath(projectRoot, target) {
+  return path.relative(projectRoot, target).split(path.sep).join("/") || ".";
+}
+
+function readTrajectoryArchivedIdsSync(projectRoot) {
+  const trajectoryPath = path.join(projectRoot, "research_trajectory", "TRAJECTORY.json");
+  if (!fs.existsSync(trajectoryPath)) return new Set();
+  try {
+    const payload = readJsonSync(trajectoryPath);
+    return new Set(Array.isArray(payload.archived_trial_ids) ? payload.archived_trial_ids.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function activeTrialDirsSync(projectRoot) {
+  const root = path.join(projectRoot, "research_trajectory", "trials");
+  if (!fs.existsSync(root)) return [];
+  const archived = readTrajectoryArchivedIdsSync(projectRoot);
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(root, entry.name))
+    .filter((trialDir) => {
+      const name = path.basename(trialDir);
+      if (archived.has(name) || /^0*_?project_conversion/i.test(name)) return false;
+      return ["PLAN.md", "REVIEW.md", "REPORT.md", "artifacts", "reviews"].some((entry) => fs.existsSync(path.join(trialDir, entry)));
+    })
+    .sort((a, b) => trialIterationFromId(path.basename(a)) - trialIterationFromId(path.basename(b)) || path.basename(a).localeCompare(path.basename(b)));
+}
+
+function reviewerOutputPath(trialDir, key) {
+  return path.join(trialDir, "reviews", REQUIRED_REVIEWER_OUTPUTS[key].file);
+}
+
+function firstRegexValue(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return String(match[1] || "").trim().replace(/^`|`$/g, "").trim();
+  }
+  return "";
+}
+
+function parseReviewerSections(text, sourcePath = "") {
+  const matches = [...text.matchAll(/^Reviewer:\s*`?([^`\n]+?)`?\s*$/gm)];
+  const sections = [];
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const reviewer = String(match[1] || "").trim();
+    const key = reviewerKeyForLabel(reviewer);
+    if (!key) continue;
+    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+    const block = text.slice(match.index, end).trim().replace(/\n-{3,}\s*$/, "").trim();
+    sections.push({
+      key,
+      reviewer,
+      path: sourcePath,
+      text: block,
+      decision: firstRegexValue(block, [/^Decision:\s*`?([^`\n]+)`?/im, /^Status:\s*`?([^`\n]+)`?/im]),
+      gate: firstRegexValue(block, [/^Gate impact:\s*`?([^`\n]+)`?/im, /^Gate:\s*`?([^`\n]+)`?/im]),
+      confidence: firstRegexValue(block, [/^Confidence:\s*`?([^`\n]+)`?/im]) || "medium"
+    });
+  }
+  return sections;
+}
+
+function stripReviewerMetadata(text) {
+  const metadata = new Set(["reviewer", "scope", "decision", "gate impact", "gate", "confidence", "source trial", "generated at", "instruction file", "migration source"]);
+  return String(text || "").split(/\r?\n/).filter((line) => !metadata.has(line.split(":", 1)[0].trim().toLowerCase())).join("\n").trim();
+}
+
+function reviewedInputsForTrial(projectRoot, trialDir, key) {
+  const candidates = [
+    path.join(trialDir, "PLAN.md"),
+    path.join(trialDir, "REPORT.md"),
+    path.join(projectRoot, "PROJECT.md"),
+    path.join(projectRoot, "research_trajectory", "STATE.md"),
+    path.join(projectRoot, "research_trajectory", "CURRENT_FINDINGS.md")
+  ];
+  if (["evidence", "venue_fit", "manuscript", "figure_table", "final_gate"].includes(key)) candidates.push(path.join(projectRoot, "manuscript", "BLUEPRINT.md"));
+  if (["figure_table", "final_gate"].includes(key)) candidates.push(path.join(projectRoot, "manuscript", "figures", "FIGURE_SPECS.md"));
+  if (["venue_fit", "figure_table", "final_gate"].includes(key)) {
+    candidates.push(
+      path.join(projectRoot, "resources", "target_venue", "SEED_PAPERS.md"),
+      path.join(projectRoot, "resources", "target_venue", "STYLE_NOTES.md"),
+      path.join(projectRoot, "resources", "target_venue", "FIGURE_TABLE_NOTES.md")
+    );
+  }
+  return [...new Set(candidates.filter((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()).map((candidate) => projectRelativePath(projectRoot, candidate)))];
+}
+
+function defaultMissingReviewBody(label) {
+  return [
+    "## Blocking Issues",
+    "",
+    `- ${label} was not run for this trial before the per-reviewer migration.`,
+    "",
+    "## Required Actions Before Pass",
+    "",
+    `- Run the ${label} for this trial and replace this migration record.`,
+    "",
+    "## Qualified / Partial Passes",
+    "",
+    "- none",
+    "",
+    "## Unassessed Areas",
+    "",
+    `- ${label} was not assessed for this trial.`
+  ].join("\n");
+}
+
+function formatReviewerFile(projectRoot, trialDir, key, { decision, gate, confidence, migrationSource, contextSummary, body = "" }) {
+  const config = REQUIRED_REVIEWER_OUTPUTS[key];
+  const cleanBody = body ? stripReviewerMetadata(body) : defaultMissingReviewBody(config.label);
+  const inputs = reviewedInputsForTrial(projectRoot, trialDir, key);
+  return [
+    `# ${config.label} Review`,
+    "",
+    `Reviewer: ${config.label}`,
+    `Scope: ${config.scope}`,
+    `Decision: ${normalizeGateStatus(decision)}`,
+    `Gate impact: ${normalizeGateStatus(gate || decision)}`,
+    `Confidence: ${String(confidence || "medium").trim()}`,
+    `Source trial: \`${path.basename(trialDir)}\``,
+    `Generated at: ${new Date().toISOString()}`,
+    `Instruction file: \`${config.instruction}\``,
+    `Migration source: \`${migrationSource}\``,
+    "",
+    "## Reviewed Inputs",
+    "",
+    ...(inputs.length ? inputs.map((item) => `- \`${item}\``) : ["- none recorded"]),
+    "",
+    "## Context Summary",
+    "",
+    contextSummary || "No context summary recorded.",
+    "",
+    cleanBody,
+    ""
+  ].join("\n");
+}
+
+function backupProjectFileSync(projectRoot, source, migrationDir, backedUp) {
+  if (!fs.existsSync(source) || !fs.statSync(source).isFile()) return;
+  const relative = projectRelativePath(projectRoot, source);
+  const destination = path.join(migrationDir, "review_storage_backups", relative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination);
+  if (!backedUp.includes(relative)) backedUp.push(relative);
+}
+
+function latestSavedPassSectionsSync(projectRoot, trialDirs) {
+  const latest = {};
+  const sources = trialDirs.map((trialDir) => path.join(trialDir, "REVIEW.md"));
+  const manuscriptReviews = path.join(projectRoot, "manuscript", "reviews");
+  if (fs.existsSync(manuscriptReviews)) {
+    for (const name of fs.readdirSync(manuscriptReviews).filter((item) => item.endsWith(".md") && item !== ".gitkeep").sort()) {
+      sources.push(path.join(manuscriptReviews, name));
+    }
+  }
+  for (const source of sources) {
+    if (!fs.existsSync(source)) continue;
+    const relative = projectRelativePath(projectRoot, source);
+    const iteration = relative.includes("manuscript/reviews") ? 1_000_000_000 : trialIterationFromId(path.basename(path.dirname(source)));
+    for (const section of parseReviewerSections(fs.readFileSync(source, "utf8"), relative)) {
+      if (normalizeGateStatus(section.decision) !== "pass" || normalizeGateStatus(section.gate || section.decision) !== "pass") continue;
+      if (!latest[section.key] || latest[section.key].iteration <= iteration) latest[section.key] = { ...section, iteration };
+    }
+  }
+  return latest;
+}
+
+function projectGateTextPassedSync(projectRoot) {
+  const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
+  if (!fs.existsSync(statePath)) return false;
+  const text = fs.readFileSync(statePath, "utf8");
+  const section = text.match(/^##\s+Autoresearch Goal Gate\s*$[\s\S]*?(?=^##\s+|\s*$)/m);
+  if (!section) return false;
+  const status = section[0].match(/^\s*Status:\s*(.+?)\s*$/im);
+  if (!status || normalizeGateStatus(status[1]) !== "pass") return false;
+  return Object.values(REQUIRED_REVIEWER_OUTPUTS).every((config) => {
+    const escaped = config.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = section[0].match(new RegExp(`^\\s*[-*]\\s*${escaped}\\s*:\\s*(.+?)\\s*$`, "im"));
+    return match && normalizeGateStatus(match[1]) === "pass";
+  });
+}
+
+function normalizeStateGateReferencesSync(projectRoot, latestTrial, migrationDir, backedUp, dryRun = false) {
+  if (!latestTrial) return "";
+  const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
+  if (!fs.existsSync(statePath)) return "";
+  const text = fs.readFileSync(statePath, "utf8");
+  let changed = false;
+  const updated = text.replace(/^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure\/table reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$/gm, (line, label, status) => {
+    const key = reviewerKeyForLabel(label);
+    if (!key) return line;
+    const reference = projectRelativePath(projectRoot, reviewerOutputPath(latestTrial, key));
+    if (status.includes(`\`${reference}\``)) return line;
+    changed = true;
+    return `- ${REQUIRED_REVIEWER_OUTPUTS[key].label}: ${status.trim()} - \`${reference}\``;
+  });
+  if (!changed) return "";
+  if (!dryRun) {
+    backupProjectFileSync(projectRoot, statePath, migrationDir, backedUp);
+    fs.writeFileSync(statePath, `${updated.trimEnd()}\n`, "utf8");
+  }
+  return projectRelativePath(projectRoot, statePath);
+}
+
+function migrateActiveReviewStorageSync(projectRoot, migrationDir, { dryRun = false } = {}) {
+  const trialDirs = activeTrialDirsSync(projectRoot);
+  const latestTrial = trialDirs.at(-1) || "";
+  const allowLatestBackfill = Boolean(latestTrial && projectGateTextPassedSync(projectRoot));
+  const latestPass = latestSavedPassSectionsSync(projectRoot, trialDirs);
+  const backedUp = [];
+  const created = [];
+  const backfilled = [];
+  const placeholders = [];
+  for (const trialDir of trialDirs) {
+    const legacyPath = path.join(trialDir, "REVIEW.md");
+    const legacySections = {};
+    if (fs.existsSync(legacyPath)) {
+      for (const section of parseReviewerSections(fs.readFileSync(legacyPath, "utf8"), projectRelativePath(projectRoot, legacyPath))) {
+        legacySections[section.key] = section;
+      }
+    }
+    for (const [key, config] of Object.entries(REQUIRED_REVIEWER_OUTPUTS)) {
+      const target = reviewerOutputPath(trialDir, key);
+      if (fs.existsSync(target)) continue;
+      let source = legacySections[key];
+      let contextSummary = "Created from the legacy trial REVIEW.md section during per-reviewer migration.";
+      if (!source && allowLatestBackfill && trialDir === latestTrial && latestPass[key]) {
+        source = latestPass[key];
+        contextSummary = "Backfilled from the latest saved passing reviewer output for the current active gate. This preserves pass provenance but is not a fresh reviewer run for this trial.";
+        backfilled.push(projectRelativePath(projectRoot, target));
+      } else if (!source) {
+        placeholders.push(projectRelativePath(projectRoot, target));
+      }
+      created.push(projectRelativePath(projectRoot, target));
+      if (dryRun) continue;
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      if (fs.existsSync(legacyPath)) backupProjectFileSync(projectRoot, legacyPath, migrationDir, backedUp);
+      const body = source?.text || "";
+      fs.writeFileSync(target, formatReviewerFile(projectRoot, trialDir, key, {
+        decision: source?.decision || "continue",
+        gate: source?.gate || source?.decision || "continue",
+        confidence: source?.confidence || "low",
+        migrationSource: source?.path || `missing legacy ${config.label} section`,
+        contextSummary: source ? contextSummary : "No legacy reviewer section existed for this active trial. This file records the missing review explicitly.",
+        body
+      }), "utf8");
+    }
+  }
+  const normalizedManuscriptReviews = [];
+  const manuscriptReviews = path.join(projectRoot, "manuscript", "reviews");
+  if (fs.existsSync(manuscriptReviews)) {
+    for (const name of fs.readdirSync(manuscriptReviews).filter((item) => item.endsWith(".md") && item !== ".gitkeep").sort()) {
+      const target = path.join(manuscriptReviews, name);
+      let text = fs.readFileSync(target, "utf8");
+      if (text.includes("Source trial:") && text.includes("## Reviewed Inputs") && text.includes("Migration source:")) continue;
+      const section = parseReviewerSections(text, projectRelativePath(projectRoot, target))[0] || {};
+      const key = section.key || "manuscript";
+      const trialMatch = path.basename(name, ".md").match(/^0*(\d+)/);
+      const sourceTrial = firstRegexValue(text, [/^Source trial:\s*`?([^`\n]+)`?/im]) || (trialMatch ? trialMatch[1] : path.basename(name, ".md"));
+      const insertion = [
+        `Source trial: \`${sourceTrial}\``,
+        `Generated at: ${new Date().toISOString()}`,
+        `Instruction file: \`${(REQUIRED_REVIEWER_OUTPUTS[key] || REQUIRED_REVIEWER_OUTPUTS.manuscript).instruction}\``,
+        `Migration source: \`${projectRelativePath(projectRoot, target)}\``,
+        "",
+        "## Reviewed Inputs",
+        "",
+        "- `manuscript/BLUEPRINT.md`",
+        "- `research_trajectory/STATE.md`",
+        "- `research_trajectory/CURRENT_FINDINGS.md`",
+        "",
+        "## Context Summary",
+        "",
+        "Normalized active manuscript review metadata during per-reviewer migration.",
+        ""
+      ].join("\n");
+      normalizedManuscriptReviews.push(projectRelativePath(projectRoot, target));
+      if (dryRun) continue;
+      backupProjectFileSync(projectRoot, target, migrationDir, backedUp);
+      text = /^Confidence:\s*.+?$/im.test(text) ? text.replace(/^Confidence:\s*.+?$/im, (line) => `${line}\n${insertion}`) : `${insertion}\n${text}`;
+      fs.writeFileSync(target, `${text.trimEnd()}\n`, "utf8");
+    }
+  }
+  const normalizedState = normalizeStateGateReferencesSync(projectRoot, latestTrial, migrationDir, backedUp, dryRun);
+  return {
+    storageVersion: REVIEW_STORAGE_VERSION,
+    trialCount: trialDirs.length,
+    created,
+    backfilled,
+    placeholders,
+    normalizedManuscriptReviews,
+    normalizedState,
+    backedUp,
+    outdated: Boolean(created.length || normalizedManuscriptReviews.length || normalizedState)
+  };
+}
+
+function projectReviewStorageStatusSync(projectRoot) {
+  const trialDirs = activeTrialDirsSync(projectRoot);
+  const latestTrial = trialDirs.at(-1) || "";
+  const missingByTrial = {};
+  const nonpassingLatest = [];
+  for (const trialDir of trialDirs) {
+    const missing = [];
+    for (const [key, config] of Object.entries(REQUIRED_REVIEWER_OUTPUTS)) {
+      const target = reviewerOutputPath(trialDir, key);
+      if (!fs.existsSync(target)) {
+        missing.push(config.file);
+        continue;
+      }
+      if (trialDir === latestTrial && projectGateTextPassedSync(projectRoot)) {
+        const text = fs.readFileSync(target, "utf8");
+        const decision = normalizeGateStatus(firstRegexValue(text, [/^Decision:\s*`?([^`\n]+)`?/im]));
+        const gate = normalizeGateStatus(firstRegexValue(text, [/^Gate impact:\s*`?([^`\n]+)`?/im]));
+        if (decision !== "pass" || gate !== "pass") nonpassingLatest.push(config.file);
+      }
+    }
+    if (missing.length) missingByTrial[path.basename(trialDir)] = missing;
+  }
+  const stateMissingReferences = [];
+  const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
+  const stateText = fs.existsSync(statePath) ? fs.readFileSync(statePath, "utf8") : "";
+  if (latestTrial && stateText) {
+    for (const key of Object.keys(REQUIRED_REVIEWER_OUTPUTS)) {
+      const expected = projectRelativePath(projectRoot, reviewerOutputPath(latestTrial, key));
+      if (!stateText.includes(expected)) stateMissingReferences.push(expected);
+    }
+  }
+  const manuscriptReviewsMissingMetadata = [];
+  const manuscriptReviews = path.join(projectRoot, "manuscript", "reviews");
+  if (fs.existsSync(manuscriptReviews)) {
+    for (const name of fs.readdirSync(manuscriptReviews).filter((item) => item.endsWith(".md") && item !== ".gitkeep")) {
+      const target = path.join(manuscriptReviews, name);
+      const text = fs.readFileSync(target, "utf8");
+      if (!text.includes("Source trial:") || !text.includes("## Reviewed Inputs") || !text.includes("Migration source:")) manuscriptReviewsMissingMetadata.push(projectRelativePath(projectRoot, target));
+    }
+  }
+  return {
+    schemaVersion: 1,
+    storageVersion: REVIEW_STORAGE_VERSION,
+    requiredFiles: Object.values(REQUIRED_REVIEWER_OUTPUTS).map((config) => config.file),
+    missingByTrial,
+    nonpassingLatest,
+    stateMissingReferences,
+    manuscriptReviewsMissingMetadata,
+    outdated: Boolean(Object.keys(missingByTrial).length || nonpassingLatest.length || stateMissingReferences.length || manuscriptReviewsMissingMetadata.length)
+  };
+}
+
+function projectReviewerStatusSync(projectRoot) {
+  const templateHashes = reviewerTemplateHashesSync();
+  const reviewerDir = path.join(projectRoot, "instructions", "reviewers");
+  const metadataPath = path.join(projectRoot, REVIEWER_BASELINE_PATH);
+  const missing = [];
+  const changed = [];
+  const hashes = {};
+  for (const name of CORE_REVIEWER_FILES) {
+    const projectPath = path.join(reviewerDir, name);
+    if (!fs.existsSync(projectPath)) {
+      missing.push(name);
+      continue;
+    }
+    const hash = sha256FileSync(projectPath);
+    hashes[name] = hash;
+    if (templateHashes[name] && hash !== templateHashes[name]) changed.push(name);
+  }
+  let metadata = {};
+  if (fs.existsSync(metadataPath)) {
+    try {
+      metadata = readJsonSync(metadataPath);
+    } catch {
+      metadata = {};
+    }
+  }
+  const metadataHashes = metadata && typeof metadata.coreReviewerFiles === "object" ? metadata.coreReviewerFiles : {};
+  const metadataMissing = CORE_REVIEWER_FILES.filter((name) => metadataHashes[name] !== templateHashes[name]);
+  const baselineVersion = String(metadata.reviewerBaselineVersion || "");
+  const reviewStorage = projectReviewStorageStatusSync(projectRoot);
+  return {
+    baselineVersion,
+    latestBaselineVersion: REVIEWER_BASELINE_VERSION,
+    outdated: Boolean(missing.length || changed.length || metadataMissing.length || baselineVersion !== REVIEWER_BASELINE_VERSION || reviewStorage.outdated),
+    missing,
+    changed,
+    metadataMissing,
+    metadataPath: REVIEWER_BASELINE_PATH,
+    hashes,
+    reviewStorage
+  };
+}
+
+function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
+  const status = projectReviewerStatusSync(projectRoot);
+  const migrationId = `${new Date().toISOString().replace(/[-:.]/g, "").replace("T", "T").replace("Z", "Z")}_${randomUUID().slice(0, 8)}`;
+  const reviewerDir = path.join(projectRoot, "instructions", "reviewers");
+  const backupRoot = path.join(projectRoot, "archive", "template_migrations", migrationId, "instructions", "reviewers");
+  if (dryRun) {
+    const dryRunMigrationDir = path.join(projectRoot, "archive", "template_migrations", "DRY_RUN");
+    return {
+      ok: true,
+      dryRun: true,
+      migrationId: "",
+      before: status,
+      after: status,
+      copied: [],
+      backedUp: [],
+      backupPath: "",
+      reviewStorage: migrateActiveReviewStorageSync(projectRoot, dryRunMigrationDir, { dryRun: true })
+    };
+  }
+  fs.mkdirSync(reviewerDir, { recursive: true });
+  const copied = [];
+  const backedUp = [];
+  for (const name of CORE_REVIEWER_FILES) {
+    const source = path.join(reviewerTemplateDir(), name);
+    if (!fs.existsSync(source)) throw new Error(`Package reviewer file is missing: ${name}`);
+    const target = path.join(reviewerDir, name);
+    if (fs.existsSync(target)) {
+      fs.mkdirSync(backupRoot, { recursive: true });
+      fs.copyFileSync(target, path.join(backupRoot, name));
+      backedUp.push(name);
+    }
+    fs.copyFileSync(source, target);
+    copied.push(name);
+  }
+  const metadata = writeReviewerBaselineMetadataSync(projectRoot);
+  const migrationDir = path.join(projectRoot, "archive", "template_migrations", migrationId);
+  fs.mkdirSync(migrationDir, { recursive: true });
+  const reviewStorage = migrateActiveReviewStorageSync(projectRoot, migrationDir);
+  fs.writeFileSync(
+    path.join(migrationDir, "MIGRATION.md"),
+    [
+      `# Reviewer Migration ${migrationId}`,
+      "",
+      `- Created: ${new Date().toISOString()}`,
+      `- Reviewer baseline: \`${REVIEWER_BASELINE_VERSION}\``,
+      `- Copied core reviewers: ${copied.length}`,
+      `- Backed up previous core reviewers: ${backedUp.length}`,
+      `- Metadata: \`${REVIEWER_BASELINE_PATH}\``,
+      `- Review storage version: \`${REVIEW_STORAGE_VERSION}\``,
+      `- Created per-reviewer files: ${reviewStorage.created.length}`,
+      `- Backfilled latest-gate files: ${reviewStorage.backfilled.length}`,
+      `- Explicit missing-review placeholders: ${reviewStorage.placeholders.length}`,
+      `- Normalized manuscript reviews: ${reviewStorage.normalizedManuscriptReviews.length}`,
+      "",
+      "Custom reviewer files outside the core reviewer set were preserved.",
+      "Archived restart/resume history was not rewritten.",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+  return {
+    ok: true,
+    dryRun: false,
+    migrationId,
+    backupPath: path.relative(projectRoot, migrationDir),
+    copied,
+    backedUp,
+    reviewStorage,
+    before: status,
+    after: projectReviewerStatusSync(projectRoot),
+    metadata
+  };
 }
 
 function isProjectRootSync(root) {
@@ -169,7 +724,8 @@ function addProjectCandidate(candidates, root) {
     path: resolved,
     relativePath,
     status: readProjectRuntimeStatusSync(resolved),
-    templateVersion: String(metadata.templateVersion || "").trim()
+    templateVersion: String(metadata.templateVersion || "").trim(),
+    reviewerStatus: projectReviewerStatusSync(resolved)
   });
 }
 
@@ -220,9 +776,10 @@ function printProjectTable(projects) {
     String(index + 1),
     project.name,
     project.status,
+    project.reviewerStatus?.outdated ? "outdated" : "current",
     project.relativePath
   ]);
-  const headers = ["#", "name", "status", "path"];
+  const headers = ["#", "name", "status", "reviewers", "path"];
   const widths = headers.map((header, column) => Math.max(header.length, ...rows.map((row) => row[column].length)));
   const format = (row) => row.map((value, column) => value.padEnd(widths[column])).join("  ");
   console.log(format(headers));
@@ -350,6 +907,7 @@ async function finalizeGeneratedProject(target) {
     }
   }
   await ensureProjectMetadata(target);
+  writeReviewerBaselineMetadataSync(target);
 }
 
 async function ensureProjectMetadata(target) {
@@ -577,7 +1135,20 @@ async function commandDoctor(args) {
 
   const packageUi = path.join(TEMPLATE_ROOT, "ui", "server.py");
   console.log(`${fs.existsSync(packageUi) ? "ok" : "missing"}  package ui/server.py${fs.existsSync(packageUi) ? ` - package-managed runtime ${packageVersion()}` : ""}`);
-  console.log(`${isProjectRootSync(process.cwd()) ? "ok" : "warn"}      current directory${isProjectRootSync(process.cwd()) ? " is a CoAutoResearch project" : " is not a CoAutoResearch project"}`);
+  const currentIsProject = isProjectRootSync(process.cwd());
+  console.log(`${currentIsProject ? "ok" : "warn"}      current directory${currentIsProject ? " is a CoAutoResearch project" : " is not a CoAutoResearch project"}`);
+  if (currentIsProject) {
+    const reviewerStatus = projectReviewerStatusSync(process.cwd());
+    const detail = reviewerStatus.outdated
+      ? [
+          reviewerStatus.missing.length ? `missing ${reviewerStatus.missing.join(", ")}` : "",
+          reviewerStatus.changed.length ? `changed ${reviewerStatus.changed.join(", ")}` : "",
+          reviewerStatus.metadataMissing.length ? "metadata stale" : ""
+        ].filter(Boolean).join("; ")
+      : `baseline ${REVIEWER_BASELINE_VERSION}`;
+    console.log(`${reviewerStatus.outdated ? "warn" : "ok"}      reviewers${reviewerStatus.outdated ? ` outdated - ${detail || "sync required"}` : ` current - ${detail}`}`);
+    if (reviewerStatus.outdated) console.log("        run: co-auto-research upgrade-project");
+  }
   const projectUi = path.join(process.cwd(), "ui", "server.py");
   console.log(`${fs.existsSync(projectUi) ? "ok" : "warn"}      legacy project ui/server.py${fs.existsSync(projectUi) ? " present as fallback" : " not found in current directory"}`);
 }
@@ -681,6 +1252,48 @@ async function commandUpgrade() {
   console.log("Generated project research files are not rewritten automatically.");
 }
 
+async function commandUpgradeProject(args) {
+  const { options, rest } = parseOptions(args);
+  const dryRun = Boolean(options["dry-run"]);
+  let projects = [];
+  if (options.all) {
+    if (rest.length > 0) throw new Error("Unexpected argument with --all. Usage: co-auto-research upgrade-project --all [--projects-dir <dir>] [--dry-run]");
+    projects = collectProjectCandidates(options);
+  } else {
+    if (rest.length > 1) throw new Error("Usage: co-auto-research upgrade-project [project-name-or-path] [--projects-dir <dir>] [--dry-run]");
+    const target = rest[0] || options.project || "";
+    if (!target && isProjectRootSync(process.cwd())) {
+      const candidates = new Map();
+      addProjectCandidate(candidates, process.cwd());
+      projects = [...candidates.values()];
+    } else {
+      projects = [resolveAttachProject(target, options)];
+    }
+  }
+  if (!projects.length) {
+    console.log("No CoAutoResearch projects found.");
+    return;
+  }
+  let changedCount = 0;
+  for (const project of projects) {
+    const before = projectReviewerStatusSync(project.path);
+    const marker = before.outdated ? "outdated" : "current";
+    console.log(`${project.name} (${project.relativePath}): reviewers ${marker}`);
+    if (!before.outdated) continue;
+    const result = syncProjectReviewersSync(project.path, { dryRun });
+    changedCount += 1;
+    if (dryRun) {
+      console.log("  dry run: would sync core reviewers and write baseline metadata");
+    } else {
+      console.log(`  synced ${result.copied.length} core reviewers`);
+      console.log(`  backup: ${result.backupPath || "none"}`);
+    }
+  }
+  if (!changedCount) console.log("All project reviewers are current.");
+  else if (dryRun) console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} would be updated.`);
+  else console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} updated to reviewer baseline ${REVIEWER_BASELINE_VERSION}.`);
+}
+
 function commandVersion() {
   console.log(packageVersion());
 }
@@ -698,6 +1311,7 @@ async function main() {
   if (command === "ui") return commandUi(args);
   if (command === "doctor") return commandDoctor(args);
   if (command === "upgrade") return commandUpgrade(args);
+  if (command === "upgrade-project") return commandUpgradeProject(args);
   throw new Error(`Unknown command: ${command}\n\n${usage()}`);
 }
 
