@@ -92,6 +92,10 @@ also supports paste and drag-and-drop for files. The `+` button files are copied
 into `resources/user_input/attachments/` by default. You can reclassify an
 attachment in its chip before sending, and uploaded or linked materials are
 recorded in `resources/user_input/RESOURCE_MANIFEST.md`.
+Files over 50 MB prompt for “Copy into resources,” then copy in chunks with
+visible progress before send or launch is enabled again. For existing folders or
+prior project bundles, use the resource browser chips. The server-side browser
+copies files or symlinks folders into the selected `resources/` category.
 
 ## Autoresearch Controls
 

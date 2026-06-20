@@ -34,6 +34,7 @@ PORT_FALLBACK_ATTEMPTS = 50
 FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection"
 MAX_TEXT_BYTES = 500_000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+RESOURCE_IMPORT_CHUNK_BYTES = 8 * 1024 * 1024
 AUTO_RESOURCE_SEARCH_MAX_RESULTS = 8
 AUTO_RESOURCE_SEARCH_MAX_DIRS = 2500
 AUTO_RESOURCE_SEARCH_MAX_DEPTH = 5
@@ -55,6 +56,17 @@ RESTART_SNAPSHOT_PATHS = [
     "manuscript",
     "workspace",
     "resources/user_input/RESOURCE_MANIFEST.md",
+]
+CHAT_PROTECTED_PATHS = [
+    "research_trajectory/STATE.md",
+    "research_trajectory/CURRENT_FINDINGS.md",
+    "research_trajectory/TRAJECTORY.json",
+    "research_trajectory/NEXT_TRIAL.json",
+    "research_trajectory/trials",
+    "research_trajectory/checkpoints",
+    "manuscript/BLUEPRINT.md",
+    "manuscript/reviews",
+    "manuscript/figures/FIGURE_SPECS.md",
 ]
 RESOURCE_PROVENANCE_VALUES = {
     "user_explicit",
@@ -1243,21 +1255,64 @@ class ProjectRegistry:
         expected = context.display_name
         if confirm != expected:
             raise ValueError(f"Type the project name to confirm deletion: {expected}")
-        with context.lock:
-            proc = context.session.get("process")
-            running = bool(proc and proc.poll() is None)
-        if running:
-            raise ValueError("Stop the active Codex run before deleting this project.")
+        stopped_run = self.stop_project_run_for_delete(context)
         root = context.root.resolve()
         shutil.rmtree(root)
         self.refresh()
         projects = self.summaries()
         return {
             "deleted_project_id": project_id,
+            "stopped_active_run": stopped_run,
             "active_project_id": projects[0]["id"] if projects else "",
             "projects": projects,
             "multi_project": self.multi_project,
         }
+
+    def stop_project_run_for_delete(self, context: ProjectContext) -> bool:
+        with context.lock:
+            proc = context.session.get("process")
+            thread = context.session.get("process_thread")
+            running = bool(proc and proc.poll() is None)
+            if not running:
+                context.session["loop_active"] = False
+                return False
+            context.session["status"] = "stopping"
+            context.session["loop_active"] = False
+            context.session["loop_stop_reason"] = "deleted_project"
+            context.session.setdefault("logs", []).append("Stop requested because the project is being deleted.")
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                raise ValueError("Could not stop the active Codex run before deleting this project.")
+        if isinstance(thread, threading.Thread):
+            thread.join(timeout=5)
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            with context.lock:
+                active_proc = context.session.get("process")
+                if active_proc is None or active_proc.poll() is not None:
+                    break
+            time.sleep(0.05)
+        with context.lock:
+            context.session["process"] = None
+            context.session["process_thread"] = None
+            context.session["status"] = "stopped"
+            context.session["returncode"] = proc.returncode
+            context.session["ended_at"] = now_iso()
+            context.session["loop_active"] = False
+            context.session["loop_stop_reason"] = "deleted_project"
+        return True
 
 
 PROJECT_REGISTRY: ProjectRegistry | None = None
@@ -1474,6 +1529,7 @@ RESOURCE_LINK_TARGETS = {
     "ongoing_work": "resources/ongoing_work",
     "proposals": "resources/proposals",
     "literature": "resources/literature",
+    "target_venue": "resources/target_venue",
     "data_sources": "resources/data_sources",
     "other": "resources/other",
 }
@@ -1490,7 +1546,7 @@ def now_id() -> str:
 def persist_research_session() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     with RESEARCH_LOCK:
-        payload = {key: value for key, value in RESEARCH_SESSION.items() if key != "process"}
+        payload = {key: value for key, value in RESEARCH_SESSION.items() if key not in {"process", "process_thread"}}
     SESSION_STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -2000,6 +2056,126 @@ def rel_path(path: Path) -> str:
         return absolute.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
 
 
+def path_exists(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def protected_path_signature(path: Path) -> dict[str, Any]:
+    if not path_exists(path):
+        return {"exists": False}
+    if path.is_symlink():
+        try:
+            target = os.readlink(path)
+        except OSError:
+            target = ""
+        return {"exists": True, "kind": "symlink", "target": target}
+    if path.is_file():
+        try:
+            stat = path.stat()
+        except OSError:
+            return {"exists": False}
+        return {"exists": True, "kind": "file", "size": stat.st_size, "hash": hash_file(path)}
+    if path.is_dir():
+        entries: list[dict[str, Any]] = []
+        for child in sorted(path.rglob("*"), key=lambda item: item.as_posix()):
+            relative = child.relative_to(path).as_posix()
+            if child.is_symlink():
+                try:
+                    target = os.readlink(child)
+                except OSError:
+                    target = ""
+                entries.append({"path": relative, "kind": "symlink", "target": target})
+            elif child.is_file():
+                try:
+                    stat = child.stat()
+                except OSError:
+                    continue
+                entries.append({"path": relative, "kind": "file", "size": stat.st_size, "hash": hash_file(child)})
+            elif child.is_dir():
+                entries.append({"path": relative, "kind": "dir"})
+        return {"exists": True, "kind": "dir", "entries": entries}
+    return {"exists": True, "kind": "other"}
+
+
+def create_chat_protected_snapshot() -> dict[str, Any]:
+    snapshot_id = f"{now_id()}_{uuid.uuid4().hex[:8]}"
+    snapshot_root = RUNTIME_DIR / "chat_protected_snapshots" / snapshot_id
+    files_root = snapshot_root / "files"
+    entries: list[dict[str, Any]] = []
+    snapshot_root.mkdir(parents=True, exist_ok=True)
+    for relative in CHAT_PROTECTED_PATHS:
+        source = repo_path(relative)
+        entry = {
+            "path": relative,
+            "signature": protected_path_signature(source),
+        }
+        if path_exists(source):
+            target = files_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_symlink() or source.is_file():
+                shutil.copy2(source, target, follow_symlinks=False)
+            elif source.is_dir():
+                shutil.copytree(source, target, symlinks=True)
+        entries.append(entry)
+    manifest = {"id": snapshot_id, "created_at": now_iso(), "protected_paths": entries}
+    (snapshot_root / "MANIFEST.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {"id": snapshot_id, "root": str(snapshot_root), "paths": list(CHAT_PROTECTED_PATHS)}
+
+
+def restore_chat_protected_snapshot(snapshot: dict[str, Any] | None) -> list[str]:
+    if not isinstance(snapshot, dict) or not snapshot.get("root"):
+        return []
+    snapshot_root = Path(str(snapshot["root"]))
+    manifest_path = snapshot_root / "MANIFEST.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    entries = manifest.get("protected_paths")
+    if not isinstance(entries, list):
+        return []
+    changed_paths: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        relative = str(entry.get("path") or "").strip()
+        if not relative:
+            continue
+        source = repo_path(relative)
+        before = entry.get("signature") if isinstance(entry.get("signature"), dict) else {"exists": False}
+        if protected_path_signature(source) == before:
+            continue
+        backup = snapshot_root / "files" / relative
+        if path_exists(source):
+            remove_path(source)
+        if before.get("exists"):
+            source.parent.mkdir(parents=True, exist_ok=True)
+            if backup.is_symlink() or backup.is_file():
+                shutil.copy2(backup, source, follow_symlinks=False)
+            elif backup.is_dir():
+                shutil.copytree(backup, source, symlinks=True)
+        changed_paths.append(relative)
+    return changed_paths
+
+
 def file_kind(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in {".md", ".markdown"}:
@@ -2191,7 +2367,13 @@ def value_after_label(text: str, label: str) -> str:
     lines = text.splitlines()
     normalized = label.lower().rstrip(":")
     for index, raw_line in enumerate(lines):
-        line = raw_line.strip().lower().rstrip(":")
+        stripped = raw_line.strip()
+        inline = re.match(rf"^{re.escape(normalized)}\s*:\s*(.+?)\s*$", stripped, re.IGNORECASE)
+        if inline:
+            value = inline.group(1).strip()
+            if value and not (value.startswith("<") and value.endswith(">")):
+                return value[:240]
+        line = stripped.lower().rstrip(":")
         if line == normalized:
             return first_meaningful_line("\n".join(lines[index + 1 :]), "")
     return ""
@@ -2438,11 +2620,16 @@ def git_summary() -> dict[str, Any]:
 def project_summary(project_text: str) -> dict[str, Any]:
     target_section = extract_section(project_text, "Target Venue / Audience")
     contribution_section = extract_section(project_text, "Expected Contribution Style")
+    target = (
+        value_after_label(target_section, "Current target")
+        or value_after_label(target_section, "Target venue")
+        or first_meaningful_line(target_section, "")
+    )
     return {
         "one_sentence": first_meaningful_line(extract_section(project_text, "One-Sentence Project Summary")),
         "goal": first_meaningful_line(extract_section(project_text, "Research Goal")),
         "motivation": first_meaningful_line(extract_section(project_text, "Motivation")),
-        "target": value_after_label(target_section, "Current target") or "Not specified",
+        "target": target or "Not specified",
         "research_type": first_meaningful_line(extract_section(project_text, "Target Research Type")),
         "contribution": value_after_label(contribution_section, "Current expected contribution") or "Not specified",
         "questions": list_section_items(extract_section(project_text, "Core Research Questions"))[:5],
@@ -2603,6 +2790,23 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         "missing_evidence": [item for item in list_section_items(extract_section(blueprint_text, "Missing Evidence")) if meaningful_summary_value(item)][:12],
         "figure_specs": figure_specs[:10],
     }
+
+
+def current_target_venue(project_text: str, blueprint_text: str, project: dict[str, Any] | None = None, manuscript: dict[str, Any] | None = None) -> str:
+    target_note = REPO_ROOT / "resources" / "target_venue" / "TARGET_VENUE.md"
+    if target_note.exists():
+        target = first_meaningful_line(target_note.read_text(encoding="utf-8", errors="replace"), "")
+        if meaningful_summary_value(target):
+            return target
+    project = project or project_summary(project_text)
+    target = str(project.get("target") or "")
+    if meaningful_summary_value(target):
+        return target
+    manuscript = manuscript or manuscript_summary(blueprint_text, "")
+    target = str(manuscript.get("target") or "")
+    if meaningful_summary_value(target):
+        return target
+    return ""
 
 
 def infer_trial_status(plan: str, review: str, report: str) -> str:
@@ -3639,6 +3843,8 @@ def build_overview() -> dict[str, Any]:
     state_text = state.get("text", "")
     blueprint_text = blueprint.get("text", "")
     figure_text = figure_specs.get("text", "")
+    project_overview = project_summary(project_text)
+    manuscript_overview = manuscript_summary(blueprint_text, figure_text)
     return {
         "active_project_id": context.id,
         "project": context.summary(),
@@ -3656,9 +3862,12 @@ def build_overview() -> dict[str, Any]:
         },
         "cold_start_files": [cold_start_file_for_ui(path, project_text) for path in COLD_START_EDIT_FILES],
         "summaries": {
-            "project": project_summary(project_text),
+            "project": project_overview,
             "state": state_summary(state_text),
-            "manuscript": manuscript_summary(blueprint_text, figure_text),
+            "manuscript": manuscript_overview,
+        },
+        "inputs": {
+            "target_venue": current_target_venue(project_text, blueprint_text, project_overview, manuscript_overview),
         },
         "trials": collect_trials(),
         "reviews": collect_reviews(),
@@ -3725,6 +3934,202 @@ def save_uploads(payload: dict[str, Any]) -> list[str]:
         destination.write_bytes(data)
         saved_files.append(rel_path(destination))
     return saved_files
+
+
+def resource_import_runtime_dir() -> Path:
+    path = RUNTIME_DIR / "resource_imports"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def valid_resource_import_id(value: str) -> str:
+    import_id = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", import_id):
+        raise ValueError("Invalid resource import id.")
+    return import_id
+
+
+def resource_import_manifest_path(import_id: str) -> Path:
+    return resource_import_runtime_dir() / f"{valid_resource_import_id(import_id)}.json"
+
+
+def read_resource_import_manifest(import_id: str) -> dict[str, Any]:
+    path = resource_import_manifest_path(import_id)
+    if not path.exists():
+        raise ValueError("Unknown resource import.")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_resource_import_manifest(manifest: dict[str, Any]) -> None:
+    import_id = valid_resource_import_id(str(manifest.get("import_id", "")))
+    path = resource_import_manifest_path(import_id)
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def validated_resource_destination(relative_path: str) -> Path:
+    text = str(relative_path or "").replace("\\", "/").lstrip("/")
+    if not text.startswith("resources/") or "/../" in f"/{text}/":
+        raise ValueError("Imported resource path must be inside resources/.")
+    root = (REPO_ROOT / "resources").resolve()
+    path = (REPO_ROOT / text).absolute()
+    try:
+        path.relative_to((REPO_ROOT / "resources").absolute())
+    except ValueError as exc:
+        raise ValueError("Imported resource path escapes resources/.") from exc
+    resolved_parent = path.parent.resolve()
+    if resolved_parent != root and root not in resolved_parent.parents:
+        raise ValueError("Imported resource path escapes resources/.")
+    return path
+
+
+def start_resource_import(payload: dict[str, Any]) -> dict[str, Any]:
+    filename = str(payload.get("name") or "resource").strip()
+    category = str(payload.get("category") or "").strip()
+    target = UPLOAD_TARGETS.get(category)
+    if not target:
+        category = "ongoing_work"
+        target = UPLOAD_TARGETS[category]
+    try:
+        size = int(payload.get("size") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Resource import size must be a number.") from exc
+    if size <= 0:
+        raise ValueError("Resource import size must be greater than zero.")
+    if "/" in filename or "\\" in filename:
+        filename = Path(filename.replace("\\", "/")).name
+    safe_name = slugify(filename or "resource", "resource")
+    destination = unique_path(REPO_ROOT / target, safe_name)
+    import_id = uuid.uuid4().hex
+    staging = resource_import_runtime_dir() / f"{import_id}.part"
+    manifest = {
+        "import_id": import_id,
+        "name": filename or safe_name,
+        "safe_name": safe_name,
+        "size": size,
+        "category": category,
+        "destination": rel_path(destination),
+        "staging": str(staging),
+        "received": 0,
+        "status": "copying",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    staging.parent.mkdir(parents=True, exist_ok=True)
+    staging.write_bytes(b"")
+    write_resource_import_manifest(manifest)
+    return {
+        "import_id": import_id,
+        "chunk_size": RESOURCE_IMPORT_CHUNK_BYTES,
+        "destination": manifest["destination"],
+        "category": category,
+        "received": 0,
+        "size": size,
+    }
+
+
+def write_resource_import_chunk(import_id: str, offset: int, data: bytes) -> dict[str, Any]:
+    manifest = read_resource_import_manifest(import_id)
+    if manifest.get("status") not in {"copying", "failed"}:
+        raise ValueError("Resource import is not accepting chunks.")
+    size = int(manifest.get("size") or 0)
+    received = int(manifest.get("received") or 0)
+    if offset != received:
+        raise ValueError(f"Invalid resource import offset: expected {received}.")
+    if not data:
+        raise ValueError("Resource import chunk is empty.")
+    if received + len(data) > size:
+        raise ValueError("Resource import chunk exceeds declared size.")
+    staging = Path(str(manifest.get("staging") or ""))
+    if not staging.exists():
+        raise ValueError("Resource import staging file is missing.")
+    with staging.open("ab") as handle:
+        handle.write(data)
+    received += len(data)
+    manifest["received"] = received
+    manifest["status"] = "copying"
+    manifest["updated_at"] = now_iso()
+    write_resource_import_manifest(manifest)
+    return {
+        "import_id": manifest["import_id"],
+        "received": received,
+        "size": size,
+        "progress": received / size if size else 0,
+    }
+
+
+def finish_resource_import(payload: dict[str, Any]) -> dict[str, Any]:
+    manifest = read_resource_import_manifest(str(payload.get("import_id") or ""))
+    size = int(manifest.get("size") or 0)
+    received = int(manifest.get("received") or 0)
+    staging = Path(str(manifest.get("staging") or ""))
+    destination = validated_resource_destination(str(manifest.get("destination") or ""))
+    if received != size:
+        raise ValueError(f"Resource import is incomplete: {received} of {size} bytes received.")
+    if not staging.exists() or staging.stat().st_size != size:
+        raise ValueError("Resource import staging bytes do not match the declared size.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() or destination.is_symlink():
+        destination = unique_path(destination.parent, destination.name)
+    os.replace(staging, destination)
+    manifest["destination"] = rel_path(destination)
+    manifest["status"] = "done"
+    manifest["updated_at"] = now_iso()
+    write_resource_import_manifest(manifest)
+    resource = {
+        "path": manifest["destination"],
+        "category": str(manifest.get("category") or "ongoing_work"),
+        "alreadyImported": True,
+        "name": str(manifest.get("name") or destination.name),
+        "size": size,
+    }
+    return {
+        "import_id": manifest["import_id"],
+        "resource": resource,
+        "path": resource["path"],
+        "category": resource["category"],
+    }
+
+
+def cancel_resource_import(payload: dict[str, Any]) -> dict[str, Any]:
+    import_id = valid_resource_import_id(str(payload.get("import_id") or ""))
+    manifest_path = resource_import_manifest_path(import_id)
+    staging: Path | None = None
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            staging_value = str(manifest.get("staging") or "")
+            staging = Path(staging_value) if staging_value else None
+        except (OSError, json.JSONDecodeError):
+            staging = None
+    if staging and staging.exists():
+        staging.unlink()
+    if manifest_path.exists():
+        manifest_path.unlink()
+    return {"import_id": import_id, "cancelled": True}
+
+
+def already_imported_resource_record(item: dict[str, Any]) -> dict[str, str] | None:
+    if not (item.get("alreadyImported") or item.get("imported")):
+        return None
+    source_text = str(item.get("path", "")).strip()
+    if not source_text:
+        raise ValueError("Imported resource path is required.")
+    source = validated_resource_destination(source_text)
+    if not source.exists() and not source.is_symlink():
+        raise ValueError(f"Imported resource path does not exist: {source_text}")
+    category = str(item.get("category", "")).strip() or infer_resource_category(source)
+    if category not in UPLOAD_TARGETS:
+        category = infer_resource_category(source)
+    return {
+        "mode": "imported",
+        "category": category,
+        "source": rel_path(source),
+        "path": rel_path(source),
+        "provenance": "user_explicit",
+        "auto_detected": "true" if item.get("autoDetected") else "false",
+        "source_text": str(item.get("sourceText", "")).strip(),
+        "resolution_status": str(item.get("resolutionStatus", "")).strip(),
+    }
 
 
 def unique_resource_destination(directory: Path, source: Path) -> Path:
@@ -4038,6 +4443,10 @@ def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
             continue
         source_text = str(item.get("path", "")).strip()
         if not source_text:
+            continue
+        imported_record = already_imported_resource_record(item)
+        if imported_record:
+            saved.append(imported_record)
             continue
         source = path_exists_resolved(Path(os.path.expandvars(os.path.expanduser(source_text))))
         if not source:
@@ -4949,8 +5358,13 @@ def ensure_autoresearch_gate_for_loop() -> None:
 
 
 def research_session_snapshot() -> dict[str, Any]:
-    gate = repair_autoresearch_gate_if_needed()
-    trajectory = sync_trajectory_state("snapshot")
+    with RESEARCH_LOCK:
+        current_mode = str(RESEARCH_SESSION.get("mode", "") or "")
+        current_proc = RESEARCH_SESSION.get("process")
+        current_running = bool(current_proc and current_proc.poll() is None)
+    chat_guard_active = current_mode == "chat" and current_running
+    gate = read_autoresearch_gate() if chat_guard_active else repair_autoresearch_gate_if_needed()
+    trajectory = read_trajectory_state() if chat_guard_active else sync_trajectory_state("snapshot")
     with RESEARCH_LOCK:
         RESEARCH_SESSION["gate"] = gate
         loop_active = bool(RESEARCH_SESSION.get("loop_active"))
@@ -4958,7 +5372,8 @@ def research_session_snapshot() -> dict[str, Any]:
         loop_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
         proc = RESEARCH_SESSION.get("process")
         running = bool(proc and proc.poll() is None)
-        latest_iteration = latest_active_trial_iteration()
+        mode = str(RESEARCH_SESSION.get("mode", "") or "")
+        latest_iteration = 0 if mode == "chat" and running else latest_active_trial_iteration()
         if not running and latest_iteration > 0:
             loop_iteration = latest_iteration
             RESEARCH_SESSION["loop_iteration"] = loop_iteration
@@ -4975,7 +5390,6 @@ def research_session_snapshot() -> dict[str, Any]:
         elif loop_stop_reason == "all_reviewer_gates_passed":
             loop_stop_reason = ""
             RESEARCH_SESSION["loop_stop_reason"] = ""
-        mode = str(RESEARCH_SESSION.get("mode", "") or "")
         run_id = str(RESEARCH_SESSION.get("id", "") or "")
         started_at = str(RESEARCH_SESSION.get("started_at", "") or "")
         active_trial_iteration = 0
@@ -5058,6 +5472,7 @@ def finish_research_run(returncode: int | None) -> None:
         RESEARCH_SESSION["returncode"] = returncode
         RESEARCH_SESSION["ended_at"] = now_iso()
         RESEARCH_SESSION["process"] = None
+        RESEARCH_SESSION["process_thread"] = None
     persist_research_session()
 
 
@@ -5186,12 +5601,26 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
     except Exception as exc:  # pragma: no cover - defensive process handling
         append_research_log(f"UI session error: {exc}")
         returncode = proc.poll()
+    with RESEARCH_LOCK:
+        mode = str(RESEARCH_SESSION.get("mode") or "")
+        protected_snapshot = RESEARCH_SESSION.get("protected_snapshot")
     finish_research_run(returncode)
+    if mode == "chat":
+        restored_paths = restore_chat_protected_snapshot(protected_snapshot if isinstance(protected_snapshot, dict) else None)
+        if restored_paths:
+            append_research_log(
+                "Chat mode guard restored protected autoresearch artifacts; use Start autoresearch or `/goal` to create trials: "
+                + ", ".join(restored_paths)
+            )
+        with RESEARCH_LOCK:
+            RESEARCH_SESSION["protected_snapshot"] = None
+        persist_research_session()
     if returncode == 0:
         try:
-            validate_expected_trial_marker()
-            maybe_checkpoint_latest_trial()
-            sync_trajectory_state("run_completed")
+            if mode != "chat":
+                validate_expected_trial_marker()
+                maybe_checkpoint_latest_trial()
+                sync_trajectory_state("run_completed")
         except Exception as exc:  # pragma: no cover - checkpointing should not kill the UI loop
             append_research_log(f"Trajectory/checkpoint warning: {exc}")
     maybe_continue_autoresearch_loop(returncode)
@@ -5234,6 +5663,7 @@ def start_research_run(
             raise ValueError("A Codex run is already active.")
         previous_session_id = str(RESEARCH_SESSION.get("session_id") or "")
         command = codex_command_for_prompt(resume, settings)
+        protected_snapshot = create_chat_protected_snapshot() if mode == "chat" else None
         if mode == "goal":
             sync_trajectory_state("start_goal_run")
         previous_loop_iteration = latest_active_trial_iteration() if mode == "goal" else int(RESEARCH_SESSION.get("loop_iteration") or 0)
@@ -5278,6 +5708,7 @@ def start_research_run(
                 "loop_review_checkpoint_iteration": loop_review_checkpoint_iteration,
                 "loop_stop_reason": "" if next_loop_active else RESEARCH_SESSION.get("loop_stop_reason", ""),
                 "process": None,
+                "protected_snapshot": protected_snapshot,
             }
         )
         display_text = prompt if display_prompt is None else str(display_prompt).strip()
@@ -5317,6 +5748,8 @@ def start_research_run(
     append_research_log(f"Started: {' '.join(command)}")
     context = current_project_context()
     thread = threading.Thread(target=run_in_project, args=(context, process_research_run, proc), daemon=True)
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["process_thread"] = thread
     thread.start()
     return research_session_snapshot()
 
@@ -5397,12 +5830,22 @@ resources to use, uncertainties, and what would count as a useful result.
 When PROJECT.md is ready for human review, stop and summarize briefly."""
 
 
-def autoresearch_goal_prompt() -> str:
-    return """/goal
+def autoresearch_goal_prompt(launch_instruction: str = "") -> str:
+    instruction = str(launch_instruction or "").strip()
+    instruction_section = ""
+    if instruction:
+        instruction_section = f"""
+
+Additional user instruction for this launch:
+{instruction}
+
+Apply this launch instruction when choosing and executing the next research objective, but do not let it weaken the reviewer gate, provenance, or final-pass requirements below."""
+    return f"""/goal
 
 Start the autoresearch loop from the current PROJECT.md as the goal.
 
 This is after the user-facing framing pass. Do not rerun cold-start framing just to rewrite PROJECT.md.
+{instruction_section}
 
 Use the repository instructions:
 - read AGENTS.md
@@ -5449,6 +5892,27 @@ outdated, or if stale language such as "tentative until source-level evidence
 checks are completed" remains, keep `Status: continue`.
 
 Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message and set `Status: needs_human` instead of silently inventing a different project."""
+
+
+def chat_research_prompt(message: str = "") -> str:
+    extra = message.strip()
+    return f"""Respond in CoAutoResearch chat/framing mode. This is not an autoresearch launch.
+
+User message:
+{extra or "(No text; attached resources may have been saved by the UI.)"}
+
+Hard boundary:
+- Do not create, edit, delete, rename, or summarize as newly completed anything under `research_trajectory/trials/`.
+- Do not update `research_trajectory/STATE.md`, `research_trajectory/CURRENT_FINDINGS.md`, `research_trajectory/TRAJECTORY.json`, `research_trajectory/NEXT_TRIAL.json`, or `research_trajectory/checkpoints/`.
+- Do not create reviewer files, trial reports, manuscript gate files, or mark any trial/gate/reviewer as pass, completed, or current.
+- Do not run the autoresearch loop from this chat path. If the user asks to continue research, start autoresearch, run trials, overqualify the work, or otherwise perform the loop, tell them to use the Start autoresearch button or an explicit `/goal` command, and do not modify protected autoresearch artifacts.
+
+Allowed behavior:
+- Answer questions from current project files.
+- If explicitly asked for framing edits, update only framing-level files such as `PROJECT.md` or resource intake notes.
+- If resources were attached, acknowledge what the UI saved and say that Resource Intake or autoresearch should be launched explicitly before treating them as trial evidence.
+
+Use AGENTS.md for repository conventions, but the boundary above overrides any instruction that would start or continue a trial. Be concise in the final response."""
 
 
 def continue_research_prompt(message: str = "") -> str:
@@ -5935,7 +6399,7 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
         RESEARCH_SESSION["loop_stop_reason"] = ""
     ensure_autoresearch_gate_for_loop()
     session = start_research_run(
-        autoresearch_goal_prompt(),
+        autoresearch_goal_prompt(str(payload.get("launchInstruction", ""))[:4000]),
         "goal",
         resume=resume,
         settings_payload=payload.get("settings"),
@@ -6011,7 +6475,7 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "files": attachments,
         "session": start_research_run(
-            continue_research_prompt(message),
+            chat_research_prompt(message),
             "chat",
             resume=True,
             settings_payload=payload.get("settings"),
@@ -6432,9 +6896,24 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         self.serve_static(parsed.path)
 
     def do_POST(self) -> None:
+        parsed = urlparse(self.path)
         try:
+            if parsed.path == "/api/resource-import/chunk":
+                query = parse_qs(parsed.query)
+                import_id = query.get("import_id", [""])[0]
+                try:
+                    offset = int(query.get("offset", [""])[0])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Resource import chunk offset is required.") from exc
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                if length <= 0:
+                    raise ValueError("Resource import chunk body is empty.")
+                data = self.rfile.read(length)
+                with using_project(self.request_project_id(parsed)):
+                    result = write_resource_import_chunk(import_id, offset, data)
+                    self.send_json({"ok": True, "result": result, **result})
+                return
             payload = self.read_json()
-            parsed = urlparse(self.path)
             if parsed.path == "/api/projects":
                 if not PROJECT_REGISTRY:
                     raise ValueError("Project registry is not available.")
@@ -6483,6 +6962,18 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     })
                 return
             with using_project(self.request_project_id(parsed, payload)):
+                if parsed.path == "/api/resource-import/start":
+                    result = start_resource_import(payload)
+                    self.send_json({"ok": True, "result": result, **result})
+                    return
+                if parsed.path == "/api/resource-import/finish":
+                    result = finish_resource_import(payload)
+                    self.send_json({"ok": True, "result": result, **result})
+                    return
+                if parsed.path == "/api/resource-import/cancel":
+                    result = cancel_resource_import(payload)
+                    self.send_json({"ok": True, "result": result, **result})
+                    return
                 if parsed.path == "/api/cold-start":
                     self.send_json({"ok": True, "result": write_cold_start(payload)})
                     return

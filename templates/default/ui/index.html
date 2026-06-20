@@ -124,7 +124,7 @@
                   <div class="compact-fields brief-context-fields">
                     <label class="field">
                       <span>Target venue / audience</span>
-                      <input id="target-venue" type="text" placeholder="Nature, NeurIPS, medicine, HCI, policy memo, benchmark report, internal review..." autocomplete="off" />
+                      <input id="target-venue" type="text" placeholder="Venue: Nature, NeurIPS, CHI, ICLR, policy memo; audience optional..." autocomplete="off" />
                     </label>
                   </div>
 
@@ -132,8 +132,8 @@
                     <div class="launch-files" id="launch-files"></div>
                   </div>
 
-                  <div class="material-quick-actions" aria-label="Link or drop resources">
-                    <span class="material-actions-label">Link or drop resources</span>
+                  <div class="material-quick-actions" aria-label="Browse or drop resources">
+                    <span class="material-actions-label">Browse or drop resources</span>
                     <button class="material-action-chip" type="button" data-material-type="ongoing_work">
                       <span class="material-action-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4.1c.7 0 1.3.3 1.8.8l1.1 1.2h4A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/></svg>
@@ -186,7 +186,7 @@
 	                              <path d="M12 5v14M5 12h14" />
 	                            </svg>
 	                          </button>
-	                          <textarea id="cold-file-editor" spellcheck="false" aria-label="Research brief" placeholder="Research topic, problem, scope, and data or materials to use..."></textarea>
+	                          <textarea id="cold-file-editor" rows="1" wrap="soft" spellcheck="false" aria-label="Research brief" placeholder="Research topic, problem, scope, and data or materials to use..."></textarea>
 	                          <div class="brief-run-controls">
 	                            <label>
 	                              <span>Model</span>
@@ -476,6 +476,36 @@
       </section>
     </dialog>
 
+    <dialog class="project-dialog large-resource-import-dialog" id="large-resource-import-dialog" aria-labelledby="large-import-title">
+      <section class="project-dialog-shell">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Large file</p>
+            <h2 id="large-import-title">Copy into resources?</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-large-import-close aria-label="Close large file dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <section class="large-import-summary">
+          <div>
+            <strong id="large-import-file-name">File</strong>
+            <span id="large-import-file-size">0 B</span>
+          </div>
+          <label class="resource-category-select">
+            <span>Type</span>
+            <select id="large-import-category"></select>
+          </label>
+          <p>Destination: <code id="large-import-destination">resources/ongoing_work/</code></p>
+        </section>
+        <p class="project-dialog-note" id="large-import-note">Large browser files are copied in chunks before they can be sent.</p>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-large-import-cancel>Cancel</button>
+          <button class="primary-button" type="button" data-large-import-confirm>Copy into resources</button>
+        </footer>
+      </section>
+    </dialog>
+
     <dialog class="launch-dialog" id="launch-dialog" aria-labelledby="launch-dialog-title">
       <section class="launch-dialog-shell">
         <header class="launch-dialog-head">
@@ -525,6 +555,11 @@
           <label class="toggle-field">
             <input name="webSearch" type="checkbox" />
             <span>Live web search</span>
+          </label>
+          <label class="field wide launch-instruction-field">
+            <span>Optional launch instruction</span>
+            <textarea id="launch-instruction" name="launchInstruction" rows="2" placeholder="Extra instruction for this autoresearch run..."></textarea>
+            <small>Used only for this launch. Leave blank to run from PROJECT.md with the standard reviewer gate.</small>
           </label>
           <label class="field wide">
             <span>Advanced config</span>

@@ -39,16 +39,22 @@ let trialStripScrollLeft = 0;
 let selectedResumeTrialContext = null;
 let pendingResumeTrialConfirm = null;
 let pendingRestartAutoresearchConfirm = null;
+let activeLargeResourceImportId = "";
 let composerDraft = "";
+let targetVenueProjectId = activeProjectId || "";
 const localMessages = [];
+const openRunActivityDetails = new Set();
 let activeResourceCategory = "ongoing_work";
 const selectedResourceItems = [];
 const selectedUploadItems = [];
+const pendingResourceImports = [];
 const coldFiles = {};
 const inlineFiles = {};
 const inlineFilePayloads = {};
 const inlineFileModes = {};
 const COLD_AUTOSAVE_DELAY = 900;
+const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024;
+const LARGE_RESOURCE_CHUNK_BYTES = 8 * 1024 * 1024;
 
 const panelTitles = {
   workspace: "Project files",
@@ -90,6 +96,7 @@ const resourceCategories = {
   literature: "Papers",
   proposals: "Proposal",
   data_sources: "Data",
+  target_venue: "Target venue",
   other: "Other",
 };
 
@@ -296,7 +303,9 @@ function normalizeFramingMessage(message) {
           if (kind === "link") {
             const path = String(item.path || "").trim();
             if (!path) return null;
-            return { kind, path, name: String(item.name || basename(path)), category };
+            const normalized = { kind, path, name: String(item.name || basename(path)), category };
+            if (item.alreadyImported || item.imported) normalized.alreadyImported = true;
+            return normalized;
           }
           const name = String(item.name || "").trim();
           if (!name) return null;
@@ -552,6 +561,20 @@ function setColdSaveStatus(message, tone = "") {
 function resizeColdEditor() {
   const editor = $("#cold-file-editor");
   if (!editor) return;
+  const compactComposer = Boolean(editor.closest?.(".brief-composer-row"));
+  if (compactComposer) {
+    const minHeight = 44;
+    const maxHeight = Math.min(window.innerHeight * 0.34, 320);
+    editor.rows = 1;
+    editor.classList.remove("is-compact-single-line");
+    editor.style.height = "auto";
+    const measuredHeight = Math.max(editor.scrollHeight || minHeight, minHeight);
+    const nextHeight = Math.min(measuredHeight, maxHeight);
+    editor.style.height = `${nextHeight}px`;
+    editor.style.overflowY = measuredHeight > maxHeight ? "auto" : "hidden";
+    updateBriefDockGeometry();
+    return;
+  }
   editor.style.height = "auto";
   const maxHeight = Math.min(window.innerHeight * 0.34, 320);
   const nextHeight = Math.min(Math.max(editor.scrollHeight, 54), maxHeight);
@@ -578,8 +601,11 @@ function scopedStorageKey(key) {
   return `coAutoResearch:${activeProjectId || "default"}:${key}`;
 }
 
-function scopedGet(key, fallback = "") {
-  return localStorage.getItem(scopedStorageKey(key)) ?? localStorage.getItem(key) ?? fallback;
+function scopedGet(key, fallback = "", options = {}) {
+  const scoped = localStorage.getItem(scopedStorageKey(key));
+  if (scoped !== null) return scoped;
+  if (options.legacyFallback === false) return fallback;
+  return localStorage.getItem(key) ?? fallback;
 }
 
 function scopedSet(key, value) {
@@ -588,6 +614,59 @@ function scopedSet(key, value) {
 
 function scopedRemove(key) {
   localStorage.removeItem(scopedStorageKey(key));
+}
+
+function scopedJsonGet(key, fallback = {}) {
+  try {
+    const raw = scopedGet(key, "", { legacyFallback: false });
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function scopedSessionSettings() {
+  const settings = scopedJsonGet("autoResearchSessionSettings", {});
+  return settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+}
+
+function mergedProjectSessionSettings(base = {}) {
+  return normalizeSessionSettings({ ...defaultSessionSettings, ...(base || {}), ...scopedSessionSettings() });
+}
+
+function storedComposerDraft() {
+  return scopedGet("autoResearchComposerDraft", "", { legacyFallback: false });
+}
+
+function persistComposerDraft(value = "") {
+  const text = String(value ?? "");
+  composerDraft = text;
+  if (text) scopedSet("autoResearchComposerDraft", text);
+  else scopedRemove("autoResearchComposerDraft");
+}
+
+function clearComposerDraft() {
+  persistComposerDraft("");
+}
+
+function hydrateTargetVenueField(options = {}) {
+  const input = $("#target-venue");
+  if (!input) return "";
+  const projectId = String(activeProjectId || appState?.active_project_id || "");
+  const projectChanged = projectId !== targetVenueProjectId;
+  if (projectChanged) {
+    targetVenueProjectId = projectId;
+  }
+  const stored = scopedGet("autoResearchTargetVenue", "", { legacyFallback: false });
+  if (options.force || projectChanged) {
+    input.value = stored || "";
+    localStorage.removeItem("autoResearchTargetVenue");
+    return input.value;
+  }
+  if (stored && !String(input.value || "").trim() && document.activeElement !== input) {
+    input.value = stored;
+  }
+  return input.value;
 }
 
 function normalizeThemeMode(value) {
@@ -622,6 +701,20 @@ function apiPath(path) {
 async function api(path, options = {}) {
   const response = await fetch(apiPath(path), {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `Request failed: ${response.status}`);
+  }
+  return payload;
+}
+
+async function apiBinary(path, body, options = {}) {
+  const response = await fetch(apiPath(path), {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", ...(options.headers || {}) },
+    body,
     ...options,
   });
   const payload = await response.json();
@@ -708,6 +801,7 @@ function renderProjectAvailability() {
     button.disabled = noProject;
     button.setAttribute("aria-disabled", noProject ? "true" : "false");
   });
+  updateResourceImportActionState();
   if (!noProject) return;
   const editor = $("#cold-file-editor");
   if (editor) {
@@ -820,15 +914,23 @@ function resetProjectClientState() {
   pendingFramingUserMessageId = "";
   framingPendingSince = 0;
   selectedTrialIndex = 0;
+  targetVenueProjectId = activeProjectId || "";
+  composerDraft = "";
+  openRunActivityDetails.clear();
   localMessages.splice(0);
   selectedResourceItems.splice(0);
   selectedUploadItems.splice(0);
+  pendingResourceImports.splice(0);
   sentFramingResourceItems.splice(0);
   sentFramingUploadItems.splice(0);
   clearObject(coldFiles);
   clearObject(inlineFiles);
   clearObject(inlineFilePayloads);
   clearObject(inlineFileModes);
+  const coldEditor = $("#cold-file-editor");
+  if (coldEditor) coldEditor.value = "";
+  const targetVenue = $("#target-venue");
+  if (targetVenue) targetVenue.value = "";
 }
 
 async function switchProject(projectId) {
@@ -837,9 +939,10 @@ async function switchProject(projectId) {
   activeProjectId = next;
   localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
   resetProjectClientState();
-  $("#target-venue").value = scopedGet("autoResearchTargetVenue", "");
+  hydrateTargetVenueField({ force: true });
   restoreSessionSettings();
   restoreResourceSelections();
+  restorePendingResourceImports();
   await loadUiSettings();
   await loadOverview(true);
 }
@@ -1048,7 +1151,7 @@ async function deleteProjectFromDialog(event) {
       renderProjectAvailability();
       maybeOpenInitialProjectDialog();
     }
-    showToast("Project deleted.");
+    showToast(payload.stopped_active_run ? "Stopped active run and deleted project." : "Project deleted.");
   } catch (error) {
     const note = $("#project-delete-note");
     if (note) {
@@ -1090,7 +1193,7 @@ async function createProjectFromDialog(event) {
     };
     closeProjectCreateDialog();
     renderProjectList();
-    $("#target-venue").value = scopedGet("autoResearchTargetVenue", "");
+    hydrateTargetVenueField({ force: true });
     restoreSessionSettings();
     restoreResourceSelections();
     await loadUiSettings();
@@ -1123,6 +1226,9 @@ async function loadOverview(silent = false) {
     if (appState.active_project_id && appState.active_project_id !== activeProjectId) {
       activeProjectId = appState.active_project_id;
       localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+      resetProjectClientState();
+      restoreResourceSelections();
+      restorePendingResourceImports();
     }
     const session = appState.research_session || {};
     if (framingDraftPending && session.mode === "framing" && !["running", "stopping"].includes(session.status)) {
@@ -1132,6 +1238,7 @@ async function loadOverview(silent = false) {
     $("#sync-state").textContent = `Synced ${new Date(appState.generated_at).toLocaleTimeString()}`;
     renderProjectList();
     renderRailVisibility();
+    hydrateTargetVenueField();
     hydrateColdStartFiles();
     restoreFramingMessages();
     restorePrepareSaved();
@@ -1422,6 +1529,29 @@ function activeRunScopeLabel() {
   return "Current run";
 }
 
+function activeRunActivityDetailsKey() {
+  const run = activeRun();
+  const session = sessionState();
+  return [
+    "current",
+    activeProjectId || appState?.active_project_id || "",
+    String(run.run_id || session.run_id || session.id || session.session_id || ""),
+    String(run.started_at || session.started_at || ""),
+    String(run.trial_iteration || ""),
+  ].join(":");
+}
+
+function runActivityOpenAttribute(key) {
+  return openRunActivityDetails.has(key) ? " open" : "";
+}
+
+function rememberRunActivityDetailsState(details) {
+  const key = details?.dataset?.runActivityDetails || "";
+  if (!key) return;
+  if (details.open) openRunActivityDetails.add(key);
+  else openRunActivityDetails.delete(key);
+}
+
 function canPauseActiveRunAfterCurrentTurn() {
   return isAutoresearchActiveRun();
 }
@@ -1517,7 +1647,7 @@ function hasProjectDraftReady() {
 }
 
 function projectDraftFromBrief() {
-  const targetVenue = String($("#target-venue")?.value || scopedGet("autoResearchTargetVenue", "") || "").trim();
+  const targetVenue = String($("#target-venue")?.value || "").trim();
   return buildProjectDraft(currentBriefText(), targetVenue);
 }
 
@@ -1990,23 +2120,18 @@ function updateLatestProjectDraftMessage(text) {
   setHiddenProjectDraft(draft);
 }
 
-function latestAssistantTextMessage(messages = localMessages) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role === "assistant" && message.kind !== "project" && String(message.text || "").trim()) return message;
-  }
-  return null;
-}
-
-function canLaunchAutoresearchFromAssistant(message) {
-  const latest = latestAssistantTextMessage();
-  return Boolean(
-    message?.id &&
-    latest?.id === message.id &&
-    hasProjectDraftReady() &&
-    !hasGoalStarted() &&
-    !isSessionRunning()
-  );
+function cacheProjectDraftInlinePayload(draft) {
+  const text = String(draft || "");
+  inlineFiles["PROJECT.md"] = text;
+  inlineFilePayloads["PROJECT.md"] = {
+    exists: true,
+    is_dir: false,
+    path: "PROJECT.md",
+    text,
+    kind: "markdown",
+    mime: "text/markdown",
+    editable: false,
+  };
 }
 
 function framingControlMessageHtml(message) {
@@ -2049,11 +2174,13 @@ function framingMessageHtml(message) {
       </article>
     `;
   }
-  const actions = role === "user" && !message.resumeFromTrial
-    ? `<div class="framing-actions"><button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button></div>`
-    : canLaunchAutoresearchFromAssistant(message)
-      ? `<div class="framing-actions"><button class="primary-button small-button" type="button" data-project-launch>Start autoresearch</button></div>`
-      : "";
+  const actionItems = [
+    messageCopyButton(message.text, `Copy ${role === "user" ? "your" : "CoAutoResearch"} message`),
+    role === "user" && !message.resumeFromTrial
+      ? `<button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button>`
+      : "",
+  ].filter(Boolean);
+  const actions = actionItems.length ? `<div class="framing-actions message-action-row">${actionItems.join("")}</div>` : "";
   return `
     <article class="framing-message ${role}" data-framing-id="${escapeHtml(message.id)}">
       <div class="transcript-meta">${title}</div>
@@ -2200,8 +2327,9 @@ function framingProgressDetailsHtml() {
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
     : "Waiting for Codex events...";
   const runControls = runControlButtonsHtml();
+  const activityKey = activeRunActivityDetailsKey();
   return `
-    <details class="framing-progress-details">
+    <details class="framing-progress-details" data-run-activity-details="${escapeHtml(activityKey)}"${runActivityOpenAttribute(activityKey)}>
       <summary>
         <span>Current run activity</span>
         <span class="current-run-summary">
@@ -2222,6 +2350,7 @@ function projectDraftCardHtml(message) {
   const isLatest = latest && latest.id === message.id;
   const canStartGoal = isLatest && !hasGoalStarted();
   const draft = String(message?.artifact?.text || currentProjectDraft());
+  cacheProjectDraftInlinePayload(draft);
   const body = projectDraftEditMode && isLatest
     ? `
       <textarea class="project-inline-editor" data-project-inline-editor spellcheck="false">${escapeHtml(draft)}</textarea>
@@ -2233,6 +2362,7 @@ function projectDraftCardHtml(message) {
     : `
       <div class="project-rendered markdown-preview">${markdownToHtml(draft)}</div>
       <div class="project-card-actions" ${isLatest ? "" : "hidden"}>
+        ${messageCopyButton(draft, "Copy PROJECT.md draft", "PROJECT.md draft copied.")}
         <button class="secondary-button small-button" type="button" data-project-edit> Edit Markdown</button>
         ${canStartGoal ? '<button class="primary-button small-button" type="button" data-project-launch>Start autoresearch</button>' : ""}
       </div>
@@ -2246,6 +2376,7 @@ function projectDraftCardHtml(message) {
             <strong>Project framing draft</strong>
             <span>${isLatest ? "Review the scope before launching autoresearch." : "Earlier draft kept in the conversation history."}</span>
           </div>
+          ${fullscreenButtonHtml("PROJECT.md")}
         </div>
         ${body}
       </div>
@@ -2505,13 +2636,7 @@ function applySessionSettings(settings, persist = false) {
 }
 
 function restoreSessionSettings() {
-  let settings = { ...defaultSessionSettings };
-  try {
-    settings = { ...settings, ...JSON.parse(scopedGet("autoResearchSessionSettings", "{}") || "{}") };
-  } catch {
-    settings = { ...defaultSessionSettings };
-  }
-  applySessionSettings(settings);
+  applySessionSettings(mergedProjectSessionSettings(uiSettings?.codex || defaultSessionSettings));
 }
 
 function settingsLabel(settings) {
@@ -2606,7 +2731,7 @@ async function loadUiSettings() {
     uiSettings = payload.settings || {};
     settingsSecretKeys = payload.secret_keys || Object.keys(secretKeyLabels);
     hydrateSettingsDialog(uiSettings);
-    applySessionSettings(uiSettings.codex || defaultSessionSettings, true);
+    restoreSessionSettings();
   } catch (error) {
     showToast(error.message, true);
   }
@@ -2714,9 +2839,12 @@ function renderStage() {
     const draft = currentProjectDraft();
     const locked = !prepareSaved && (!draft.trim() || isPlaceholderProject(draft));
     const gatePassed = sessionState()?.gate?.status === "pass";
-    launchButton.disabled = locked || isSessionRunning() || gatePassed;
+    const resourceBlocked = hasBlockingResourceImports();
+    launchButton.disabled = locked || isSessionRunning() || gatePassed || resourceBlocked;
     launchButton.textContent = gatePassed ? "Reviewer gates passed" : launched ? "Continue autoresearch" : "Start autoresearch";
-    launchButton.title = gatePassed
+    launchButton.title = resourceBlocked
+      ? blockingResourceImportMessage()
+      : gatePassed
       ? "All reviewer gates have passed."
       : locked
         ? "Finish PROJECT.md before starting autoresearch."
@@ -2759,9 +2887,10 @@ function renderChatState() {
   const textarea = $("#chat-form textarea");
   const send = $("#chat-form .send-button");
   const cont = $("#continue-research");
+  const resourceBlocked = hasBlockingResourceImports();
   textarea.disabled = !canMessage();
-  send.disabled = !canMessage();
-  cont.disabled = !canMessage();
+  send.disabled = !canMessage() || resourceBlocked;
+  cont.disabled = !canMessage() || resourceBlocked;
   textarea.placeholder = canMessage() ? "Message the current Codex session..." : "Run cold start before messaging...";
   renderComposerSuggestions();
   renderChatSummary();
@@ -2792,15 +2921,17 @@ function renderColdStartEditor() {
   const currentEditorValue = String(editor.value || "");
   const sessionComposerMode = hasProjectDraftReady() || hasLaunched() || hasFramingThread;
   if (sessionComposerMode && document.activeElement === editor) {
-    composerDraft = currentEditorValue;
+    persistComposerDraft(currentEditorValue);
   }
+  const savedComposerDraft = composerDraft || storedComposerDraft();
   const nextEditorValue = sessionComposerMode
-    ? (currentEditorValue || composerDraft || "")
-    : coldFiles[activeColdPath] ?? "";
+    ? (currentEditorValue || savedComposerDraft || "")
+    : (savedComposerDraft || coldFiles[activeColdPath] || "");
   editor.placeholder = coldComposerPlaceholder(hasFramingThread);
   if (document.activeElement !== editor && editor.value !== nextEditorValue) {
     editor.value = nextEditorValue;
   }
+  composerDraft = String(editor.value || nextEditorValue || "");
   resizeColdEditor();
   setColdSaveStatus(coldDirty ? "Unsaved changes" : "Autosaved", coldDirty ? "pending" : "saved");
   renderColdPreview();
@@ -3256,11 +3387,12 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
 }
 
 function latestTrialProgressEntry(entries) {
-  return [...(entries || [])].reverse().find((entry) => {
+  const candidates = [...(entries || [])].reverse().filter((entry) => {
     const role = transcriptRole(entry);
     const rawType = String(entry?.raw_type || "").toLowerCase();
     return role !== "user" && rawType !== "turn.completed" && String(entry?.content || "").trim();
   });
+  return candidates.find((entry) => ["Error", "Done", "Update", "File change"].includes(framingProgressTitle(entry))) || candidates[0] || null;
 }
 
 function runningTrialStatusHtml(trial) {
@@ -3338,8 +3470,8 @@ function iterationNavHtml(trials, activeTrial) {
             const summary = report ? cleanText(report.report_summary, title) : title;
             return `
               <button class="trial-chip ${active ? "is-active" : ""} ${running ? "is-running" : ""}" type="button" data-trial-select="${escapeHtml(iteration)}" title="${escapeHtml(compactText(summary, 180))}">
-                <strong>${escapeHtml(iteration)}</strong>
-                <span>${escapeHtml(label)}</span>
+                <strong class="trial-chip-index">${escapeHtml(iteration)}</strong>
+                <span class="trial-chip-status">${escapeHtml(label)}</span>
               </button>
             `;
           })
@@ -3423,8 +3555,13 @@ function workedDurationLabel(userEntry, entries) {
 function inlineRunActivityHtml(userEntry, entries) {
   if (!entries.length) return "";
   const label = workedDurationLabel(userEntry, entries);
+  const activityKey = [
+    "inline",
+    activeProjectId || appState?.active_project_id || "",
+    String(userEntry?.id || entryTimeValue(userEntry) || ""),
+  ].join(":");
   return `
-    <details class="framing-run-activity">
+    <details class="framing-run-activity" data-run-activity-details="${escapeHtml(activityKey)}"${runActivityOpenAttribute(activityKey)}>
       <summary aria-label="${escapeHtml(`${label}, ${entries.length} event${entries.length === 1 ? "" : "s"}`)}">
         <span>${escapeHtml(label)}</span>
       </summary>
@@ -3699,17 +3836,18 @@ function transcriptEntryHtml(entry) {
       </article>
     `;
   }
+  const actionItems = [
+    messageCopyButton(content, `Copy ${role === "user" ? "your" : "transcript"} message`),
+    editable ? `<button class="text-button" type="button" data-transcript-edit="${escapeHtml(id)}">Edit</button>` : "",
+  ].filter(Boolean);
+  const actions = actionItems.length ? `<div class="transcript-actions message-action-row">${actionItems.join("")}</div>` : "";
   return `
     <article class="transcript-message ${role}" data-transcript-id="${escapeHtml(id)}">
       <div class="transcript-meta">${escapeHtml(meta || transcriptTitle(entry))}</div>
       <div class="transcript-body">
         ${transcriptContentHtml(content, { markdown: role === "assistant" || role === "final" })}
       </div>
-      ${
-        editable
-          ? `<div class="transcript-actions"><button class="text-button" type="button" data-transcript-edit="${escapeHtml(id)}">Edit</button></div>`
-          : ""
-      }
+      ${actions}
     </article>
   `;
 }
@@ -3777,6 +3915,25 @@ function copyButton(text, label = "Copy", message = "Copied.") {
   return `<button class="secondary-button small-button" type="button" data-copy-text="${escapeHtml(encodeURIComponent(value))}" data-copy-label="${escapeHtml(message)}">${escapeHtml(label)}</button>`;
 }
 
+function copyIconSvg() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path>
+    </svg>
+  `;
+}
+
+function messageCopyButton(text, label = "Copy message", message = "Message copied.") {
+  const value = String(text || "").trim();
+  if (!value) return "";
+  return `
+    <button class="message-copy-button" type="button" data-copy-text="${escapeHtml(encodeURIComponent(value))}" data-copy-label="${escapeHtml(message)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+      ${copyIconSvg()}
+    </button>
+  `;
+}
+
 function inlineOpenButton(path, label = "Open source") {
   const value = repoRelativePath(path);
   if (!value || value.includes("*")) return "";
@@ -3786,7 +3943,8 @@ function inlineOpenButton(path, label = "Open source") {
 function renderTree(node, depth = 0) {
   if (!node) return empty("No files here yet.");
   if (node.type === "file") {
-    const fileMeta = node.is_symlink ? `${node.path} · linked` : node.path;
+    const filePath = repoRelativePath(node.path || node.name);
+    const fileMeta = node.is_symlink ? `${filePath} · linked` : filePath;
     if (!node.previewable) {
       return `
         <div class="tree-file is-disabled">
@@ -3796,12 +3954,12 @@ function renderTree(node, depth = 0) {
       `;
     }
     return `
-      <details class="tree-file-node" data-file-details="${escapeHtml(node.path)}">
+      <details class="tree-file-node" data-file-details="${escapeHtml(filePath)}">
         <summary>
           <span>${escapeHtml(node.name)}</span>
           <small>${escapeHtml(fileMeta)}</small>
         </summary>
-        <div class="inline-file" data-inline-file="${escapeHtml(node.path)}">
+        <div class="inline-file" data-inline-file="${escapeHtml(filePath)}">
           <div class="tree-empty">Open to load file.</div>
         </div>
       </details>
@@ -4474,10 +4632,10 @@ function renderContext() {
 }
 
 function normalizeResourceItem(value) {
-  if (typeof value === "string") return { path: value, category: "ongoing_work" };
+  if (typeof value === "string") return { path: value, category: "ongoing_work", alreadyImported: false };
   const path = String(value?.path || "").trim();
   const category = resourceCategories[value?.category] ? value.category : inferClientResourceCategory(path);
-  return { path, category };
+  return { path, category, alreadyImported: Boolean(value?.alreadyImported || value?.imported) };
 }
 
 function inferClientResourceCategory(path) {
@@ -4505,7 +4663,7 @@ function restoreResourceSelections() {
       values
         .map(normalizeResourceItem)
         .filter((item) => item.path)
-        .forEach((item) => addResourcePath(item.path, { category: item.category, persist: false, notify: false }));
+        .forEach((item) => addResourcePath(item.path, { category: item.category, alreadyImported: item.alreadyImported, persist: false, notify: false }));
     }
   } catch {
     selectedResourceItems.splice(0);
@@ -4535,7 +4693,7 @@ function renderSelectedResources() {
                     .join("")}
                 </select>
               </label>
-              <button class="icon-button" type="button" data-resource-remove="${escapeHtml(item.path)}" aria-label="Remove ${escapeHtml(basename(item.path))}">Remove</button>
+              <button class="resource-remove-button" type="button" data-resource-remove="${escapeHtml(item.path)}" aria-label="Remove ${escapeHtml(basename(item.path))}">Remove</button>
             </div>
           `
         )
@@ -4556,7 +4714,7 @@ function renderSelectedResources() {
                     .join("")}
                 </select>
               </label>
-              <button class="icon-button" type="button" data-upload-remove="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.name)}">Remove</button>
+              <button class="resource-remove-button" type="button" data-upload-remove="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.name)}">Remove</button>
             </div>
           `
         )
@@ -4568,13 +4726,13 @@ function renderSelectedResources() {
 }
 
 function addResourcePath(path, options = {}) {
-  const { category = activeResourceCategory, persist = true, notify = true } = options;
+  const { category = activeResourceCategory, alreadyImported = false, persist = true, notify = true } = options;
   const value = String(path || "").trim();
   if (!value || selectedResourceItems.some((item) => item.path === value)) {
     renderSelectedResources();
     return;
   }
-  selectedResourceItems.push({ path: value, category: resourceCategories[category] ? category : inferClientResourceCategory(value) });
+  selectedResourceItems.push({ path: value, category: resourceCategories[category] ? category : inferClientResourceCategory(value), alreadyImported: Boolean(alreadyImported) });
   if (persist) saveResourceSelections();
   renderSelectedResources();
   if (notify) showToast(`${resourceLabel(category)} selected for launch.`);
@@ -4593,6 +4751,162 @@ function formatBytes(value) {
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
 }
 
+function resourceImportDestination(category) {
+  const targets = {
+    user_input: "resources/user_input/attachments/",
+    ongoing_work: "resources/ongoing_work/",
+    literature: "resources/literature/",
+    proposals: "resources/proposals/",
+    data_sources: "resources/data_sources/",
+    target_venue: "resources/target_venue/",
+    other: "resources/other/",
+  };
+  return targets[category] || targets.ongoing_work;
+}
+
+function activeResourceImportRecords() {
+  return pendingResourceImports.filter((item) => !["done", "cancelled"].includes(item.status));
+}
+
+function hasBlockingResourceImports() {
+  return activeResourceImportRecords().length > 0;
+}
+
+function blockingResourceImportMessage() {
+  const active = activeResourceImportRecords();
+  if (!active.length) return "";
+  if (active.some((item) => item.status === "copying" || item.status === "finalizing")) {
+    return "Wait for resource copy to finish before continuing.";
+  }
+  if (active.some((item) => item.status === "failed")) {
+    return "Resolve failed resource copies before continuing.";
+  }
+  return "Confirm or cancel pending resource copies before continuing.";
+}
+
+function ensureResourceImportsReady() {
+  if (!hasBlockingResourceImports()) return true;
+  showToast(blockingResourceImportMessage(), true);
+  renderAttachmentTrays();
+  return false;
+}
+
+function savePendingResourceImports() {
+  const serializable = activeResourceImportRecords().map((item) => ({
+    id: item.id,
+    importId: item.importId || "",
+    name: item.name,
+    type: item.type || "",
+    size: item.size || 0,
+    lastModified: item.lastModified || 0,
+    category: item.category || "ongoing_work",
+    destination: item.destination || resourceImportDestination(item.category),
+    status: item.status,
+    progress: Number(item.progress || 0),
+    received: Number(item.received || 0),
+    error: item.error || "",
+  }));
+  if (serializable.length) scopedSet("autoResearchResourceImports", JSON.stringify(serializable));
+  else scopedRemove("autoResearchResourceImports");
+}
+
+function restorePendingResourceImports() {
+  pendingResourceImports.splice(0);
+  try {
+    const values = JSON.parse(scopedGet("autoResearchResourceImports", "[]", { legacyFallback: false }) || "[]");
+    if (Array.isArray(values)) {
+      values.forEach((item) => {
+        if (!item || ["done", "cancelled"].includes(item.status)) return;
+        pendingResourceImports.push({
+          id: String(item.id || `${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          importId: String(item.importId || ""),
+          name: String(item.name || "large-resource"),
+          type: String(item.type || ""),
+          size: Number(item.size || 0),
+          lastModified: Number(item.lastModified || 0),
+          category: resourceCategories[item.category] ? item.category : "ongoing_work",
+          destination: String(item.destination || resourceImportDestination(item.category)),
+          status: "failed",
+          progress: Number(item.progress || 0),
+          received: Number(item.received || 0),
+          stale: true,
+          error: item.error || "Page refreshed before this copy completed. Cancel it and attach the file again.",
+        });
+      });
+    }
+  } catch {
+    pendingResourceImports.splice(0);
+  }
+  savePendingResourceImports();
+  renderAttachmentTrays();
+}
+
+function updateResourceImportActionState() {
+  const blocked = hasBlockingResourceImports();
+  const message = blockingResourceImportMessage();
+  ["#prepare-cold-start", "#open-launch-dialog", "#open-launch-dialog-inline", "#launch-autoresearch"].forEach((selector) => {
+    const button = $(selector);
+    if (!button) return;
+    if (blocked) {
+      button.disabled = true;
+      button.dataset.resourceImportBlocked = "true";
+      button.title = message;
+    } else if (button.dataset.resourceImportBlocked === "true") {
+      delete button.dataset.resourceImportBlocked;
+      button.removeAttribute("title");
+    }
+  });
+  const send = $("#chat-form .send-button");
+  const cont = $("#continue-research");
+  if (blocked) {
+    if (send) send.disabled = true;
+    if (cont) cont.disabled = true;
+  }
+}
+
+function resourceImportProgressPercent(item) {
+  const size = Number(item.size || 0);
+  const progress = Number(item.progress || 0);
+  if (Number.isFinite(progress) && progress > 0) return Math.max(0, Math.min(100, progress * 100));
+  if (!size) return 0;
+  return Math.max(0, Math.min(100, (Number(item.received || 0) / size) * 100));
+}
+
+function resourceImportStatusText(item) {
+  if (item.status === "pending_confirm") return `${resourceLabel(item.category)} · needs confirmation · ${formatBytes(item.size)}`;
+  if (item.status === "copying") return `${resourceLabel(item.category)} · copying ${Math.round(resourceImportProgressPercent(item))}%`;
+  if (item.status === "finalizing") return `${resourceLabel(item.category)} · finalizing`;
+  if (item.status === "failed") return item.error || "Copy failed.";
+  return `${resourceLabel(item.category)} · ${formatBytes(item.size)}`;
+}
+
+function resourceImportToChip(item) {
+  const percent = resourceImportProgressPercent(item);
+  const canRetry = item.status === "failed" && item.file && !item.stale;
+  const copyAction = item.status === "pending_confirm"
+    ? `<button class="attachment-action-button" type="button" data-resource-import-open="${escapeHtml(item.id)}">Copy</button>`
+    : "";
+  const retryAction = canRetry
+    ? `<button class="attachment-action-button" type="button" data-resource-import-retry="${escapeHtml(item.id)}">Retry</button>`
+    : "";
+  const showProgress = item.status === "copying" || item.status === "finalizing";
+  return `
+    <div class="attachment-chip resource-import-chip is-${escapeHtml(item.status)}">
+      <span class="attachment-icon">${escapeHtml(shortFileType(item.name, item.type))}</span>
+      <span class="attachment-copy">
+        <strong>${escapeHtml(item.name)}</strong>
+        <small>${escapeHtml(resourceImportStatusText(item))}</small>
+        ${showProgress ? `<span class="attachment-progress" aria-hidden="true"><span style="width: ${percent}%"></span></span>` : ""}
+      </span>
+      <span class="attachment-chip-actions">
+        ${copyAction}
+        ${retryAction}
+        <button type="button" data-resource-import-cancel="${escapeHtml(item.id)}" aria-label="Cancel ${escapeHtml(item.name)}">×</button>
+      </span>
+    </div>
+  `;
+}
+
 function uploadToChip(item, index) {
   return `
     <div class="attachment-chip">
@@ -4607,12 +4921,13 @@ function uploadToChip(item, index) {
 }
 
 function linkToChip(item) {
+  const mode = item.alreadyImported ? "copied" : "linked";
   return `
     <div class="attachment-chip">
       <span class="attachment-icon">${escapeHtml(shortFileType(item.path))}</span>
       <span class="attachment-copy">
         <strong>${escapeHtml(basename(item.path))}</strong>
-        <small>${escapeHtml(resourceLabel(item.category))} · linked</small>
+        <small>${escapeHtml(resourceLabel(item.category))} · ${escapeHtml(mode)}</small>
       </span>
       <button type="button" data-resource-remove="${escapeHtml(item.path)}" aria-label="Remove ${escapeHtml(basename(item.path))}">×</button>
     </div>
@@ -4687,7 +5002,7 @@ function messageResumeContextHtml(message) {
 function messageAttachmentChip(item) {
   const isLink = item.kind === "link";
   const name = isLink ? basename(item.path) : item.name;
-  const label = `${resourceLabel(item.category)} · ${isLink ? "linked" : "upload"}`;
+  const label = `${resourceLabel(item.category)} · ${isLink ? item.alreadyImported ? "copied" : "linked" : "upload"}`;
   return `
     <div class="message-attachment-chip">
       <span class="attachment-icon">${escapeHtml(shortFileType(name, item.type))}</span>
@@ -4710,6 +5025,7 @@ function renderAttachmentTrays() {
     resumeContextChipHtml(selectedResumeTrialContext),
     ...selectedResourceItems.map(linkToChip),
     ...selectedUploadItems.map(uploadToChip),
+    ...activeResourceImportRecords().map(resourceImportToChip),
   ].filter(Boolean).join("");
   ["#brief-attachment-tray", "#chat-attachment-tray"].forEach((selector) => {
     const tray = $(selector);
@@ -4717,30 +5033,265 @@ function renderAttachmentTrays() {
     tray.innerHTML = html;
     tray.hidden = !html;
   });
+  requestAnimationFrame(() => {
+    updateBriefDockGeometry();
+    updateFramingScrollButton();
+  });
+  updateResourceImportActionState();
+}
+
+function uploadTooLargeMessage(name, size) {
+  return `${name} is ${formatBytes(size)}. Copy it into project resources before sending.`;
+}
+
+function queueLargeResourceImport(file, options = {}) {
+  const fallbackExt = fileExtensionFromMime(file.type, extension(file.name) || ".bin");
+  const generatedName = `large_resource_${new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)}${fallbackExt || ".bin"}`;
+  const name = file.name || generatedName;
+  const size = Number(file.size || 0);
+  const category = resourceCategories[options.category] ? options.category : activeResourceCategory || "ongoing_work";
+  const duplicate = pendingResourceImports.some((item) => (
+    !["done", "cancelled"].includes(item.status) &&
+    item.name === name &&
+    item.size === size &&
+    item.lastModified === (file.lastModified || 0)
+  ));
+  if (duplicate) {
+    renderAttachmentTrays();
+    return { accepted: false, error: false, pendingImport: true, message: `${name} is already pending copy.` };
+  }
+  const record = {
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    file,
+    name,
+    type: file.type || "",
+    size,
+    lastModified: file.lastModified || 0,
+    category,
+    destination: resourceImportDestination(category),
+    status: "pending_confirm",
+    progress: 0,
+    received: 0,
+    importId: "",
+    error: "",
+    stale: false,
+  };
+  pendingResourceImports.push(record);
+  savePendingResourceImports();
+  renderAttachmentTrays();
+  openLargeResourceImportDialog(record.id);
+  return { accepted: false, error: false, pendingImport: true, message: uploadTooLargeMessage(name, size) };
+}
+
+function largeResourceImportById(id) {
+  return pendingResourceImports.find((item) => item.id === id) || null;
+}
+
+function renderLargeResourceImportDialog(record) {
+  const title = $("#large-import-title");
+  const fileName = $("#large-import-file-name");
+  const fileSize = $("#large-import-file-size");
+  const category = $("#large-import-category");
+  const destination = $("#large-import-destination");
+  const note = $("#large-import-note");
+  if (title) title.textContent = "Copy into resources?";
+  if (fileName) fileName.textContent = record?.name || "";
+  if (fileSize) fileSize.textContent = formatBytes(record?.size || 0);
+  if (category) {
+    category.innerHTML = Object.entries(resourceCategories)
+      .map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === record?.category ? "selected" : ""}>${escapeHtml(label)}</option>`)
+      .join("");
+    category.value = record?.category || "ongoing_work";
+  }
+  if (destination) destination.textContent = resourceImportDestination(record?.category || "ongoing_work");
+  if (note) note.textContent = "Large browser files are copied in chunks. Sending is blocked until the copy finishes or is cancelled.";
+}
+
+function openLargeResourceImportDialog(id) {
+  const record = largeResourceImportById(id);
+  if (!record || record.status !== "pending_confirm") return;
+  const dialog = $("#large-resource-import-dialog");
+  if (!dialog) {
+    showToast(uploadTooLargeMessage(record.name, record.size), true);
+    return;
+  }
+  activeLargeResourceImportId = id;
+  renderLargeResourceImportDialog(record);
+  if (dialog.showModal && !dialog.open) dialog.showModal();
+  else dialog.setAttribute("open", "");
+}
+
+function closeLargeResourceImportDialog() {
+  const dialog = $("#large-resource-import-dialog");
+  activeLargeResourceImportId = "";
+  if (!dialog) return;
+  if (dialog.close) dialog.close();
+  else dialog.removeAttribute("open");
+}
+
+function removeResourceImportRecord(id) {
+  const index = pendingResourceImports.findIndex((item) => item.id === id);
+  if (index >= 0) pendingResourceImports.splice(index, 1);
+  savePendingResourceImports();
+  renderAttachmentTrays();
+}
+
+async function cancelLargeResourceImport(id, options = {}) {
+  const record = largeResourceImportById(id);
+  if (!record) return;
+  record.cancelRequested = true;
+  if (record.controller) record.controller.abort();
+  if (record.importId) {
+    try {
+      await api("/api/resource-import/cancel", {
+        method: "POST",
+        body: JSON.stringify({ import_id: record.importId }),
+      });
+    } catch (error) {
+      if (!options.silent) showToast(error.message, true);
+    }
+  }
+  record.status = "cancelled";
+  removeResourceImportRecord(id);
+  if (activeLargeResourceImportId === id) closeLargeResourceImportDialog();
+  if (!options.silent) showToast(`${record.name} copy cancelled.`);
+  renderChatState();
+  renderStage();
+  renderProjectAvailability();
+}
+
+async function confirmLargeResourceImport(id, categoryOverride = "") {
+  const record = largeResourceImportById(id);
+  if (!record) return;
+  if (categoryOverride && resourceCategories[categoryOverride]) {
+    record.category = categoryOverride;
+    record.destination = resourceImportDestination(categoryOverride);
+  }
+  if (!record.file || typeof record.file.slice !== "function") {
+    record.status = "failed";
+    record.error = "The browser no longer has access to this File. Cancel it and attach the file again.";
+    record.stale = true;
+    savePendingResourceImports();
+    renderAttachmentTrays();
+    return;
+  }
+  if (record.importId && record.status === "failed") {
+    try {
+      await api("/api/resource-import/cancel", {
+        method: "POST",
+        body: JSON.stringify({ import_id: record.importId }),
+      });
+    } catch {
+      // Best-effort cleanup before retrying with a fresh staging file.
+    }
+    record.importId = "";
+  }
+  record.status = "copying";
+  record.error = "";
+  record.progress = 0;
+  record.received = 0;
+  record.cancelRequested = false;
+  record.controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  savePendingResourceImports();
+  renderAttachmentTrays();
+  closeLargeResourceImportDialog();
+  try {
+    const start = await api("/api/resource-import/start", {
+      method: "POST",
+      body: JSON.stringify({
+        name: record.name,
+        size: record.size,
+        type: record.type,
+        category: record.category,
+      }),
+    });
+    record.importId = start.import_id || start.result?.import_id || "";
+    record.destination = start.destination || start.result?.destination || resourceImportDestination(record.category);
+    const chunkSize = Number(start.chunk_size || start.result?.chunk_size || LARGE_RESOURCE_CHUNK_BYTES) || LARGE_RESOURCE_CHUNK_BYTES;
+    savePendingResourceImports();
+    let offset = 0;
+    while (offset < record.size) {
+      if (record.cancelRequested) throw new Error("Copy cancelled.");
+      const end = Math.min(offset + chunkSize, record.size);
+      const chunk = record.file.slice(offset, end);
+      const body = await chunk.arrayBuffer();
+      const response = await apiBinary(`/api/resource-import/chunk?import_id=${encodeURIComponent(record.importId)}&offset=${offset}`, body, {
+        signal: record.controller?.signal,
+      });
+      offset = Number(response.received || response.result?.received || end);
+      record.received = offset;
+      record.progress = record.size ? offset / record.size : 0;
+      savePendingResourceImports();
+      renderAttachmentTrays();
+    }
+    record.status = "finalizing";
+    savePendingResourceImports();
+    renderAttachmentTrays();
+    const finished = await api("/api/resource-import/finish", {
+      method: "POST",
+      body: JSON.stringify({ import_id: record.importId }),
+    });
+    const resource = finished.resource || finished.result?.resource || {
+      path: finished.path || finished.result?.path || record.destination,
+      category: record.category,
+      alreadyImported: true,
+    };
+    addResourcePath(resource.path, {
+      category: resource.category || record.category,
+      alreadyImported: true,
+      notify: false,
+    });
+    record.status = "done";
+    removeResourceImportRecord(id);
+    showToast(`${record.name} copied into ${resource.path}.`);
+    renderChatState();
+    renderStage();
+    renderProjectAvailability();
+  } catch (error) {
+    if (record.cancelRequested || error.name === "AbortError") {
+      await cancelLargeResourceImport(id, { silent: true });
+      return;
+    }
+    record.status = "failed";
+    record.error = error.message || "Copy failed.";
+    savePendingResourceImports();
+    renderAttachmentTrays();
+    showToast(record.error, true);
+  } finally {
+    record.controller = null;
+  }
 }
 
 function addUploadFile(file, options = {}) {
-  if (!file || !file.name && !file.type) return;
+  const notify = options.notify !== false;
+  if (!file || !file.name && !file.type) return { accepted: false, error: false, message: "" };
   const fallbackExt = fileExtensionFromMime(file.type, extension(file.name) || ".bin");
   const generatedName = `pasted_image_${new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)}${fallbackExt || ".bin"}`;
   const name = file.name || generatedName;
+  const size = Number(file.size || 0);
+  if (size > MAX_BROWSER_UPLOAD_BYTES) {
+    const result = queueLargeResourceImport(file, options);
+    if (notify) showToast(result.message);
+    return result;
+  }
   const category = options.category || activeResourceCategory || "ongoing_work";
   const duplicate = selectedUploadItems.some((item) => item.name === name && item.size === file.size && item.lastModified === file.lastModified);
   if (duplicate) {
     renderSelectedResources();
-    return;
+    return { accepted: false, error: false, message: `${name} is already attached.` };
   }
   selectedUploadItems.push({
     id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
     file,
     name,
     type: file.type || "",
-    size: file.size || 0,
+    size,
     lastModified: file.lastModified || 0,
     category: resourceCategories[category] ? category : "ongoing_work",
   });
   renderSelectedResources();
-  showToast(`${name} attached.`);
+  if (notify) showToast(`${name} attached.`);
+  return { accepted: true, error: false, message: `${name} attached.` };
 }
 
 function removeUploadFile(id) {
@@ -4768,9 +5319,21 @@ function hasDroppedDirectory(dataTransfer) {
 function addFilesFromList(files, source = "file", options = {}) {
   const list = Array.from(files || []).filter(Boolean);
   if (!list.length) return 0;
-  list.forEach((file) => addUploadFile(file, options));
-  showToast(`${list.length} ${list.length === 1 ? "file" : "files"} attached from ${source}.`);
-  return list.length;
+  const results = list.map((file) => addUploadFile(file, { ...options, notify: false }));
+  const accepted = results.filter((result) => result?.accepted).length;
+  const pending = results.filter((result) => result?.pendingImport).length;
+  const errors = results.filter((result) => result?.error && result.message);
+  if (accepted) {
+    showToast(`${accepted} ${accepted === 1 ? "file" : "files"} attached from ${source}.`);
+    if (pending) showToast(`${pending} large ${pending === 1 ? "file needs" : "files need"} resource-copy confirmation.`);
+  } else if (pending) {
+    showToast(`${pending} large ${pending === 1 ? "file needs" : "files need"} resource-copy confirmation.`);
+  } else if (errors.length === 1) {
+    showToast(errors[0].message, true);
+  } else if (errors.length > 1) {
+    showToast(`${errors.length} files were not attached. Use Browse resources and select local files or folders so CoAutoResearch can copy or symlink them.`, true);
+  }
+  return accepted;
 }
 
 function handleAttachmentPaste(event) {
@@ -4788,6 +5351,8 @@ function handleAttachmentDrop(event) {
   document.body.classList.remove("is-dragging-file");
   if (hasDroppedDirectory(event.dataTransfer)) {
     showToast("Folder drag-and-drop cannot expose a stable local path. Use the file browser for folders so they can be symlinked.", true);
+    showResourceBrowser();
+    return;
   }
   addFilesFromList(event.dataTransfer.files, "drop");
 }
@@ -4832,6 +5397,13 @@ function chooseMaterialType(category) {
   setResourceCategory(category);
   closeMaterialTypeDialog();
   showResourceBrowser();
+}
+
+function openComposerFilePicker(category = "user_input") {
+  const input = $("#composer-file-input");
+  if (!input) return;
+  input.dataset.resourceCategory = resourceCategories[category] ? category : "user_input";
+  input.click();
 }
 
 function updateSelectedResourceCategory(index, category) {
@@ -5171,7 +5743,11 @@ function collectResourceLinks() {
   ];
   const seen = new Set();
   return links
-    .map((item) => ({ path: item.path, category: item.category }))
+    .map((item) => {
+      const link = { path: item.path, category: item.category };
+      if (item.alreadyImported) link.alreadyImported = true;
+      return link;
+    })
     .filter((item) => {
       const key = `${item.category}:${item.path}`;
       if (!item.path || seen.has(key)) return false;
@@ -5214,12 +5790,16 @@ async function collectUploadFiles() {
 
 function currentComposerAttachments() {
   return [
-    ...selectedResourceItems.map((item) => ({
-      kind: "link",
-      path: item.path,
-      name: basename(item.path),
-      category: item.category,
-    })),
+    ...selectedResourceItems.map((item) => {
+      const attachment = {
+        kind: "link",
+        path: item.path,
+        name: basename(item.path),
+        category: item.category,
+      };
+      if (item.alreadyImported) attachment.alreadyImported = true;
+      return attachment;
+    }),
     ...selectedUploadItems.map((item) => ({
       kind: "upload",
       name: item.name,
@@ -5266,7 +5846,7 @@ function restoreFramingComposerState(snapshot) {
   if (!snapshot) return;
   const editor = $("#cold-file-editor");
   if (editor) editor.value = snapshot.text || "";
-  composerDraft = String(snapshot.composerDraft ?? snapshot.text ?? "");
+  persistComposerDraft(String(snapshot.composerDraft || snapshot.text || ""));
   if (snapshot.activeColdPath && !hasProjectDraftReady() && !hasLaunched()) {
     coldFiles[snapshot.activeColdPath] = snapshot.text || snapshot.activeColdText || "";
   }
@@ -5288,7 +5868,7 @@ function clearFramingComposerText(expectedText = "") {
   const current = String(editor.value || "");
   if (expectedText && current.trim() !== String(expectedText || "").trim()) return;
   editor.value = "";
-  composerDraft = "";
+  clearComposerDraft();
   resizeColdEditor();
   renderColdPreview();
 }
@@ -5526,6 +6106,7 @@ function wait(ms) {
 }
 
 async function openLaunchDialog() {
+  if (!ensureResourceImportsReady()) return;
   if (hasGoalStarted()) {
     showToast("Autoresearch has already started for this session.", true);
     return;
@@ -5545,6 +6126,7 @@ async function openLaunchDialog() {
 }
 
 async function launchAutoresearch() {
+  if (!ensureResourceImportsReady()) return;
   if (!hasActiveProject()) {
     openProjectCreateDialog();
     showToast("Create a project first.", true);
@@ -5566,6 +6148,8 @@ async function launchAutoresearch() {
   const fileEdits = Object.entries(coldFiles).map(([path, text]) => ({ path, text }));
   fileEdits.push({ path: "PROJECT.md", text: currentProjectDraft() });
   const targetVenue = String($("#target-venue")?.value || "").trim();
+  const launchInstruction = String($("#launch-instruction")?.value || "").trim();
+  const launchComposerText = String($("#cold-file-editor")?.value || "");
   try {
     framingDraftPending = true;
     beginFramingPending();
@@ -5578,13 +6162,18 @@ async function launchAutoresearch() {
     const files = await collectUploadFiles();
     const response = await api("/api/research/cold-start", {
       method: "POST",
-      body: JSON.stringify({ confirmLaunch: true, brief, targetVenue, fileEdits, resourceLinks: collectResourceLinks(), files, settings: settingsFromForm() }),
+      body: JSON.stringify({ confirmLaunch: true, brief, targetVenue, launchInstruction, fileEdits, resourceLinks: collectResourceLinks(), files, settings: settingsFromForm() }),
     });
     mergeSessionFromApiResponse(response);
     notifyResourceHandlingFromResponse(response);
     framingDraftPending = false;
     reconcileFramingPending(localMessages);
     coldDirty = false;
+    if (String($("#cold-file-editor")?.value || "").trim() === launchComposerText.trim()) {
+      clearFramingComposerText(launchComposerText);
+    } else if (storedComposerDraft() === launchComposerText) {
+      clearComposerDraft();
+    }
     showToast("Started autoresearch.");
     activeStage = "1";
     await loadOverview(true);
@@ -5598,6 +6187,7 @@ async function launchAutoresearch() {
 }
 
 async function sendSessionComposerMessage(message) {
+  if (!ensureResourceImportsReady()) return false;
   if (!hasActiveProject()) {
     openProjectCreateDialog();
     showToast("Create a project first.", true);
@@ -5686,6 +6276,7 @@ async function sendSessionComposerMessage(message) {
 }
 
 async function startFramingRun(brief) {
+  if (!ensureResourceImportsReady()) throw new Error(blockingResourceImportMessage());
   if (!hasActiveProject()) throw new Error("Create a project first.");
   const text = String(brief || "").trim();
   if (!text) throw new Error("Research brief is required.");
@@ -5714,6 +6305,7 @@ async function startFramingRun(brief) {
 }
 
 async function coldStartFromPrepare() {
+  if (!ensureResourceImportsReady()) return;
   if (!hasActiveProject()) {
     openProjectCreateDialog();
     showToast("Create a project first.", true);
@@ -5729,6 +6321,7 @@ async function coldStartFromPrepare() {
     return;
   }
   const displayInput = input || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
+  let composerSnapshot = null;
   try {
     if (canSendLocalSlashControl(input)) {
       const sent = await sendSessionComposerMessage(input);
@@ -5749,6 +6342,7 @@ async function coldStartFromPrepare() {
       return;
     }
     const attachments = currentComposerAttachments();
+    composerSnapshot = snapshotFramingComposerState();
     framingDraftPending = true;
     const message = appendFramingMessage("user", displayInput, { attachments });
     beginFramingPending(message?.id || "");
@@ -5759,6 +6353,7 @@ async function coldStartFromPrepare() {
     scrollFramingToBottomSoon();
     await persistFramingMessages();
     await startFramingRun(displayInput);
+    clearComposerDraft();
     framingDraftPending = false;
     reconcileFramingPending(localMessages);
     renderFramingConversation();
@@ -5775,6 +6370,7 @@ async function coldStartFromPrepare() {
   } catch (error) {
     framingDraftPending = false;
     reconcileFramingPending(localMessages);
+    if (composerSnapshot) restoreFramingComposerState(composerSnapshot);
     renderFramingConversation();
     showToast(error.message, true);
   }
@@ -5858,6 +6454,7 @@ async function handleChat(event) {
 }
 
 async function handleContinue() {
+  if (!ensureResourceImportsReady()) return;
   if (!canMessage()) {
     showToast("Run cold start first.", true);
     return;
@@ -5873,6 +6470,7 @@ async function handleContinue() {
 }
 
 async function sendCommand(command) {
+  if (!ensureResourceImportsReady()) return;
   const localControl = canSendLocalSlashControl(command);
   if (!canMessage() && !localControl) {
     showToast("Wait for the current Codex run to finish before sending another message.", true);
@@ -6024,6 +6622,7 @@ function bindEvents() {
   });
   $("#cold-file-editor").addEventListener("input", () => {
     const value = $("#cold-file-editor").value;
+    persistComposerDraft(value);
     if (hasProjectDraftReady() || hasLaunched()) {
       composerDraft = value;
     } else if (activeColdPath) {
@@ -6078,11 +6677,27 @@ function bindEvents() {
   $("#cold-file-editor").addEventListener("paste", handleAttachmentPaste);
   $("#chat-form textarea").addEventListener("paste", handleAttachmentPaste);
   $("#composer-attach-button")?.addEventListener("click", () => {
-    $("#composer-file-input")?.click();
+    openComposerFilePicker("user_input");
   });
   $("#composer-file-input")?.addEventListener("change", (event) => {
-    addFilesFromList(event.target.files, "file picker", { category: "user_input" });
+    const category = resourceCategories[event.target.dataset.resourceCategory] ? event.target.dataset.resourceCategory : "user_input";
+    addFilesFromList(event.target.files, "file picker", { category });
+    delete event.target.dataset.resourceCategory;
     event.target.value = "";
+  });
+  $("#large-import-category")?.addEventListener("change", (event) => {
+    const record = largeResourceImportById(activeLargeResourceImportId);
+    const category = event.target.value;
+    if (!record || !resourceCategories[category]) return;
+    record.category = category;
+    record.destination = resourceImportDestination(category);
+    savePendingResourceImports();
+    renderLargeResourceImportDialog(record);
+    renderAttachmentTrays();
+  });
+  $("#large-resource-import-dialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeLargeResourceImportDialog();
   });
   document.addEventListener("dragover", (event) => {
     if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
@@ -6181,6 +6796,37 @@ function bindEvents() {
     const removeUpload = event.target.closest("[data-upload-remove]");
     if (removeUpload) {
       removeUploadFile(removeUpload.dataset.uploadRemove);
+      return;
+    }
+    const openResourceImport = event.target.closest("[data-resource-import-open]");
+    if (openResourceImport) {
+      openLargeResourceImportDialog(openResourceImport.dataset.resourceImportOpen);
+      return;
+    }
+    const retryResourceImport = event.target.closest("[data-resource-import-retry]");
+    if (retryResourceImport) {
+      confirmLargeResourceImport(retryResourceImport.dataset.resourceImportRetry).catch((error) => showToast(error.message, true));
+      return;
+    }
+    const cancelResourceImport = event.target.closest("[data-resource-import-cancel]");
+    if (cancelResourceImport) {
+      cancelLargeResourceImport(cancelResourceImport.dataset.resourceImportCancel).catch((error) => showToast(error.message, true));
+      return;
+    }
+    const confirmLargeImport = event.target.closest("[data-large-import-confirm]");
+    if (confirmLargeImport) {
+      const category = $("#large-import-category")?.value || "";
+      confirmLargeResourceImport(activeLargeResourceImportId, category).catch((error) => showToast(error.message, true));
+      return;
+    }
+    const cancelLargeImport = event.target.closest("[data-large-import-cancel]");
+    if (cancelLargeImport) {
+      cancelLargeResourceImport(activeLargeResourceImportId).catch((error) => showToast(error.message, true));
+      return;
+    }
+    const closeLargeImport = event.target.closest("[data-large-import-close]");
+    if (closeLargeImport) {
+      closeLargeResourceImportDialog();
       return;
     }
     const copyText = event.target.closest("[data-copy-text]");
@@ -6430,6 +7076,10 @@ function bindEvents() {
   document.addEventListener(
     "toggle",
     (event) => {
+      const activityDetails = event.target.closest?.("[data-run-activity-details]");
+      if (activityDetails === event.target) {
+        rememberRunActivityDetailsState(activityDetails);
+      }
       const details = event.target.closest?.("[data-file-details]");
       if (!details || !details.open) return;
       const path = details.dataset.fileDetails;
@@ -6454,10 +7104,11 @@ async function init() {
     scheduleOverviewPoll(3500);
     return;
   }
-  $("#target-venue").value = scopedGet("autoResearchTargetVenue", "");
+  hydrateTargetVenueField({ force: true });
   restoreSessionSettings();
   await loadUiSettings();
   restoreResourceSelections();
+  restorePendingResourceImports();
   resizeComposer();
   resizeColdEditor();
   await loadOverview(true);

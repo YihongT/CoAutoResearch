@@ -18,28 +18,61 @@ function loadAppContext() {
   const elements = new Map();
   const storage = new Map();
   const clipboardWrites = [];
-  const element = (extra = {}) => ({
-    value: "",
-    hidden: false,
-    innerHTML: "",
-    textContent: "",
-    dataset: {},
-    style: {},
-    classList: { add() {}, remove() {}, toggle() {} },
-    addEventListener() {},
-    dispatchEvent() {},
-    appendChild() {},
-    remove() {},
-    select() {},
-    focus() {},
-    setSelectionRange() {},
-    toggleAttribute(name, force) { this[name] = Boolean(force); },
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
-    ...extra,
+  const element = (extra = {}) => {
+    const classes = new Set(extra.classNames || []);
+    return {
+      value: "",
+      hidden: false,
+      innerHTML: "",
+      textContent: "",
+      dataset: {},
+      style: {
+        setProperty(name, value) { this[name] = String(value); },
+        removeProperty(name) { delete this[name]; },
+      },
+      classList: {
+        add(...names) { names.forEach((name) => classes.add(name)); },
+        remove(...names) { names.forEach((name) => classes.delete(name)); },
+        toggle(name, force) {
+          const enabled = force === undefined ? !classes.has(name) : Boolean(force);
+          if (enabled) classes.add(name);
+          else classes.delete(name);
+          return enabled;
+        },
+        contains(name) { return classes.has(name); },
+        toString() { return Array.from(classes).join(" "); },
+      },
+      addEventListener() {},
+      dispatchEvent() {},
+      appendChild() {},
+      remove() {},
+      select() {},
+      focus() {},
+      setAttribute(name, value) { this[name] = String(value); },
+      removeAttribute(name) { delete this[name]; },
+      setSelectionRange() {},
+      toggleAttribute(name, force) { this[name] = Boolean(force); },
+      closest() { return null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      ...extra,
+    };
+  };
+  const coldEditor = element({
+    __compactComposer: true,
+    rows: 2,
+    scrollHeight: 44,
+    closest(selector) {
+      return selector === ".brief-composer-row" && this.__compactComposer ? {} : null;
+    },
   });
-  const coldEditor = element();
   const projectEditor = element({ value: "# Project\n\nReady." });
+  const composerFileInput = element({
+    clickCount: 0,
+    click() {
+      this.clickCount += 1;
+    },
+  });
   const trialStripScroll = element({
     clientWidth: 300,
     scrollWidth: 1200,
@@ -53,6 +86,37 @@ function loadAppContext() {
     close() { this.closed = true; },
     showModal() { this.open = true; },
   });
+  const largeImportDialog = element({
+    close() { this.closed = true; this.open = false; },
+    showModal() { this.open = true; },
+  });
+  const field = (value = "", extra = {}) => element({ value, ...extra });
+  const sessionForm = element({
+    elements: {
+      model: field("gpt-5.5"),
+      reasoningEffort: field("medium"),
+      permissionPreset: field("default"),
+      webSearch: field("", { checked: true }),
+      extraConfig: field(""),
+      reviewCheckpointInterval: field("100"),
+    },
+  });
+  const settingsForm = element({
+    elements: {
+      themeMode: field("graphite-aurora"),
+      settingsModel: field("gpt-5.5"),
+      settingsReasoningEffort: field("medium"),
+      settingsPermissionPreset: field("default"),
+      settingsWebSearch: field("", { checked: true }),
+      settingsExtraConfig: field(""),
+      settingsReviewCheckpointInterval: field("100"),
+    },
+    querySelector() {
+      return element();
+    },
+  });
+  const composerModel = sessionForm.elements.model;
+  const composerReasoning = sessionForm.elements.reasoningEffort;
   [
     ["#cold-file-editor", coldEditor],
     ["#launch-files", element()],
@@ -62,6 +126,9 @@ function loadAppContext() {
     ["#cold-save-status", element()],
     ["#cold-file-preview", element()],
     ["#cold-editor-workbench", element()],
+    ["#brief-attachment-tray", element()],
+    ["#chat-attachment-tray", element()],
+    ["#composer-file-input", composerFileInput],
     [".trial-strip-scroll", trialStripScroll],
     ["#project-draft-editor", projectEditor],
     ["#target-venue", element()],
@@ -75,19 +142,40 @@ function loadAppContext() {
     ["#open-launch-dialog-inline", element()],
     ["#composer-suggestions", element()],
     ["#launch-dialog", launchDialog],
+    ["#launch-instruction", element()],
     ["#restart-autoresearch-dialog", restartDialog],
     ["#restart-autoresearch-reason", element()],
+    ["#large-resource-import-dialog", largeImportDialog],
+    ["#large-import-title", element()],
+    ["#large-import-file-name", element()],
+    ["#large-import-file-size", element()],
+    ["#large-import-category", element()],
+    ["#large-import-destination", element()],
+    ["#large-import-note", element()],
     ["#chat-thread", element()],
+    ["#session-settings-form", sessionForm],
+    ["#settings-form", settingsForm],
+    ["#composer-model", composerModel],
+    ["#composer-reasoning", composerReasoning],
+    ["#settings-summary", element()],
+    ["#session-settings", element()],
+    ["#settings-secret-grid", element()],
   ].forEach(([selector, value]) => elements.set(selector, value));
 
   const context = {
     console,
+    URL,
     URLSearchParams,
     FormData: class FormData {
       constructor(form) {
         this.form = form;
       }
       get(name) {
+        const field = this.form?.elements?.[name];
+        if (field) {
+          if ("checked" in field && !field.value) return field.checked ? "on" : "";
+          return field.value || "";
+        }
         return this.form?.values?.[name] || "";
       }
     },
@@ -147,6 +235,8 @@ function loadAppContext() {
     globalThis.__renderCount = 0;
     globalThis.__persistCount = 0;
     globalThis.__scrollCount = 0;
+    globalThis.__browserOpenCount = 0;
+    globalThis.__browserOpenCategory = "";
     globalThis.__collectSeen = null;
     globalThis.__toastMessages = [];
     activeProjectId = "p1";
@@ -182,15 +272,20 @@ function loadAppContext() {
     renderSession = () => {};
     renderResumeCommandBar = () => {};
     renderComposerSuggestions = () => {};
-    renderSelectedResources = () => {};
+    renderSelectedResources = () => renderAttachmentTrays();
     saveResourceSelections = () => {};
+    globalThis.__resizeColdEditorImpl = resizeColdEditor;
+    updateBriefDockGeometry = () => {};
     resizeColdEditor = () => {};
     renderColdPreview = () => {};
     resizeComposer = () => {};
     scrollFramingToBottomSoon = () => { globalThis.__scrollCount += 1; };
     scrollThread = () => { globalThis.__scrollCount += 1; };
     notifyResourceHandlingFromResponse = () => {};
-    settingsFromForm = () => ({});
+    showResourceBrowser = () => {
+      globalThis.__browserOpenCount += 1;
+      globalThis.__browserOpenCategory = activeResourceCategory;
+    };
     showToast = (message, error = false) => { globalThis.__toastMessages.push({ message, error }); };
     openProjectCreateDialog = () => {};
     setColdViewMode = () => {};
@@ -216,6 +311,28 @@ function loadAppContext() {
       if (globalThis.__apiError) throw new Error(globalThis.__apiError);
       const body = options.body ? JSON.parse(options.body) : {};
       globalThis.__apiCalls.push({ endpoint, body });
+      if (endpoint === "/api/resource-import/start") {
+        return {
+          ok: true,
+          import_id: "import_1",
+          chunk_size: 1000000000,
+          destination: "resources/" + (body.category || "ongoing_work") + "/" + (body.name || "file.bin"),
+          category: body.category || "ongoing_work",
+        };
+      }
+      if (endpoint === "/api/resource-import/finish") {
+        return {
+          ok: true,
+          resource: {
+            path: "resources/ongoing_work/perceived_safety.zip",
+            category: "ongoing_work",
+            alreadyImported: true,
+          },
+        };
+      }
+      if (endpoint === "/api/resource-import/cancel") {
+        return { ok: true, cancelled: true };
+      }
       return globalThis.__apiResponse || {
         ok: true,
         result: {
@@ -229,6 +346,13 @@ function loadAppContext() {
           }
         }
       };
+    };
+    apiBinary = async (endpoint, body) => {
+      const offset = Number(new URL(endpoint, "http://local").searchParams.get("offset") || 0);
+      const length = body?.byteLength || body?.length || 0;
+      const received = Math.min(globalThis.__activeImportSize || offset + length, offset + 1000000000);
+      globalThis.__apiCalls.push({ endpoint, binaryBytes: length });
+      return { ok: true, received, size: globalThis.__activeImportSize || received, progress: 1 };
     };
     globalThis.__messages = () => localMessages.map((message) => ({
       id: message.id,
@@ -265,6 +389,123 @@ function loadAppContext() {
       dataset: document.documentElement.dataset.theme,
       stored: localStorage.getItem("coAutoResearchTheme"),
     });
+    globalThis.__targetVenueState = () => ({
+      value: document.querySelector("#target-venue")?.value || "",
+      scoped: localStorage.getItem(scopedStorageKey("autoResearchTargetVenue")),
+      legacy: localStorage.getItem("autoResearchTargetVenue"),
+      projectId: activeProjectId,
+    });
+    globalThis.__sessionSettingsState = () => {
+      const form = document.querySelector("#session-settings-form");
+      return {
+        projectId: activeProjectId,
+        composerModel: document.querySelector("#composer-model")?.value || "",
+        composerReasoning: document.querySelector("#composer-reasoning")?.value || "",
+        formModel: form?.elements?.model?.value || "",
+        formReasoning: form?.elements?.reasoningEffort?.value || "",
+        formPermission: form?.elements?.permissionPreset?.value || "",
+        formWebSearch: Boolean(form?.elements?.webSearch?.checked),
+        formReviewInterval: form?.elements?.reviewCheckpointInterval?.value || "",
+        summary: document.querySelector("#settings-summary")?.textContent || "",
+        stored: localStorage.getItem(scopedStorageKey("autoResearchSessionSettings")),
+        legacy: localStorage.getItem("autoResearchSessionSettings"),
+      };
+    };
+    globalThis.__composerDraftState = () => ({
+      projectId: activeProjectId,
+      value: document.querySelector("#cold-file-editor")?.value || "",
+      composerDraft,
+      stored: localStorage.getItem(scopedStorageKey("autoResearchComposerDraft")),
+      legacy: localStorage.getItem("autoResearchComposerDraft"),
+    });
+    globalThis.__setProjectId = (projectId) => {
+      activeProjectId = projectId;
+      resetProjectClientState();
+      appState = { ...appState, active_project_id: projectId, project: { id: projectId, display_name: projectId } };
+    };
+    globalThis.__hydrateTargetVenue = (payload = {}, options = {}) => {
+      appState = { ...appState, ...payload };
+      hydrateTargetVenueField(options);
+      return globalThis.__targetVenueState();
+    };
+    globalThis.__filePickerState = () => {
+      const input = document.querySelector("#composer-file-input");
+      return {
+        activeCategory: activeResourceCategory,
+        pendingCategory: input?.dataset?.resourceCategory || "",
+        clicks: input?.clickCount || 0,
+      };
+    };
+    globalThis.__chooseMaterialTypeProbe = (category) => {
+      chooseMaterialType(category);
+      return {
+        ...globalThis.__filePickerState(),
+        browserOpenCount: globalThis.__browserOpenCount,
+        browserOpenCategory: globalThis.__browserOpenCategory,
+      };
+    };
+    globalThis.__openFilePickerProbe = (category) => {
+      openComposerFilePicker(category);
+      return globalThis.__filePickerState();
+    };
+    globalThis.__addUploadProbe = (file, options = {}) => {
+      const before = selectedUploadItems.length;
+      addUploadFile(file, options);
+      return {
+        before,
+        after: selectedUploadItems.length,
+        uploads: selectedUploadItems.map((item) => ({ name: item.name, size: item.size, category: item.category })),
+        imports: pendingResourceImports.map((item) => ({ name: item.name, size: item.size, category: item.category, status: item.status, path: item.destination || "" })),
+        trayExists: Boolean(document.querySelector("#brief-attachment-tray")),
+        briefTray: document.querySelector("#brief-attachment-tray")?.innerHTML || "",
+        briefTrayHidden: Boolean(document.querySelector("#brief-attachment-tray")?.hidden),
+        toasts: globalThis.__toastMessages,
+      };
+    };
+    globalThis.__addFilesProbe = (files, source = "drop", options = {}) => {
+      const before = selectedUploadItems.length;
+      const accepted = addFilesFromList(files, source, options);
+      return {
+        accepted,
+        before,
+        after: selectedUploadItems.length,
+        uploads: selectedUploadItems.map((item) => ({ name: item.name, size: item.size, category: item.category })),
+        imports: pendingResourceImports.map((item) => ({ name: item.name, size: item.size, category: item.category, status: item.status, path: item.destination || "" })),
+        briefTray: document.querySelector("#brief-attachment-tray")?.innerHTML || "",
+        briefTrayHidden: Boolean(document.querySelector("#brief-attachment-tray")?.hidden),
+        toasts: globalThis.__toastMessages,
+      };
+    };
+    globalThis.__pendingResourceImportState = () => ({
+      imports: pendingResourceImports.map((item) => ({ name: item.name, status: item.status, path: item.destination || "", category: item.category, error: item.error || "" })),
+      resources: selectedResourceItems.map((item) => ({ path: item.path, category: item.category, alreadyImported: Boolean(item.alreadyImported) })),
+      blocked: hasBlockingResourceImports(),
+      tray: document.querySelector("#brief-attachment-tray")?.innerHTML || "",
+    });
+    globalThis.__confirmFirstResourceImport = async () => {
+      const record = pendingResourceImports[0];
+      if (!record) return globalThis.__pendingResourceImportState();
+      globalThis.__activeImportSize = record.size;
+      record.file.slice = () => ({ arrayBuffer: async () => new ArrayBuffer(1) });
+      await confirmLargeResourceImport(record.id, record.category);
+      return globalThis.__pendingResourceImportState();
+    };
+    globalThis.__resizeColdEditorProbe = ({ value = "", scrollHeight = 44, compact = true } = {}) => {
+      const editor = document.querySelector("#cold-file-editor");
+      editor.value = value;
+      editor.scrollHeight = scrollHeight;
+      editor.__compactComposer = compact;
+      editor.style.height = "";
+      editor.style.overflowY = "";
+      editor.classList.remove("is-compact-single-line");
+      globalThis.__resizeColdEditorImpl();
+      return {
+        height: editor.style.height,
+        overflowY: editor.style.overflowY,
+        rows: editor.rows,
+        singleLine: editor.classList.contains("is-compact-single-line"),
+      };
+    };
     globalThis.__resetRuntimeFlags = () => {
       framingDraftPending = false;
       framingReplyPending = false;
@@ -341,6 +582,11 @@ function loadAppContext() {
     globalThis.__sessionTimelineProbe = () => sessionTimelineHtml(sessionTranscriptEntries());
     globalThis.__thinkingProbe = () => framingThinkingHtml();
     globalThis.__progressDetailsProbe = () => framingProgressDetailsHtml();
+    globalThis.__progressSummaryProbe = () => {
+      const entries = currentProgressEntries();
+      const entry = latestTrialProgressEntry(entries);
+      return entry ? framingProgressTitle(entry) + ": " + framingProgressContent(entry) : "Waiting for Codex events...";
+    };
     globalThis.__formatWorkedDuration = (seconds) => formatWorkedDuration(seconds);
     globalThis.__statusCardProbe = (payload) => statusCardHtml(payload, { id: "status-test" });
     globalThis.__trialStripScrollProbe = (scrollLeft, clientWidth = 300, scrollWidth = 1200) => {
@@ -357,6 +603,14 @@ function loadAppContext() {
       appState.summaries = { ...(appState.summaries || {}), manuscript: payload };
       return renderManuscriptPanel();
     };
+    globalThis.__treeHtmlProbe = (tree) => renderTree(tree);
+    globalThis.__inlinePdfBodyProbe = (payload = {}) => inlineFileBodyHtml({
+      path: "resources/papers/paper.pdf",
+      kind: "pdf",
+      mime: "application/pdf",
+      url: "/api/file/raw?path=resources%2Fpapers%2Fpaper.pdf",
+      ...payload,
+    }, "preview");
     globalThis.__copyTextProbe = async (text) => copyTextToClipboard(text, "Probe copied.");
     `,
     context
@@ -563,6 +817,7 @@ async function testResumeTrialSlashCommandIsBlocked() {
 async function testFailedSessionSendRestoresComposerState() {
   const app = loadAppContext();
   app.coldEditor.value = "Continue from here with a stricter pass.";
+  app.run('persistComposerDraft("Continue from here with a stricter pass.")');
   app.context.__apiError = "Backend rejected the fork.";
   app.run(`
     __setSelectedResources([{ path: "/tmp/evidence.pdf", category: "literature" }]);
@@ -580,9 +835,21 @@ async function testFailedSessionSendRestoresComposerState() {
     /Backend rejected the fork/
   );
   assert.equal(app.coldEditor.value, "Continue from here with a stricter pass.", "backend failure must restore the typed text");
+  assert.equal(app.context.__composerDraftState().stored, "Continue from here with a stricter pass.", "backend failure must restore the project-scoped composer draft");
   assert.equal(app.context.__resumeTrialContext().id, "000003_evidence_audit", "backend failure must restore the staged trial chip");
   assertJsonEqual(app.context.__selectedResources(), [{ path: "/tmp/evidence.pdf", category: "literature" }], "backend failure must restore selected resources");
   assert.equal(app.context.__messages().length, 0, "backend failure must remove the optimistic user message");
+}
+
+async function testSuccessfulSessionSendClearsComposerDraft() {
+  const app = loadAppContext();
+  app.coldEditor.value = "Submit this draft.";
+  app.run('persistComposerDraft("Submit this draft.")');
+  await app.run('sendSessionComposerMessage("Submit this draft.")');
+  const state = app.context.__composerDraftState();
+  assert.equal(app.coldEditor.value, "", "successful sends should clear the visible composer");
+  assert.equal(state.stored, null, "successful sends should clear the project-scoped composer draft");
+  assert.equal(state.legacy, null, "composer drafts must not use the legacy global key");
 }
 
 async function testSlashCommandVisibleAndIgnoredAsUnanswered() {
@@ -697,6 +964,8 @@ async function testEditTruncatesLaterConversationBeforeResend() {
 async function testLaunchGoalMessageBeforeBackendWork() {
   const app = loadAppContext();
   app.coldEditor.value = "launch brief";
+  app.run('document.querySelector("#launch-instruction").value = "Prioritize source-level evidence before drafting."');
+  app.run('persistComposerDraft("launch brief")');
   app.run("__installBlockingCollect()");
   const pending = app.run("launchAutoresearch()");
   assert.equal(app.launchDialog.closed, true, "launch dialog should close before uploads/API complete");
@@ -714,6 +983,93 @@ async function testLaunchGoalMessageBeforeBackendWork() {
   app.context.__resolveCollect();
   await pending;
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/cold-start");
+  assert.equal(app.context.__apiCalls[0].body.launchInstruction, "Prioritize source-level evidence before drafting.");
+  assert.equal(app.coldEditor.value, "", "successful launch should clear the submitted composer draft");
+  assert.equal(app.context.__composerDraftState().stored, null, "successful launch should clear the project-scoped composer draft");
+}
+
+function testStartAutoresearchOnlyAppearsOnProjectDraftCard() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "framing", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+    __setMessages([
+      { id: "a1", role: "assistant", kind: "text", text: "Updated PROJECT.md and it is ready.", created_at: "2026-06-17T10:00:01.000Z" },
+      { id: "p1", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Project\\n\\nReady to launch." }, created_at: "2026-06-17T10:00:02.000Z" }
+    ]);
+  `);
+  const assistantHtml = app.run("__messageHtml(0)");
+  const projectHtml = app.run("__messageHtml(1)");
+  assert.equal(assistantHtml.includes("data-project-launch"), false, "assistant text messages must not duplicate the project launch button");
+  assert.equal(projectHtml.includes("data-project-launch"), true, "project draft card should keep the canonical launch button");
+  assert.equal(projectHtml.includes('data-inline-fullscreen="PROJECT.md"'), true, "project draft card should expose the canonical fullscreen preview");
+  assert.equal(projectHtml.includes("inline-fullscreen-button"), true);
+  assert.equal(projectHtml.includes("Open full view"), false);
+}
+
+function testMessagesExposeCopyButtons() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u-copy", role: "user", kind: "text", text: "Copy this user message", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a-copy", role: "assistant", kind: "text", text: "Copy this assistant message", created_at: "2026-06-17T10:00:01.000Z" },
+      { id: "p-copy", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Copyable Project\\n\\nDraft body." }, created_at: "2026-06-17T10:00:02.000Z" }
+    ]);
+    __setSession({
+      id: "s-copy",
+      session_id: "sid-copy",
+      status: "completed",
+      mode: "chat",
+      started_at: "2026-06-17T10:00:00.000Z",
+      transcript: [
+        { id: "t-copy", role: "assistant", kind: "assistant", raw_type: "turn.completed", content: "Copy this transcript response.", created_at: "2026-06-17T10:00:03.000Z" }
+      ]
+    });
+  `);
+  const userHtml = app.run("__messageHtml(0)");
+  const assistantHtml = app.run("__messageHtml(1)");
+  const projectHtml = app.run("__messageHtml(2)");
+  const transcriptHtml = app.run(`transcriptEntryHtml({
+    id: "t-copy",
+    role: "assistant",
+    kind: "assistant",
+    raw_type: "item.completed",
+    content: "Copy this transcript response.",
+    created_at: "2026-06-17T10:00:03.000Z"
+  })`);
+  assert.equal(userHtml.includes("message-copy-button"), true, "user messages should expose a copy icon");
+  assert.equal(userHtml.includes(encodeURIComponent("Copy this user message")), true);
+  assert.equal(assistantHtml.includes("message-copy-button"), true, "assistant messages should expose a copy icon");
+  assert.equal(assistantHtml.includes(encodeURIComponent("Copy this assistant message")), true);
+  assert.equal(projectHtml.includes("message-copy-button"), true, "project draft cards should expose a copy icon");
+  assert.equal(projectHtml.includes(encodeURIComponent("# Copyable Project\n\nDraft body.")), true);
+  assert.equal(transcriptHtml.includes("message-copy-button"), true, "transcript messages should expose a copy icon");
+  assert.equal(transcriptHtml.includes(encodeURIComponent("Copy this transcript response.")), true);
+}
+
+function testFileTreePdfPreviewControls() {
+  const app = loadAppContext();
+  const tree = {
+    type: "directory",
+    name: "resources",
+    path: "resources",
+    children: [
+      {
+        type: "file",
+        name: "paper.pdf",
+        path: "resources/papers/paper.pdf",
+        previewable: true,
+        kind: "pdf",
+        mime: "application/pdf",
+      },
+    ],
+  };
+  const html = app.run(`__treeHtmlProbe(${JSON.stringify(tree)})`);
+  assert.equal(html.includes('data-file-details="resources/papers/paper.pdf"'), true, "previewable PDFs in file trees should be expandable");
+  assert.equal(html.includes('data-inline-file="resources/papers/paper.pdf"'), true, "tree rows should still keep inline expansion for previewable files");
+  assert.equal(html.includes('tree-file-actions'), false, "file tree rows should not add extra action controls that disrupt the browser layout");
+  const pdfHtml = app.run("__inlinePdfBodyProbe()");
+  assert.equal(pdfHtml.includes('class="file-pdf-preview"'), true, "PDF previews should render in an iframe");
+  assert.equal(pdfHtml.includes("/api/file/raw?path=resources%2Fpapers%2Fpaper.pdf"), true, "PDF previews should use the raw file endpoint");
 }
 
 function testSessionTimelineDoesNotRenderCurrentActivityCard() {
@@ -740,7 +1096,8 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
       transcript: [
         { id: "tu1", role: "user", kind: "user", raw_type: "ui.goal", content: "Start autoresearch loop with /goal.", created_at: "2026-06-17T10:00:00.000Z" },
         { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "codex exec resume", created_at: "2026-06-17T10:00:01.000Z" },
-        { id: "ta1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking sources.", created_at: "2026-06-17T10:00:04.000Z" }
+        { id: "ta1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking sources.", created_at: "2026-06-17T10:00:04.000Z" },
+        { id: "tc2", role: "command", kind: "command", raw_type: "process.started", content: "git status --short", created_at: "2026-06-17T10:00:05.000Z" }
       ]
     });
   `);
@@ -761,6 +1118,7 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(thinkingHtml.includes("Working for"), true, "working bubble should show elapsed running time");
   assert.equal(thinkingHtml.includes("Trial 1"), true, "working bubble should include the trial axis for autoresearch runs");
   assert.equal(thinkingHtml.includes("Update: Checking sources."), true, "current run activity summary should expose the latest update");
+  assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking sources.", "collapsed current run summary should prefer readable Codex updates over later commands");
 }
 
 function testPassedGoalDoesNotShowStaleRunningTrial() {
@@ -824,7 +1182,8 @@ function testCurrentRunActivityShowsPauseForChatRun() {
         status_label: "Codex is working"
       },
       transcript: [
-        { id: "tr1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking the selected trial boundary.", created_at: "2026-06-17T10:00:02.000Z" }
+        { id: "tr1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking the selected trial boundary.", created_at: "2026-06-17T10:00:02.000Z" },
+        { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "git diff -- PROJECT.md", created_at: "2026-06-17T10:00:03.000Z" }
       ]
     });
   `);
@@ -836,6 +1195,12 @@ function testCurrentRunActivityShowsPauseForChatRun() {
   assert.equal(html.includes("data-stop-current-run"), true, "current-run stop must terminate the active process");
   assert.equal(html.includes("Current run"), true, "chat run summary should identify the scope without showing a trial");
   assert.equal(html.includes("Update: Checking the selected trial boundary."), true, "chat run summary should expose the latest update");
+  assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking the selected trial boundary.", "chat run summary should prefer readable updates over later commands");
+  const expandedHtml = app.run(`
+    openRunActivityDetails.add(activeRunActivityDetailsKey());
+    __progressDetailsProbe();
+  `);
+  assert.match(expandedHtml, /data-run-activity-details="[^"]+" open/, "current run activity should stay expanded across re-render");
 }
 
 function testWorkingDurationFormatter() {
@@ -937,6 +1302,171 @@ function testSettingsRenderPreservesComposerDraft() {
   );
 }
 
+function testProjectScopedSessionSettingsOverrideServerDefaults() {
+  const app = loadAppContext();
+  let state = app.run(`
+    uiSettings = {
+      codex: {
+        model: "gpt-5.5",
+        reasoningEffort: "medium",
+        permissionPreset: "default",
+        webSearch: true,
+        reviewCheckpointInterval: 100
+      }
+    };
+    localStorage.setItem(scopedStorageKey("autoResearchSessionSettings"), JSON.stringify({
+      model: "gpt-5.4-mini",
+      reasoningEffort: "xhigh",
+      permissionPreset: "auto-review",
+      webSearch: false,
+      reviewCheckpointInterval: 12
+    }));
+    restoreSessionSettings();
+    __sessionSettingsState();
+  `);
+  assert.equal(state.composerModel, "gpt-5.4-mini", "scoped browser model override should beat server defaults");
+  assert.equal(state.composerReasoning, "xhigh", "scoped browser reasoning override should beat server defaults");
+  assert.equal(state.formModel, "gpt-5.4-mini");
+  assert.equal(state.formReasoning, "xhigh");
+  assert.equal(state.formPermission, "auto-review");
+  assert.equal(state.formWebSearch, false);
+  assert.equal(Number(state.formReviewInterval), 12);
+  assert.equal(state.legacy, null, "session settings must not use the legacy global key");
+
+  state = app.run(`
+    __setProjectId("p2");
+    uiSettings = {
+      codex: {
+        model: "gpt-5.5",
+        reasoningEffort: "medium",
+        permissionPreset: "default",
+        webSearch: true,
+        reviewCheckpointInterval: 100
+      }
+    };
+    restoreSessionSettings();
+    __sessionSettingsState();
+  `);
+  assert.equal(state.projectId, "p2");
+  assert.equal(state.composerModel, "gpt-5.5", "another project must not inherit p1 model override");
+  assert.equal(state.composerReasoning, "medium", "another project must not inherit p1 reasoning override");
+  assert.equal(state.stored, null);
+}
+
+function testComposerModelReasoningChangesPersistProjectScoped() {
+  const app = loadAppContext();
+  let state = app.run(`
+    document.querySelector("#composer-model").value = "gpt-5.3-codex";
+    document.querySelector("#composer-reasoning").value = "high";
+    updateSessionSettingsFromComposer();
+    __sessionSettingsState();
+  `);
+  let stored = JSON.parse(state.stored);
+  assert.equal(stored.model, "gpt-5.3-codex");
+  assert.equal(stored.reasoningEffort, "high");
+  assert.equal(state.composerModel, "gpt-5.3-codex");
+  assert.equal(state.composerReasoning, "high");
+  assert.equal(state.formModel, "gpt-5.3-codex");
+  assert.equal(state.formReasoning, "high");
+
+  state = app.run(`
+    __setProjectId("p2");
+    uiSettings = { codex: { model: "gpt-5.5", reasoningEffort: "medium" } };
+    restoreSessionSettings();
+    __sessionSettingsState();
+  `);
+  assert.equal(state.composerModel, "gpt-5.5");
+  assert.equal(state.composerReasoning, "medium");
+  assert.equal(state.stored, null);
+
+  state = app.run(`
+    __setProjectId("p1");
+    restoreSessionSettings();
+    __sessionSettingsState();
+  `);
+  stored = JSON.parse(state.stored);
+  assert.equal(stored.model, "gpt-5.3-codex");
+  assert.equal(stored.reasoningEffort, "high");
+  assert.equal(state.composerModel, "gpt-5.3-codex", "returning to p1 should restore its model override");
+  assert.equal(state.composerReasoning, "high", "returning to p1 should restore its reasoning override");
+}
+
+async function testSettingsModalSaveSyncsScopedSessionSettings() {
+  const app = loadAppContext();
+  const state = await app.run(`
+    (async () => {
+      const form = document.querySelector("#settings-form");
+      form.querySelector = () => null;
+      form.elements.themeMode.value = "museum-tech";
+      form.elements.settingsModel.value = "gpt-5.2";
+      form.elements.settingsReasoningEffort.value = "low";
+      form.elements.settingsPermissionPreset.value = "full-access";
+      form.elements.settingsWebSearch.checked = false;
+      form.elements.settingsExtraConfig.value = "sandbox note";
+      form.elements.settingsReviewCheckpointInterval.value = "17";
+      const codex = codexSettingsFromModal();
+      globalThis.__apiResponse = { settings: { codex }, secret_keys: [] };
+      await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
+      return __sessionSettingsState();
+    })()
+  `);
+  const stored = JSON.parse(state.stored);
+  assert.equal(stored.model, "gpt-5.2");
+  assert.equal(stored.reasoningEffort, "low");
+  assert.equal(stored.permissionPreset, "full-access");
+  assert.equal(stored.webSearch, false);
+  assert.equal(Number(stored.reviewCheckpointInterval), 17);
+  assert.equal(state.composerModel, "gpt-5.2", "Settings save should sync the composer model");
+  assert.equal(state.composerReasoning, "low", "Settings save should sync the composer reasoning");
+  assert.equal(state.formPermission, "full-access", "Settings save should sync launch/session form values");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/settings");
+}
+
+function testProjectScopedComposerDraftAndTargetVenueRestore() {
+  const app = loadAppContext();
+  let state = app.run(`
+    appState.cold_start_files = [{ path: "resources/user_input/INITIAL_BRIEF.md", text: "" }];
+    activeColdPath = "resources/user_input/INITIAL_BRIEF.md";
+    persistComposerDraft("Draft for project one");
+    scopedSet("autoResearchTargetVenue", "Nature Methods");
+    document.querySelector("#cold-file-editor").value = "";
+    document.querySelector("#target-venue").value = "";
+    renderColdStartEditor();
+    hydrateTargetVenueField({ force: true });
+    ({ draft: __composerDraftState(), venue: __targetVenueState() });
+  `);
+  assert.equal(state.draft.value, "Draft for project one", "composer draft should restore for the active project");
+  assert.equal(state.draft.stored, "Draft for project one");
+  assert.equal(state.venue.value, "Nature Methods", "target venue should restore for the active project");
+  assert.equal(state.venue.scoped, "Nature Methods");
+  assert.equal(state.draft.legacy, null);
+  assert.equal(state.venue.legacy, null);
+
+  state = app.run(`
+    __setProjectId("p2");
+    appState.cold_start_files = [{ path: "resources/user_input/INITIAL_BRIEF.md", text: "" }];
+    activeColdPath = "resources/user_input/INITIAL_BRIEF.md";
+    renderColdStartEditor();
+    hydrateTargetVenueField({ force: true });
+    ({ draft: __composerDraftState(), venue: __targetVenueState() });
+  `);
+  assert.equal(state.draft.value, "", "another project must not inherit p1 composer draft");
+  assert.equal(state.draft.stored, null);
+  assert.equal(state.venue.value, "", "another project must not inherit p1 target venue");
+  assert.equal(state.venue.scoped, null);
+
+  state = app.run(`
+    persistComposerDraft("Draft for project two");
+    scopedSet("autoResearchTargetVenue", "NeurIPS");
+    __setProjectId("p1");
+    renderColdStartEditor();
+    hydrateTargetVenueField({ force: true });
+    ({ draft: __composerDraftState(), venue: __targetVenueState() });
+  `);
+  assert.equal(state.draft.value, "Draft for project one", "returning to p1 should restore its own composer draft");
+  assert.equal(state.venue.value, "Nature Methods", "returning to p1 should restore its own target venue");
+}
+
 function testThemeModePersistsAndApplies() {
   const app = loadAppContext();
   let theme = app.run('__themeState()');
@@ -955,6 +1485,142 @@ function testThemeModePersistsAndApplies() {
   theme = app.run('__themeState()');
   assert.equal(theme.dataset, "dark-glass");
   assert.equal(theme.stored, "dark-glass");
+}
+
+function testTargetVenueUsesOnlyProjectScopedDraft() {
+  const app = loadAppContext();
+  let state = app.run(`
+    localStorage.setItem("autoResearchTargetVenue", "Old global venue");
+    activeProjectId = "new-project";
+    appState = {
+      ...(appState || {}),
+      active_project_id: "new-project",
+      inputs: {},
+      summaries: { project: { target: "Not specified" }, manuscript: { target: "" } }
+    };
+    __hydrateTargetVenue({}, { force: true });
+  `);
+  assert.equal(state.value, "", "global target venue drafts must not be restored into a project");
+  assert.equal(state.scoped, null);
+  assert.equal(state.legacy, null);
+
+  state = app.run(`
+    scopedSet("autoResearchTargetVenue", "Old scoped venue");
+    __hydrateTargetVenue({
+      inputs: { target_venue: "ICLR workshop, benchmark report" },
+      summaries: { project: { target: "Not specified" }, manuscript: { target: "" } }
+    }, { force: true });
+  `);
+  assert.equal(state.value, "Old scoped venue", "current project scoped target venue should restore after refresh");
+  assert.equal(state.scoped, "Old scoped venue");
+
+  state = app.run(`
+    scopedRemove("autoResearchTargetVenue");
+    __hydrateTargetVenue({
+      inputs: { target_venue: "ICLR workshop, benchmark report" },
+      summaries: { project: { target: "Not specified" }, manuscript: { target: "" } }
+    }, { force: true });
+  `);
+  assert.equal(state.value, "", "server target venue metadata must remain a hint, not a prefilled input value");
+  assert.equal(state.scoped, null);
+
+  state = app.run(`
+    document.querySelector("#target-venue").value = "Audience: methods reviewers";
+    scopedSet("autoResearchTargetVenue", "Audience: methods reviewers");
+    __hydrateTargetVenue({
+      inputs: { target_venue: "ICLR workshop, benchmark report" },
+      summaries: { project: { target: "Not specified" }, manuscript: { target: "" } }
+    });
+  `);
+  assert.equal(state.value, "Audience: methods reviewers", "overview polling should not clear active target venue input");
+  assert.equal(state.scoped, "Audience: methods reviewers");
+
+  state = app.run(`
+    __hydrateTargetVenue({ inputs: { target_venue: "Server refreshed venue" } }, { force: true });
+  `);
+  assert.equal(state.value, "Audience: methods reviewers", "forced project hydration should keep the project-scoped target venue draft");
+}
+
+function testMaterialTypeChipsUseLocalBrowserAndPlusUsesFilePicker() {
+  const app = loadAppContext();
+  let state = app.run('__chooseMaterialTypeProbe("literature")');
+  assert.equal(state.activeCategory, "literature", "material chips should still set the selected resource type");
+  assert.equal(state.browserOpenCategory, "literature", "material chips should open the local browser with the selected type");
+  assert.equal(state.browserOpenCount, 1, "material chips should use the server local browser for copy/symlink resources");
+  assert.equal(state.clicks, 0, "material chips must not use browser File upload for resource folders or large zip files");
+
+  state = app.run('__openFilePickerProbe("user_input")');
+  assert.equal(state.activeCategory, "literature", "generic plus browsing should not change the active material type");
+  assert.equal(state.pendingCategory, "user_input", "generic plus browsing should keep the default user-input category");
+  assert.equal(state.clicks, 1);
+}
+
+async function testLargeBrowserUploadsUseResourceCopyFlow() {
+  const app = loadAppContext();
+  let state = app.run('__addUploadProbe({ name: "small-note.md", type: "text/markdown", size: 1024, lastModified: 1 }, { category: "user_input" })');
+  assert.equal(state.after, 1, "small browser uploads should still attach normally");
+  assert.equal(state.uploads[0].name, "small-note.md");
+  assert.equal(state.briefTrayHidden, false, "attached files should make the composer attachment tray visible");
+  assert.equal(
+    state.briefTray.includes("small-note.md"),
+    true,
+    `attached files should render as composer chips: exists=${state.trayExists} hidden=${state.briefTrayHidden} html=${state.briefTray}`
+  );
+
+  state = app.run('__addFilesProbe([{ name: "perceived_safety.zip", type: "application/zip", size: 1593975145, lastModified: 2, slice(start, end) { return { arrayBuffer: async () => new ArrayBuffer(end - start) }; } }], "drop", { category: "ongoing_work" })');
+  assert.equal(state.before, 1);
+  assert.equal(state.accepted, 0, "large dropped browser uploads should not be counted as normal browser uploads");
+  assert.equal(state.after, 1, "large browser uploads should not become base64 upload chips");
+  assert.equal(state.imports.length, 1, "large dropped browser uploads should enter the resource-copy queue");
+  assert.equal(state.imports[0].status, "pending_confirm");
+  assert.equal(state.briefTray.includes("perceived_safety.zip"), true, "pending large imports should render in the composer tray");
+  assert.equal(app.run("__pendingResourceImportState()").blocked, true, "pending large imports should block send and launch actions");
+  assert.equal(
+    state.toasts.some((toast) => !toast.error && toast.message.includes("resource-copy confirmation")),
+    true,
+    "large upload should ask for resource-copy confirmation"
+  );
+  assert.equal(
+    state.toasts.some((toast) => !toast.error && toast.message.includes("attached from drop")),
+    false,
+    "large pending drops must not show a false attached-from-drop success toast"
+  );
+
+  state = await app.run('__confirmFirstResourceImport()');
+  assert.equal(state.blocked, false, "completed large resource imports should unblock sending");
+  assert.equal(state.imports.length, 0, "completed imports should leave the pending queue");
+  assert.equal(state.resources.length, 1, "completed imports should add a resource link chip");
+  assert.equal(state.resources[0].path, "resources/ongoing_work/perceived_safety.zip");
+  assert.equal(state.resources[0].alreadyImported, true);
+}
+
+function testCompactComposerAutosizesFromCenteredBase() {
+  const app = loadAppContext();
+  let state = app.run('__resizeColdEditorProbe({ value: "", scrollHeight: 44 })');
+  assert.equal(state.singleLine, false, "compact composer should not rely on a forced single-line class");
+  assert.equal(state.rows, 1, "compact composer should start from a one-row textarea");
+  assert.equal(state.height, "44px");
+  assert.equal(state.overflowY, "hidden");
+
+  state = app.run('__resizeColdEditorProbe({ value: "S", scrollHeight: 44 })');
+  assert.equal(state.singleLine, false, "single-character input should stay on the normal autosize path");
+  assert.equal(state.height, "44px");
+  assert.equal(state.overflowY, "hidden");
+
+  state = app.run('__resizeColdEditorProbe({ value: "Line one\\nLine two", scrollHeight: 88 })');
+  assert.equal(state.singleLine, false);
+  assert.equal(state.height, "88px");
+  assert.equal(state.overflowY, "hidden");
+
+  state = app.run('__resizeColdEditorProbe({ value: "A long wrapped composer line", scrollHeight: 88 })');
+  assert.equal(state.singleLine, false);
+  assert.equal(state.height, "88px");
+  assert.equal(state.overflowY, "hidden");
+
+  state = app.run('__resizeColdEditorProbe({ value: "Overflowing composer content", scrollHeight: 400 })');
+  assert.equal(state.singleLine, false);
+  assert.equal(state.height, "306px");
+  assert.equal(state.overflowY, "auto");
 }
 
 function testComposerPromptInsertionIsIdempotent() {
@@ -1095,6 +1761,7 @@ await testResumeFromTrialRequiresConfirmationAndSendsPayload();
 await testResumeFromTrialCancelPreservesComposer();
 await testResumeTrialSlashCommandIsBlocked();
 await testFailedSessionSendRestoresComposerState();
+await testSuccessfulSessionSendClearsComposerDraft();
 await testSlashCommandVisibleAndIgnoredAsUnanswered();
 await testRestartCommandRequiresConfirmationAndSendsRestartEndpoint();
 await testRestartCancelPreservesComposer();
@@ -1102,6 +1769,9 @@ testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 await testEditTruncatesLaterConversationBeforeResend();
 await testLaunchGoalMessageBeforeBackendWork();
+testStartAutoresearchOnlyAppearsOnProjectDraftCard();
+testMessagesExposeCopyButtons();
+testFileTreePdfPreviewControls();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
 testPassedGoalDoesNotShowStaleRunningTrial();
 testCurrentRunActivityShowsPauseForChatRun();
@@ -1110,7 +1780,15 @@ testTrialStripScrollRestoresAcrossRender();
 testStatusCardShowsReviewCheckpoint();
 testComposerPlaceholderBecomesGeneralAfterLaunch();
 testSettingsRenderPreservesComposerDraft();
+testProjectScopedSessionSettingsOverrideServerDefaults();
+testComposerModelReasoningChangesPersistProjectScoped();
+await testSettingsModalSaveSyncsScopedSessionSettings();
+testProjectScopedComposerDraftAndTargetVenueRestore();
 testThemeModePersistsAndApplies();
+testTargetVenueUsesOnlyProjectScopedDraft();
+testMaterialTypeChipsUseLocalBrowserAndPlusUsesFilePicker();
+await testLargeBrowserUploadsUseResourceCopyFlow();
+testCompactComposerAutosizesFromCenteredBase();
 testComposerPromptInsertionIsIdempotent();
 await testCopyTextHelperWritesClipboard();
 testManuscriptPanelRendersPaperFiguresTablesAndTraceability();

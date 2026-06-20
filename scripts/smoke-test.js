@@ -502,6 +502,25 @@ Confidence: medium
   ) {
     throw new Error("settings must expose the persisted dashboard themes");
   }
+  const loadSettingsStart = appJs.indexOf("async function loadUiSettings");
+  const loadSettingsEnd = appJs.indexOf("async function saveUiSettings", loadSettingsStart);
+  const loadSettingsBody = loadSettingsStart >= 0 && loadSettingsEnd > loadSettingsStart
+    ? appJs.slice(loadSettingsStart, loadSettingsEnd)
+    : "";
+  if (
+    !appJs.includes("function scopedJsonGet") ||
+    !appJs.includes("function scopedSessionSettings") ||
+    !appJs.includes("function mergedProjectSessionSettings") ||
+    !appJs.includes('scopedGet("autoResearchComposerDraft", "", { legacyFallback: false })') ||
+    !appJs.includes('scopedGet("autoResearchTargetVenue", "", { legacyFallback: false })') ||
+    !appJs.includes('scopedSet("autoResearchTargetVenue", event.target.value || "")') ||
+    !appJs.includes('scopedSet("autoResearchSessionSettings", JSON.stringify(settings))') ||
+    !loadSettingsBody.includes("hydrateSettingsDialog(uiSettings);") ||
+    !loadSettingsBody.includes("restoreSessionSettings();") ||
+    loadSettingsBody.includes("applySessionSettings(")
+  ) {
+    throw new Error("project-scoped UI persistence must keep drafts/settings in scoped storage and keep loadUiSettings from overwriting browser overrides");
+  }
   assertThemeContrast(stylesCss);
   if (
     !serverPy.includes('{"text", "project", "goal-launch", "command"}') ||
@@ -511,12 +530,30 @@ Confidence: medium
     throw new Error("server must preserve goal-launch messages and keep attachment-only chat turns visible");
   }
   if (
+    !serverPy.includes("def chat_research_prompt") ||
+    !serverPy.includes("This is not an autoresearch launch") ||
+    !serverPy.includes("CHAT_PROTECTED_PATHS") ||
+    !serverPy.includes("create_chat_protected_snapshot() if mode == \"chat\" else None") ||
+    !serverPy.includes("restore_chat_protected_snapshot") ||
+    !serverPy.includes("Chat mode guard restored protected autoresearch artifacts") ||
+    !serverPy.includes("read_trajectory_state() if chat_guard_active else sync_trajectory_state(\"snapshot\")")
+  ) {
+    throw new Error("chat mode must not be able to create or sync autoresearch trial artifacts");
+  }
+  if (
     !indexHtml.includes('id="composer-attach-button"') ||
     !indexHtml.includes('id="composer-file-input"') ||
     !indexHtml.includes('type="file" multiple hidden') ||
+    !indexHtml.includes("Browse or drop resources") ||
     !appJs.includes('$("#composer-attach-button")?.addEventListener("click"') ||
     !appJs.includes('$("#composer-file-input")?.addEventListener("change"') ||
-    !appJs.includes('addFilesFromList(event.target.files, "file picker", { category: "user_input" })') ||
+    !appJs.includes("function openComposerFilePicker") ||
+    !appJs.includes("const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024") ||
+    !appJs.includes("size > MAX_BROWSER_UPLOAD_BYTES") ||
+    !appJs.includes("Copy it into project resources before sending.") ||
+    !appJs.includes("function chooseMaterialType") ||
+    !appJs.includes("showResourceBrowser();") ||
+    !appJs.includes('addFilesFromList(event.target.files, "file picker", { category })') ||
     !appJs.includes('user_input: "User input"') ||
     !serverPy.includes('"user_input": "resources/user_input/attachments"') ||
     !stylesCss.includes(".composer-attach-button") ||
@@ -527,6 +564,25 @@ Confidence: medium
     !gettingStartedDocs.includes("resources/user_input/RESOURCE_MANIFEST.md")
   ) {
     throw new Error("composer must expose a local file attach button and document project-local attachment storage");
+  }
+  if (
+    !appJs.includes("function uploadTooLargeMessage") ||
+    !appJs.includes("function queueLargeResourceImport") ||
+    !appJs.includes("function confirmLargeResourceImport") ||
+    !appJs.includes("hasBlockingResourceImports()") ||
+    !serverPy.includes("/api/resource-import/start") ||
+    !serverPy.includes("/api/resource-import/chunk") ||
+    !serverPy.includes("def start_resource_import") ||
+    !serverPy.includes("def write_resource_import_chunk") ||
+    !serverPy.includes("alreadyImported") ||
+    !appJs.includes("const accepted = results.filter((result) => result?.accepted).length") ||
+    !appJs.includes("return accepted;") ||
+    appJs.includes("showToast(`${list.length} ${list.length === 1 ? \"file\" : \"files\"} attached from ${source}.`)") ||
+    !stylesCss.includes(".brief-editor-shell.is-framing-dock .attachment-tray[hidden]") ||
+    !stylesCss.includes(".brief-editor-shell.is-framing-dock .attachment-chip") ||
+    !stylesCss.includes(".attachment-progress")
+  ) {
+    throw new Error("composer attachments must show accepted files and route large drops through resource-copy flow");
   }
   if (
     !serverPy.includes("WinError 10013") ||
@@ -589,6 +645,17 @@ Confidence: medium
   const launchApiIndex = appJs.indexOf('api("/api/research/cold-start"', launchStart);
   if (!(launchStart >= 0 && launchCloseIndex > launchStart && launchPersistIndex > launchCloseIndex && launchApiIndex > launchCloseIndex)) {
     throw new Error("launch dialog must close immediately after local /goal pending UI is rendered");
+  }
+  if (
+    !indexHtml.includes('id="launch-instruction"') ||
+    !indexHtml.includes("Optional launch instruction") ||
+    !appJs.includes('const launchInstruction = String($("#launch-instruction")?.value || "").trim()') ||
+    !appJs.includes("launchInstruction, fileEdits") ||
+    !serverPy.includes("def autoresearch_goal_prompt(launch_instruction") ||
+    !serverPy.includes("Additional user instruction for this launch") ||
+    !serverPy.includes('autoresearch_goal_prompt(str(payload.get("launchInstruction", ""))[:4000])')
+  ) {
+    throw new Error("launch dialog must support an optional one-run autoresearch instruction");
   }
   if (
     !appJs.includes("markdownLinkHtml") ||
@@ -739,15 +806,13 @@ Confidence: medium
     throw new Error("framing/chat Codex events must render as Worked rows or trial activity, not separate current-session cards");
   }
   if (
-    !appJs.includes("canLaunchAutoresearchFromAssistant") ||
-    !appJs.includes("latestAssistantTextMessage") ||
+    appJs.includes("canLaunchAutoresearchFromAssistant") ||
+    appJs.includes("latestAssistantTextMessage") ||
+    !appJs.includes("function projectDraftCardHtml") ||
     !appJs.includes("data-project-launch>Start autoresearch</button>") ||
-    !appJs.includes("latest?.id === message.id") ||
-    !appJs.includes("hasProjectDraftReady()") ||
-    !appJs.includes("!hasGoalStarted()") ||
-    !appJs.includes("!isSessionRunning()")
+    !appJs.includes("fullscreenButtonHtml(\"PROJECT.md\")")
   ) {
-    throw new Error("latest pre-goal assistant reply must expose a Start autoresearch action");
+    throw new Error("PROJECT.md draft card must own launch and fullscreen actions");
   }
   if (
     !appJs.includes("Open latest manuscript") ||
@@ -759,6 +824,35 @@ Confidence: medium
     appJs.includes("editor.value = current ? `${current}\\n${text}` : text;")
   ) {
     throw new Error("UI must expose the latest manuscript and make quick prompt insertion idempotent");
+  }
+  if (
+    !appJs.includes("function messageCopyButton") ||
+    !appJs.includes("message-copy-button") ||
+    !stylesCss.includes(".message-copy-button") ||
+    !stylesCss.includes(".message-action-row")
+  ) {
+    throw new Error("chat and transcript messages must expose copy controls");
+  }
+  if (
+    appJs.includes('class="tree-file-actions"') ||
+    stylesCss.includes(".tree-file-actions") ||
+    !appJs.includes('data-file-details="${escapeHtml(filePath)}"') ||
+    !appJs.includes('data-inline-file="${escapeHtml(filePath)}"') ||
+    !appJs.includes('return `<iframe class="file-pdf-preview"') ||
+    !stylesCss.includes(".file-pdf-preview")
+  ) {
+    throw new Error("Project files and resources must keep clean expandable rows while rendering PDF previews through the inline viewer");
+  }
+  if (
+    !appJs.includes('class="trial-chip-index"') ||
+    !appJs.includes('class="trial-chip-status"') ||
+    !stylesCss.includes(".trial-chip-index") ||
+    !stylesCss.includes("width: 28px;") ||
+    !stylesCss.includes("height: 28px;") ||
+    !stylesCss.includes(".trial-chip.is-active .trial-chip-index") ||
+    !stylesCss.includes("color: #ffffff;")
+  ) {
+    throw new Error("trial strip numbers must render as high-contrast fixed-size badges");
   }
   if (
     !appJs.includes("function figureSpecCardsHtml") ||
@@ -924,6 +1018,31 @@ Confidence: medium
     throw new Error(`Python Codex resolver returned ${resolverOutput}`);
   }
 
+  const launchPromptOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    [
+      "import importlib.util, os, pathlib",
+      "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+      "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "base = module.autoresearch_goal_prompt()",
+      "custom = module.autoresearch_goal_prompt('Prioritize source-level evidence.')",
+      "assert 'Additional user instruction for this launch' not in base",
+      "assert 'Prioritize source-level evidence.' in custom",
+      "assert 'Required reviewer gates must all be strict `pass`' in custom",
+      "print('launch-prompt-ok')",
+    ].join("; ")
+  ], {
+    cwd: root,
+    env: { ...process.env, COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py") },
+    encoding: "utf8"
+  }).trim();
+  if (launchPromptOutput !== "launch-prompt-ok") {
+    throw new Error(`launch prompt smoke returned ${launchPromptOutput}`);
+  }
+
   const legacyFileReferenceScript = [
     "import importlib.util, json, os, pathlib",
     "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
@@ -954,6 +1073,49 @@ Confidence: medium
   }).trim();
   if (!legacyFileReferenceOutput.includes("RESOURCE_MANIFEST.md")) {
     throw new Error(`legacy file reference resolver returned ${legacyFileReferenceOutput}`);
+  }
+
+  const resourceImportScript = [
+    "import importlib.util, json, os, pathlib",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "root = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT'])",
+    "module._CONTEXT.project = module.ProjectContext(root)",
+    "payload = module.start_resource_import({'name': 'large.bin', 'size': 11, 'category': 'data_sources'})",
+    "module.write_resource_import_chunk(payload['import_id'], 0, b'hello ')",
+    "try:\n    module.write_resource_import_chunk(payload['import_id'], 1, b'bad')\n    raise AssertionError('invalid offset accepted')\nexcept ValueError:\n    pass",
+    "module.write_resource_import_chunk(payload['import_id'], 6, b'world')",
+    "finished = module.finish_resource_import({'import_id': payload['import_id']})",
+    "dest = root / finished['path']",
+    "assert finished['path'].startswith('resources/data_sources/'), finished",
+    "assert dest.read_bytes() == b'hello world'",
+    "payload2 = module.start_resource_import({'name': 'cancel.bin', 'size': 4, 'category': 'other'})",
+    "module.write_resource_import_chunk(payload2['import_id'], 0, b'ab')",
+    "cancelled = module.cancel_resource_import({'import_id': payload2['import_id']})",
+    "assert cancelled['cancelled'] is True",
+    "runtime = root / 'ui' / '.runtime' / 'resource_imports'",
+    "assert not any(path.name.startswith(payload2['import_id']) for path in runtime.glob('*'))",
+    "saved = module.save_resource_links({'resourceLinks': [{'path': finished['path'], 'category': 'data_sources', 'alreadyImported': True}]})",
+    "assert saved and saved[0]['mode'] == 'imported' and saved[0]['path'] == finished['path'], saved",
+    "print(json.dumps({'path': finished['path'], 'mode': saved[0]['mode']}))"
+  ].join("\n");
+  const resourceImportOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    resourceImportScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!resourceImportOutput.includes("resources/data_sources")) {
+    throw new Error(`resource import smoke returned ${resourceImportOutput}`);
   }
 
   const externalRepo = path.join(tempRoot, "LLMShopper-TBS-Test");
@@ -1372,7 +1534,7 @@ Confidence: medium
     ...python.args,
     "-c",
     [
-      "import importlib.util, json, os, pathlib, shutil",
+      "import importlib.util, json, os, pathlib, shutil, subprocess, sys",
       "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
       "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
       "module = importlib.util.module_from_spec(spec)",
@@ -1407,7 +1569,34 @@ Confidence: medium
       "    raise AssertionError('project deletion did not require exact confirmation name')",
       "except ValueError:",
       "    pass",
+      "chat_guard = dashboard.create_project({'name': 'chat guard'})",
+      "module.PROJECT_REGISTRY = dashboard",
+      "guard_ctx = dashboard.context_for(chat_guard['id'])",
+      "with module.using_project(chat_guard['id']):",
+      "    state_path = guard_ctx.root / 'research_trajectory' / 'STATE.md'",
+      "    original_state = state_path.read_text(encoding='utf-8') if state_path.exists() else None",
+      "    snapshot = module.create_chat_protected_snapshot()",
+      "    bad_trial = guard_ctx.root / 'research_trajectory' / 'trials' / '000001_wrong_chat_trial'",
+      "    bad_trial.mkdir(parents=True)",
+      "    (bad_trial / 'REPORT.md').write_text('bad chat trial', encoding='utf-8')",
+      "    state_path.parent.mkdir(parents=True, exist_ok=True)",
+      "    state_path.write_text('bad chat state', encoding='utf-8')",
+      "    restored = module.restore_chat_protected_snapshot(snapshot)",
+      "    assert 'research_trajectory/trials' in restored, restored",
+      "    assert 'research_trajectory/STATE.md' in restored, restored",
+      "    assert not bad_trial.exists()",
+      "    if original_state is None:",
+      "        assert not state_path.exists()",
+      "    else:",
+      "        assert state_path.read_text(encoding='utf-8') == original_state",
+      "dashboard.delete_project({'project': chat_guard['id'], 'confirm': 'chat guard'})",
+      "ctx = dashboard.context_for(created['id'])",
+      "proc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])",
+      "ctx.session['process'] = proc",
+      "ctx.session['status'] = 'running'",
       "deleted = dashboard.delete_project({'project': created['id'], 'confirm': 'renamed ui project'})",
+      "assert deleted['stopped_active_run'] is True, deleted",
+      "assert proc.poll() is not None, proc.poll()",
       "assert all(item['id'] != created['id'] for item in deleted['projects'])",
       "assert not (temp_root / 'ui_project').exists()",
       "print(json.dumps({'single': single_names, 'default': from_ui['display_name'], 'renamed': renamed['display_name'], 'deleted': deleted['deleted_project_id']}))"

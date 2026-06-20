@@ -189,6 +189,12 @@ these uploads are copied into the current project's
 the attachment chip before sending, and uploaded or linked materials are indexed
 in `resources/user_input/RESOURCE_MANIFEST.md` so the agent can cite the same
 project-local record later.
+Files over 50 MB are not base64-uploaded. The UI asks whether to copy them into
+the matching `resources/` category, shows chunk-copy progress, and only enables
+send or launch after the copy finishes or is cancelled. For existing local
+folders or prior project bundles, use the resource browser chips; the
+server-side browser copies files or symlinks folders into the matching
+`resources/` category.
 
 Autoresearch controls use distinct meanings:
 
