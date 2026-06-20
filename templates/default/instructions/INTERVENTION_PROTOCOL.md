@@ -66,7 +66,7 @@ When a formal intervention arrives:
 2. Create a new file under `research_trajectory/human_interventions/` with the next ID, such as `I0001_change_target_venue.md`.
 3. Update `research_trajectory/human_interventions/INDEX.md`.
 4. Update `research_trajectory/STATE.md` with the current effective consequence.
-5. Update the active trial `PLAN.md`, `REVIEW.md`, or `REPORT.md` if the intervention affects it.
+5. Update the active trial `PLAN.md`, `REPORT.md`, or relevant `reviews/*_REVIEW.md` file if the intervention affects it.
 6. Update `research_trajectory/CURRENT_FINDINGS.md` if any finding, claim, evidence status, or limitation changes.
 7. Update `manuscript/BLUEPRINT.md` or `manuscript/figures/FIGURE_SPECS.md` if manuscript-facing implications changed.
 8. Continue only under the updated state.

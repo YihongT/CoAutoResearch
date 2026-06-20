@@ -137,7 +137,8 @@ Example:
 Each trial contains:
 
 - `PLAN.md`: written before execution;
-- `REVIEW.md`: cumulative review record for this trial;
+- `reviews/`: canonical per-reviewer review files for this trial;
+- `REVIEW.md`: optional legacy compatibility summary only;
 - `REPORT.md`: written after execution;
 - `artifacts/`: raw outputs, logs, figures, tables, downloaded files, scripts, or other files produced or collected during the trial.
 
@@ -157,20 +158,28 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 4. Identify the next coherent objective.
 5. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
 6. Write `PLAN.md` before execution.
-7. Review the plan in `REVIEW.md` if the plan is non-trivial, direction-setting, method-heavy, resource-heavy, compute-heavy, or uncertain.
-8. Revise `PLAN.md` if the review requires it.
-9. Execute mainly in `workspace/` or another clearly justified location.
-10. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
-11. Write `REPORT.md` after execution.
-12. Add post-execution review to `REVIEW.md` when needed.
+7. Create `reviews/` and run the Plan reviewer into `reviews/PLAN_REVIEW.md`; revise `PLAN.md` if the review requires it.
+8. Execute mainly in `workspace/` or another clearly justified location.
+9. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
+10. Write `REPORT.md` after execution.
+11. Run or refresh all seven core reviewers for this trial and write their canonical files:
+    - `reviews/PLAN_REVIEW.md`
+    - `reviews/PROCESS_REVIEW.md`
+    - `reviews/EVIDENCE_REVIEW.md`
+    - `reviews/VENUE_FIT_REVIEW.md`
+    - `reviews/MANUSCRIPT_REVIEW.md`
+    - `reviews/FIGURE_TABLE_REVIEW.md`
+    - `reviews/FINAL_GATE_REVIEW.md`
+12. A reviewer with little to assess still writes its file with a scoped judgment and explicit unassessed areas.
 13. Update only global files that genuinely changed:
     - `research_trajectory/STATE.md`
     - `research_trajectory/CURRENT_FINDINGS.md`
     - `research_trajectory/notes/NOTES.md`
     - `manuscript/BLUEPRINT.md`
     - `manuscript/figures/FIGURE_SPECS.md`
-14. Commit changes to git.
-15. Push if a remote exists and progress is meaningful.
+14. Update the `Autoresearch Goal Gate` in `STATE.md` so each reviewer line references the current trial's reviewer file path.
+15. Commit changes to git.
+16. Push if a remote exists and progress is meaningful.
 
 ---
 
@@ -188,26 +197,18 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 - success criteria;
 - what global files may need updates.
 
-### `REVIEW.md` should include
+### `reviews/*_REVIEW.md` should include
 
-Use one cumulative review file per trial by default. It may contain:
+Each core reviewer file must follow `instructions/reviewers/REVIEW_TAXONOMY.md`
+and include provenance:
 
-- pre-execution plan review;
-- mid-execution review;
-- method review;
-- resource review;
-- result review;
-- process review;
-- post-execution review.
-
-Default review decisions:
-
-- `approved`;
-- `revise_plan`;
-- `continue_with_caution`;
-- `blocked`;
-- `completed`;
-- `needs_follow_up_trial`.
+- reviewer name, scope, decision, gate impact, confidence;
+- source trial;
+- generated timestamp;
+- instruction file path;
+- reviewed input paths;
+- context summary;
+- migration source, if the file was created from legacy content or backfilled.
 
 ### `REPORT.md` should include
 
@@ -225,17 +226,38 @@ Default review decisions:
 
 ## Review Policy
 
-Review outputs for trial-level work belong in the relevant trial's `REVIEW.md`.
+Canonical review outputs for trial-level work belong in the relevant trial's
+`reviews/` directory, one file per reviewer:
 
-Review outputs for manuscript-facing deliverables belong in:
+- `PLAN_REVIEW.md`
+- `PROCESS_REVIEW.md`
+- `EVIDENCE_REVIEW.md`
+- `VENUE_FIT_REVIEW.md`
+- `MANUSCRIPT_REVIEW.md`
+- `FIGURE_TABLE_REVIEW.md`
+- `FINAL_GATE_REVIEW.md`
+
+Legacy `REVIEW.md` may exist only as a human-readable summary or compatibility
+record. Do not treat it as canonical when `reviews/` exists.
+
+Every active trial must produce all seven core reviewer files. No reviewer gate
+may silently carry forward from an earlier trial. If a reviewer cannot assess
+much in the current trial, it must still write the current trial file with
+`Decision: continue`, `blocked`, or `needs_human` as appropriate and list what
+was unassessed.
+
+Review outputs for manuscript-facing deliverables may also be mirrored or
+summarized in:
 
 `manuscript/reviews/`
 
-Process review is also a trial. If recent progress appears stuck, create a trial such as:
+but the current trial's canonical reviewer file remains required.
+
+Process review can still be the objective of a dedicated trial, for example:
 
 `research_trajectory/trials/000024_process_review/`
 
-and write the process review in that trial's `REVIEW.md`.
+That trial still writes all seven files under its own `reviews/` directory.
 
 Do not create `research_trajectory/process_reviews/`.
 Do not create `research_trajectory/reviewers/`.
@@ -255,9 +277,18 @@ Use this section to decide whether the autoresearch loop should continue or stop
 
 - `Status: pass`, `continue`, `blocked`, or `needs_human`;
 - reviewer gate lines for Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, and Final gate;
+- the current trial reviewer file path on each reviewer gate line;
 - the next action when any gate is not `pass`.
 
-The autoresearch goal is complete only when `Status: pass` and every required reviewer gate is a strict `pass`, including the Final gate reviewer.
+The autoresearch goal is complete only when `Status: pass` and every required
+current-trial reviewer file has `Decision: pass` and `Gate impact: pass`,
+including the Final gate reviewer.
+
+Use gate lines like:
+
+```markdown
+- Evidence reviewer: pass - `research_trajectory/trials/<trial_id>/reviews/EVIDENCE_REVIEW.md`
+```
 
 For manuscript-facing projects, a pass also requires a final synthesis step
 before the gate is marked pass. That step must update:
@@ -283,7 +314,12 @@ after evidence/final gates are claimed as pass.
 
 Before marking any gate as `pass`, read `instructions/reviewers/REVIEW_TAXONOMY.md`. Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results and require `continue` unless the relevant reviewer standard is fully satisfied.
 
-The Final gate reviewer is required before the loop can stop. It must confirm that all other required reviewers passed under the shared output schema and that no blocking issues, required actions, unresolved qualifications, active revision constraints, critical unassessed areas, outdated reviewer instructions, incomplete final blueprint sections, or stale pass-conflicting language remain.
+The Final gate reviewer is required before the loop can stop. It must confirm
+that all six other current-trial reviewer files exist and pass under the shared
+output schema, and that no blocking issues, required actions, unresolved
+qualifications, active revision constraints, critical unassessed areas,
+outdated reviewer instructions, incomplete final blueprint sections, or stale
+pass-conflicting language remain.
 
 If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a human decision is genuinely required, mark `Status: needs_human` and state the exact question.
 
@@ -295,7 +331,9 @@ If the current task requires a specialized review perspective not covered by exi
 
 `instructions/reviewers/REVIEWER_SPAWNING.md`
 
-Spawned reviewers are instruction files, not review outputs. Their review results still go into the relevant trial `REVIEW.md` or `manuscript/reviews/`.
+Spawned reviewers are instruction files, not review outputs. Their review
+results go into the relevant trial `reviews/` directory or `manuscript/reviews/`
+when manuscript-facing.
 
 Create a new reviewer only when it addresses a clear quality risk.
 

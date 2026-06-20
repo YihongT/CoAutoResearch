@@ -46,9 +46,18 @@ Detailed generation-style prompt:
 
 <Very detailed prompt-like description.>
 
-Caption draft:
+Caption draft or current caption:
 
 Figure F000000. <caption>
+
+Source artifact path:
+
+<path or none for not-yet-generated conceptual figures>
+
+Linked manuscript paragraphs:
+
+- Section:
+- Paragraph IDs:
 
 Evidence / conceptual basis:
 

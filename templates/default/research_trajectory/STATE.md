@@ -93,13 +93,13 @@ Status: continue
 
 Required reviewer gates:
 
-- Plan reviewer: continue - no substantive trial has been completed yet.
-- Process reviewer: continue - project trajectory is not initialized yet.
-- Evidence reviewer: continue - evidence state is not initialized yet.
-- Venue fit reviewer: continue - venue or audience is not initialized yet.
-- Manuscript reviewer: continue - manuscript-facing direction is not initialized yet.
-- Figure/table reviewer: continue - display needs are not initialized yet.
-- Final gate reviewer: continue - required reviewers have not strictly passed yet.
+- Plan reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/PLAN_REVIEW.md`.
+- Process reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/PROCESS_REVIEW.md`.
+- Evidence reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/EVIDENCE_REVIEW.md`.
+- Venue fit reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/VENUE_FIT_REVIEW.md`.
+- Manuscript reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/MANUSCRIPT_REVIEW.md`.
+- Figure/table reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FIGURE_TABLE_REVIEW.md`.
+- Final gate reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`.
 
 Next action: complete cold start or conversion, then create the first coherent trial.
 

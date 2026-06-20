@@ -63,13 +63,25 @@ source trials or artifacts cited there.
 
 ## Section-By-Section Architecture
 
-### Section 1: <title>
+Use the section order and section titles required by the target manual, target
+venue notes, seed-paper style, or explicit project scope. Do not default to a
+generic paper structure unless that is the target-venue structure.
+
+Include the abstract as a section when the target deliverable has one. If the
+target requires a structured abstract, use the target's required abstract
+headings as paragraph/move labels. If the abstract is unstructured, plan 4-6
+rhetorical moves. Do not write full manuscript prose here; specify what each
+paragraph or abstract move must accomplish.
+
+### Section 1: <target-venue section title>
 
 Purpose:
 
-Target-venue role:
+Section thesis:
 
-Content to include:
+Reader question answered:
+
+Narrative role in target venue:
 
 Accepted claims:
 
@@ -79,12 +91,20 @@ Figures / tables:
 
 Required qualifications:
 
+Paragraph plan:
+
+| Para | Rhetorical move | Content to cover, not full prose | Claims / evidence | Results / artifacts | Figures / tables | Citation posture | Required qualification | Transition job |
+|---|---|---|---|---|---|---|---|---|
+| P1 | <move> | <specific content obligation> | <claim IDs / evidence IDs> | <result IDs or artifact paths> | <figure/table IDs or none> | <citation role> | <qualification or none> | <how this sets up the next paragraph/section> |
+
 ---
 
 ## Figure Plan
 
 Every active figure must be self-contained here, even if detailed specs also
-live in `manuscript/figures/FIGURE_SPECS.md`.
+live in `manuscript/figures/FIGURE_SPECS.md`. Captions may be complete prose
+because they are deliverable text; section paragraphs should remain writing
+plans, not full manuscript prose.
 
 ### Figure F000000: <title>
 
@@ -94,9 +114,15 @@ Argument or result role:
 
 Content and panel layout:
 
+Visual style:
+
 Caption draft or current caption:
 
 Source artifact path:
+
+Result shown or conceptual basis:
+
+Linked paragraphs:
 
 Linked claims:
 
@@ -123,6 +149,12 @@ Content, columns, rows, or comparison logic:
 Caption draft or current caption:
 
 Source artifact path:
+
+Key results shown:
+
+Small table preview, if compact enough:
+
+Linked paragraphs:
 
 Linked claims:
 

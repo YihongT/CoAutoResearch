@@ -12,9 +12,10 @@ flowchart TD
   P --> S["STATE.md<br/>current objective"]
   S --> T["Trial<br/>one coherent work package"]
   T --> PL["PLAN.md"]
-  PL --> RV["REVIEW.md"]
+  PL --> RV["reviews/*_REVIEW.md<br/>seven reviewer files"]
   RV --> W["Execute in workspace/"]
   W --> RP["REPORT.md"]
+  RP --> RV
   RP --> F["CURRENT_FINDINGS.md<br/>claims and evidence"]
   F --> M["Manuscript / deliverable<br/>human can defend and revise"]
   M --> S

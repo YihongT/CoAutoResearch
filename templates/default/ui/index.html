@@ -6,10 +6,12 @@
     <title>CoAutoResearch</title>
     <script>
       (() => {
+        const allowedThemes = new Set(["graphite-aurora", "museum-tech", "dark-glass"]);
         try {
-          document.documentElement.dataset.theme = "light";
+          const stored = localStorage.getItem("coAutoResearchTheme");
+          document.documentElement.dataset.theme = allowedThemes.has(stored) ? stored : "graphite-aurora";
         } catch {
-          document.documentElement.dataset.theme = "light";
+          document.documentElement.dataset.theme = "graphite-aurora";
         }
       })();
     </script>
@@ -620,12 +622,20 @@
             <div class="settings-row">
               <div>
                 <h3>Theme</h3>
-                <p>CoAutoResearch currently ships with the Light dashboard theme.</p>
+                <p>Choose a dashboard theme. The setting stays local to this browser.</p>
               </div>
               <fieldset class="theme-mode-control" aria-label="Theme mode">
                 <label>
-                  <input type="radio" name="themeMode" value="light" data-theme-option />
-                  <span>Light</span>
+                  <input type="radio" name="themeMode" value="graphite-aurora" data-theme-option />
+                  <span>Graphite Aurora</span>
+                </label>
+                <label>
+                  <input type="radio" name="themeMode" value="museum-tech" data-theme-option />
+                  <span>Museum Tech</span>
+                </label>
+                <label>
+                  <input type="radio" name="themeMode" value="dark-glass" data-theme-option />
+                  <span>Dark Glass</span>
                 </label>
               </fieldset>
             </div>

@@ -4,7 +4,8 @@
 
 Prevent the research process from getting stuck in a local minimum, repeating unproductive trials, or optimizing a small technical issue at the expense of the real research contribution.
 
-Process review is itself a trial.
+Process review is required for every active trial. A dedicated process-review
+trial may still be useful when the process itself is the objective.
 
 ## When to Invoke
 
@@ -15,15 +16,22 @@ Invoke when:
 - the project seems to be drifting from `PROJECT.md`;
 - evidence is not improving despite activity;
 - a human asks for a process review;
+- the standard autoresearch trial review cycle reaches this reviewer;
 - the agent suspects a pivot or strategy change may be needed.
 
 ## Output Location
 
-Create a process-review trial, for example:
+Write the canonical current-trial process review to:
+
+`research_trajectory/trials/<trial_id>/reviews/PROCESS_REVIEW.md`
+
+If the process itself is the objective, create a process-review trial, for
+example:
 
 `research_trajectory/trials/000024_process_review/`
 
-Write the review into that trial's `REVIEW.md`, and summarize conclusions in `REPORT.md`.
+That trial still writes `reviews/PROCESS_REVIEW.md`, and summarizes conclusions
+in `REPORT.md`.
 
 Do not create `research_trajectory/process_reviews/`.
 
@@ -33,7 +41,7 @@ Do not create `research_trajectory/process_reviews/`.
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
-- recent trial `PLAN.md`, `REVIEW.md`, and `REPORT.md` files
+- recent trial `PLAN.md`, `REPORT.md`, and `reviews/` files
 - `research_trajectory/notes/NOTES.md`
 - relevant formal human interventions
 
@@ -64,4 +72,8 @@ needs a follow-up trial. "Process review completed" is not the same as pass.
 
 ## Output Schema
 
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`.
+Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
+input paths for recent trial plans, reports, reviewer files, notes, current
+state, and any formal human interventions. If there is not enough trajectory
+history to assess process quality, still write the file and record that as an
+unassessed area or required action.

@@ -10,13 +10,17 @@ Review whether claims are supported by evidence.
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
-- relevant trial `REPORT.md`, `REVIEW.md`, and artifacts
+- current trial `PLAN.md`, `REPORT.md`, `reviews/`, and artifacts
 - `manuscript/BLUEPRINT.md` if claims are manuscript-facing
 
 ## Output Location
 
-- Trial-level evidence review: current trial `REVIEW.md`
-- Manuscript-facing evidence review: `manuscript/reviews/`
+Write the canonical current-trial evidence review to:
+
+`research_trajectory/trials/<trial_id>/reviews/EVIDENCE_REVIEW.md`
+
+If the review is manuscript-facing, you may also mirror or summarize it under
+`manuscript/reviews/`, but the current trial file remains required.
 
 ## Review Criteria
 
@@ -46,4 +50,7 @@ claim-language revision remains, use `Decision: continue`.
 
 ## Output Schema
 
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`.
+Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
+input paths for the findings, claim/evidence map, trial report, artifacts, and
+manuscript files you assessed. If there is little evidence to assess in the
+current trial, still write the file with a scoped judgment and unassessed areas.

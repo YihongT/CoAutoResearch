@@ -19,6 +19,8 @@ instructions/reviewers/REVIEW_TAXONOMY.md
 PROJECT.md
 research_trajectory/STATE.md
 research_trajectory/CURRENT_FINDINGS.md
+research_trajectory/trials/<trial_id>/PLAN.md
+research_trajectory/trials/<trial_id>/REPORT.md
 manuscript/BLUEPRINT.md
 resources/target_venue/SEED_PAPERS.md
 resources/target_venue/STYLE_NOTES.md
@@ -89,22 +91,26 @@ revised" requires `Decision: continue`.
 
 ## Output Location
 
-If the review is part of a trial, write it into:
+Write the canonical current-trial venue fit review to:
 
 ```text
-research_trajectory/trials/<trial_id>/REVIEW.md
+research_trajectory/trials/<trial_id>/reviews/VENUE_FIT_REVIEW.md
 ```
 
-If the review is manuscript-facing, write it into:
+If the review is manuscript-facing, you may also mirror or summarize it under:
 
 ```text
 manuscript/reviews/
 ```
 
+but the current trial file remains required.
+
 ## Output Format
 
-Use the shared schema from `instructions/reviewers/REVIEW_TAXONOMY.md`, then add
-this venue-specific detail:
+Use the shared schema from `instructions/reviewers/REVIEW_TAXONOMY.md`,
+including source trial, generated timestamp, instruction file, reviewed input
+paths, context summary, and migration source. Then add this venue-specific
+detail:
 
 ```markdown
 # Venue Fit Review

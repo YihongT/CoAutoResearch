@@ -15,11 +15,9 @@ Review a trial `PLAN.md` before execution.
 
 ## Output Location
 
-Write the review into the current trial:
+Write the canonical current-trial plan review to:
 
-`research_trajectory/trials/<trial_id>/REVIEW.md`
-
-Do not create `PLAN_REVIEW.md` by default.
+`research_trajectory/trials/<trial_id>/reviews/PLAN_REVIEW.md`
 
 ## Review Criteria
 
@@ -36,18 +34,11 @@ Check whether the plan:
 
 ## Decisions
 
-For plan execution, use one of:
-
-- `approved`
-- `revise_plan`
-- `continue_with_caution`
-- `blocked`
-
-These plan-execution decisions do not directly pass the autoresearch goal gate.
-When the plan review is also used as a reviewer gate, add the shared output
-schema from `instructions/reviewers/REVIEW_TAXONOMY.md` and include a separate
-`Gate impact`. A trial plan can be approved while the plan gate remains
-`continue` for final autoresearch completion.
+Use the shared decisions from `instructions/reviewers/REVIEW_TAXONOMY.md`.
+A trial plan can be executable while the plan gate remains `continue` for final
+autoresearch completion; record those positives under
+`Qualified / Partial Passes` instead of using non-canonical decisions such as
+`approved`.
 
 ## Pass Standard
 
@@ -56,3 +47,9 @@ or feasibility issue for the declared autoresearch goal, not merely because the
 next trial plan is executable. If the current trial plan is approved but later
 planning, scope, method, resource, or success-criteria work remains, use
 `Gate impact: continue`.
+
+## Output Schema
+
+Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
+input paths for `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, the current
+trial `PLAN.md`, and any prior reports used to assess feasibility.

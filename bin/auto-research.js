@@ -148,6 +148,7 @@ function writeReviewerBaselineMetadataSync(projectRoot) {
   const payload = {
     schemaVersion: 1,
     reviewerBaselineVersion: REVIEWER_BASELINE_VERSION,
+    reviewStorageVersion: REVIEW_STORAGE_VERSION,
     syncedAt: new Date().toISOString(),
     coreReviewerFiles: reviewerTemplateHashesSync()
   };
@@ -374,20 +375,40 @@ function projectGateTextPassedSync(projectRoot) {
   });
 }
 
+function reviewerFileStatusSync(target) {
+  if (!fs.existsSync(target)) return "missing";
+  const text = fs.readFileSync(target, "utf8");
+  const gate = normalizeGateStatus(firstRegexValue(text, [/^Gate impact:\s*`?([^`\n]+)`?/im]));
+  if (gate !== "missing") return gate;
+  return normalizeGateStatus(firstRegexValue(text, [/^Decision:\s*`?([^`\n]+)`?/im]));
+}
+
 function normalizeStateGateReferencesSync(projectRoot, latestTrial, migrationDir, backedUp, dryRun = false) {
   if (!latestTrial) return "";
   const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
   if (!fs.existsSync(statePath)) return "";
   const text = fs.readFileSync(statePath, "utf8");
   let changed = false;
-  const updated = text.replace(/^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure\/table reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$/gm, (line, label, status) => {
+  let updated = text.replace(/^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure\/table reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$/gm, (line, label, status) => {
     const key = reviewerKeyForLabel(label);
     if (!key) return line;
-    const reference = projectRelativePath(projectRoot, reviewerOutputPath(latestTrial, key));
-    if (status.includes(`\`${reference}\``)) return line;
+    const reviewPath = reviewerOutputPath(latestTrial, key);
+    const reference = projectRelativePath(projectRoot, reviewPath);
+    const fileStatus = reviewerFileStatusSync(reviewPath);
+    const normalizedStatus = fileStatus === "missing" ? normalizeGateStatus(status) : fileStatus;
+    const reason = normalizedStatus === "pass" ? "" : " - current trial reviewer file is not pass";
+    const desired = `- ${REQUIRED_REVIEWER_OUTPUTS[key].label}: ${normalizedStatus}${reason} - \`${reference}\``;
+    if (line.trim() === desired) return line;
     changed = true;
-    return `- ${REQUIRED_REVIEWER_OUTPUTS[key].label}: ${status.trim()} - \`${reference}\``;
+    return desired;
   });
+  const cleaned = updated
+    .replace(/^\s*[-*]\s*Reviewer instructions are outdated \(baseline is outdated\)\.\s*$/gmi, "")
+    .replace(/\nConsistency blockers:\s*\n(?=\s*Next action:)/g, "\n");
+  if (cleaned !== updated) {
+    updated = cleaned;
+    changed = true;
+  }
   if (!changed) return "";
   if (!dryRun) {
     backupProjectFileSync(projectRoot, statePath, migrationDir, backedUp);
@@ -512,12 +533,27 @@ function projectReviewStorageStatusSync(projectRoot) {
     if (missing.length) missingByTrial[path.basename(trialDir)] = missing;
   }
   const stateMissingReferences = [];
+  const stateStatusMismatches = [];
+  const stateStaleConsistencyBlockers = [];
   const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
   const stateText = fs.existsSync(statePath) ? fs.readFileSync(statePath, "utf8") : "";
   if (latestTrial && stateText) {
-    for (const key of Object.keys(REQUIRED_REVIEWER_OUTPUTS)) {
-      const expected = projectRelativePath(projectRoot, reviewerOutputPath(latestTrial, key));
+    if (/Reviewer instructions are outdated \(baseline is outdated\)\./i.test(stateText)) {
+      stateStaleConsistencyBlockers.push("Reviewer instructions are outdated (baseline is outdated).");
+    }
+    for (const [key, config] of Object.entries(REQUIRED_REVIEWER_OUTPUTS)) {
+      const reviewPath = reviewerOutputPath(latestTrial, key);
+      const expected = projectRelativePath(projectRoot, reviewPath);
       if (!stateText.includes(expected)) stateMissingReferences.push(expected);
+      const escaped = config.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = stateText.match(new RegExp(`^\\s*[-*]\\s*${escaped}\\s*:\\s*(.+?)\\s*$`, "im"));
+      if (match && fs.existsSync(reviewPath)) {
+        const stateStatus = normalizeGateStatus(match[1]);
+        const fileStatus = reviewerFileStatusSync(reviewPath);
+        if (fileStatus !== "missing" && stateStatus !== fileStatus) {
+          stateStatusMismatches.push(`${config.label}: state ${stateStatus}, file ${fileStatus}`);
+        }
+      }
     }
   }
   const manuscriptReviewsMissingMetadata = [];
@@ -536,8 +572,10 @@ function projectReviewStorageStatusSync(projectRoot) {
     missingByTrial,
     nonpassingLatest,
     stateMissingReferences,
+    stateStatusMismatches,
+    stateStaleConsistencyBlockers,
     manuscriptReviewsMissingMetadata,
-    outdated: Boolean(Object.keys(missingByTrial).length || nonpassingLatest.length || stateMissingReferences.length || manuscriptReviewsMissingMetadata.length)
+    outdated: Boolean(Object.keys(missingByTrial).length || nonpassingLatest.length || stateMissingReferences.length || stateStatusMismatches.length || stateStaleConsistencyBlockers.length || manuscriptReviewsMissingMetadata.length)
   };
 }
 
@@ -1139,11 +1177,13 @@ async function commandDoctor(args) {
   console.log(`${currentIsProject ? "ok" : "warn"}      current directory${currentIsProject ? " is a CoAutoResearch project" : " is not a CoAutoResearch project"}`);
   if (currentIsProject) {
     const reviewerStatus = projectReviewerStatusSync(process.cwd());
+    const storage = reviewerStatus.reviewStorage || {};
     const detail = reviewerStatus.outdated
       ? [
           reviewerStatus.missing.length ? `missing ${reviewerStatus.missing.join(", ")}` : "",
           reviewerStatus.changed.length ? `changed ${reviewerStatus.changed.join(", ")}` : "",
-          reviewerStatus.metadataMissing.length ? "metadata stale" : ""
+          reviewerStatus.metadataMissing.length ? "metadata stale" : "",
+          storage.outdated ? "review storage migration required" : ""
         ].filter(Boolean).join("; ")
       : `baseline ${REVIEWER_BASELINE_VERSION}`;
     console.log(`${reviewerStatus.outdated ? "warn" : "ok"}      reviewers${reviewerStatus.outdated ? ` outdated - ${detail || "sync required"}` : ` current - ${detail}`}`);
@@ -1284,8 +1324,10 @@ async function commandUpgradeProject(args) {
     changedCount += 1;
     if (dryRun) {
       console.log("  dry run: would sync core reviewers and write baseline metadata");
+      console.log(`  dry run: would create ${result.reviewStorage.created.length} per-reviewer files, backfill ${result.reviewStorage.backfilled.length}, and normalize ${result.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews`);
     } else {
       console.log(`  synced ${result.copied.length} core reviewers`);
+      console.log(`  review files: ${result.reviewStorage.created.length} created, ${result.reviewStorage.backfilled.length} backfilled, ${result.reviewStorage.placeholders.length} missing-review placeholders, ${result.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews normalized`);
       console.log(`  backup: ${result.backupPath || "none"}`);
     }
   }

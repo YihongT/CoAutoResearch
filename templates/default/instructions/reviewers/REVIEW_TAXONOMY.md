@@ -61,6 +61,13 @@ Scope: <plan / trial / evidence / venue / manuscript / figure-table / process / 
 Decision: <pass / continue / blocked / needs_human>
 Gate impact: <pass / continue / blocked / needs_human>
 Confidence: <high / medium / low>
+Source trial: <research_trajectory/trials/<trial_id>/, or none>
+Generated at: <ISO 8601 timestamp>
+Instruction file: <instructions/reviewers/<REVIEWER>.md>
+Reviewed inputs:
+- <explicit file path>
+Context summary: <brief summary of what was reviewed and why>
+Migration source: <none, legacy REVIEW.md section, backfilled from older reviewer file, or other provenance>
 
 ## Blocking Issues
 
@@ -83,6 +90,12 @@ Confidence: <high / medium / low>
 required action, unresolved qualification, or critical unassessed area remains,
 `Decision` and `Gate impact` must be `continue`, `blocked`, or `needs_human`,
 not `pass`.
+
+Every active trial must have all seven core reviewer files under
+`research_trajectory/trials/<trial_id>/reviews/`. A reviewer file can only
+support the current gate for its own source trial. Do not carry a pass forward
+silently from a previous trial; if content is migrated or backfilled, declare it
+in `Migration source` and keep the decision truthful for the reviewed scope.
 
 ## Strict Pass Rule
 

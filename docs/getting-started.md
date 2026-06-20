@@ -108,8 +108,9 @@ context until you explicitly reattach or confirm them.
 
 ## Theme
 
-The dashboard currently uses the Light theme. The setting is local to the
-browser and does not clear composer text, attachments, or context chips.
+The dashboard ships with Graphite Aurora, Museum Tech, and Dark Glass themes.
+The setting is local to the browser and does not clear composer text,
+attachments, or context chips.
 
 ## Return Later
 

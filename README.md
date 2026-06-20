@@ -202,8 +202,9 @@ Autoresearch controls use distinct meanings:
   become archived prior-run context until you explicitly reattach or confirm
   them.
 
-The dashboard currently uses the Light theme. The setting is local to the
-browser and does not clear the composer, attached files, or context chips.
+The dashboard ships with Graphite Aurora, Museum Tech, and Dark Glass themes.
+The setting is local to the browser and does not clear the composer, attached
+files, or context chips.
 
 In dashboard mode, the sidebar `+` button can also create a new project from the
 same immutable template. This is the simplest path for normal use; `init`

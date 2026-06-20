@@ -98,8 +98,9 @@ state, working manuscript, generated workspace, and current findings under
 autoresearch-discovered or generated resources become prior-run context until
 you explicitly reattach or confirm them.
 
-The dashboard currently uses the Light theme. The setting is local to the
-browser and does not clear composer text, attachments, or context chips.
+The dashboard ships with Graphite Aurora, Museum Tech, and Dark Glass themes.
+The setting is local to the browser and does not clear composer text,
+attachments, or context chips.
 
 ## Update Project Reviewers
 

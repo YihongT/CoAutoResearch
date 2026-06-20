@@ -335,6 +335,7 @@ def write_reviewer_baseline_metadata(project_root: Path, template_root: Path | N
     payload = {
         "schemaVersion": 1,
         "reviewerBaselineVersion": REVIEWER_BASELINE_VERSION,
+        "reviewStorageVersion": REVIEW_STORAGE_VERSION,
         "syncedAt": now_iso(),
         "coreReviewerFiles": hashes,
     }
@@ -587,6 +588,16 @@ def project_gate_text_passed(project_root: Path) -> bool:
     return True
 
 
+def reviewer_file_status(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return "missing"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    gate = normalize_gate_status(regex_first_value(text, [r"Gate impact:\s*`?([^`\n]+)`?"]))
+    if gate != "missing":
+        return gate
+    return normalize_gate_status(regex_first_value(text, [r"Decision:\s*`?([^`\n]+)`?"]))
+
+
 def normalize_state_gate_references(project_root: Path, latest_trial: Path | None, migration_dir: Path, backed_up: list[str], dry_run: bool = False) -> str:
     if latest_trial is None:
         return ""
@@ -603,11 +614,16 @@ def normalize_state_gate_references(project_root: Path, latest_trial: Path | Non
         key = reviewer_key_for_label(prefix)
         if not key:
             return match.group(0)
-        reference = project_relative_path(project_root, reviewer_output_path(latest_trial, key))
-        if f"`{reference}`" in status:
+        review_path = reviewer_output_path(latest_trial, key)
+        reference = project_relative_path(project_root, review_path)
+        file_status = reviewer_file_status(review_path)
+        normalized_status = normalize_gate_status(status) if file_status == "missing" else file_status
+        reason = "" if normalized_status == "pass" else " - current trial reviewer file is not pass"
+        desired = f"- {REQUIRED_REVIEWER_OUTPUTS[key]['label']}: {normalized_status}{reason} - `{reference}`"
+        if match.group(0).strip() == desired:
             return match.group(0)
         changed = True
-        return f"- {REQUIRED_REVIEWER_OUTPUTS[key]['label']}: {status} - `{reference}`"
+        return desired
 
     updated = re.sub(
         r"^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure/table reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$",
@@ -615,6 +631,11 @@ def normalize_state_gate_references(project_root: Path, latest_trial: Path | Non
         text,
         flags=re.MULTILINE,
     )
+    cleaned = re.sub(r"^\s*[-*]\s*Reviewer instructions are outdated \(baseline is outdated\)\.\s*$", "", updated, flags=re.IGNORECASE | re.MULTILINE)
+    cleaned = re.sub(r"\nConsistency blockers:\s*\n(?=\s*Next action:)", "\n", cleaned)
+    if cleaned != updated:
+        updated = cleaned
+        changed = True
     if not changed:
         return ""
     if not dry_run:
@@ -767,18 +788,29 @@ def project_review_storage_status(project_root: Path) -> dict[str, Any]:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 decision = normalize_gate_status(regex_first_value(text, [r"Decision:\s*`?([^`\n]+)`?"]))
                 gate = normalize_gate_status(regex_first_value(text, [r"Gate impact:\s*`?([^`\n]+)`?"]))
-            if decision != "pass" or gate != "pass":
-                nonpassing_latest.append(config["file"])
+                if decision != "pass" or gate != "pass":
+                    nonpassing_latest.append(config["file"])
         if trial_missing:
             missing[trial_dir.name] = trial_missing
     state_missing_references: list[str] = []
+    state_status_mismatches: list[str] = []
+    state_stale_consistency_blockers: list[str] = []
     state_path = project_root / "research_trajectory" / "STATE.md"
     state_text = state_path.read_text(encoding="utf-8", errors="replace") if state_path.exists() else ""
     if latest_trial and state_text:
+        if re.search(r"Reviewer instructions are outdated \(baseline is outdated\)\.", state_text, re.IGNORECASE):
+            state_stale_consistency_blockers.append("Reviewer instructions are outdated (baseline is outdated).")
         for key, config in REQUIRED_REVIEWER_OUTPUTS.items():
-            expected = project_relative_path(project_root, reviewer_output_path(latest_trial, key))
+            review_path = reviewer_output_path(latest_trial, key)
+            expected = project_relative_path(project_root, review_path)
             if expected not in state_text:
                 state_missing_references.append(expected)
+            gate_match = re.search(rf"^\s*[-*]\s*{re.escape(config['label'])}\s*:\s*(.+?)\s*$", state_text, re.IGNORECASE | re.MULTILINE)
+            if gate_match and review_path.exists():
+                state_status = normalize_gate_status(gate_match.group(1))
+                file_status = reviewer_file_status(review_path)
+                if file_status != "missing" and state_status != file_status:
+                    state_status_mismatches.append(f"{config['label']}: state {state_status}, file {file_status}")
     manuscript_missing = []
     manuscript_reviews = project_root / "manuscript" / "reviews"
     if manuscript_reviews.is_dir():
@@ -795,8 +827,10 @@ def project_review_storage_status(project_root: Path) -> dict[str, Any]:
         "missing_by_trial": missing,
         "nonpassing_latest": nonpassing_latest,
         "state_missing_references": state_missing_references,
+        "state_status_mismatches": state_status_mismatches,
+        "state_stale_consistency_blockers": state_stale_consistency_blockers,
         "manuscript_reviews_missing_metadata": manuscript_missing,
-        "outdated": bool(missing or nonpassing_latest or state_missing_references or manuscript_missing),
+        "outdated": bool(missing or nonpassing_latest or state_missing_references or state_status_mismatches or state_stale_consistency_blockers or manuscript_missing),
     }
 
 
@@ -2526,7 +2560,15 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         return bool(re.search(r"\b(?:t\d{3,}|table\s+\d+)\b", title, re.IGNORECASE))
 
     claims = [section for section in sections if section["title"].lower().startswith("c") and real_section(section)]
-    section_blueprint = [section for section in sections if title_starts(section, "section") and real_section(section)]
+    architecture_sections = [
+        {"level": 3, "title": title, "body": body}
+        for title, body in blueprint_section_blocks(extract_section(blueprint_text, "Section-By-Section Architecture"))
+    ]
+    section_blueprint = [
+        section
+        for section in architecture_sections
+        if real_section(section)
+    ]
     figure_sections = [section for section in sections if title_starts(section, "figure") and real_section(section)]
     table_sections = [section for section in sections if title_starts(section, "table") and real_section(section)]
     figure_plans = [section for section in sections if figure_plan_section(section) and real_section(section)]
@@ -2539,14 +2581,15 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         or clean_summary_value(extract_section(blueprint_text, "Candidate Claims And Evidence Map"))
         or clean_summary_value(extract_section(blueprint_text, "Candidate Claims and Evidence Map"))
     )
+    target_section = extract_section(blueprint_text, "Target Venue / Audience / Article Type") or extract_section(blueprint_text, "Target Venue / Audience")
     figure_specs = [
         section
         for section in extract_sections(figure_text)
         if real_section(section) and str(section.get("title", "")).strip().lower() not in {"figures", "figure specs", "figure specifications"}
     ]
     return {
-        "target": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Target Venue / Audience"))),
-        "contribution": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Contribution Style"))),
+        "target": clean_summary_value(value_after_label(target_section, "Target venue") or first_meaningful_line(target_section)),
+        "contribution": clean_summary_value(value_after_label(target_section, "Contribution posture") or value_after_label(target_section, "Contribution style")),
         "core_story": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Core Story"))),
         "claims": claims,
         "sections": section_blueprint,
@@ -4563,6 +4606,25 @@ def section_has_unresolved_placeholder(section: str) -> bool:
     return bool(re.search(r"<[^>\n]+>", section))
 
 
+def blueprint_section_blocks(section_text: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"^###\s+(.+?)\s*$", section_text, re.MULTILINE))
+    blocks: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(section_text)
+        blocks.append((match.group(1).strip(), section_text[match.end():end].strip()))
+    return blocks
+
+
+def paragraph_plan_complete(section_body: str) -> bool:
+    return bool(
+        re.search(r"^Paragraph plan:\s*$", section_body, re.IGNORECASE | re.MULTILINE)
+        and re.search(r"\|\s*Para\s*\|", section_body, re.IGNORECASE)
+        and re.search(r"\|\s*Rhetorical move\s*\|", section_body, re.IGNORECASE)
+        and re.search(r"Content to cover,\s*not full prose", section_body, re.IGNORECASE)
+        and re.search(r"\|\s*Transition job\s*\|", section_body, re.IGNORECASE)
+    )
+
+
 def final_gate_review_schema_blockers() -> list[str]:
     review_paths = list(REPO_ROOT.glob("research_trajectory/trials/*/reviews/FINAL_GATE_REVIEW.md"))
     review_paths.extend(REPO_ROOT.glob("research_trajectory/*/trials/*/reviews/FINAL_GATE_REVIEW.md"))
@@ -4634,14 +4696,32 @@ def final_blueprint_consistency_blockers() -> list[str]:
     if blocking_missing and meaningful_section_lines(blocking_missing):
         blockers.append("BLUEPRINT.md has non-empty `Blocking Missing Evidence`.")
 
+    section_architecture = markdown_section(text, "Section-By-Section Architecture")
+    section_blocks = blueprint_section_blocks(section_architecture)
+    if not section_blocks:
+        blockers.append("BLUEPRINT.md must include target-venue section entries under `Section-By-Section Architecture`.")
+    for title, body in section_blocks:
+        for label in (
+            "Section thesis:",
+            "Reader question answered:",
+            "Narrative role in target venue:",
+        ):
+            if label not in body:
+                blockers.append(f"`{title}` is missing `{label}`.")
+        if not paragraph_plan_complete(body):
+            blockers.append(f"`{title}` is missing a complete paragraph plan table.")
+
     figure_plan = markdown_section(text, "Figure Plan")
     active_figure = bool(re.search(r"Inclusion status:\s*active\b", figure_plan, re.IGNORECASE))
     if active_figure:
         for label in (
             "Argument or result role:",
             "Content and panel layout:",
+            "Visual style:",
             "Caption draft or current caption:",
             "Source artifact path:",
+            "Result shown or conceptual basis:",
+            "Linked paragraphs:",
             "Linked claims:",
             "Linked evidence:",
             "Target-venue fit rationale:",
@@ -4657,6 +4737,8 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Content, columns, rows, or comparison logic:",
             "Caption draft or current caption:",
             "Source artifact path:",
+            "Key results shown:",
+            "Linked paragraphs:",
             "Linked claims:",
             "Linked evidence:",
             "Target-venue fit rationale:",
@@ -4796,13 +4878,13 @@ Updated: {now_iso()}
 This section is owned by the autoresearch loop. The loop should continue until every required reviewer gate below is a strict `pass`.
 
 Required reviewer gates:
-- Plan reviewer: continue
-- Process reviewer: continue
-- Evidence reviewer: continue
-- Venue fit reviewer: continue
-- Manuscript reviewer: continue
-- Figure/table reviewer: continue
-- Final gate reviewer: continue
+- Plan reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/PLAN_REVIEW.md`
+- Process reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/PROCESS_REVIEW.md`
+- Evidence reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/EVIDENCE_REVIEW.md`
+- Venue fit reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/VENUE_FIT_REVIEW.md`
+- Manuscript reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/MANUSCRIPT_REVIEW.md`
+- Figure/table reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FIGURE_TABLE_REVIEW.md`
+- Final gate reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`
 
 Next action: start or continue the next coherent autoresearch iteration.
 """
@@ -4835,7 +4917,13 @@ def repair_autoresearch_gate_if_needed() -> dict[str, Any]:
     for key, label in REQUIRED_REVIEWER_GATES.items():
         raw = str(raw_statuses.get(key) or "").strip()
         status = "pass" if normalize_gate_status(raw) == "pass" else "continue"
-        lines.append(f"- {label}: {status}")
+        path_note = ""
+        active_trials = project_active_trial_dirs(REPO_ROOT)
+        if active_trials:
+            review_path = reviewer_output_path(active_trials[-1], key)
+            if review_path.exists():
+                path_note = f" - `{project_relative_path(REPO_ROOT, review_path)}`"
+        lines.append(f"- {label}: {status}{path_note}")
     if consistency_blockers:
         lines.extend(["", "Consistency blockers:"])
         for blocker in consistency_blockers[:12]:
@@ -5025,21 +5113,22 @@ Read:
 - research_trajectory/CURRENT_FINDINGS.md
 - the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
 - instructions/reviewers/REVIEW_TAXONOMY.md
-- relevant reviewer instructions under instructions/reviewers/
+- all seven core reviewer instructions under instructions/reviewers/
 - instructions/reviewers/FINAL_GATE_REVIEWER.md
 
-If the `Autoresearch Goal Gate` section in `research_trajectory/STATE.md` says `Status: pass` and every required reviewer gate is a strict pass, including the Final gate reviewer, do not create a new trial. Report that the autoresearch goal has passed all reviewer gates.
+If the `Autoresearch Goal Gate` section in `research_trajectory/STATE.md` says `Status: pass` and every current-trial reviewer file is a strict pass, including the Final gate reviewer, do not create a new trial. Report that the autoresearch goal has passed all reviewer gates.
 
 Otherwise, run exactly the next coherent autoresearch iteration needed to move the gate toward pass:
 1. create the next trial under research_trajectory/trials/;
 2. write PLAN.md before execution;
-3. apply the relevant reviewer instructions;
+3. create `reviews/` and write all seven current-trial reviewer files: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, and FINAL_GATE_REVIEW.md;
 4. execute mainly in workspace/;
 5. write REPORT.md;
-6. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
-7. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end.
+6. refresh all seven current-trial reviewer files after REPORT.md;
+7. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
+8. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end, with each reviewer line pointing to the current trial's reviewer file path.
 
-Do not stop merely because one trial completed, a plan was approved, a manuscript architecture is coherent, a venue fit is plausible, or evidence is supported with qualification. Stop only when all required reviewer gates are strict pass with no blocking issues, required actions, unresolved qualifications, active revision constraints, or critical unassessed areas."""
+Do not stop merely because one trial completed, a plan was approved, a manuscript architecture is coherent, a venue fit is plausible, or evidence is supported with qualification. Stop only when all seven current-trial reviewer files have `Decision: pass` and `Gate impact: pass` with no blocking issues, required actions, unresolved qualifications, active revision constraints, or critical unassessed areas."""
 
 
 def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
@@ -5323,7 +5412,7 @@ Use the repository instructions:
 - read research_trajectory/CURRENT_FINDINGS.md
 - inspect resources only as needed for the next coherent research objective
 - read instructions/reviewers/REVIEW_TAXONOMY.md
-- read the reviewer instructions under instructions/reviewers/
+- read all seven core reviewer instructions under instructions/reviewers/
 - read instructions/reviewers/FINAL_GATE_REVIEWER.md
 - create or update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
 
@@ -5331,16 +5420,18 @@ This is not complete after one trial. Run the next autoresearch iteration and ma
 1. choose one coherent next research objective;
 2. create the next trial under research_trajectory/trials/;
 3. write PLAN.md before execution;
-4. apply the relevant reviewer instructions;
+4. create `reviews/` and write all seven current-trial reviewer files: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, and FINAL_GATE_REVIEW.md;
 5. execute primarily in workspace/;
 6. write REPORT.md after execution;
-7. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, or notes only when their current state genuinely changes;
-8. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md with:
+7. refresh all seven current-trial reviewer files after REPORT.md;
+8. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, or notes only when their current state genuinely changes;
+9. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md with:
    - `Status: pass`, `continue`, `blocked`, or `needs_human`;
    - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Final gate;
+   - the current trial reviewer file path on each reviewer gate line;
    - the next action if any gate is not pass.
 
-Required reviewer gates must all be strict `pass` before the autoresearch goal is complete, including the Final gate reviewer. If any reviewer gate is not pass, or if any blocking issue, required action, unresolved qualification, active revision constraint, or critical unassessed area remains, set `Status: continue` unless human input is truly required.
+Required reviewer gates must all be strict `pass` before the autoresearch goal is complete, including the Final gate reviewer. If any current-trial reviewer file is missing, not pass, or has any blocking issue, required action, unresolved qualification, active revision constraint, or critical unassessed area, set `Status: continue` unless human input is truly required.
 
 Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results unless the relevant reviewer standard and Final gate standard are fully satisfied.
 
@@ -5427,10 +5518,10 @@ Read:
 - research_trajectory/CURRENT_FINDINGS.md
 - the base trial PLAN/REVIEW/REPORT files
 - instructions/reviewers/REVIEW_TAXONOMY.md
-- relevant reviewer instructions under instructions/reviewers/
+- all seven core reviewer instructions under instructions/reviewers/
 - instructions/reviewers/FINAL_GATE_REVIEWER.md
 
-Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do. Update the autoresearch gate, and stop only when the strict reviewer gate standard is met or human input is required."""
+Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do. Write all seven reviewer files under the current trial `reviews/` directory, update the autoresearch gate with those paths, and stop only when the strict reviewer gate standard is met or human input is required."""
 
 
 def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: dict[str, Any]) -> dict[str, Any]:
@@ -5683,9 +5774,9 @@ Read:
 - instructions/RESOURCE_INTAKE.md
 - instructions/MANUSCRIPT.md
 - instructions/reviewers/REVIEW_TAXONOMY.md
-- all required reviewer instructions under instructions/reviewers/
+- all seven core reviewer instructions under instructions/reviewers/
 
-Stop only when the strict autoresearch final gate passes, or when human input is required."""
+Write all seven reviewer files under each new active trial `reviews/` directory. Stop only when the strict autoresearch final gate passes, or when human input is required."""
 
 
 def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:

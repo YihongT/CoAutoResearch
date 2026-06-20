@@ -69,8 +69,9 @@ const defaultSessionSettings = {
   reviewCheckpointInterval: 100,
 };
 
-const allowedThemeModes = new Set(["light"]);
-let currentThemeMode = normalizeThemeMode(localStorage.getItem("coAutoResearchTheme") || document.documentElement.dataset.theme || "light");
+const defaultThemeMode = "graphite-aurora";
+const allowedThemeModes = new Set([defaultThemeMode, "museum-tech", "dark-glass"]);
+let currentThemeMode = normalizeThemeMode(localStorage.getItem("coAutoResearchTheme") || document.documentElement.dataset.theme || defaultThemeMode);
 
 const localSlashCommandRegistry = {
   "/goal": { label: "Autoresearch", value: "Show autoresearch" },
@@ -591,7 +592,8 @@ function scopedRemove(key) {
 
 function normalizeThemeMode(value) {
   const mode = String(value || "").trim().toLowerCase();
-  return allowedThemeModes.has(mode) ? mode : "light";
+  if (mode === "light") return defaultThemeMode;
+  return allowedThemeModes.has(mode) ? mode : defaultThemeMode;
 }
 
 function applyThemeMode(value, options = {}) {
@@ -2378,7 +2380,12 @@ function updateFramingScrollButton() {
   const dockActive = Boolean($(".brief-editor-shell.is-framing-dock"));
   const chatVisible = activeView === "chat" && !$("#chat-view")?.hidden;
   const shouldShow = chatVisible && dockActive && !isPageNearBottom(36);
+  const wasShowing = document.body.classList.contains("has-framing-scroll-button");
   button.hidden = !shouldShow;
+  document.body.classList.toggle("has-framing-scroll-button", shouldShow);
+  if (dockActive && wasShowing !== shouldShow) {
+    requestAnimationFrame(updateBriefDockGeometry);
+  }
 }
 
 function scrollFramingToBottom() {
@@ -4009,6 +4016,8 @@ const figureSpecFieldLabels = new Set([
   "Caption draft or current caption",
   "Caption from revised source",
   "Evidence / conceptual basis",
+  "Result shown or conceptual basis",
+  "Linked manuscript paragraphs",
   "Linked claims",
   "Linked evidence",
   "Source trial",
@@ -4020,6 +4029,8 @@ const figureSpecFieldLabels = new Set([
   "Remaining blocker",
   "Result",
   "Result shown",
+  "Key results shown",
+  "Small table preview, if compact enough",
   "Notes",
 ]);
 
@@ -4104,6 +4115,17 @@ function manuscriptFieldValue(section, labels) {
     if (hasRealText(value)) return value;
   }
   return "";
+}
+
+function paragraphPlanHtml(section) {
+  const plan = manuscriptFieldValue(section, ["Paragraph plan", "Paragraph-level plan", "Writing plan"]);
+  if (!hasRealText(plan)) return "";
+  return `
+    <div class="paragraph-plan-block">
+      <h5>Paragraph plan</h5>
+      <div class="markdown-preview">${markdownToHtml(plan)}</div>
+    </div>
+  `;
 }
 
 function figureReferenceKeys(value) {
@@ -4259,17 +4281,20 @@ function figureSpecCardsHtml(specs, options = {}) {
 
 function paperSectionHtml(section, specs) {
   const fields = [
+    ["Section thesis", manuscriptFieldValue(section, ["Section thesis", "Thesis"])],
+    ["Reader question", manuscriptFieldValue(section, ["Reader question answered", "Reader question"])],
+    ["Narrative role", manuscriptFieldValue(section, ["Narrative role in target venue", "Target-venue role", "Role", "Section role"])],
     ["Purpose", manuscriptFieldValue(section, ["Purpose"])],
-    ["Role", manuscriptFieldValue(section, ["Target-venue role", "Role", "Section role"])],
-    ["Evidence/result", manuscriptFieldValue(section, ["Evidence", "Accepted claims", "Result", "Results", "Content to include"])],
+    ["Claims/evidence", manuscriptFieldValue(section, ["Accepted claims", "Evidence", "Claims / evidence"])],
     ["Figures/tables", manuscriptFieldValue(section, ["Figures / tables", "Figures", "Tables"])],
   ].filter(([, value]) => hasRealText(value));
+  const paragraphPlan = paragraphPlanHtml(section);
   const relatedSpecs = figureSpecsForSection(section, specs);
-  const fallback = fields.length ? "" : `<div class="markdown-preview">${markdownToHtml(section.body)}</div>`;
+  const fallback = fields.length || paragraphPlan ? "" : `<div class="markdown-preview">${markdownToHtml(section.body)}</div>`;
   return `
     <article class="paper-section-row">
       <header class="paper-section-head">
-        <p>Paper section</p>
+        <p>Blueprint section</p>
         <h4>${escapeHtml(cleanText(section.title, "Untitled section"))}</h4>
       </header>
       ${fields.length ? `
@@ -4284,6 +4309,7 @@ function paperSectionHtml(section, specs) {
             .join("")}
         </dl>
       ` : ""}
+      ${paragraphPlan}
       ${fallback}
       ${relatedSpecs.length ? `
         <div class="paper-linked-block">
@@ -4361,15 +4387,20 @@ function renderTablesPanel(manuscript) {
       <section class="manuscript-tables">
         ${plans
           .map((section) => {
-            const sourcePath = firstArtifactPath(section.body);
+            const caption = manuscriptFieldValue(section, ["Caption draft or current caption", "Caption draft", "Caption"]);
+            const sourcePath = firstArtifactPath([
+              manuscriptFieldValue(section, ["Source artifact path", "Source artifact", "Artifact path"]),
+              section.body,
+            ].filter(Boolean).join("\n"));
             return `
               <article class="table-plan-row">
                 <header class="paper-section-head">
-                  <p>Table</p>
+                  <p>Table blueprint</p>
                   <h4>${escapeHtml(cleanText(section.title, "Untitled table"))}</h4>
                 </header>
                 ${manuscriptActionsHtml([
                   copyButton([`### ${section.title}`, section.body].join("\n\n"), "Copy table", "Table content copied."),
+                  caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
                   sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
                 ])}
                 <div class="markdown-preview">${markdownToHtml(section.body)}</div>
@@ -4414,12 +4445,12 @@ function renderManuscriptPanel() {
     </div>
   `;
   return [
-    contextCard("Current manuscript", blueprintViewer, "Latest manuscript blueprint synthesized from accepted findings and trial reports.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
-    contextCard("Paper outline", renderPaperOutline(manuscript), "Human-readable manuscript architecture with figures attached where they belong."),
+    contextCard("Writing blueprint", renderPaperOutline(manuscript), "Paragraph-level manuscript architecture with results, claims, and figures attached where they belong."),
     contextCard("Figures", renderFiguresPanel(manuscript), "One card per planned figure, matched to FIGURE_SPECS.md.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
     contextCard("Tables", renderTablesPanel(manuscript), "Render stable table content here; otherwise explain why no table is active."),
     contextCard("Traceability", renderTraceabilityPanel(manuscript), "Secondary audit map for claims and evidence."),
     contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
+    contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
   ].join("");
 }
 

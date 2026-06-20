@@ -80,7 +80,7 @@ if (!stateTemplate.includes("Final gate reviewer")) {
 }
 
 const manifest = JSON.parse(await fsp.readFile(path.join(template, ".co-auto-research-template", "manifest.json"), "utf8"));
-if (manifest.reviewerBaselineVersion !== "2026-06-final-blueprint") {
+if (manifest.reviewerBaselineVersion !== "2026-06-per-reviewer-files") {
   failures.push(".co-auto-research-template/manifest.json: missing reviewer baseline version");
 }
 const coreReviewerFiles = Array.isArray(manifest.coreReviewerFiles) ? manifest.coreReviewerFiles : [];
@@ -121,18 +121,43 @@ for (const heading of [
     failures.push(`manuscript/BLUEPRINT.md: missing ${heading}`);
   }
 }
+for (const requiredText of [
+  "Section thesis:",
+  "Reader question answered:",
+  "Narrative role in target venue:",
+  "Paragraph plan:",
+  "Content to cover, not full prose",
+  "Linked paragraphs:",
+  "Key results shown:"
+]) {
+  if (!blueprintTemplate.includes(requiredText)) {
+    failures.push(`manuscript/BLUEPRINT.md: missing paragraph-level contract text ${requiredText}`);
+  }
+}
 
 const finalGateReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
 if (!finalGateReviewer.includes("## Artifact Consistency Audit")) {
   failures.push("instructions/reviewers/FINAL_GATE_REVIEWER.md: missing artifact consistency audit");
 }
+if (!finalGateReviewer.includes("reviews/FINAL_GATE_REVIEW.md")) {
+  failures.push("instructions/reviewers/FINAL_GATE_REVIEWER.md: missing canonical final gate output path");
+}
+if (!finalGateReviewer.includes("paragraph plan completeness")) {
+  failures.push("instructions/reviewers/FINAL_GATE_REVIEWER.md: missing paragraph plan audit requirement");
+}
 
 const serverTemplate = await fsp.readFile(path.join(template, "ui", "server.py"), "utf8");
-if (!serverTemplate.includes('"final_gate": "Final gate reviewer"')) {
+if (!serverTemplate.includes('"final_gate": {') || !serverTemplate.includes('"label": "Final gate reviewer"') || !serverTemplate.includes('"FINAL_GATE_REVIEW.md"')) {
   failures.push("ui/server.py: missing Final gate reviewer parser entry");
 }
 if (!serverTemplate.includes("final_blueprint_consistency_blockers")) {
   failures.push("ui/server.py: missing final blueprint consistency guard");
+}
+if (!serverTemplate.includes("current_trial_reviewer_file_blockers")) {
+  failures.push("ui/server.py: missing current-trial reviewer file guard");
+}
+if (!serverTemplate.includes("paragraph_plan_complete")) {
+  failures.push("ui/server.py: missing paragraph plan consistency guard");
 }
 
 if (failures.length) {

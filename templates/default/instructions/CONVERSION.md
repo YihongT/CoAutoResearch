@@ -55,7 +55,7 @@ Conversion should produce or update:
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
 - `research_trajectory/trials/000000_project_conversion/PLAN.md`
-- `research_trajectory/trials/000000_project_conversion/REVIEW.md`
+- `research_trajectory/trials/000000_project_conversion/reviews/`
 - `research_trajectory/trials/000000_project_conversion/REPORT.md`
 - `manuscript/BLUEPRINT.md`, if enough information exists
 

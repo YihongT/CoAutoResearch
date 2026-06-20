@@ -940,17 +940,21 @@ function testSettingsRenderPreservesComposerDraft() {
 function testThemeModePersistsAndApplies() {
   const app = loadAppContext();
   let theme = app.run('__themeState()');
-  assert.equal(theme.mode, "light");
-  assert.equal(theme.dataset, "light");
+  assert.equal(theme.mode, "graphite-aurora");
+  assert.equal(theme.dataset, "graphite-aurora");
   app.run('applyThemeMode("unsupported")');
   theme = app.run('__themeState()');
-  assert.equal(theme.mode, "light", "unsupported theme modes should normalize to Light");
-  assert.equal(theme.dataset, "light", "unsupported theme modes should leave the document on Light");
-  assert.equal(theme.stored, "light", "unsupported theme modes should persist as Light");
+  assert.equal(theme.mode, "graphite-aurora", "unsupported theme modes should normalize to Graphite Aurora");
+  assert.equal(theme.dataset, "graphite-aurora", "unsupported theme modes should leave the document on Graphite Aurora");
+  assert.equal(theme.stored, "graphite-aurora", "unsupported theme modes should persist as Graphite Aurora");
   app.run('applyThemeMode("light")');
   theme = app.run('__themeState()');
-  assert.equal(theme.dataset, "light");
-  assert.equal(theme.stored, "light");
+  assert.equal(theme.dataset, "graphite-aurora", "legacy Light selection should map to Graphite Aurora");
+  assert.equal(theme.stored, "graphite-aurora", "legacy Light selection should persist as Graphite Aurora");
+  app.run('applyThemeMode("dark-glass")');
+  theme = app.run('__themeState()');
+  assert.equal(theme.dataset, "dark-glass");
+  assert.equal(theme.stored, "dark-glass");
 }
 
 function testComposerPromptInsertionIsIdempotent() {
@@ -1010,10 +1014,18 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
     sections: [{
       title: "Section 2: Calibration result",
       body: [
-        "Purpose: Explain the calibrated perceived-safety result.",
-        "Target-venue role: Results-like argument.",
+        "Purpose: Explain the calibrated result.",
+        "Section thesis: Calibration changes the observed outcome in the accepted evidence.",
+        "Reader question answered: What result should the reader take away?",
+        "Narrative role in target venue: Results-like argument.",
+        "Accepted claims: C1.",
+        "Evidence: E1.",
         "Figures / tables: Figure 1 active.",
-        "Content to include: Put the result beside Figure 1."
+        "Paragraph plan:",
+        "",
+        "| Para | Rhetorical move | Content to cover, not full prose | Claims / evidence | Results / artifacts | Figures / tables | Citation posture | Required qualification | Transition job |",
+        "|---|---|---|---|---|---|---|---|---|",
+        "| P1 | State result | Put the calibration result beside Figure 1. | C1 / E1 | `research_trajectory/CURRENT_FINDINGS.md` | Figure 1 | cite source trial | none | sets up interpretation |"
       ].join("\n")
     }],
     figure_plans: [{
@@ -1048,11 +1060,17 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
     }]
   };
   const html = app.run(`__renderManuscriptPanelProbe(${JSON.stringify(payload)})`);
-  assert.equal(html.includes("Paper outline"), true);
+  assert.equal(html.includes("Writing blueprint"), true);
   assert.equal(html.includes("Figures"), true);
   assert.equal(html.includes("Tables"), true);
   assert.equal(html.includes("Traceability"), true);
   assert.equal(html.includes("Section 2: Calibration result"), true);
+  assert.equal(html.includes("Section thesis"), true);
+  assert.equal(html.includes("Reader question"), true);
+  assert.equal(html.includes("Narrative role"), true);
+  assert.equal(html.includes("Paragraph plan"), true);
+  assert.equal(html.includes("Rhetorical move"), true);
+  assert.equal(html.includes("Put the calibration result beside Figure 1."), true);
   assert.equal(html.includes("Figure specs at this location"), true);
   assert.equal(html.indexOf("Section 2: Calibration result") < html.indexOf("Inline figure spec"), true, "figure spec should render beside the relevant paper section");
   assert.equal(html.includes("figure-spec-card"), true);

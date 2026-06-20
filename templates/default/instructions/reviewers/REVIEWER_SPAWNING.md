@@ -58,9 +58,14 @@ Reviewer instructions do not store review results.
 
 Review results go into:
 
-- current trial `REVIEW.md`, for trial-level review;
+- current trial `reviews/<SPECIALIZED_REVIEW>.md`, for trial-level review;
 - `manuscript/reviews/`, for manuscript-facing review.
+
+Core reviewer results always keep their canonical names under the current
+trial's `reviews/` directory. Spawned reviewers must not replace the seven core
+reviewer files required for the autoresearch gate.
 
 ## Record the Spawn
 
-When spawning a reviewer, record why in the active trial `REPORT.md` or `REVIEW.md`.
+When spawning a reviewer, record why in the active trial `REPORT.md` or in the
+spawned review file's context summary.

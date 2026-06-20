@@ -57,7 +57,7 @@ function closeServer(server) {
 }
 
 function parseThemeTokens(stylesCss, theme) {
-  const selector = theme === "light" ? ":root" : `html[data-theme="${theme}"]`;
+  const selector = `html[data-theme="${theme}"]`;
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const matches = [...stylesCss.matchAll(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\n\\}`, "g"))];
   const match = matches.at(-1);
@@ -119,7 +119,7 @@ function assertThemeContrast(stylesCss) {
     ["warning-ink", "warning-bg", 4.5],
     ["danger-ink", "danger-bg", 4.5],
   ];
-  for (const theme of ["light"]) {
+  for (const theme of ["graphite-aurora", "museum-tech", "dark-glass"]) {
     const tokens = parseThemeTokens(stylesCss, theme);
     for (const [foregroundToken, backgroundToken, minimum] of requiredPairs) {
       const foreground = tokens[foregroundToken];
@@ -258,13 +258,67 @@ try {
   }
   const reviewerMetadataPath = path.join(projectDir, "instructions", ".co-auto-research-instructions.json");
   const reviewerMetadata = JSON.parse(await fsp.readFile(reviewerMetadataPath, "utf8"));
-  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-final-blueprint") {
+  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-per-reviewer-files") {
     throw new Error("new projects should record the reviewer baseline");
   }
   const staleReviewerFixtureRoot = path.join(tempRoot, "upgrade-fixtures");
   await fsp.mkdir(staleReviewerFixtureRoot, { recursive: true });
   const staleReviewerProject = path.join(staleReviewerFixtureRoot, "stale-reviewers");
   execFileSync("node", [cli, "init", staleReviewerProject], { cwd: root, stdio: "pipe" });
+  const staleTrial = path.join(staleReviewerProject, "research_trajectory", "trials", "000001_legacy_review_split");
+  await fsp.mkdir(path.join(staleTrial, "artifacts"), { recursive: true });
+  await fsp.writeFile(path.join(staleTrial, "PLAN.md"), "# Plan\n\nLegacy split fixture.\n", "utf8");
+  await fsp.writeFile(path.join(staleTrial, "REPORT.md"), "# Report\n\nLegacy split fixture.\n", "utf8");
+  await fsp.writeFile(path.join(staleTrial, "REVIEW.md"), `# Review
+
+## Plan Review
+
+Reviewer: Plan reviewer
+Scope: plan
+Decision: pass
+Gate impact: pass
+Confidence: high
+
+## Blocking Issues
+
+- none
+
+## Required Actions Before Pass
+
+- none
+
+## Qualified / Partial Passes
+
+- none
+
+## Unassessed Areas
+
+- none
+
+## Evidence Review
+
+Reviewer: Evidence reviewer
+Scope: evidence
+Decision: continue
+Gate impact: continue
+Confidence: medium
+
+## Blocking Issues
+
+- source audit remains incomplete
+
+## Required Actions Before Pass
+
+- complete the source audit
+
+## Qualified / Partial Passes
+
+- none
+
+## Unassessed Areas
+
+- source-level provenance
+`, "utf8");
   const customReviewer = path.join(staleReviewerProject, "instructions", "reviewers", "CUSTOM_REVIEWER.md");
   await fsp.writeFile(customReviewer, "# Custom Reviewer\n", "utf8");
   await fsp.rm(path.join(staleReviewerProject, "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"));
@@ -278,7 +332,7 @@ try {
     throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
   }
   const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
-  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-final-blueprint") {
+  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-per-reviewer-files" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
     throw new Error("upgrade-project should write reviewer baseline metadata");
   }
   try {
@@ -290,6 +344,16 @@ try {
   if (!migrationDirs.length) {
     throw new Error("upgrade-project should create a template migration backup");
   }
+  const splitPlanReview = await fsp.readFile(path.join(staleTrial, "reviews", "PLAN_REVIEW.md"), "utf8");
+  const splitEvidenceReview = await fsp.readFile(path.join(staleTrial, "reviews", "EVIDENCE_REVIEW.md"), "utf8");
+  if (!splitPlanReview.includes("Migration source:") || !splitPlanReview.includes("Decision: pass")) {
+    throw new Error("upgrade-project should split legacy plan review sections into per-reviewer files");
+  }
+  if (!splitEvidenceReview.includes("Decision: continue") || !splitEvidenceReview.includes("source audit remains incomplete")) {
+    throw new Error("upgrade-project should preserve legacy evidence review status when splitting");
+  }
+  const latestMigrationDir = migrationDirs.sort().at(-1);
+  await fsp.access(path.join(staleReviewerProject, "archive", "template_migrations", latestMigrationDir, "review_storage_backups", "research_trajectory", "trials", "000001_legacy_review_split", "REVIEW.md"));
   const packageManifest = JSON.parse(await fsp.readFile(path.join(root, "package.json"), "utf8"));
   const resourceIntakeInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "RESOURCE_INTAKE.md"), "utf8");
   const conversionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "CONVERSION.md"), "utf8");
@@ -419,22 +483,24 @@ try {
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
   const themeOptionValues = [...indexHtml.matchAll(/name="themeMode"\s+value="([^"]+)"/g)].map((match) => match[1]);
   const explicitThemeBlocks = [...stylesCss.matchAll(/html\[data-theme="([^"]+)"\]/g)].map((match) => match[1]);
+  const expectedThemes = ["graphite-aurora", "museum-tech", "dark-glass"];
   if (
-    themeOptionValues.length !== 1 ||
-    themeOptionValues[0] !== "light" ||
-    explicitThemeBlocks.length ||
-    !indexHtml.includes('document.documentElement.dataset.theme = "light"') ||
+    themeOptionValues.length !== expectedThemes.length ||
+    !expectedThemes.every((theme) => themeOptionValues.includes(theme)) ||
+    !expectedThemes.every((theme) => explicitThemeBlocks.includes(theme)) ||
+    !indexHtml.includes('document.documentElement.dataset.theme = allowedThemes.has(stored) ? stored : "graphite-aurora"') ||
     !appJs.includes('localStorage.getItem("coAutoResearchTheme")') ||
     !appJs.includes('localStorage.setItem("coAutoResearchTheme", mode)') ||
     !appJs.includes("function applyThemeMode") ||
-    !appJs.includes('new Set(["light"])') ||
+    !appJs.includes('const defaultThemeMode = "graphite-aurora"') ||
+    !appJs.includes('new Set([defaultThemeMode, "museum-tech", "dark-glass"])') ||
     !appJs.includes('$$("[data-theme-option]")') ||
     !stylesCss.includes(".theme-mode-control") ||
-    !readme.includes("currently uses the Light theme") ||
-    !gettingStartedDocs.includes("currently uses the Light theme") ||
-    !cliDocs.includes("currently uses the Light theme")
+    !readme.includes("Graphite Aurora, Museum Tech, and Dark Glass") ||
+    !gettingStartedDocs.includes("Graphite Aurora, Museum Tech, and Dark Glass") ||
+    !cliDocs.includes("Graphite Aurora, Museum Tech, and Dark Glass")
   ) {
-    throw new Error("settings must expose only the persisted Light theme");
+    throw new Error("settings must expose the persisted dashboard themes");
   }
   assertThemeContrast(stylesCss);
   if (
@@ -686,7 +752,7 @@ try {
   if (
     !appJs.includes("Open latest manuscript") ||
     !appJs.includes('data-inline-fullscreen="manuscript/BLUEPRINT.md"') ||
-    !appJs.includes("Latest manuscript blueprint synthesized from accepted findings and trial reports.") ||
+    !appJs.includes("Raw BLUEPRINT.md for editing and audit.") ||
     !appJs.includes("function composerPromptNextValue") ||
     !appJs.includes("function isComposerCommandLine") ||
     !appJs.includes("if (lines.some((line) => line.trim() === promptText)) return current;") ||
@@ -701,7 +767,9 @@ try {
     !appJs.includes("function renderFiguresPanel") ||
     !appJs.includes("function renderTablesPanel") ||
     !appJs.includes("function renderTraceabilityPanel") ||
-    !appJs.includes('contextCard("Paper outline"') ||
+    !appJs.includes('contextCard("Writing blueprint"') ||
+    !appJs.includes("function paragraphPlanHtml") ||
+    !appJs.includes("Paragraph plan") ||
     !appJs.includes('contextCard("Figures"') ||
     !appJs.includes('contextCard("Tables"') ||
     !appJs.includes('contextCard("Traceability"') ||
@@ -718,11 +786,12 @@ try {
     !stylesCss.includes(".figure-caption") ||
     !stylesCss.includes(".figure-status.is-caution") ||
     !stylesCss.includes(".paper-outline") ||
+    !stylesCss.includes(".paragraph-plan-block") ||
     !stylesCss.includes(".manuscript-actions") ||
     !stylesCss.includes(".table-empty-rationale") ||
     !stylesCss.includes(".traceability-details")
   ) {
-    throw new Error("manuscript panel must render a paper-like outline with inline figure specs, tables, traceability, and copy/open controls");
+    throw new Error("manuscript panel must render a paragraph-level writing blueprint with inline figure specs, tables, traceability, and copy/open controls");
   }
   if (
     !appJs.includes("selectedResumeTrialContext") ||
@@ -958,11 +1027,20 @@ try {
     "module._CONTEXT.project = context",
     "state = context.research_state_path",
     "blueprint = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'manuscript' / 'BLUEPRINT.md'",
-    "review_dir = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'manuscript' / 'reviews'",
+    "trial_dir = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'research_trajectory' / 'trials' / '000001_final_smoke'",
+    "review_dir = trial_dir / 'reviews'",
     "review_dir.mkdir(parents=True, exist_ok=True)",
     "def write_final_artifacts():",
-    "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected figure/table style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Accepted Claims And Evidence Map\n\n| Claim ID | Claim | Evidence IDs | Evidence strength | Required qualification | Manuscript location |\n|---|---|---|---|---|---|\n| C000001 | A bounded accepted claim. | R000001 | qualified | none | Introduction |\n\n---\n\n## Section-By-Section Architecture\n\n### Section 1: Introduction\n\nPurpose: Establish the problem.\n\nTarget-venue role: Open the perspective.\n\nContent to include: Bounded motivation.\n\nAccepted claims: C000001.\n\nEvidence: R000001.\n\nFigures / tables: none.\n\nRequired qualifications: none.\n\n---\n\n## Figure Plan\n\nNo active figures are required for the final scoped deliverable.\n\n---\n\n## Table Plan\n\nNo active tables are required for the final scoped deliverable.\n\n### No-Table Rationale\n\nNo table is needed because the accepted claim/evidence mapping is compact and carried by prose in the section architecture.\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence.\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
-    "    (review_dir / 'FINAL_GATE_REVIEW.md').write_text(\"\"\"Reviewer: Final gate reviewer\nScope: final-gate\nDecision: pass\nGate impact: pass\nConfidence: high\n\n## Artifact Consistency Audit\n\n- reviewer baseline status: current\n- final blueprint section completeness: complete\n- accepted claims vs candidate claims status: accepted\n- blocking missing evidence status: none\n- figure plan completeness: complete\n- table plan or no-table rationale completeness: complete\n- reference/literature grounding completeness: complete\n- appendix/supplement plan completeness: complete\n- stale contradiction scan result: none\n- exact reason the gate can pass: all required checks passed\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\", encoding='utf-8')",
+    "    trial_dir.mkdir(parents=True, exist_ok=True)",
+    "    (trial_dir / 'PLAN.md').write_text('# Plan\\n\\nFinal gate smoke plan.\\n', encoding='utf-8')",
+    "    (trial_dir / 'REPORT.md').write_text('# Report\\n\\nFinal gate smoke report.\\n', encoding='utf-8')",
+    "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected figure/table style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Accepted Claims And Evidence Map\n\n| Claim ID | Claim | Evidence IDs | Evidence strength | Required qualification | Manuscript location |\n|---|---|---|---|---|---|\n| C000001 | A bounded accepted claim. | R000001 | qualified | none | Introduction P1 |\n\n---\n\n## Section-By-Section Architecture\n\n### Section 1: Introduction\n\nPurpose: Establish the problem.\n\nSection thesis: The accepted claim is important but bounded by the reviewed evidence.\n\nReader question answered: Why should this perspective exist and what claim is supported?\n\nNarrative role in target venue: Open the perspective with a qualified evidence synthesis.\n\nAccepted claims: C000001.\n\nEvidence: R000001.\n\nFigures / tables: none.\n\nRequired qualifications: The claim remains bounded to R000001.\n\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Claims / evidence | Results / artifacts | Figures / tables | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|---|\n| P1 | Establish problem and bounded claim | State the research problem, introduce C000001, and say exactly what R000001 supports without drafting final prose. | C000001 / R000001 | research_trajectory/CURRENT_FINDINGS.md | none | cite the accepted source audit | bounded to reviewed evidence | sets up the implication section |\n\n---\n\n## Figure Plan\n\nNo active figures are required for the final scoped deliverable.\n\n---\n\n## Table Plan\n\nNo active tables are required for the final scoped deliverable.\n\n### No-Table Rationale\n\nNo table is needed because the accepted claim/evidence mapping is compact and carried by Section 1 paragraph P1.\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence and that qualification is reflected in paragraph P1.\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
+    "    review_template = \"\"\"Reviewer: {reviewer}\nScope: {scope}\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `{instruction}`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `PROJECT.md`\n- `research_trajectory/STATE.md`\n- `research_trajectory/trials/000001_final_smoke/PLAN.md`\n- `research_trajectory/trials/000001_final_smoke/REPORT.md`\n\n## Context Summary\n\nSmoke test reviewer fixture.\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\"",
+    "    for key, config in module.REQUIRED_REVIEWER_OUTPUTS.items():",
+    "        if key == 'final_gate':",
+    "            continue",
+    "        (review_dir / config['file']).write_text(review_template.format(reviewer=config['label'], scope=config['scope'], instruction=config['instruction']), encoding='utf-8')",
+    "    (review_dir / 'FINAL_GATE_REVIEW.md').write_text(\"\"\"Reviewer: Final gate reviewer\nScope: final-gate\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `instructions/reviewers/FINAL_GATE_REVIEWER.md`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n\n## Context Summary\n\nSmoke test final gate fixture.\n\n## Artifact Consistency Audit\n\n- reviewer baseline status: current\n- final blueprint section completeness: complete\n- target manual section title/order fidelity: complete\n- paragraph plan completeness: complete\n- accepted claims vs candidate claims status: accepted\n- blocking missing evidence status: none\n- figure plan completeness: complete\n- figure paragraph placement completeness: complete\n- table plan or no-table rationale completeness: complete\n- table paragraph placement and source/result completeness: complete\n- reference/literature grounding completeness: complete\n- appendix/supplement plan completeness: complete\n- stale contradiction scan result: none\n- exact reason the gate can pass: all required checks passed\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\", encoding='utf-8')",
     "assert module.normalize_gate_status('ready for targeted revision') == 'continue'",
     "assert module.normalize_gate_status('completed') == 'continue'",
     "assert module.normalize_gate_status('approved') == 'continue'",
@@ -982,13 +1060,25 @@ try {
     "assert missing_final['status'] == 'continue', missing_final",
     "assert 'final_gate' in missing_final['missing_reviewers'], missing_final",
     "assert module.gate_has_passed(missing_final) is False, missing_final",
-    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- Process reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- Evidence reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- Venue fit reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- Manuscript reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- Figure/table reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- Final gate reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md`\n\nNext action: none.\n\"\"\", encoding='utf-8')",
     "stale = module.read_autoresearch_gate()",
     "assert stale['status'] == 'continue', stale",
     "assert stale['consistency_blockers'], stale",
     "assert module.gate_has_passed(stale) is False, stale",
     "write_final_artifacts()",
-    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
+    "pass_gate_with_paths = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md\n- Process reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md\n- Evidence reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md\n- Venue fit reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md\n- Manuscript reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md\n- Figure/table reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md\n- Final gate reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md\n\nNext action: none.\n\"\"\"",
+    "evidence_review = review_dir / 'EVIDENCE_REVIEW.md'",
+    "original_evidence = evidence_review.read_text(encoding='utf-8')",
+    "evidence_review.write_text(original_evidence.replace('Decision: pass', 'Decision: continue').replace('Gate impact: pass', 'Gate impact: continue'), encoding='utf-8')",
+    "state.write_text(pass_gate_with_paths, encoding='utf-8')",
+    "nonpass_file = module.read_autoresearch_gate()",
+    "assert nonpass_file['status'] == 'continue', nonpass_file",
+    "assert any('EVIDENCE_REVIEW.md' in blocker for blocker in nonpass_file['consistency_blockers']), nonpass_file",
+    "evidence_review.write_text(original_evidence, encoding='utf-8')",
+    "collected = module.collect_reviews()",
+    "trial_review_paths = sorted(item['path'] for item in collected if '000001_final_smoke/reviews/' in item['path'])",
+    "assert len(trial_review_paths) == 7, trial_review_paths",
+    "state.write_text(pass_gate_with_paths, encoding='utf-8')",
     "passed = module.read_autoresearch_gate()",
     "assert passed['status'] == 'pass', passed",
     "assert passed['all_reviewers_passed'] is True, passed",
@@ -1022,7 +1112,7 @@ try {
     "module._CONTEXT.project = context",
     "state = context.research_state_path",
     "continue_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: continue\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\"",
-    "pass_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: none.\n\"\"\"",
+    "pass_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- Process reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- Evidence reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- Venue fit reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- Manuscript reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- Figure/table reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- Final gate reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md`\n\nNext action: none.\n\"\"\"",
     "assert module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL == 100",
     "assert module.normalize_review_checkpoint_interval(None) == 100",
     "assert module.normalize_research_settings({'reviewCheckpointInterval': '25'})['reviewCheckpointInterval'] == 25",
@@ -1044,7 +1134,7 @@ try {
     "resumed = module.handle_local_slash_command('/goal resume', '/goal resume', {'reviewCheckpointInterval': 25})",
     "assert resumed and resumed.get('local') is True, resumed",
     "assert context.session['loop_active'] is True, context.session",
-    "assert context.session['loop_review_checkpoint_iteration'] == 25, context.session",
+    "assert context.session['loop_review_checkpoint_iteration'] == 26, context.session",
     "print(json.dumps({'default': module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL, 'checkpoint_stop': 'review_checkpoint_reached', 'resumed_checkpoint': context.session['loop_review_checkpoint_iteration']}))"
   ].join("\n");
   const checkpointOutput = execFileSync(python.command, [
@@ -1063,7 +1153,7 @@ try {
   if (
     !checkpointOutput.includes('"default": 100') ||
     !checkpointOutput.includes('"checkpoint_stop": "review_checkpoint_reached"') ||
-    !checkpointOutput.includes('"resumed_checkpoint": 25')
+    !checkpointOutput.includes('"resumed_checkpoint": 26')
   ) {
     throw new Error(`checkpoint smoke test returned unexpected output: ${checkpointOutput}`);
   }
