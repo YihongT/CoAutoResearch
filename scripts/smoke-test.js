@@ -440,6 +440,10 @@ Confidence: medium
   const resourceIntakeInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "RESOURCE_INTAKE.md"), "utf8");
   const conversionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "CONVERSION.md"), "utf8");
   const executionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "EXECUTION_AGENT.md"), "utf8");
+  const planReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "PLAN_REVIEWER.md"), "utf8");
+  const processReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "PROCESS_REVIEWER.md"), "utf8");
+  const notesEntrypointTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "NOTES.md"), "utf8");
+  const notesIndexTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "index.md"), "utf8");
   const resourceManifestTemplate = await fsp.readFile(path.join(root, "templates", "default", "resources", "user_input", "RESOURCE_MANIFEST.md"), "utf8");
   const literatureReadme = await fsp.readFile(path.join(root, "templates", "default", "resources", "literature", "README.md"), "utf8");
   if (
@@ -452,6 +456,25 @@ Confidence: medium
     !literatureReadme.includes("surface them here")
   ) {
     throw new Error("resource intake must surface embedded ongoing-work bibliographies without confusing them with target-venue seed papers");
+  }
+  if (
+    executionInstructions.includes("Mandatory note triggers") ||
+    !executionInstructions.includes("## Knowledge Capture Contract") ||
+    !executionInstructions.includes("Every trial report must include a `Knowledge Capture` section") ||
+    !executionInstructions.includes("Note updated: research_trajectory/notes/<topic>.md") ||
+    !executionInstructions.includes("Promoted elsewhere: <PROJECT.md, STATE.md, CURRENT_FINDINGS.md, or manifest path> because <reason>") ||
+    !executionInstructions.includes("topic in kebab case") ||
+    !planReviewerInstructions.includes("declares possible knowledge-capture outputs") ||
+    !processReviewerInstructions.includes("topic-based notes index") ||
+    !processReviewerInstructions.includes("reusable knowledge buried in reports") ||
+    !notesEntrypointTemplate.includes("compatibility") ||
+    !notesEntrypointTemplate.includes("research_trajectory/notes/index.md") ||
+    notesEntrypointTemplate.includes("Durable Project Notes") ||
+    !notesIndexTemplate.includes("# Knowledge Notes Index") ||
+    !notesIndexTemplate.includes("## Active Notes") ||
+    !notesIndexTemplate.includes("## Retired / Superseded Notes")
+  ) {
+    throw new Error("knowledge notes must use CORAL-style sparse topic notes with an index and trial-level capture outcomes");
   }
   const indexHtml = await fsp.readFile(path.join(root, "templates", "default", "ui", "index.html"), "utf8");
   const readme = await fsp.readFile(path.join(root, "README.md"), "utf8");
@@ -560,7 +583,7 @@ Confidence: medium
     throw new Error("framing composer and CoAutoResearch returns must share a centered column");
   }
   if (
-    !indexHtml.includes("20260620-story-map1") ||
+    !indexHtml.includes("20260621-viewstate-asc1") ||
     !stylesCss.includes("Reader typography: match the composer text across content surfaces.") ||
     !stylesCss.includes(".framing-message .transcript-body") ||
     !stylesCss.includes("font-family: var(--reader);")
@@ -775,7 +798,7 @@ Confidence: medium
     !appJs.includes("markdownLinkHtml") ||
     !appJs.includes('transcriptContentHtml(message.text, { markdown: role === "assistant" })') ||
     !stylesCss.includes(".markdown-file-link") ||
-    !indexHtml.includes("20260620-story-map1")
+    !indexHtml.includes("20260621-viewstate-asc1")
   ) {
     throw new Error("Codex assistant responses must render Markdown in framing chat");
   }
@@ -826,7 +849,7 @@ Confidence: medium
     throw new Error("interrupted goal sessions must show resume controls instead of pause controls");
   }
   if (
-    !indexHtml.includes("app.js?v=20260620-story-map1") ||
+    !indexHtml.includes("app.js?v=20260621-viewstate-asc1") ||
     !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command"])') ||
     !appJs.includes('appendFramingMessage("user", displayText, { kind: "command" })') ||
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
@@ -884,7 +907,7 @@ Confidence: medium
     throw new Error("slash command pending state must start before the command row is rendered");
   }
   if (
-    !indexHtml.includes("styles.css?v=20260620-story-map1") ||
+    !indexHtml.includes("styles.css?v=20260621-viewstate-asc1") ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
     !appJs.includes("const latestRunStart = transcript.reduce") ||
     !appJs.includes("function framingProgressDetailsHtml()") ||
@@ -1053,7 +1076,12 @@ Confidence: medium
     !stylesCss.includes(".architecture-toc") ||
     !stylesCss.includes(".paragraph-plan-block") ||
     !stylesCss.includes(".manuscript-actions") ||
-    !stylesCss.includes(".traceability-details")
+    !stylesCss.includes(".traceability-details") ||
+    !appJs.includes("Download BLUEPRINT.md") ||
+    !appJs.includes("data-download-single-file") ||
+    !appJs.includes("downloadSingleFile") ||
+    !serverPy.includes('query.get("download"') ||
+    !serverPy.includes('"attachment" if download else "inline"')
   ) {
     throw new Error("manuscript panel must render a self-contained architecture blueprint with inline artifact blocks, provenance, and copy/open controls");
   }
@@ -2102,6 +2130,10 @@ Confidence: medium
       "        resources_dir = export_ctx.root / 'resources' / 'data_sources'",
       "        resources_dir.mkdir(parents=True, exist_ok=True)",
       "        (resources_dir / 'data.csv').write_text('a,b\\n1,2\\n', encoding='utf-8')",
+      "        raw_archive_dir = export_ctx.root / 'resources' / 'ongoing_work'",
+      "        raw_archive_dir.mkdir(parents=True, exist_ok=True)",
+      "        (raw_archive_dir / 'raw_bundle.zip').write_bytes(b'raw-source-archive')",
+      "        (export_ctx.root / 'manuscript' / 'BLUEPRINT.md').write_text('Use `research_trajectory/trials/000001_export/artifacts/final_figure.png`. Reference-only raw archive: `resources/ongoing_work/raw_bundle.zip`. Reference-only workspace output: `workspace/results/model.bin`.\\n', encoding='utf-8')",
       "        symlink_created = False",
       "        try:",
       "            os.symlink('/definitely/missing/coauto-export.csv', resources_dir / 'missing.csv')",
@@ -2123,7 +2155,12 @@ Confidence: medium
       "        blueprint_paths = {item['bundle_path'] for item in blueprint_estimate['largest_files']}",
       "        assert 'FINDINGS.md' in blueprint_paths, blueprint_paths",
       "        assert any(path.startswith('assets/') for path in blueprint_paths), blueprint_paths",
+      "        assert 'assets/raw_bundle.zip' not in blueprint_paths, blueprint_paths",
+      "        assert 'assets/model.bin' not in blueprint_paths, blueprint_paths",
       "        assert not any(path.startswith('research_trajectory/') for path in blueprint_paths), blueprint_paths",
+      "        skipped_paths = {item['path'] for item in blueprint_estimate['skipped']}",
+      "        assert 'resources/ongoing_work/raw_bundle.zip' in skipped_paths, skipped_paths",
+      "        assert 'workspace/results/model.bin' in skipped_paths, skipped_paths",
       "        job = module.start_export({'kind': 'blueprint', 'confirmed': True})",
       "        deadline = time.time() + 10",
       "        status = job",
@@ -2137,6 +2174,8 @@ Confidence: medium
       "            names = set(archive.namelist())",
       "            assert {'README.md', 'PROJECT.md', 'BLUEPRINT.md', 'FIGURE_SPECS.md', 'FINDINGS.md', 'MANIFEST.json'} <= names, names",
       "            assert any(name.startswith('assets/') and name.endswith('final_figure.png') for name in names), names",
+      "            assert 'assets/raw_bundle.zip' not in names, names",
+      "            assert 'assets/model.bin' not in names, names",
       "            assert not any(name.startswith('research_trajectory/') for name in names), names",
       "            manifest = json.loads(archive.read('MANIFEST.json').decode('utf-8'))",
       "            assert any(item['bundle_path'] == 'FINDINGS.md' and item['sha256'] for item in manifest['files']), manifest",

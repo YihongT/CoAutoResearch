@@ -4834,6 +4834,18 @@ EXPORT_EXCLUDED_ROOTS = {
     "secrets",
 }
 EXPORT_EXCLUDED_ROOT_FILES = {"AGENTS.md", "CLAUDE.md"}
+BLUEPRINT_REFERENCE_ONLY_ROOTS = {"resources", "workspace", "data", "analysis", "outputs"}
+BLUEPRINT_ARCHIVE_SUFFIXES = {
+    ".7z",
+    ".bz2",
+    ".dmg",
+    ".gz",
+    ".rar",
+    ".tar",
+    ".tgz",
+    ".xz",
+    ".zip",
+}
 
 
 def normalize_export_kind(value: Any) -> str:
@@ -4903,6 +4915,25 @@ def export_skip_reason(relative_path: str, kind: str) -> str:
             return f"excluded cache or environment path `{part}`"
     if normalized.startswith("ui/.runtime/") or normalized == "ui/.runtime":
         return "excluded UI runtime"
+    return ""
+
+
+def blueprint_asset_skip_reason(relative_path: str, source: Path) -> str:
+    normalized = normalize_export_relative(relative_path)
+    if not normalized:
+        return "invalid path"
+    parts = Path(normalized).parts
+    if not parts:
+        return "invalid path"
+    if parts[0] in BLUEPRINT_REFERENCE_ONLY_ROOTS:
+        return "reference-only source/workspace path; use Final Project Pack for raw resources and working outputs"
+    if source.is_dir():
+        return "referenced directory; Blueprint Pack includes explicit final files only"
+    suffix = Path(normalized).suffix.lower()
+    if suffix in BLUEPRINT_ARCHIVE_SUFFIXES:
+        return "reference-only archive; raw source bundles are not included in Blueprint Pack"
+    if normalized.startswith("research_trajectory/") and "/artifacts/" not in normalized:
+        return "reference-only trajectory provenance; autoresearch trajectory is not included in Blueprint Pack"
     return ""
 
 
@@ -5139,6 +5170,10 @@ def build_export_plan(kind: str) -> dict[str, Any]:
             if relative in {"manuscript/BLUEPRINT.md", "manuscript/figures/FIGURE_SPECS.md"}:
                 continue
             source = REPO_ROOT / relative
+            reason = blueprint_asset_skip_reason(relative, source)
+            if reason:
+                skipped.append({"path": relative, "reason": reason})
+                continue
             if source.exists() or source.is_symlink():
                 bundle_path = f"assets/{Path(relative).name or 'asset'}"
                 add_file_export_entry(entries, missing, skipped, used, source, bundle_path, relative, kind)
@@ -8845,7 +8880,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                 if parsed.path == "/api/file/raw":
                     query = parse_qs(parsed.query)
                     relative = query.get("path", [""])[0]
-                    self.serve_repo_file(unquote(relative))
+                    download = str(query.get("download", [""])[0]).strip().lower() in {"1", "true", "yes"}
+                    self.serve_repo_file(unquote(relative), download=download)
                     return
                 if parsed.path == "/api/export/estimate":
                     query = parse_qs(parsed.query)
@@ -9017,7 +9053,7 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_json({"ok": False, "error": str(exc)}, status=400)
 
-    def serve_repo_file(self, relative_path: str) -> None:
+    def serve_repo_file(self, relative_path: str, download: bool = False) -> None:
         try:
             path, _display_path = resolve_repo_file_reference(relative_path)
         except ValueError:
@@ -9035,7 +9071,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", file_mime(path))
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Disposition", f'inline; filename="{path.name}"')
+        disposition = "attachment" if download else "inline"
+        self.send_header("Content-Disposition", f'{disposition}; filename="{path.name}"; filename*=UTF-8\'\'{quote(path.name)}')
         self.end_headers()
         self.wfile.write(data)
 

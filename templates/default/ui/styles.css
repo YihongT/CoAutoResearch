@@ -1289,17 +1289,146 @@ textarea:focus {
 
 .reviews-panel {
   display: grid;
-  gap: 12px;
+  gap: 14px;
+}
+
+.review-trial-strip {
+  padding: 6px 2px 2px;
+}
+
+.review-trial-chip .trial-chip-status {
+  min-width: 42px;
+  text-align: left;
+}
+
+.review-selected-group {
+  overflow: hidden;
+  border: 1px solid rgba(34, 39, 32, 0.1);
+  border-radius: 18px;
+  background: rgba(248, 250, 246, 0.76);
+  box-shadow: 0 14px 36px rgba(38, 43, 37, 0.04);
+}
+
+.review-selected-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(34, 39, 32, 0.08);
+}
+
+.review-selected-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 20px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.review-selected-head > span {
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.review-trial-group {
+  overflow: hidden;
+  border: 1px solid rgba(34, 39, 32, 0.1);
+  border-radius: 18px;
+  background: rgba(248, 250, 246, 0.76);
+  box-shadow: 0 14px 36px rgba(38, 43, 37, 0.04);
+}
+
+.review-trial-group > summary {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  list-style: none;
+}
+
+.review-trial-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.review-trial-group > summary::before {
+  content: "›";
+  display: inline-grid;
+  place-items: center;
+  grid-row: 1;
+  grid-column: 1;
+  width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  border: 1px solid rgba(0, 93, 88, 0.16);
+  border-radius: 999px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-weight: 900;
+  transform: rotate(0deg);
+  transition: transform 0.14s ease;
+}
+
+.review-trial-group[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.review-trial-group > summary > div {
+  display: grid;
+  grid-column: 2;
+  gap: 2px;
+  min-width: 0;
+}
+
+.review-trial-group > summary strong {
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 18px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.review-trial-group > summary > span {
+  grid-column: 3;
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.review-group-eyebrow {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.review-trial-group[open] > summary {
+  border-bottom-color: rgba(34, 39, 32, 0.08);
+}
+
+.review-trial-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
 }
 
 .review-card {
   display: grid;
   gap: 12px;
-  padding: 18px;
+  padding: 16px;
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(255, 253, 247, 0.92);
-  box-shadow: 0 16px 42px rgba(38, 43, 37, 0.05);
+  box-shadow: 0 10px 28px rgba(38, 43, 37, 0.035);
 }
 
 .review-card-head {
@@ -2055,16 +2184,19 @@ textarea:focus {
 .manuscript-export-bar {
   position: sticky;
   top: 10px;
-  z-index: 12;
+  z-index: 30;
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto;
   gap: 14px;
   align-items: start;
   padding: 12px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 94%, var(--paper) 6%);
-  box-shadow: 0 10px 28px rgba(38, 43, 37, 0.08);
+  background: var(--surface);
+  background-clip: padding-box;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.88) inset,
+    0 14px 34px rgba(17, 24, 39, 0.16);
 }
 
 .manuscript-export-copy {

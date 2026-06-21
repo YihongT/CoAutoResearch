@@ -45,6 +45,7 @@ function loadAppContext() {
       addEventListener() {},
       dispatchEvent() {},
       appendChild() {},
+      insertAdjacentElement() {},
       remove() {},
       select() {},
       focus() {},
@@ -78,6 +79,24 @@ function loadAppContext() {
     scrollWidth: 1200,
     scrollLeft: 0,
   });
+  const mainStage = element({
+    clientHeight: 900,
+    scrollHeight: 2400,
+    scrollTop: 0,
+    scrollTo(options) {
+      this.scrollTop = Number(options?.top || 0);
+    },
+  });
+  const chatView = element({ classNames: ["workspace-view", "chat-view", "is-active"] });
+  const materialView = element({ classNames: ["workspace-view", "material-view"] });
+  const contextContent = element({
+    querySelectorAll() {
+      return [];
+    },
+  });
+  const railActions = ["chat", "workspace", "resources", "trials", "reviews", "manuscript"].map((view) =>
+    element({ dataset: { view }, classNames: ["rail-action"] })
+  );
   const launchDialog = element({
     close() { this.closed = true; },
     showModal() { this.open = true; },
@@ -162,6 +181,11 @@ function loadAppContext() {
     ["#cold-save-status", element()],
     ["#cold-file-preview", element()],
     ["#cold-editor-workbench", element()],
+    [".main-stage", mainStage],
+    ["#chat-view", chatView],
+    ["#material-view", materialView],
+    ["#material-title", element()],
+    ["#context-content", contextContent],
     ["#brief-attachment-tray", element()],
     ["#chat-attachment-tray", element()],
     ["#composer-file-input", composerFileInput],
@@ -250,7 +274,8 @@ function loadAppContext() {
       querySelector(selector) {
         return elements.get(selector) || null;
       },
-      querySelectorAll() {
+      querySelectorAll(selector) {
+        if (selector === ".rail-action") return railActions;
         return [];
       },
       createElement() {
@@ -720,6 +745,10 @@ function loadAppContext() {
     globalThis.__renderManuscriptPanelProbe = (payload) => {
       appState.summaries = { ...(appState.summaries || {}), manuscript: payload };
       return renderManuscriptPanel();
+    };
+    globalThis.__renderReviewsPanelProbe = (reviews) => {
+      appState.reviews = reviews;
+      return renderReviewsPanel();
     };
     globalThis.__renderExportPanelProbe = (job = null) => {
       activeExportJob = job;
@@ -1388,6 +1417,42 @@ function testPassedGoalDoesNotShowStaleRunningTrial() {
   assert.equal(continuingHtml.includes("Autoresearch complete"), false, "incomplete gates must not show the autoresearch complete tag");
 }
 
+function testUncreatedTrialMentionDoesNotCreateTimelineTrial() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = Array.from({ length: 12 }, (_, index) => {
+      const iteration = index + 1;
+      const id = String(iteration).padStart(6, "0") + "_reported_trial";
+      return {
+        id,
+        iteration,
+        status: "reported",
+        report_path: "research_trajectory/trials/" + id + "/REPORT.md",
+        report_summary: "Reported trial " + iteration
+      };
+    });
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 13,
+      gate: { status: "pass" },
+      started_at: "2026-06-17T10:00:00.000Z",
+      transcript: [
+        { id: "tg13", role: "user", kind: "user", raw_type: "ui.goal", content: "Continue autoresearch loop (Trial 13).", created_at: "2026-06-17T10:00:01.000Z" },
+        { id: "tc13", role: "command", kind: "command", raw_type: "process.started", content: "codex exec resume", created_at: "2026-06-17T10:00:02.000Z" },
+        { id: "ta13", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "No Trial 13 was created because the stop condition is satisfied.", created_at: "2026-06-17T10:00:03.000Z" }
+      ]
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("Trial 13"), false, "mentions of an uncreated trial must not become a trial nav item");
+  assert.equal(html.includes("Report pending"), false, "uncreated trials must not render report-pending cards");
+  assert.equal(html.includes("Trial 12"), true, "timeline should stay anchored to the latest materialized trial");
+}
+
 function testCurrentRunActivityShowsPauseForChatRun() {
   const app = loadAppContext();
   app.run(`
@@ -1554,6 +1619,56 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
     }]
   })`);
   assert.equal(html.includes("Reviewer templates outdated"), false, "project sidebar card should not show maintenance reviewer-template status");
+}
+
+function testReviewsPanelGroupsByTrial() {
+  const app = loadAppContext();
+  const reviews = [{
+    type: "trial_review",
+    path: "research_trajectory/trials/000012_final_blueprint_gate_repair/reviews/FINAL_GATE_REVIEW.md",
+    name: "FINAL_GATE_REVIEW.md",
+    source_trial: "000012_final_blueprint_gate_repair",
+    reviewer: "Final gate reviewer",
+    decision: "pass",
+    summary: "Gate passes."
+  }, {
+    type: "trial_review",
+    path: "research_trajectory/trials/000011_reference_cleanup/reviews/EVIDENCE_REVIEW.md",
+    name: "EVIDENCE_REVIEW.md",
+    source_trial: "000011_reference_cleanup",
+    reviewer: "Evidence reviewer",
+    decision: "continue",
+    summary: "Needs citation cleanup."
+  }, {
+    type: "trial_review",
+    path: "research_trajectory/trials/000012_final_blueprint_gate_repair/reviews/MANUSCRIPT_REVIEW.md",
+    name: "MANUSCRIPT_REVIEW.md",
+    source_trial: "000012_final_blueprint_gate_repair",
+    reviewer: "Manuscript reviewer",
+    decision: "pass",
+    summary: "Manuscript passes."
+  }, {
+    type: "trial_review",
+    path: "research_trajectory/trials/000012_final_blueprint_gate_repair/reviews/PLAN_REVIEW.md",
+    name: "PLAN_REVIEW.md",
+    source_trial: "000012_final_blueprint_gate_repair",
+    reviewer: "Plan reviewer",
+    decision: "pass",
+    summary: "Plan passes."
+  }];
+  const html = app.run(`__renderReviewsPanelProbe(${JSON.stringify(reviews)})`);
+  assert.equal(html.includes("review-trial-strip"), true, "reviews should render a horizontal trial selector");
+  assert.equal(html.includes("review-selected-group"), true, "reviews should render one selected trial group");
+  assert.equal(html.includes('data-review-trial-select="trial:000012_final_blueprint_gate_repair"'), true);
+  assert.equal(html.includes('data-review-trial-select="trial:000011_reference_cleanup"'), true);
+  assert.equal(html.includes("Trial 12: final blueprint gate repair"), true);
+  assert.equal(html.includes("Trial 11: reference cleanup"), true);
+  assert.equal(html.indexOf("Trial 11: reference cleanup") < html.indexOf("Trial 12: final blueprint gate repair"), true, "review trial axis should increase left to right");
+  assert.equal(html.includes("3 reviews · 3 pass"), true, "group summary should show review counts and pass counts");
+  assert.equal(html.includes("Needs citation cleanup."), false, "older trial review summaries should not appear in the selected trial body");
+  assert.equal(html.indexOf("PLAN_REVIEW.md") < html.indexOf("MANUSCRIPT_REVIEW.md"), true, "group should use reviewer workflow ordering");
+  assert.equal(html.indexOf("MANUSCRIPT_REVIEW.md") < html.indexOf("FINAL_GATE_REVIEW.md"), true, "final gate should appear after manuscript review");
+  assert.equal(html.includes('data-card-preview="research_trajectory/trials/000012_final_blueprint_gate_repair/reviews/PLAN_REVIEW.md"'), true);
 }
 
 function testComposerPlaceholderBecomesGeneralAfterLaunch() {
@@ -2176,8 +2291,18 @@ async function testCopyTextHelperWritesClipboard() {
 async function testExportBundleFlow() {
   const base = loadAppContext();
   const panel = base.run("__renderExportPanelProbe(null)");
+  assert.equal(panel.includes("Download BLUEPRINT.md"), true);
+  assert.equal(panel.includes('data-download-single-file="manuscript/BLUEPRINT.md"'), true);
   assert.equal(panel.includes("Download blueprint pack"), true);
   assert.equal(panel.includes("Download final project pack"), true);
+  const singleFileHref = base.run(`
+    downloadSingleFile("manuscript/BLUEPRINT.md");
+    window.location.href;
+  `);
+  assert.equal(singleFileHref.includes("/api/file/raw?"), true);
+  assert.equal(singleFileHref.includes("path=manuscript%2FBLUEPRINT.md"), true);
+  assert.equal(singleFileHref.includes("project=p1"), true);
+  assert.equal(singleFileHref.includes("download=1"), true);
 
   const readyPanel = base.run(`__renderExportPanelProbe(${JSON.stringify({
     id: "ex_ready",
@@ -2593,6 +2718,8 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   };
   const html = app.run(`__renderManuscriptPanelProbe(${JSON.stringify(payload)})`);
   assert.equal(html.includes("manuscript-export-bar"), true);
+  assert.equal(html.includes("Download BLUEPRINT.md"), true);
+  assert.equal(html.includes('data-download-single-file="manuscript/BLUEPRINT.md"'), true);
   assert.equal(html.includes("Download blueprint pack"), true);
   assert.equal(html.includes("Download final project pack"), true);
   assert.equal(html.indexOf("manuscript-export-bar") < html.indexOf("context-card"), true, "export controls should render before manuscript context cards");
@@ -2658,7 +2785,55 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(missingTableHtml.includes("Missing publication-ready table body"), true);
 }
 
+function testNavigationStatePersistsPanelAndScroll() {
+  const app = loadAppContext();
+  const state = app.run(`
+    appState.summaries = {
+      manuscript: {
+        target: "Nature Machine Intelligence",
+        contribution: "Perspective",
+        core_story: "A finished-results paper map.",
+        architecture: [{
+          title: "Section 1: Result logic",
+          level: 3,
+          body: "Section brief: This section explains the final result and why it appears here.\\nLocal thesis / purpose: The section carries the main result.\\nLocal claims in plain language: The claim is reader-facing.\\nLocal evidence, results, or artifacts: Reviewed evidence supports it.\\nPlaced displays / methods / results: none.\\nTransition job: moves to limits."
+        }]
+      }
+    };
+    const main = document.querySelector(".main-stage");
+    main.scrollTop = 640;
+    setPanel("manuscript");
+    main.scrollTop = 720;
+    persistActiveViewScrollPosition();
+
+    activeView = "chat";
+    activePanel = "resources";
+    main.scrollTop = 0;
+    restoreNavigationState();
+    renderRailVisibility();
+    renderContext();
+
+    ({
+      activeView,
+      activePanel,
+      scrollTop: main.scrollTop,
+      storedPanel: localStorage.getItem(scopedStorageKey("activeNavigationPanel")),
+      storedScroll: localStorage.getItem(scopedStorageKey("viewScroll:manuscript")),
+      chatActive: document.querySelector("#chat-view").classList.contains("is-active"),
+      materialActive: document.querySelector("#material-view").classList.contains("is-active")
+    });
+  `);
+  assert.equal(state.storedPanel, "manuscript", "material panel selection should be stored project-locally");
+  assert.equal(state.activeView, "materials", "refresh restore should reopen the material view");
+  assert.equal(state.activePanel, "manuscript", "refresh restore should reopen the last material panel");
+  assert.equal(state.materialActive, true, "material view should be active after restore");
+  assert.equal(state.chatActive, false, "Agents view should not stay active after restoring a material panel");
+  assert.equal(state.storedScroll, "720", "active material scroll position should be persisted");
+  assert.equal(state.scrollTop, 720, "material panel scroll position should be restored after re-render");
+}
+
 testButtonInventoryHasHandlers();
+testNavigationStatePersistsPanelAndScroll();
 await testImmediateUserMessage();
 await testAttachmentOnlyMessage();
 await testResumeFromTrialRequiresConfirmationAndSendsPayload();
@@ -2685,7 +2860,9 @@ testTrialStripScrollRestoresAcrossRender();
 testRunningTrialUsesProgressFallback();
 testStatusCardShowsReviewCheckpoint();
 testReviewStorageOutdatedDoesNotShowProjectWarning();
+testReviewsPanelGroupsByTrial();
 testComposerPlaceholderBecomesGeneralAfterLaunch();
+testUncreatedTrialMentionDoesNotCreateTimelineTrial();
 testSettingsRenderPreservesComposerDraft();
 testProjectScopedSessionSettingsOverrideServerDefaults();
 testComposerModelReasoningChangesPersistProjectScoped();

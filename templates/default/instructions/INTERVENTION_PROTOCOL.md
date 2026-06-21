@@ -29,7 +29,11 @@ Do not create a human intervention file for ordinary interaction, such as:
 
 These messages may be answered directly.
 
-If useful, update no files. If the answer reveals a durable high-value insight, it may be added to `research_trajectory/notes/NOTES.md`, but only if it satisfies the notes policy in `instructions/EXECUTION_AGENT.md`.
+If useful, update no files. If the answer reveals reusable knowledge, a
+resource-use lesson, or a recurring user preference that does not belong in
+canonical state, apply the Knowledge Capture Contract in
+`instructions/EXECUTION_AGENT.md` and update a topic note plus
+`research_trajectory/notes/index.md`.
 
 ---
 

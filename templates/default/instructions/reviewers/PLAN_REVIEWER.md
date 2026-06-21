@@ -30,7 +30,9 @@ Check whether the plan:
 - avoids naive or invalid operationalization;
 - needs method grounding or literature grounding;
 - has interpretable success criteria;
-- records what outputs should update `STATE.md`, `CURRENT_FINDINGS.md`, `NOTES.md`, or `manuscript/`.
+- records what outputs should update `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/`, or knowledge notes;
+- declares possible knowledge-capture outputs when the plan may produce reusable
+  resource, method, negative-result, manuscript, process, or preference lessons.
 
 ## Decisions
 

@@ -60,7 +60,10 @@ If reviewing, use the relevant file under:
 - `research_trajectory/STATE.md`: current control state: objective, active plan, method status, blockers, constraints, next step.
 - `research_trajectory/CURRENT_FINDINGS.md`: latest global synthesis of accepted/tentative/rejected findings, results, claims, limitations, and evidence.
 - `research_trajectory/trials/`: audit trail of planned research work packages.
-- `research_trajectory/notes/NOTES.md`: distilled high-value notes only.
+- `research_trajectory/notes/index.md`: map of sparse, topic-based knowledge
+  notes for reusable resource, method, process, and human-preference lessons.
+- `research_trajectory/notes/NOTES.md`: compatibility entrypoint that points to
+  `index.md`.
 - `research_trajectory/human_interventions/`: formal human interventions only.
 - `manuscript/`: target-aware manuscript blueprint, figure specifications, candidate deliverable materials, and manuscript reviews.
 - `archive/`: deprecated or misleading materials retained for history.
@@ -103,7 +106,7 @@ When sources conflict, use this priority order:
 4. `research_trajectory/CURRENT_FINDINGS.md`;
 5. current trial `PLAN.md` and `REVIEW.md`;
 6. trial `REPORT.md` and `artifacts/`;
-7. `research_trajectory/notes/NOTES.md`;
+7. `research_trajectory/notes/index.md` and topic notes;
 8. `resources/`;
 9. `archive/`.
 

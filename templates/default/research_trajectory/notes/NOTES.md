@@ -1,6 +1,9 @@
-# Notes
+# Notes Entry Point
 
-Use this file sparingly for durable, high-value notes that should survive
-across trials.
+This file is kept for compatibility with older instructions and tools.
 
-Do not use it for routine trial summaries, raw logs, or temporary thoughts.
+Use `research_trajectory/notes/index.md` as the map of active topic-based
+knowledge notes.
+
+Do not add routine notes here. Create or update a topic note under
+`research_trajectory/notes/` and update `index.md`.

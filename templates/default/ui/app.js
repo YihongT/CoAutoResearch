@@ -1,7 +1,44 @@
+const initialUrlParams = new URLSearchParams(window.location.search);
+const MATERIAL_NAVIGATION_PANELS = new Set(["workspace", "resources", "trials", "reviews", "manuscript"]);
+const NAVIGATION_PANELS = new Set(["chat", ...MATERIAL_NAVIGATION_PANELS]);
+
+function projectScopedStorageKey(projectId, key) {
+  return `coAutoResearch:${projectId || "default"}:${key}`;
+}
+
+function projectScopedGet(projectId, key, fallback = "") {
+  return localStorage.getItem(projectScopedStorageKey(projectId, key)) ?? fallback;
+}
+
+function normalizeNavigationPanel(panel, fallback = "chat") {
+  const value = String(panel || "").trim();
+  return NAVIGATION_PANELS.has(value) ? value : fallback;
+}
+
+function normalizeMaterialPanel(panel, fallback = "resources") {
+  const value = String(panel || "").trim();
+  return MATERIAL_NAVIGATION_PANELS.has(value) ? value : fallback;
+}
+
+function initialNavigationPanel(projectId) {
+  return normalizeNavigationPanel(
+    initialUrlParams.get("view") ||
+      initialUrlParams.get("panel") ||
+      projectScopedGet(projectId, "activeNavigationPanel", localStorage.getItem("coAutoResearchActivePanel") || "chat")
+  );
+}
+
+function initialMaterialPanel(projectId) {
+  return normalizeMaterialPanel(
+    projectScopedGet(projectId, "activeMaterialPanel", localStorage.getItem("coAutoResearchActiveMaterialPanel") || "resources")
+  );
+}
+
 let appState = null;
-let activeProjectId = new URLSearchParams(window.location.search).get("project") || localStorage.getItem("coAutoResearchActiveProject") || "";
-let activeView = "chat";
-let activePanel = "resources";
+let activeProjectId = initialUrlParams.get("project") || localStorage.getItem("coAutoResearchActiveProject") || "";
+const restoredNavigationPanel = initialNavigationPanel(activeProjectId);
+let activeView = restoredNavigationPanel === "chat" ? "chat" : "materials";
+let activePanel = restoredNavigationPanel === "chat" ? initialMaterialPanel(activeProjectId) : restoredNavigationPanel;
 let activeStage = "1";
 const FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection";
 let activeColdPath = "";
@@ -35,6 +72,7 @@ let openProjectMenuId = "";
 let pendingRenameProject = null;
 let pendingDeleteProject = null;
 let selectedTrialIndex = 0;
+let selectedReviewGroupKey = "";
 let trialStripScrollState = {
   mode: "auto",
   left: 0,
@@ -52,6 +90,9 @@ let pendingExportEstimate = null;
 let optimisticResearchSession = null;
 let fileViewerResizeState = null;
 let fileViewerReturnPath = "";
+let viewScrollPersistTimer = null;
+let suppressViewScrollPersistence = false;
+let viewScrollRestoreToken = 0;
 let composerDraft = "";
 let targetVenueProjectId = activeProjectId || "";
 const localMessages = [];
@@ -267,9 +308,10 @@ function isProjectResourcePath(path) {
   return String(path || "").replace(/\\/g, "/").replace(/^\/+/, "").startsWith("resources/");
 }
 
-function rawFileUrl(path) {
+function rawFileUrl(path, options = {}) {
   const params = new URLSearchParams({ path });
   if (activeProjectId) params.set("project", activeProjectId);
+  if (options.download) params.set("download", "1");
   return `/api/file/raw?${params.toString()}`;
 }
 
@@ -695,7 +737,7 @@ function scheduleColdAutosave() {
 }
 
 function scopedStorageKey(key) {
-  return `coAutoResearch:${activeProjectId || "default"}:${key}`;
+  return projectScopedStorageKey(activeProjectId, key);
 }
 
 function scopedGet(key, fallback = "", options = {}) {
@@ -720,6 +762,91 @@ function scopedJsonGet(key, fallback = {}) {
   } catch {
     return fallback;
   }
+}
+
+function activeNavigationPanel() {
+  return activeView === "chat" ? "chat" : normalizeMaterialPanel(activePanel);
+}
+
+function restoreNavigationState() {
+  const panel = initialNavigationPanel(activeProjectId);
+  activeView = panel === "chat" ? "chat" : "materials";
+  activePanel = panel === "chat" ? initialMaterialPanel(activeProjectId) : normalizeMaterialPanel(panel);
+}
+
+function persistNavigationState({ updateUrl = false } = {}) {
+  const panel = activeNavigationPanel();
+  scopedSet("activeNavigationPanel", panel);
+  if (panel !== "chat") scopedSet("activeMaterialPanel", panel);
+  localStorage.setItem("coAutoResearchActivePanel", panel);
+  if (panel !== "chat") localStorage.setItem("coAutoResearchActiveMaterialPanel", panel);
+  if (updateUrl) updateNavigationUrl(panel);
+}
+
+function updateNavigationUrl(panel = activeNavigationPanel()) {
+  if (!window.history?.replaceState) return;
+  const url = new URL(window.location.href);
+  if (activeProjectId) url.searchParams.set("project", activeProjectId);
+  else url.searchParams.delete("project");
+  url.searchParams.set("view", normalizeNavigationPanel(panel));
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+    window.history.replaceState(null, "", next);
+  }
+}
+
+function scrollablePageNode() {
+  return $(".main-stage") || document.scrollingElement || document.documentElement;
+}
+
+function readPageScrollTop(scroller = scrollablePageNode()) {
+  if (scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body) {
+    return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  }
+  return scroller.scrollTop || 0;
+}
+
+function writePageScrollTop(value, scroller = scrollablePageNode()) {
+  const next = Math.max(0, Number(value) || 0);
+  if (scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body) {
+    window.scrollTo({ top: next, behavior: "auto" });
+  } else {
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    scroller.scrollTop = Math.min(next, max);
+  }
+}
+
+function persistActiveViewScrollPosition() {
+  if (!activeProjectId) return;
+  scopedSet(`viewScroll:${activeNavigationPanel()}`, String(Math.round(readPageScrollTop())));
+}
+
+function schedulePersistActiveViewScrollPosition() {
+  if (suppressViewScrollPersistence) return;
+  clearTimeout(viewScrollPersistTimer);
+  viewScrollPersistTimer = setTimeout(persistActiveViewScrollPosition, 120);
+}
+
+function restoreActiveViewScrollPosition({ defaultTop = 0 } = {}) {
+  const panel = activeNavigationPanel();
+  const raw = scopedGet(`viewScroll:${panel}`, "", { legacyFallback: false });
+  const target = raw === "" ? defaultTop : Number(raw);
+  if (target === null || !Number.isFinite(Number(target))) return;
+  const token = ++viewScrollRestoreToken;
+  suppressViewScrollPersistence = true;
+  requestAnimationFrame(() => {
+    if (token !== viewScrollRestoreToken || activeNavigationPanel() !== panel) {
+      if (token === viewScrollRestoreToken) suppressViewScrollPersistence = false;
+      return;
+    }
+    writePageScrollTop(Number(target));
+    requestAnimationFrame(() => {
+      if (token === viewScrollRestoreToken) {
+        suppressViewScrollPersistence = false;
+        updateFramingScrollButton();
+      }
+    });
+  });
 }
 
 function normalizeAgentBackend(value) {
@@ -1283,9 +1410,12 @@ function resetProjectClientState() {
 async function switchProject(projectId) {
   const next = String(projectId || "").trim();
   if (!next || next === activeProjectId) return;
+  persistActiveViewScrollPosition();
+  persistNavigationState();
   activeProjectId = next;
   localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
   resetProjectClientState();
+  restoreNavigationState();
   hydrateTargetVenueField({ force: true });
   restoreSessionSettings();
   restoreResourceSelections();
@@ -1575,12 +1705,14 @@ async function loadOverview(silent = false) {
     return;
   }
   try {
-    const holdMaterialTree = activeView === "materials";
+    const materialContent = $("#context-content");
+    const holdMaterialTree = activeView === "materials" && Boolean(materialContent?.childElementCount);
     appState = await api("/api/overview");
     if (appState.active_project_id && appState.active_project_id !== activeProjectId) {
       activeProjectId = appState.active_project_id;
       localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
       resetProjectClientState();
+      restoreNavigationState();
       restoreResourceSelections();
       restorePendingResourceImports();
     }
@@ -1599,7 +1731,10 @@ async function loadOverview(silent = false) {
     renderColdStartEditor();
     renderChatState();
     renderStage();
-    if (!holdMaterialTree) renderContext();
+    if (activeView === "materials") {
+      $("#material-title").textContent = panelTitles[activePanel] || "Resources";
+      if (!holdMaterialTree) renderContext();
+    }
     renderSession();
     scheduleWorkingTicker();
     if (!silent) showToast("Refreshed from repository files.");
@@ -1724,6 +1859,7 @@ function renderRailVisibility() {
   });
   if (activeView === "materials" && visible[activePanel] === false) {
     activeView = "chat";
+    persistNavigationState({ updateUrl: true });
   }
   $$(".rail-action").forEach((button) => {
     const selected = activeView === "chat" ? button.dataset.view === "chat" : button.dataset.view === activePanel;
@@ -2841,7 +2977,7 @@ function renderFramingConversation() {
       }
       restoreTrialStripScroll();
     });
-    if (pending && wasNearBottom) {
+    if (activeView === "chat" && pending && wasNearBottom) {
       scrollFramingToBottomSoon();
     } else {
       requestAnimationFrame(() => {
@@ -3297,17 +3433,21 @@ async function clearSavedSecret(key) {
 }
 
 function setPanel(panel) {
-  if (appState && visiblePanels()[panel] === false) {
-    showToast(`${panelTitles[panel] || panel} has no content yet.`);
+  const targetPanel = normalizeNavigationPanel(panel);
+  if (appState && visiblePanels()[targetPanel] === false) {
+    showToast(`${panelTitles[targetPanel] || targetPanel} has no content yet.`);
     return;
   }
-  activeView = panel === "chat" ? "chat" : "materials";
-  if (panel !== "chat") activePanel = panel;
+  persistActiveViewScrollPosition();
+  activeView = targetPanel === "chat" ? "chat" : "materials";
+  if (targetPanel !== "chat") activePanel = normalizeMaterialPanel(targetPanel);
+  persistNavigationState({ updateUrl: true });
 
   renderRailVisibility();
 
   if (activeView === "chat") {
     renderFramingConversation();
+    restoreActiveViewScrollPosition();
     return;
   }
   syncBriefComposerDock(false);
@@ -4409,7 +4549,6 @@ function trialTimelineContentHtml(entries, options = {}) {
   const reportByIteration = new Map(reports.map((report) => [trialIterationValue(report), report]));
   const iterationValues = new Set([
     ...reports.map((report) => trialIterationValue(report)).filter(Boolean),
-    ...Array.from(trialGroups.keys()).filter(Boolean),
   ]);
   if (liveIteration) iterationValues.add(liveIteration);
   const trials = Array.from(iterationValues)
@@ -4840,42 +4979,205 @@ function reviewSortKey(review) {
   return `${Number.isFinite(number) ? String(number).padStart(6, "0") : "999999"}-${type}-${path}`;
 }
 
+function reviewWorkflowOrder(review) {
+  const path = String(review.path || review.name || "").toUpperCase();
+  const reviewer = String(review.reviewer || "").toLowerCase();
+  const pairs = [
+    ["PLAN_REVIEW", "plan"],
+    ["PROCESS_REVIEW", "process"],
+    ["EVIDENCE_REVIEW", "evidence"],
+    ["VENUE_FIT_REVIEW", "venue"],
+    ["MANUSCRIPT_REVIEW", "manuscript"],
+    ["FIGURE_TABLE_REVIEW", "figure"],
+    ["FINAL_GATE_REVIEW", "final"],
+  ];
+  const index = pairs.findIndex(([fileToken, reviewerToken]) => path.includes(fileToken) || reviewer.includes(reviewerToken));
+  return index >= 0 ? index : pairs.length;
+}
+
+function reviewTrialGroupKey(review) {
+  const trialId = reviewTrialId(review);
+  if (trialId) return `trial:${trialId}`;
+  return `other:${review.type || "review"}`;
+}
+
+function reviewTrialGroupLabel(group) {
+  if (group.trialId) return reviewReadableTrial(group.trialId);
+  if (group.type === "manuscript_review") return "Manuscript-level reviews";
+  if (group.type === "figure_table_review") return "Figure/table reviews";
+  if (group.type === "process_review") return "Process reviews";
+  return "Other reviews";
+}
+
+function reviewDecisionCounts(reviews) {
+  const counts = { pass: 0, continue: 0, other: 0 };
+  for (const review of reviews) {
+    const decision = reviewDecision(review).toLowerCase();
+    if (decision === "pass") counts.pass += 1;
+    else if (decision === "continue") counts.continue += 1;
+    else counts.other += 1;
+  }
+  return counts;
+}
+
+function groupedReviews(reviews) {
+  const groups = new Map();
+  for (const review of reviews) {
+    const key = reviewTrialGroupKey(review);
+    if (!groups.has(key)) {
+      const trialId = reviewTrialId(review);
+      groups.set(key, {
+        key,
+        trialId,
+        type: review.type || "review",
+        number: trialId ? reviewTrialNumber(trialId) : Number.NEGATIVE_INFINITY,
+        reviews: [],
+      });
+    }
+    groups.get(key).reviews.push(review);
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      reviews: group.reviews.sort((a, b) => {
+        const order = reviewWorkflowOrder(a) - reviewWorkflowOrder(b);
+        if (order) return order;
+        return reviewSortKey(a).localeCompare(reviewSortKey(b));
+      }),
+    }))
+    .sort((a, b) => {
+      const aNumber = Number.isFinite(a.number) ? a.number : -1;
+      const bNumber = Number.isFinite(b.number) ? b.number : -1;
+      if (aNumber !== bNumber) return aNumber - bNumber;
+      return reviewTrialGroupLabel(a).localeCompare(reviewTrialGroupLabel(b));
+    });
+}
+
+function reviewGroupStatusLabel(group) {
+  const counts = reviewDecisionCounts(group.reviews);
+  return [
+    `${group.reviews.length} review${group.reviews.length === 1 ? "" : "s"}`,
+    counts.pass ? `${counts.pass} pass` : "",
+    counts.continue ? `${counts.continue} continue` : "",
+    counts.other ? `${counts.other} other` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function reviewGroupShortStatus(group) {
+  const counts = reviewDecisionCounts(group.reviews);
+  if (counts.continue) return "continue";
+  if (counts.other) return "mixed";
+  if (counts.pass && counts.pass === group.reviews.length) return "pass";
+  return `${group.reviews.length}`;
+}
+
+function reviewGroupIndexLabel(group) {
+  if (Number.isFinite(group.number) && group.number >= 0) return String(group.number);
+  if (group.type === "manuscript_review") return "M";
+  if (group.type === "figure_table_review") return "F";
+  if (group.type === "process_review") return "P";
+  return "R";
+}
+
+function selectedReviewGroup(groups) {
+  if (!groups.length) return null;
+  const selected = selectedReviewGroupKey ? groups.find((group) => group.key === selectedReviewGroupKey) : null;
+  if (selected) return selected;
+  const latestTrial = [...groups].reverse().find((group) => Number.isFinite(group.number) && group.number >= 0);
+  const fallback = latestTrial || groups[0];
+  selectedReviewGroupKey = fallback.key;
+  return fallback;
+}
+
+function reviewTrialStripHtml(groups, activeGroup) {
+  if (!groups.length) return "";
+  return `
+    <nav class="trial-strip review-trial-strip" aria-label="Review trials">
+      <span>Trials</span>
+      <button class="trial-scroll-button" type="button" data-review-trial-scroll="-1" aria-label="Previous review trials">‹</button>
+      <div class="trial-strip-scroll review-trial-strip-scroll">
+        ${groups
+          .map((group) => {
+            const active = activeGroup?.key === group.key;
+            const label = reviewTrialGroupLabel(group);
+            const status = reviewGroupStatusLabel(group);
+            return `
+              <button class="trial-chip review-trial-chip ${active ? "is-active" : ""}" type="button" data-review-trial-select="${escapeHtml(group.key)}" title="${escapeHtml(`${label} · ${status}`)}" aria-label="${escapeHtml(`${label}: ${status}`)}">
+                <strong class="trial-chip-index">${escapeHtml(reviewGroupIndexLabel(group))}</strong>
+                <span class="trial-chip-status">${escapeHtml(reviewGroupShortStatus(group))}</span>
+              </button>
+            `;
+          })
+          .join("")}
+      </div>
+      <button class="trial-scroll-button" type="button" data-review-trial-scroll="1" aria-label="Next review trials">›</button>
+    </nav>
+  `;
+}
+
+function restoreReviewTrialStripScroll() {
+  const strip = document.querySelector(".review-trial-strip-scroll");
+  if (!strip) return;
+  const active = strip.querySelector(".review-trial-chip.is-active");
+  if (!active) return;
+  const stripRect = strip.getBoundingClientRect();
+  const chipRect = active.getBoundingClientRect();
+  const pad = 14;
+  if (chipRect.left >= stripRect.left + pad && chipRect.right <= stripRect.right - pad) return;
+  const nextLeft = strip.scrollLeft + chipRect.left - stripRect.left - Math.max(0, (strip.clientWidth - active.offsetWidth) / 2);
+  strip.scrollLeft = Math.max(0, nextLeft);
+}
+
+function reviewCardHtml(review) {
+  const trialId = reviewTrialId(review);
+  const decision = reviewDecision(review);
+  const reviewer = cleanText(review.reviewer, "");
+  const fileName = basename(review.path || review.name || "REVIEW.md");
+  const meta = [
+    reviewTypeLabel(review.type),
+    trialId ? trialId : "",
+    reviewer,
+    decision,
+  ].filter(Boolean);
+  return `
+    <article class="review-card">
+      <header class="review-card-head">
+        <div class="review-title-block">
+          <p class="review-kicker">${escapeHtml(fileName)}</p>
+          <h3>${escapeHtml(reviewer || fileName.replace(/\.md$/i, "").replaceAll("_", " ").toLowerCase())}</h3>
+        </div>
+        ${previewButton(review.path)}
+      </header>
+      <div class="review-meta-row">
+        ${meta.map((item) => `<span class="review-chip">${escapeHtml(item)}</span>`).join("")}
+      </div>
+      <p class="review-summary">${escapeHtml(reviewSummary(review))}</p>
+      <p class="review-path">${escapeHtml(review.path || "")}</p>
+      <div class="card-inline-file" hidden></div>
+    </article>
+  `;
+}
+
 function renderReviewsPanel() {
   const reviews = (appState.reviews || []).filter(hasVisibleReview).sort((a, b) => reviewSortKey(a).localeCompare(reviewSortKey(b)));
   if (!reviews.length) return empty("No review files yet.");
+  const groups = groupedReviews(reviews);
+  const activeGroup = selectedReviewGroup(groups);
   return `
     <section class="reviews-panel">
-      ${reviews
-        .map((review) => {
-          const trialId = reviewTrialId(review);
-          const decision = reviewDecision(review);
-          const reviewer = cleanText(review.reviewer, "");
-          const fileName = basename(review.path || review.name || "REVIEW.md");
-          const meta = [
-            reviewTypeLabel(review.type),
-            trialId ? trialId : "",
-            reviewer,
-            decision,
-          ].filter(Boolean);
-          return `
-            <article class="review-card">
-              <header class="review-card-head">
-                <div class="review-title-block">
-                  <p class="review-kicker">${escapeHtml(fileName)}</p>
-                  <h3>${escapeHtml(reviewDisplayTitle(review))}</h3>
-                </div>
-                ${previewButton(review.path)}
-              </header>
-              <div class="review-meta-row">
-                ${meta.map((item) => `<span class="review-chip">${escapeHtml(item)}</span>`).join("")}
-              </div>
-              <p class="review-summary">${escapeHtml(reviewSummary(review))}</p>
-              <p class="review-path">${escapeHtml(review.path || "")}</p>
-              <div class="card-inline-file" hidden></div>
-            </article>
-          `;
-        })
-        .join("")}
+      ${reviewTrialStripHtml(groups, activeGroup)}
+      <section class="review-selected-group">
+        <header class="review-selected-head">
+          <div>
+            <p class="review-group-eyebrow">${activeGroup?.trialId ? "Trial reviews" : reviewTypeLabel(activeGroup?.type)}</p>
+            <h3>${escapeHtml(reviewTrialGroupLabel(activeGroup || {}))}</h3>
+          </div>
+          <span>${escapeHtml(activeGroup ? reviewGroupStatusLabel(activeGroup) : "")}</span>
+        </header>
+        <div class="review-trial-list">
+          ${(activeGroup?.reviews || []).map(reviewCardHtml).join("")}
+        </div>
+      </section>
     </section>
   `;
 }
@@ -5958,12 +6260,15 @@ function autoloadInlineFiles(root) {
 function renderContext() {
   if (!appState || activeView !== "materials") return;
   const content = $("#context-content");
+  suppressViewScrollPersistence = true;
   if (activePanel === "workspace") content.innerHTML = renderWorkspacePanel();
   if (activePanel === "resources") content.innerHTML = renderResourcesPanel();
   if (activePanel === "trials") content.innerHTML = renderTrialsPanel();
   if (activePanel === "reviews") content.innerHTML = renderReviewsPanel();
   if (activePanel === "manuscript") content.innerHTML = renderManuscriptPanel();
   autoloadInlineFiles(content);
+  if (activePanel === "reviews") requestAnimationFrame(restoreReviewTrialStripScroll);
+  restoreActiveViewScrollPosition();
 }
 
 function normalizeResourceItem(value) {
@@ -6193,10 +6498,11 @@ function renderExportPanel() {
   return `
     <div class="export-panel">
       <div class="export-actions">
+        <button class="secondary-button" type="button" data-download-single-file="${escapeHtml(LATEST_MANUSCRIPT_PATH)}">Download BLUEPRINT.md</button>
         <button class="secondary-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download blueprint pack</button>
         <button class="secondary-button" type="button" data-export-kind="final_project" ${busy ? "disabled" : ""}>Download final project pack</button>
       </div>
-      <p class="export-note">Final files only. Trajectory, runtime, archive, secrets, caches, and agent instructions stay out.</p>
+      <p class="export-note">Markdown is one file. Packs add final referenced files; trajectory, runtime, archive, secrets, caches, and agent instructions stay out.</p>
       ${renderExportProgress(activeExportJob)}
     </div>
   `;
@@ -6311,6 +6617,11 @@ function downloadExportJob(exportId) {
   const job = activeExportJob?.id === exportId ? activeExportJob : null;
   const path = job?.download_url || `/api/export/download?id=${encodeURIComponent(exportId)}`;
   window.location.href = apiPath(path);
+}
+
+function downloadSingleFile(path) {
+  if (!path) return;
+  window.location.href = apiPath(rawFileUrl(path, { download: true }));
 }
 
 function openExportConfirmDialog(estimate) {
@@ -8701,8 +9012,14 @@ function bindEvents() {
     updateBriefDockGeometry();
     updateFramingScrollButton();
   });
-  window.addEventListener("scroll", updateFramingScrollButton, { passive: true });
-  $(".main-stage")?.addEventListener("scroll", updateFramingScrollButton, { passive: true });
+  window.addEventListener("scroll", () => {
+    updateFramingScrollButton();
+    schedulePersistActiveViewScrollPosition();
+  }, { passive: true });
+  $(".main-stage")?.addEventListener("scroll", () => {
+    updateFramingScrollButton();
+    schedulePersistActiveViewScrollPosition();
+  }, { passive: true });
   $("#chat-form textarea").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -8900,6 +9217,11 @@ function bindEvents() {
       downloadExportJob(exportDownload.dataset.exportDownload);
       return;
     }
+    const singleFileDownload = event.target.closest("[data-download-single-file]");
+    if (singleFileDownload) {
+      downloadSingleFile(singleFileDownload.dataset.downloadSingleFile);
+      return;
+    }
     const copyText = event.target.closest("[data-copy-text]");
     if (copyText) {
       event.preventDefault();
@@ -9060,6 +9382,21 @@ function bindEvents() {
       requestAnimationFrame(restoreTrialStripScroll);
       return;
     }
+    const reviewTrialScroll = event.target.closest("[data-review-trial-scroll]");
+    if (reviewTrialScroll) {
+      const strip = reviewTrialScroll.closest(".review-trial-strip")?.querySelector(".review-trial-strip-scroll");
+      if (strip) {
+        const delta = Number(reviewTrialScroll.dataset.reviewTrialScroll || 1) * Math.max(180, strip.clientWidth * 0.72);
+        strip.scrollLeft = Math.max(0, strip.scrollLeft + delta);
+      }
+      return;
+    }
+    const reviewTrialSelect = event.target.closest("[data-review-trial-select]");
+    if (reviewTrialSelect) {
+      selectedReviewGroupKey = reviewTrialSelect.dataset.reviewTrialSelect || "";
+      renderContext();
+      return;
+    }
     const trialContinue = event.target.closest("[data-trial-continue]");
     if (trialContinue) {
       const iteration = Number(trialContinue.dataset.trialContinue || 0);
@@ -9212,6 +9549,7 @@ async function init() {
   bindEvents();
   setResourceCategory(activeResourceCategory);
   await loadProjects().catch((error) => showToast(error.message, true));
+  restoreNavigationState();
   if (!activeProjectId && appState?.multi_project) {
     $("#sync-state").textContent = "Create a project";
     renderProjectAvailability();

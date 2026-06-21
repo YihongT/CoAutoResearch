@@ -58,7 +58,7 @@ Use this contract whenever deciding where to read, write, move, or summarize inf
 | `research_trajectory/STATE.md` | Current control state | before every trial and after human intervention | when objective, plan, method status, constraints, blockers, active resources, or next step changes | raw logs, full artifacts, literature dumps |
 | `research_trajectory/CURRENT_FINDINGS.md` | Latest global synthesis of findings/results/claims/evidence | before interpreting results or updating manuscript | when accepted/tentative/rejected findings, active claims, limitations, or evidence map changes | raw outputs, command logs, full notebooks |
 | `research_trajectory/trials/` | Audit trail of planned work packages | before continuing, reviewing, or synthesizing recent work | for every substantive planned work package | global-only summaries without a concrete work package |
-| `research_trajectory/notes/NOTES.md` | Distilled high-value notes | when looking for durable insights/resources/warnings | sparingly, only for valuable cross-trial or durable notes | routine trial summaries or execution logs |
+| `research_trajectory/notes/` | Sparse, topic-based knowledge notes | when looking for reusable resource, method, process, or human-preference lessons | when a trial or review creates reusable knowledge that does not belong in a canonical state file; update `index.md` whenever adding or retiring a topic note | routine trial summaries, execution logs, or duplicates of `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, reports, or resource manifests |
 | `research_trajectory/human_interventions/` | Formal human control inputs | before major steps and when resolving contradictions | only when a user message changes direction, constraints, methods, claims, resources, venue, or priority | progress questions, ordinary pauses, log requests |
 | `manuscript/` | Manuscript blueprint and deliverable-facing materials | when story, claims, figures, tables, or venue fit matter | when manuscript-facing structure/evidence/figures/tables/reviews change | exploratory raw outputs not promoted as candidate deliverables |
 | `archive/` | Deprecated or misleading materials retained for history | rarely, when checking old context | only after marking what superseded the material | active current files |
@@ -174,7 +174,7 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 13. Update only global files that genuinely changed:
     - `research_trajectory/STATE.md`
     - `research_trajectory/CURRENT_FINDINGS.md`
-    - `research_trajectory/notes/NOTES.md`
+    - `research_trajectory/notes/index.md` and topic notes when knowledge capture changes
     - `manuscript/BLUEPRINT.md`
     - `manuscript/figures/FIGURE_SPECS.md`
 14. Update the `Autoresearch Goal Gate` in `STATE.md` so each reviewer line references the current trial's reviewer file path.
@@ -219,7 +219,10 @@ and include provenance:
 - result interpretation;
 - whether findings should update `CURRENT_FINDINGS.md`;
 - whether method status should update `STATE.md`;
-- candidate notes, if any;
+- knowledge capture outcome:
+  - `Note updated: research_trajectory/notes/<topic>.md`;
+  - `No note: <specific reason>`;
+  - `Promoted elsewhere: <PROJECT.md, STATE.md, CURRENT_FINDINGS.md, or manifest path> because <reason>`;
 - recommended next step.
 
 ---
@@ -349,32 +352,58 @@ Create a new reviewer only when it addresses a clear quality risk.
 
 ---
 
-## Notes Policy
+## Knowledge Capture Contract
 
-`research_trajectory/notes/NOTES.md` is not a trial log.
+`research_trajectory/notes/` is not a trial log and not a second copy of
+current state. It is a sparse, searchable knowledge base for reusable lessons
+that help future agents choose better actions.
 
-Create or update a note only when a trial, resource review, method reflection, manuscript review, or process review produces a durable insight likely to help future research decisions.
+Use topic-based notes, not one growing notebook:
 
-Valid notes include:
+- `research_trajectory/notes/index.md`: map of active notes by topic and kind.
+- `research_trajectory/notes/NOTES.md`: compatibility entrypoint pointing to
+  `index.md`.
+- `research_trajectory/notes/<topic>.md`: one durable lesson per file, named by
+  topic in kebab case.
 
-- useful research insight;
-- promising hypothesis;
-- discovered failure mode;
-- high-value resource;
-- important decision;
-- methodological warning;
-- recurring pattern across trials;
-- possible pivot direction.
+Every trial report must include a `Knowledge Capture` section with exactly one
+of these outcomes:
 
-Invalid notes include:
+- `Note updated: research_trajectory/notes/<topic>.md`
+- `No note: <specific reason>`
+- `Promoted elsewhere: <PROJECT.md, STATE.md, CURRENT_FINDINGS.md, or manifest path> because <reason>`
+
+Write or update a topic note only when the lesson is reusable across future
+trials and is not already better represented as project definition, current
+state, accepted/tentative findings, resource provenance, or an artifact.
+
+Good topic notes capture:
+
+- what worked, failed, or should not be retried;
+- how to use a high-value resource or prior-work bundle;
+- a method warning, negative result, or process lesson;
+- a recurring human preference that affects future choices but does not belong
+  in `PROJECT.md`.
+
+Do not write notes for:
 
 - routine execution details;
 - repeated summaries of trial reports;
-- low-value observations;
-- logs that belong in artifacts;
-- notes written only because a trial happened.
+- logs, raw outputs, or command transcripts;
+- a note only because a trial happened;
+- facts that should instead be promoted to `PROJECT.md`, `STATE.md`,
+  `CURRENT_FINDINGS.md`, or `resources/user_input/RESOURCE_MANIFEST.md`.
 
-Each note should cite its source, such as a trial ID, resource, review, or formal human intervention.
+Each topic note must cite its source paths and contain frontmatter:
+
+```markdown
+---
+created: YYYY-MM-DD
+kind: resource | method | negative-result | manuscript | process | preference
+source: <trial, resource, review, or intervention path>
+status: active | superseded
+---
+```
 
 ---
 

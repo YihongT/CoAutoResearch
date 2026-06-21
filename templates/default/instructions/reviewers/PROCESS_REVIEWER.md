@@ -42,7 +42,7 @@ Do not create `research_trajectory/process_reviews/`.
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
 - recent trial `PLAN.md`, `REPORT.md`, and `reviews/` files
-- `research_trajectory/notes/NOTES.md`
+- `research_trajectory/notes/index.md` and relevant topic notes
 - relevant formal human interventions
 
 ## Review Criteria
@@ -55,13 +55,16 @@ Ask:
 - Should the next step be execution, method revision, literature grounding, seed paper review, manuscript restructuring, or human intervention?
 - Is the current target venue still plausible?
 - Are current claims supported by evidence?
+- Is reusable knowledge buried in reports, duplicated across canonical files,
+  or missing from the topic-based notes index?
 
 ## Expected Output
 
 - diagnosis of progress;
 - local-minimum risks;
 - recommended next trial;
-- any required updates to `STATE.md` or `CURRENT_FINDINGS.md`.
+- any required updates to `STATE.md`, `CURRENT_FINDINGS.md`, or topic-based
+  knowledge notes.
 
 ## Pass Standard
 
