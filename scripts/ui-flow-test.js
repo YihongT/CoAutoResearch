@@ -94,6 +94,22 @@ function loadAppContext() {
     close() { this.closed = true; this.open = false; },
     showModal() { this.open = true; },
   });
+  const exportConfirmDialog = element({
+    close() { this.closed = true; this.open = false; },
+    showModal() { this.open = true; this.closed = false; },
+  });
+  const fileViewerDialog = element({
+    _rect: { width: 900, height: 680 },
+    close() { this.closed = true; this.open = false; },
+    showModal() { this.open = true; },
+    getBoundingClientRect() {
+      return {
+        width: Number.parseFloat(this.style.width) || this._rect.width,
+        height: Number.parseFloat(this.style.height) || this._rect.height,
+      };
+    },
+  });
+  const fileViewerBody = element();
   const field = (value = "", extra = {}) => element({ value, ...extra });
   const sessionForm = element({
     elements: {
@@ -180,6 +196,12 @@ function loadAppContext() {
     ["#large-import-category", element()],
     ["#large-import-destination", element()],
     ["#large-import-note", element()],
+    ["#export-confirm-dialog", exportConfirmDialog],
+    ["#export-confirm-title", element()],
+    ["#export-confirm-summary", element()],
+    ["#file-viewer-dialog", fileViewerDialog],
+    ["#file-viewer-body", fileViewerBody],
+    ["#file-viewer-title", element()],
     ["#chat-thread", element()],
     ["#session-settings-form", sessionForm],
     ["#settings-form", settingsForm],
@@ -215,7 +237,9 @@ function loadAppContext() {
       }
     },
     window: {
-      location: { search: "?project=p1" },
+      location: { search: "?project=p1", origin: "http://localhost" },
+      origin: "http://localhost",
+      innerWidth: 1400,
       innerHeight: 900,
       addEventListener() {},
       scrollTo() {},
@@ -342,6 +366,7 @@ function loadAppContext() {
       if (globalThis.__apiError) throw new Error(globalThis.__apiError);
       const body = options.body ? JSON.parse(options.body) : {};
       globalThis.__apiCalls.push({ endpoint, body });
+      if (globalThis.__apiHandler) return globalThis.__apiHandler(endpoint, body, options);
       if (endpoint === "/api/resource-import/start") {
         return {
           ok: true,
@@ -649,14 +674,126 @@ function loadAppContext() {
       strip.clientWidth = clientWidth;
       strip.scrollWidth = scrollWidth;
       strip.scrollLeft = scrollLeft;
-      rememberTrialStripScroll(strip);
+      rememberTrialStripScroll(strip, { manual: true });
       strip.scrollLeft = 0;
       restoreTrialStripScroll();
       return strip.scrollLeft;
     };
+    globalThis.__trialStripAutoProbe = () => {
+      const strip = document.querySelector(".trial-strip-scroll");
+      strip.clientWidth = 300;
+      strip.scrollWidth = 1200;
+      strip.scrollLeft = 0;
+      strip.getBoundingClientRect = () => ({ left: 0, right: 300 });
+      const chip = {
+        offsetWidth: 80,
+        getBoundingClientRect: () => ({ left: 900 - strip.scrollLeft, right: 980 - strip.scrollLeft }),
+      };
+      strip.querySelector = (selector) => selector === ".trial-chip.is-running" ? chip : null;
+      trialStripScrollState = { mode: "auto", left: 0, liveIteration: 0, selectedIteration: 0, touchedAt: 0 };
+      __setSession({
+        id: "s1",
+        session_id: "sid",
+        status: "running",
+        mode: "goal",
+        loop_active: true,
+        gate: { status: "continue" },
+        active_run: {
+          running: true,
+          mode: "goal",
+          trial_iteration: 12,
+          status_label: "Codex is working on Trial 12"
+        },
+        transcript: []
+      });
+      restoreTrialStripScroll();
+      const first = strip.scrollLeft;
+      strip.scrollLeft = 0;
+      restoreTrialStripScroll();
+      return { first, second: strip.scrollLeft, state: { ...trialStripScrollState } };
+    };
+    globalThis.__liveTrialStatusProbe = (session) => {
+      __setSession(session);
+      appState.trials = [];
+      return activeTrialHistoryHtml();
+    };
     globalThis.__renderManuscriptPanelProbe = (payload) => {
       appState.summaries = { ...(appState.summaries || {}), manuscript: payload };
       return renderManuscriptPanel();
+    };
+    globalThis.__renderExportPanelProbe = (job = null) => {
+      activeExportJob = job;
+      return renderExportPanel();
+    };
+    globalThis.__beginExportFlowProbe = async (kind, estimate, startJob = null) => {
+      globalThis.__apiHandler = async (endpoint, body) => {
+        if (endpoint.startsWith("/api/export/estimate")) return { ok: true, ...estimate };
+        if (endpoint === "/api/export/start") return { ok: true, export: startJob || { id: "ex1", kind: body.kind, label: "Blueprint Pack", status: "packaging", phase: "packaging", total_bytes: estimate.total_bytes || 0, bytes_done: 0, file_count: estimate.file_count || 0, files_done: 0 } };
+        if (endpoint.startsWith("/api/export/status")) return { ok: true, export: startJob || { id: "ex1", kind, label: "Blueprint Pack", status: "ready", phase: "ready", total_bytes: estimate.total_bytes || 0, bytes_done: estimate.total_bytes || 0, file_count: estimate.file_count || 0, files_done: estimate.file_count || 0, download_url: "/api/export/download?id=ex1" } };
+        return { ok: true };
+      };
+      await beginExportFlow(kind);
+      clearTimeout(exportPollTimer);
+      exportPollTimer = null;
+      const dialog = document.querySelector("#export-confirm-dialog");
+      return {
+        calls: globalThis.__apiCalls,
+        dialogOpen: Boolean(dialog?.open),
+        dialogSummary: document.querySelector("#export-confirm-summary")?.innerHTML || "",
+        activeExportJob,
+        panel: renderExportPanel(),
+      };
+    };
+    globalThis.__blueprintInspectorProbe = (payload, manuscript, reviews = [], session = null) => {
+      appState.summaries = { ...(appState.summaries || {}), manuscript };
+      appState.reviews = reviews;
+      if (session) appState.research_session = session;
+      inlineFilePayloads[payload.path] = payload;
+      inlineFileModes[payload.path] = "rendered";
+      return renderBlueprintInspector(payload);
+    };
+    globalThis.__inlineEditorProbe = (payload, compact = false) => inlineEditorHtml(payload, compact);
+    globalThis.__fileViewerResizeProbe = (axis, dx, dy, startWidth = 900, startHeight = 680) => {
+      const dialog = document.querySelector("#file-viewer-dialog");
+      dialog._rect = { width: startWidth, height: startHeight };
+      dialog.style.removeProperty("width");
+      dialog.style.removeProperty("height");
+      const handle = {
+        dataset: { fileViewerResize: axis },
+        captured: null,
+        released: null,
+        setPointerCapture(pointerId) { this.captured = pointerId; },
+        releasePointerCapture(pointerId) { this.released = pointerId; },
+      };
+      const target = { closest(selector) { return selector === "[data-file-viewer-resize]" ? handle : null; } };
+      const baseEvent = {
+        target,
+        pointerId: 42,
+        clientX: 100,
+        clientY: 120,
+        preventDefault() { this.prevented = true; },
+        stopPropagation() { this.stopped = true; },
+      };
+      startFileViewerResize(baseEvent);
+      updateFileViewerResize({
+        clientX: 100 + dx,
+        clientY: 120 + dy,
+        preventDefault() { this.prevented = true; },
+      });
+      const during = {
+        width: dialog.style.width,
+        height: dialog.style.height,
+        axis: document.body.dataset.fileViewerResizeAxis || "",
+      };
+      finishFileViewerResize({ target });
+      return {
+        ...during,
+        captured: handle.captured,
+        released: handle.released,
+        persisted: localStorage.getItem(FILE_VIEWER_SIZE_KEY),
+        activeAxis: document.body.dataset.fileViewerResizeAxis || "",
+        resizing: document.body.classList.contains("is-resizing-file-viewer"),
+      };
     };
     globalThis.__treeHtmlProbe = (tree) => renderTree(tree);
     globalThis.__inlinePdfBodyProbe = (payload = {}) => inlineFileBodyHtml({
@@ -1280,8 +1417,49 @@ function testWorkingDurationFormatter() {
 
 function testTrialStripScrollRestoresAcrossRender() {
   const app = loadAppContext();
-  assert.equal(app.run("__trialStripScrollProbe(420)"), 420, "trial strip scroll should restore after DOM rerender");
+  assert.equal(app.run("__trialStripScrollProbe(420)"), 420, "manual trial strip scroll should restore after DOM rerender");
   assert.equal(app.run("__trialStripScrollProbe(2400)"), 900, "trial strip scroll restore should clamp to the maximum scrollable offset");
+  const auto = app.run("__trialStripAutoProbe()");
+  assert.ok(auto.first > 0, "auto trial strip restore should bring the running chip into view");
+  assert.equal(auto.second, auto.first, "poll-driven rerenders must not reset auto-centered trial strip scroll to the left edge");
+  assert.equal(auto.state.mode, "auto", "auto-centering should not become sticky manual scroll state");
+}
+
+function testRunningTrialUsesProgressFallback() {
+  const app = loadAppContext();
+  const html = app.run(`__liveTrialStatusProbe({
+    id: "s1",
+    session_id: "sid",
+    status: "running",
+    mode: "goal",
+    loop_active: true,
+    started_at: "2026-06-17T10:00:00.000Z",
+    gate: { status: "continue" },
+    agent_wait_state: { kind: "idle", last_event_age_seconds: 120 },
+    active_run: {
+      running: true,
+      mode: "goal",
+      run_id: "s1",
+      trial_iteration: 8,
+      status_label: "Codex is working on Trial 8",
+      wait_state: { kind: "idle", last_event_age_seconds: 120 },
+      progress: {
+        stage: "reviewing",
+        stage_label: "Reviewing",
+        stage_index: 5,
+        total_stages: 6,
+        summary: "Reviewing · 5/7 reviewer files",
+        detail: "3/7 reviewer gates are pass.",
+        reviewer_count: 5,
+        reviewer_total: 7,
+        artifacts_count: 3
+      }
+    },
+    transcript: []
+  })`);
+  assert.equal(html.includes("Reviewing · 5/7 reviewer files"), true, "running trial without transcript events should show file-backed progress");
+  assert.equal(html.includes("trial-progress-stepper"), true, "running trial should render the compact progress stepper");
+  assert.equal(html.includes("Waiting for agent events"), false, "progress fallback should replace the weak waiting placeholder");
 }
 
 function testStatusCardShowsReviewCheckpoint() {
@@ -1315,8 +1493,8 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
   const app = loadAppContext();
   const storageOnly = app.run(`projectReviewerInstructionsOutdated({
     reviewer_status: {
-      baseline_version: "2026-06-inline-blueprint",
-      latest_baseline_version: "2026-06-inline-blueprint",
+      baseline_version: "2026-06-publication-ready-tables",
+      latest_baseline_version: "2026-06-publication-ready-tables",
       missing: [],
       changed: [],
       metadata_missing: [],
@@ -1327,7 +1505,7 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
   const changedTemplate = app.run(`projectReviewerInstructionsOutdated({
     reviewer_status: {
       baseline_version: "old",
-      latest_baseline_version: "2026-06-inline-blueprint",
+      latest_baseline_version: "2026-06-publication-ready-tables",
       missing: [],
       changed: ["EVIDENCE_REVIEWER.md"],
       metadata_missing: []
@@ -1344,7 +1522,7 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
       session_id: "019ee62",
       reviewer_status: {
         baseline_version: "old",
-        latest_baseline_version: "2026-06-inline-blueprint",
+        latest_baseline_version: "2026-06-publication-ready-tables",
         missing: [],
         changed: ["EVIDENCE_REVIEWER.md"],
         metadata_missing: []
@@ -1971,6 +2149,280 @@ async function testCopyTextHelperWritesClipboard() {
   assert.equal(app.context.__toastMessages.at(-1).message, "Probe copied.");
 }
 
+async function testExportBundleFlow() {
+  const base = loadAppContext();
+  const panel = base.run("__renderExportPanelProbe(null)");
+  assert.equal(panel.includes("Download blueprint pack"), true);
+  assert.equal(panel.includes("Download final project pack"), true);
+
+  const readyPanel = base.run(`__renderExportPanelProbe(${JSON.stringify({
+    id: "ex_ready",
+    kind: "blueprint",
+    label: "Blueprint Pack",
+    status: "ready",
+    phase: "ready",
+    total_bytes: 2048,
+    bytes_done: 2048,
+    file_count: 3,
+    files_done: 3,
+    download_url: "/api/export/download?id=ex_ready"
+  })})`);
+  assert.equal(readyPanel.includes("data-export-download"), true);
+  assert.equal(readyPanel.includes("Download</button>"), true);
+
+  const cancelledPanel = base.run(`__renderExportPanelProbe(${JSON.stringify({
+    id: "ex_cancelled",
+    kind: "final_project",
+    label: "Final Project Pack",
+    status: "cancelled",
+    phase: "cancelled",
+    total_bytes: 4096,
+    bytes_done: 1024,
+    file_count: 5,
+    files_done: 2
+  })})`);
+  assert.equal(cancelledPanel.includes("data-export-download"), false);
+  assert.equal(cancelledPanel.includes("Cancelled"), true);
+
+  const under = loadAppContext();
+  const underResult = await under.run(`__beginExportFlowProbe("blueprint", ${JSON.stringify({
+    kind: "blueprint",
+    label: "Blueprint Pack",
+    total_bytes: 500000,
+    file_count: 4,
+    largest_files: [],
+    large_files: [],
+    skipped: [],
+    missing_externals: [],
+    requires_confirmation: false,
+    confirmation_threshold_bytes: 1073741824
+  })}, ${JSON.stringify({
+    id: "ex_under",
+    kind: "blueprint",
+    label: "Blueprint Pack",
+    status: "packaging",
+    phase: "packaging",
+    total_bytes: 500000,
+    bytes_done: 100000,
+    file_count: 4,
+    files_done: 1,
+    current_file: "BLUEPRINT.md"
+  })})`);
+  assert.equal(underResult.dialogOpen, false);
+  assert.equal(underResult.calls.some((call) => call.endpoint.startsWith("/api/export/estimate")), true);
+  assert.equal(underResult.calls.some((call) => call.endpoint === "/api/export/start"), true);
+  assert.equal(underResult.activeExportJob.status, "packaging");
+  assert.equal(underResult.panel.includes("BLUEPRINT.md"), true);
+
+  const over = loadAppContext();
+  const overEstimate = {
+    kind: "final_project",
+    label: "Final Project Pack",
+    total_bytes: 2 * 1024 * 1024 * 1024,
+    file_count: 12,
+    largest_files: [{ bundle_path: "workspace/results/model.bin", source_path: "workspace/results/model.bin", size: 1500000000 }],
+    large_files: [{ bundle_path: "workspace/results/model.bin", source_path: "workspace/results/model.bin", size: 1500000000 }],
+    skipped: [{ path: "research_trajectory", reason: "not part of final result export" }],
+    missing_externals: [{ path: "resources/data/missing.csv", target: "../missing.csv", reason: "missing symlink target" }],
+    requires_confirmation: true,
+    confirmation_threshold_bytes: 1073741824
+  };
+  const overResult = await over.run(`__beginExportFlowProbe("final_project", ${JSON.stringify(overEstimate)})`);
+  assert.equal(overResult.dialogOpen, true);
+  assert.equal(overResult.calls.some((call) => call.endpoint === "/api/export/start"), false);
+  assert.equal(overResult.dialogSummary.includes("workspace/results/model.bin"), true);
+  assert.equal(overResult.dialogSummary.includes("research_trajectory"), true);
+  await over.run("confirmExportDialog()");
+  const overCalls = over.run("globalThis.__apiCalls");
+  assert.equal(overCalls.some((call) => call.endpoint === "/api/export/start" && call.body.confirmed === true), true);
+
+  const download = loadAppContext();
+  const href = download.run(`
+    activeExportJob = { id: "ex_dl", kind: "blueprint", label: "Blueprint Pack", status: "ready", phase: "ready", download_url: "/api/export/download?id=ex_dl" };
+    downloadExportJob("ex_dl");
+    window.location.href;
+  `);
+  assert.equal(href.includes("/api/export/download?id=ex_dl"), true);
+  assert.equal(href.includes("project=p1"), true);
+}
+
+function testBlueprintInspectorRendersSidebarForLatestManuscriptOnly() {
+  const app = loadAppContext();
+  const manuscript = {
+    toc: "- [Section 2: Calibration result](#section-2-calibration-result)",
+    architecture: [{
+      title: "Abstract",
+      level: 2,
+      is_artifact: false,
+      path: "Abstract",
+      body: "Target-venue role: Summarize the argument.\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|\n| A1 | State contribution | Summarize the result. | E1 | none | no citations | none | open paper |"
+    }, {
+      title: "Section 2: Calibration result",
+      level: 2,
+      is_artifact: false,
+      path: "Section 2",
+      body: "Target-venue role: Results-like argument."
+    }],
+    inline_artifacts: [{
+      title: "Figure F000001: Calibration Map",
+      level: 3,
+      kind: "figure",
+      is_artifact: true,
+      body: [
+        "Placement: Section 2 paragraph P1.",
+        "Inclusion status: active.",
+        "Source artifact or spec path: `manuscript/figures/calibration_map.pdf`"
+      ].join("\n")
+    }, {
+      title: "Table T000001: Evidence Matrix",
+      level: 3,
+      kind: "table",
+      is_artifact: true,
+      body: [
+        "Placement: Section 2 paragraph P2.",
+        "Status: candidate.",
+        "Publication-ready table:",
+        "",
+        "| Claim | Evidence | Status |",
+        "|---|---|---|",
+        "| C1 | E1 | candidate |",
+        "Caption draft or current caption: Evidence matrix caption.",
+        "Source artifact or spec path: `manuscript/tables/evidence_matrix.csv`"
+      ].join("\n")
+    }, {
+      title: "Result R000001: Benchmark Summary",
+      level: 3,
+      kind: "result",
+      is_artifact: true,
+      body: [
+        "Placement: Section 2 paragraph P3.",
+        "Status: active.",
+        "Source artifact: `research_trajectory/CURRENT_FINDINGS.md`"
+      ].join("\n")
+    }],
+  };
+  const payload = {
+    path: "manuscript/BLUEPRINT.md",
+    exists: true,
+    kind: "markdown",
+    editable: true,
+    text: [
+      "# Architecture Overview",
+      "## Section 2: Calibration result",
+      "### Figure F000001: Calibration Map",
+      "### Table T000001: Evidence Matrix",
+      "### Result R000001: Benchmark Summary"
+    ].join("\n\n")
+  };
+  const reviews = [{
+    type: "trial_review",
+    path: "research_trajectory/trials/000001_seed/reviews/EVIDENCE_REVIEW.md",
+    reviewer: "Old evidence reviewer",
+    decision: "continue",
+    source_trial: "000001_seed",
+    summary: "Old evidence review."
+  }, {
+    type: "trial_review",
+    path: "research_trajectory/trials/000002_active/reviews/EVIDENCE_REVIEW.md",
+    reviewer: "Evidence reviewer",
+    decision: "pass",
+    source_trial: "000002_active",
+    summary: "Evidence passes."
+  }, {
+    type: "trial_review",
+    path: "research_trajectory/trials/000003_later/reviews/EVIDENCE_REVIEW.md",
+    reviewer: "Later evidence reviewer",
+    decision: "pass",
+    source_trial: "000003_later",
+    summary: "Later evidence review."
+  }];
+  const activeTrialSession = {
+    status: "running",
+    mode: "goal",
+    active_run: { running: true, trial_iteration: 2 },
+  };
+  const html = app.run(`__blueprintInspectorProbe(${JSON.stringify(payload)}, ${JSON.stringify(manuscript)}, ${JSON.stringify(reviews)}, ${JSON.stringify(activeTrialSession)})`);
+  assert.equal(html.includes("blueprint-inspector"), true);
+  assert.equal(html.includes("manuscript-abstract-card"), true);
+  assert.equal(html.includes("Publication-ready table"), true);
+  assert.equal(html.includes("publication-table-preview"), true);
+  assert.equal(html.includes("Blueprint inspector"), true);
+  assert.equal(html.includes('<details class="blueprint-sidebar-section">'), true, "blueprint sidebar sections should be collapsed details by default");
+  assert.equal(html.includes("<summary>"), true);
+  assert.equal(html.includes("<small>1</small>"), true, "sidebar summaries should include section counts");
+  assert.equal(html.includes("Outline"), true);
+  assert.equal(html.includes("Figures"), true);
+  assert.equal(html.includes("Tables"), true);
+  assert.equal(html.includes("Results / Methods"), true);
+  assert.equal(html.includes("Reviews"), true);
+  assert.equal(html.includes('data-blueprint-anchor="section-2-calibration-result"'), true);
+  assert.equal(html.includes('id="section-2-calibration-result"'), true);
+  assert.equal(html.includes("Figure F000001: Calibration Map"), true);
+  assert.equal(html.includes("Table T000001: Evidence Matrix"), true);
+  assert.equal(html.includes("<td>C1</td>"), true);
+  assert.equal(html.includes("Result R000001: Benchmark Summary"), true);
+  assert.equal(html.includes("Evidence reviewer"), true);
+  assert.equal(html.includes("Old evidence reviewer"), false, "blueprint inspector should not show older trial reviews when active trial reviews exist");
+  assert.equal(html.includes("Later evidence reviewer"), false, "blueprint inspector should prefer active trial reviews over later historical reviews when active reviews exist");
+  assert.equal(html.includes('data-inline-fullscreen="research_trajectory/trials/000002_active/reviews/EVIDENCE_REVIEW.md"'), true);
+
+  const historicalHtml = app.run(`__blueprintInspectorProbe(${JSON.stringify(payload)}, ${JSON.stringify(manuscript)}, ${JSON.stringify(reviews)}, ${JSON.stringify({
+    status: "running",
+    mode: "goal",
+    active_run: { running: true, trial_iteration: 4 },
+  })})`);
+  assert.equal(historicalHtml.includes("Later evidence reviewer"), true, "blueprint inspector should fall back to the highest reviewed trial when the active trial has no saved reviews");
+  assert.equal(historicalHtml.includes("Evidence reviewer"), false);
+
+  const emptyReviewHtml = app.run(`__blueprintInspectorProbe(${JSON.stringify(payload)}, ${JSON.stringify(manuscript)}, [], ${JSON.stringify({
+    status: "running",
+    mode: "goal",
+    active_run: { running: true, trial_iteration: 4 },
+  })})`);
+  assert.equal(emptyReviewHtml.includes("No saved reviews for Trial 4 yet."), true);
+
+  const fallbackHtml = app.run(`__blueprintInspectorProbe(${JSON.stringify(payload)}, ${JSON.stringify({ architecture: [], inline_artifacts: [], toc: "" })}, [])`);
+  assert.equal(fallbackHtml.includes('data-blueprint-anchor="section-2-calibration-result"'), true, "blueprint inspector should fall back to rendered markdown headings when server summary is empty");
+  assert.equal(fallbackHtml.includes("Figure F000001: Calibration Map"), true);
+  assert.equal(fallbackHtml.includes("Table T000001: Evidence Matrix"), true);
+  assert.equal(fallbackHtml.includes("Result R000001: Benchmark Summary"), true);
+  assert.equal(fallbackHtml.includes("From BLUEPRINT.md"), true);
+
+  const genericHtml = app.run(`__inlineEditorProbe(${JSON.stringify({
+    path: "PROJECT.md",
+    exists: true,
+    kind: "markdown",
+    editable: true,
+    text: "# Project\\n\\nReady."
+  })})`);
+  assert.equal(genericHtml.includes("blueprint-inspector"), false, "ordinary markdown previews should not render the blueprint sidebar");
+}
+
+function testFileViewerResizeZonesRespectDragAxis() {
+  const app = loadAppContext();
+  let state = app.run('__fileViewerResizeProbe("right", 120, 90, 900, 680)');
+  assert.equal(state.width, "1020px", "right resize zone should change width");
+  assert.equal(state.height, "680px", "right resize zone should preserve height");
+  assert.equal(state.axis, "right");
+  assert.equal(state.activeAxis, "", "resize axis should be cleared after pointerup");
+  assert.equal(state.resizing, false);
+  assert.equal(state.captured, 42);
+  assert.equal(state.released, 42);
+  assert.deepEqual(JSON.parse(state.persisted), { width: 1020, height: 680 });
+
+  state = app.run('__fileViewerResizeProbe("bottom", 120, 90, 900, 680)');
+  assert.equal(state.width, "900px", "bottom resize zone should preserve width");
+  assert.equal(state.height, "770px", "bottom resize zone should change height");
+  assert.equal(state.axis, "bottom");
+  assert.deepEqual(JSON.parse(state.persisted), { width: 900, height: 770 });
+
+  state = app.run('__fileViewerResizeProbe("corner", 120, 90, 900, 680)');
+  assert.equal(state.width, "1020px", "corner resize zone should change width");
+  assert.equal(state.height, "770px", "corner resize zone should change height");
+  assert.equal(state.axis, "corner");
+  assert.deepEqual(JSON.parse(state.persisted), { width: 1020, height: 770 });
+}
+
 function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   const app = loadAppContext();
   const payload = {
@@ -1980,6 +2432,26 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
       "  - [Figure F000001: Calibration Map](#figure-f000001-calibration-map)"
     ].join("\n"),
     architecture: [{
+      title: "Abstract",
+      level: 3,
+      kind: "section",
+      is_artifact: false,
+      body: [
+        "Target-venue role: Summarize the paper in the target venue style.",
+        "Reader question answered: What is the contribution and evidence posture?",
+        "Local thesis / purpose: The abstract states the calibrated-safety contribution.",
+        "Local claims in plain language: The manuscript advances one bounded claim.",
+        "Local evidence, results, or artifacts: Evidence E1 supports the scope.",
+        "Placed displays / methods / results: none.",
+        "Local qualifications: scoped to reviewed evidence.",
+        "Transition job: opens the manuscript.",
+        "Paragraph plan:",
+        "",
+        "| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |",
+        "|---|---|---|---|---|---|---|---|",
+        "| A1 | Frame contribution | State the problem, contribution, evidence posture, and implication. | E1 | none | target venue abstract style | bounded claim | open paper |"
+      ].join("\n")
+    }, {
       title: "Section 2: Calibration result",
       level: 3,
       kind: "section",
@@ -2018,6 +2490,30 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "Target-venue fit rationale: Fits a compact result-led display.",
         "Remaining blocker: none."
       ].join("\n")
+    }, {
+      title: "Table T000001: Evidence Matrix",
+      level: 4,
+      kind: "table",
+      is_artifact: true,
+      path: "Section 2: Calibration result / Table T000001: Evidence Matrix",
+      body: [
+        "Placement: Section 2 paragraph P2.",
+        "Inclusion status: active",
+        "Purpose or result role: Provides the manuscript-ready evidence matrix.",
+        "Table number/title: Table 1. Evidence matrix.",
+        "Publication-ready table:",
+        "",
+        "| Claim | Evidence | Readiness |",
+        "|---|---|---|",
+        "| Calibration claim | Source audit E1 | Ready |",
+        "Caption draft or current caption: Table 1. Evidence matrix for the calibration claim.",
+        "Table notes / definitions / abbreviations: E1 denotes the accepted source audit.",
+        "Source artifact or spec path: `manuscript/tables/evidence_matrix.csv`",
+        "Key result or conceptual contrast shown: The claim is tied to reviewed evidence.",
+        "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
+        "Target-venue fit rationale: Compact enough for the main text.",
+        "Remaining blocker: none."
+      ].join("\n")
     }],
     claims: [],
     sections: [],
@@ -2049,6 +2545,8 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("Architecture overview"), true);
   assert.equal(html.includes("Manuscript architecture"), true);
   assert.equal(html.includes("Audit / provenance"), true);
+  assert.equal(html.includes("manuscript-abstract-card"), true);
+  assert.equal(html.includes("Frame contribution"), true);
   assert.equal(html.includes("Section 2: Calibration result"), true);
   assert.equal(html.includes("Local thesis / purpose"), true);
   assert.equal(html.includes("Reader question"), true);
@@ -2070,6 +2568,27 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("No active tables are present because the current evidence is figure-led."), true);
   assert.equal(html.includes("Claim C1 maps to calibration evidence E1."), true);
   assert.equal(html.includes("Figure descriptions"), false);
+  assert.equal(html.includes("manuscript-table-card"), true);
+  assert.equal(html.includes("Publication-ready table"), true);
+  assert.equal(html.includes("Calibration claim"), true);
+  assert.equal(html.includes("Table 1. Evidence matrix for the calibration claim."), true);
+  assert.equal(html.includes("E1 denotes the accepted source audit."), true);
+  assert.equal(html.includes("table-missing-warning"), false);
+
+  const missingTableHtml = app.run(`__renderManuscriptPanelProbe(${JSON.stringify({
+    architecture: [{
+      title: "Table T000002: Missing Body",
+      level: 4,
+      kind: "table",
+      is_artifact: true,
+      body: "Placement: Section 3.\nInclusion status: active\nPurpose or result role: summarize evidence.\nCaption draft or current caption: Missing body caption."
+    }],
+    toc: "",
+    figure_specs: [],
+    table_plans: []
+  })})`);
+  assert.equal(missingTableHtml.includes("table-missing-warning"), true);
+  assert.equal(missingTableHtml.includes("Missing publication-ready table body"), true);
 }
 
 testButtonInventoryHasHandlers();
@@ -2095,6 +2614,7 @@ testPassedGoalDoesNotShowStaleRunningTrial();
 testCurrentRunActivityShowsPauseForChatRun();
 testWorkingDurationFormatter();
 testTrialStripScrollRestoresAcrossRender();
+testRunningTrialUsesProgressFallback();
 testStatusCardShowsReviewCheckpoint();
 testReviewStorageOutdatedDoesNotShowProjectWarning();
 testComposerPlaceholderBecomesGeneralAfterLaunch();
@@ -2116,6 +2636,9 @@ await testLargeBrowserUploadsUseResourceCopyFlow();
 testCompactComposerAutosizesFromCenteredBase();
 testComposerPromptInsertionIsIdempotent();
 await testCopyTextHelperWritesClipboard();
+await testExportBundleFlow();
+testBlueprintInspectorRendersSidebarForLatestManuscriptOnly();
+testFileViewerResizeZonesRespectDragAxis();
 testManuscriptPanelRendersPaperFiguresTablesAndTraceability();
 
 console.log("UI flow test passed.");

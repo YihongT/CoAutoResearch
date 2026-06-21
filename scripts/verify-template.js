@@ -37,6 +37,8 @@ async function walk(directory) {
 
 const files = await walk(template);
 const failures = [];
+const compactText = (value) => String(value || "").replace(/\s+/g, " ");
+const includesCompact = (value, needle) => compactText(value).includes(needle);
 
 for (const file of files) {
   const relative = path.relative(template, file);
@@ -80,7 +82,7 @@ if (!stateTemplate.includes("Final gate reviewer")) {
 }
 
 const manifest = JSON.parse(await fsp.readFile(path.join(template, ".co-auto-research-template", "manifest.json"), "utf8"));
-if (manifest.reviewerBaselineVersion !== "2026-06-inline-blueprint") {
+if (manifest.reviewerBaselineVersion !== "2026-06-publication-ready-tables") {
   failures.push(".co-auto-research-template/manifest.json: missing reviewer baseline version");
 }
 const coreReviewerFiles = Array.isArray(manifest.coreReviewerFiles) ? manifest.coreReviewerFiles : [];
@@ -126,6 +128,7 @@ for (const requiredText of [
   "Paragraph plan:",
   "Content to cover, not full prose",
   "Placement:",
+  "Publication-ready table:",
   "Caption draft or current caption:",
   "Key result or conceptual contrast shown:",
   "Source code or artifact links:"
@@ -145,6 +148,19 @@ if (!finalGateReviewer.includes("reviews/FINAL_GATE_REVIEW.md")) {
 if (!finalGateReviewer.includes("paragraph plan completeness")) {
   failures.push("instructions/reviewers/FINAL_GATE_REVIEWER.md: missing paragraph plan audit requirement");
 }
+if (!includesCompact(finalGateReviewer, "publication-ready Markdown table body")) {
+  failures.push("instructions/reviewers/FINAL_GATE_REVIEWER.md: missing publication-ready table requirement");
+}
+
+const manuscriptInstructions = await fsp.readFile(path.join(template, "instructions", "MANUSCRIPT.md"), "utf8");
+if (!manuscriptInstructions.includes("Publication-ready table:") || !includesCompact(manuscriptInstructions, "Column lists, row descriptions, comparison logic, source links")) {
+  failures.push("instructions/MANUSCRIPT.md: missing publication-ready inline table contract");
+}
+
+const figureTableReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "FIGURE_TABLE_REVIEWER.md"), "utf8");
+if (!includesCompact(figureTableReviewer, "publication-ready Markdown") || !includesCompact(figureTableReviewer, "active tables that are only column/row/comparison specs")) {
+  failures.push("instructions/reviewers/FIGURE_TABLE_REVIEWER.md: missing table-spec-only rejection");
+}
 
 const serverTemplate = await fsp.readFile(path.join(template, "ui", "server.py"), "utf8");
 if (!serverTemplate.includes('"final_gate": {') || !serverTemplate.includes('"label": "Final gate reviewer"') || !serverTemplate.includes('"FINAL_GATE_REVIEW.md"')) {
@@ -158,6 +174,9 @@ if (!serverTemplate.includes("current_trial_reviewer_file_blockers")) {
 }
 if (!serverTemplate.includes("paragraph_plan_complete")) {
   failures.push("ui/server.py: missing paragraph plan consistency guard");
+}
+if (!serverTemplate.includes("markdown_has_table") || !serverTemplate.includes("Publication-ready table:")) {
+  failures.push("ui/server.py: missing publication-ready table consistency guard");
 }
 
 if (failures.length) {

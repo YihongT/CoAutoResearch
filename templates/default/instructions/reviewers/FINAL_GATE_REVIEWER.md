@@ -57,21 +57,22 @@ Check:
   index, deprecated ideas, and submission-readiness summary.
 - if the target deliverable has an abstract, the blueprint plans the abstract
   according to the target manual: structured headings when required, otherwise
-  4-6 unstructured rhetorical moves.
+  4-6 unstructured rhetorical moves, plus target-venue role, claim/evidence
+  posture, and word/structure constraints.
 - every active figure is placed inline in `Manuscript Architecture` and has a
   title, placement, inclusion status, purpose/result role, content and panel
   layout, visual style, caption draft/current caption, source artifact or spec
   path, result shown or conceptual basis, provenance links, target-venue fit
   rationale, and remaining blocker value.
 - every active table is placed inline in `Manuscript Architecture` and has a
-  title, placement, inclusion status, purpose/result role,
-  content/columns/rows/comparison logic, caption draft/current caption, source
-  artifact or spec path, key result or conceptual contrast, provenance links,
-  target-venue fit rationale, and remaining blocker value. Compact tables may
-  be included directly; larger tables must link to a source artifact. If there
-  are no active tables, the blueprint must explain in the architecture or
-  appendix/supplement plan where the needed comparison or evidence mapping is
-  carried instead.
+  title, placement, inclusion status, purpose/result role, publication-ready
+  Markdown table body in final row/column form, caption draft/current caption,
+  table notes or `none`, source artifact or spec path, key result or conceptual
+  contrast, provenance links, target-venue fit rationale, and remaining blocker
+  value. Table specs, column lists, comparison logic, or source links are not
+  enough for an active manuscript table. If there are no active tables, the
+  blueprint must explain in the architecture or appendix/supplement plan where
+  the needed comparison or evidence mapping is carried instead.
 - every active algorithm, method, dataset, benchmark, or result block is placed
   inline in `Manuscript Architecture` and includes placement, purpose, source
   artifacts or code links, validation/evidence or limitations, and remaining
@@ -97,7 +98,7 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - local claim/evidence/result explanation completeness;
 - blocking missing evidence status;
 - inline figure block completeness;
-- inline table block or no-table rationale completeness;
+- inline publication-ready table block or no-table rationale completeness;
 - inline algorithm/method/dataset/benchmark/result block completeness;
 - reference/literature grounding completeness;
 - appendix/supplement plan completeness;

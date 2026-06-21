@@ -40,7 +40,8 @@ Evaluate:
 - novelty and contribution clarity;
 - story coherence;
 - abstract structure and content plan when the target deliverable has an
-  abstract;
+  abstract, including target-venue role, rhetorical moves, claim/evidence
+  posture, and word/structure constraints;
 - paragraph-level writing plan for every active titled unit;
 - local claim/evidence/result explanation inside the relevant manuscript
   section, without requiring readers to jump to separate ID maps;
@@ -61,10 +62,11 @@ self-contained readability. For manuscript-facing final pass,
 `manuscript/BLUEPRINT.md` must be self-contained and target-venue-ready:
 target-venue section titles/order/depth, abstract plan when applicable,
 paragraph-level writing plans, local claim/evidence/result explanations, inline
-figure/table/algorithm/dataset/benchmark/result blocks, captions, references,
-appendix/supplement posture, blocking missing evidence, required
-qualifications, provenance/audit index, and submission-readiness must all be
-explicit and mutually consistent.
+figure/table/algorithm/dataset/benchmark/result blocks, captions,
+publication-ready inline table bodies for every active table, references,
+appendix/supplement posture, blocking missing evidence, required qualifications,
+provenance/audit index, and submission-readiness must all be explicit and
+mutually consistent.
 
 Each active titled unit must specify the target-venue role, reader question
 answered, local thesis or purpose, local claims in plain language, local
@@ -80,6 +82,12 @@ Separate claim/evidence maps, `Figure Plan`, `Table Plan`, or
 cannot substitute for a self-contained manuscript architecture. If a reader
 must leave the target-venue reading order to understand what goes where, use
 `Decision: continue`.
+
+For active tables, table specs, column lists, row descriptions, comparison
+logic, or source links do not substitute for a publication-ready Markdown table
+body in the local manuscript position. Use `Decision: continue` if an active
+table cannot be read as the table that would appear in the manuscript or
+supplement.
 
 If the manuscript architecture is coherent, the story is plausible, or the
 deliverable is ready for targeted revision, use `Decision: continue` and record

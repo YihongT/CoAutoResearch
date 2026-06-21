@@ -16,6 +16,10 @@ const projectDir = path.join(tempRoot, "project");
 const projectTwoDir = path.join(tempRoot, "project-two");
 let nextTestPort = 32100;
 
+function compactText(value) {
+  return String(value || "").replace(/\s+/g, " ");
+}
+
 function findPython() {
   const candidates = [
     { command: process.env.COAUTO_PYTHON || "", args: [] },
@@ -336,7 +340,7 @@ try {
   }
   const reviewerMetadataPath = path.join(projectDir, "instructions", ".co-auto-research-instructions.json");
   const reviewerMetadata = JSON.parse(await fsp.readFile(reviewerMetadataPath, "utf8"));
-  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-inline-blueprint") {
+  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-publication-ready-tables") {
     throw new Error("new projects should record the reviewer baseline");
   }
   const staleReviewerFixtureRoot = path.join(tempRoot, "upgrade-fixtures");
@@ -410,7 +414,7 @@ Confidence: medium
     throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
   }
   const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
-  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-inline-blueprint" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
+  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-publication-ready-tables" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
     throw new Error("upgrade-project should write reviewer baseline metadata");
   }
   try {
@@ -556,7 +560,7 @@ Confidence: medium
     throw new Error("framing composer and CoAutoResearch returns must share a centered column");
   }
   if (
-    !indexHtml.includes("20260620-run-ui2") ||
+    !indexHtml.includes("20260620-export-bundle1") ||
     !stylesCss.includes("Reader typography: match the composer text across content surfaces.") ||
     !stylesCss.includes(".framing-message .transcript-body") ||
     !stylesCss.includes("font-family: var(--reader);")
@@ -565,6 +569,9 @@ Confidence: medium
   }
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
+  const manuscriptInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "MANUSCRIPT.md"), "utf8");
+  const figureTableReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FIGURE_TABLE_REVIEWER.md"), "utf8");
+  const finalGateReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
   const themeOptionValues = [...indexHtml.matchAll(/name="themeMode"\s+value="([^"]+)"/g)].map((match) => match[1]);
   const explicitThemeBlocks = [...stylesCss.matchAll(/html\[data-theme="([^"]+)"\]/g)].map((match) => match[1]);
   const expectedThemes = ["graphite-aurora", "museum-tech", "dark-glass"];
@@ -767,7 +774,7 @@ Confidence: medium
     !appJs.includes("markdownLinkHtml") ||
     !appJs.includes('transcriptContentHtml(message.text, { markdown: role === "assistant" })') ||
     !stylesCss.includes(".markdown-file-link") ||
-    !indexHtml.includes("20260620-run-ui2")
+    !indexHtml.includes("20260620-export-bundle1")
   ) {
     throw new Error("Codex assistant responses must render Markdown in framing chat");
   }
@@ -818,7 +825,7 @@ Confidence: medium
     throw new Error("interrupted goal sessions must show resume controls instead of pause controls");
   }
   if (
-    !indexHtml.includes("app.js?v=20260620-run-ui2") ||
+    !indexHtml.includes("app.js?v=20260620-export-bundle1") ||
     !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command"])') ||
     !appJs.includes('appendFramingMessage("user", displayText, { kind: "command" })') ||
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
@@ -876,7 +883,7 @@ Confidence: medium
     throw new Error("slash command pending state must start before the command row is rendered");
   }
   if (
-    !indexHtml.includes("styles.css?v=20260620-run-ui2") ||
+    !indexHtml.includes("styles.css?v=20260620-export-bundle1") ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
     !appJs.includes("const latestRunStart = transcript.reduce") ||
     !appJs.includes("function framingProgressDetailsHtml()") ||
@@ -933,17 +940,26 @@ Confidence: medium
   }
   if (
     !indexHtml.includes("data-file-viewer-resize") ||
+    !indexHtml.includes('data-file-viewer-resize="right"') ||
+    !indexHtml.includes('data-file-viewer-resize="bottom"') ||
+    !indexHtml.includes('data-file-viewer-resize="corner"') ||
     !indexHtml.includes("data-file-viewer-return=\"manuscript/BLUEPRINT.md\"") ||
     !appJs.includes("function startFileViewerResize") ||
     !appJs.includes("function clampFileViewerSize") ||
     !appJs.includes("function updateFileViewerReturnAction") ||
+    !appJs.includes("fileViewerResizeAxis") ||
+    !appJs.includes("function renderBlueprintInspector") ||
+    !appJs.includes("function blueprintSidebarHtml") ||
+    !appJs.includes("[data-blueprint-anchor]") ||
     !appJs.includes("LATEST_MANUSCRIPT_PATH") ||
     !appJs.includes("FILE_VIEWER_SIZE_KEY") ||
     !stylesCss.includes(".file-viewer-resize-handle") ||
+    !stylesCss.includes(".file-viewer-resize-zone") ||
     !stylesCss.includes(".file-viewer-return") ||
+    !stylesCss.includes(".blueprint-inspector-sidebar") ||
     !stylesCss.includes("body.is-resizing-file-viewer")
   ) {
-    throw new Error("fullscreen file preview must expose a draggable resize handle and return-to-manuscript action");
+    throw new Error("fullscreen file preview must expose a draggable resize handle, return-to-manuscript action, and blueprint inspector sidebar");
   }
   if (
     !appJs.includes("function messageCopyButton") ||
@@ -978,6 +994,10 @@ Confidence: medium
     !appJs.includes("function renderArchitectureOverview") ||
     !appJs.includes("function renderManuscriptArchitecture") ||
     !appJs.includes("function manuscriptArtifactCardHtml") ||
+    !appJs.includes("function manuscriptTableCardHtml") ||
+    !appJs.includes("function manuscriptAbstractCardHtml") ||
+    !appJs.includes("function publicationReadyTableMarkdown") ||
+    !appJs.includes("Missing publication-ready table body") ||
     !appJs.includes("function renderManuscriptAuditPanel") ||
     !appJs.includes("function figureSpecCardsHtml") ||
     !appJs.includes("function figureSpecFields") ||
@@ -1003,12 +1023,24 @@ Confidence: medium
     !stylesCss.includes(".figure-status.is-caution") ||
     !stylesCss.includes(".manuscript-architecture") ||
     !stylesCss.includes(".manuscript-artifact-card") ||
+    !stylesCss.includes(".manuscript-abstract-card") ||
+    !stylesCss.includes(".manuscript-table-card") ||
+    !stylesCss.includes(".publication-table-preview") ||
+    !stylesCss.includes(".table-missing-warning") ||
     !stylesCss.includes(".architecture-toc") ||
     !stylesCss.includes(".paragraph-plan-block") ||
     !stylesCss.includes(".manuscript-actions") ||
     !stylesCss.includes(".traceability-details")
   ) {
     throw new Error("manuscript panel must render a self-contained architecture blueprint with inline artifact blocks, provenance, and copy/open controls");
+  }
+  if (
+    !manuscriptInstructions.includes("Publication-ready table:") ||
+    !compactText(figureTableReviewer).includes("publication-ready Markdown") ||
+    !compactText(finalGateReviewer).includes("publication-ready Markdown table body") ||
+    !serverPy.includes("def markdown_has_table")
+  ) {
+    throw new Error("blueprint table contract must require publication-ready inline table bodies");
   }
   if (
     !appJs.includes("selectedResumeTrialContext") ||
@@ -1637,6 +1669,59 @@ Confidence: medium
     throw new Error(`checkpoint smoke test returned unexpected output: ${checkpointOutput}`);
   }
 
+  const activeTrialMarkerScript = [
+    "import importlib.util, json, os, pathlib, tempfile",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server_marker', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "root = pathlib.Path(tempfile.mkdtemp(prefix='coauto-marker-smoke-'))",
+    "(root / 'PROJECT.md').write_text('# Marker Smoke\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'trials' / '000011_final_gate' ).mkdir(parents=True)",
+    "(root / 'research_trajectory' / 'trials' / '000011_final_gate' / 'REPORT.md').write_text('# Report\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'STATE.md').write_text(\"\"\"# Research State\\n\\n## Autoresearch Goal Gate\\n\\nStatus: continue\\n\\nRequired reviewer gates:\\n- Plan reviewer: continue\\n- Process reviewer: continue\\n- Evidence reviewer: continue\\n- Venue fit reviewer: continue\\n- Manuscript reviewer: continue\\n- Figure/table reviewer: continue\\n- Final gate reviewer: continue\\n\\nNext action: continue.\\n\"\"\", encoding='utf-8')",
+    "context = module.ProjectContext(root)",
+    "module._CONTEXT.project = context",
+    "class RunningProc:",
+    "    def poll(self):",
+    "        return None",
+    "context.session.update({'process': RunningProc(), 'status': 'running', 'mode': 'goal', 'loop_active': True, 'loop_iteration': 12, 'settings': {'backend': 'codex'}, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "(root / 'research_trajectory' / 'NEXT_TRIAL.json').write_text(json.dumps({'status': 'complete', 'expected_iteration': 12}, indent=2), encoding='utf-8')",
+    "complete_snapshot = module.research_session_snapshot()",
+    "assert complete_snapshot['active_run']['trial_iteration'] == 11, complete_snapshot['active_run']",
+    "(root / 'research_trajectory' / 'NEXT_TRIAL.json').write_text(json.dumps({'status': 'pending', 'expected_iteration': 12}, indent=2), encoding='utf-8')",
+    "pending_snapshot = module.research_session_snapshot()",
+    "assert pending_snapshot['active_run']['trial_iteration'] == 12, pending_snapshot['active_run']",
+    "pass_lines = ['# Research State', '', '## Autoresearch Goal Gate', '', 'Status: pass', '', 'Required reviewer gates:']",
+    "for key, config in module.REQUIRED_REVIEWER_GATES.items():",
+    "    pass_lines.append(f'- {config}: pass - `research_trajectory/trials/000011_final_gate/reviews/{key}.md`')",
+    "(root / 'research_trajectory' / 'STATE.md').write_text('\\n'.join(pass_lines), encoding='utf-8')",
+    "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_stop_reason': 'all_reviewer_gates_passed', 'loop_iteration': 11})",
+    "completed_snapshot = module.research_session_snapshot()",
+    "assert completed_snapshot['gate']['status'] == 'pass', completed_snapshot['gate']",
+    "assert 'Server repair:' not in (root / 'research_trajectory' / 'STATE.md').read_text(encoding='utf-8')",
+    "print(json.dumps({'complete_marker': complete_snapshot['active_run']['trial_iteration'], 'pending_marker': pending_snapshot['active_run']['trial_iteration'], 'completed_gate': completed_snapshot['gate']['status']}))"
+  ].join("\n");
+  const activeTrialMarkerOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    activeTrialMarkerScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (
+    !activeTrialMarkerOutput.includes('"complete_marker": 11') ||
+    !activeTrialMarkerOutput.includes('"pending_marker": 12') ||
+    !activeTrialMarkerOutput.includes('"completed_gate": "pass"')
+  ) {
+    throw new Error(`active trial marker smoke test returned unexpected output: ${activeTrialMarkerOutput}`);
+  }
+
   const resumeForkScript = [
     "import importlib.util, json, os, pathlib, shutil",
     "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
@@ -1851,7 +1936,7 @@ Confidence: medium
     ...python.args,
     "-c",
     [
-      "import importlib.util, json, os, pathlib, shutil, subprocess, sys",
+      "import importlib.util, json, os, pathlib, shutil, subprocess, sys, time, zipfile",
       "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
       "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
       "module = importlib.util.module_from_spec(spec)",
@@ -1909,6 +1994,105 @@ Confidence: medium
       "    else:",
       "        assert state_path.read_text(encoding='utf-8') == original_state",
       "dashboard.delete_project({'project': chat_guard['id'], 'confirm': 'chat guard'})",
+      "progress_probe = dashboard.create_project({'name': 'progress probe'})",
+      "progress_ctx = dashboard.context_for(progress_probe['id'])",
+      "with module.using_project(progress_probe['id']):",
+      "    trial_dir = progress_ctx.root / 'research_trajectory' / 'trials' / '000001_progress_probe'",
+      "    trial_dir.mkdir(parents=True, exist_ok=True)",
+      "    (trial_dir / 'PLAN.md').write_text('# Plan\\n\\n## Objective\\nProbe progress inference.', encoding='utf-8')",
+      "    progress = module.collect_trials()[0]['progress']",
+      "    assert progress['stage'] == 'working' and progress['stage_index'] == 2, progress",
+      "    artifacts = trial_dir / 'artifacts'",
+      "    artifacts.mkdir()",
+      "    (artifacts / 'note.md').write_text('artifact', encoding='utf-8')",
+      "    progress = module.collect_trials()[0]['progress']",
+      "    assert progress['stage'] == 'synthesizing' and progress['artifacts_count'] == 1, progress",
+      "    (trial_dir / 'REPORT.md').write_text('# Report\\n\\n## Findings\\nProbe report ready.', encoding='utf-8')",
+      "    progress = module.collect_trials()[0]['progress']",
+      "    assert progress['stage'] == 'reporting' and progress['report_exists'] is True, progress",
+      "    reviews = trial_dir / 'reviews'",
+      "    reviews.mkdir()",
+      "    reviewer_items = list(module.REQUIRED_REVIEWER_OUTPUTS.items())",
+      "    for key, config in reviewer_items[:5]:",
+      "        (reviews / config['file']).write_text('Decision: pass\\nGate impact: pass\\n', encoding='utf-8')",
+      "    progress = module.collect_trials()[0]['progress']",
+      "    assert progress['stage'] == 'reviewing' and progress['reviewer_count'] == 5, progress",
+      "    for key, config in reviewer_items[5:]:",
+      "        (reviews / config['file']).write_text('Decision: pass\\nGate impact: pass\\n', encoding='utf-8')",
+      "    gate_lines = ['# Research State', '', '## Autoresearch Goal Gate', '', 'Status: continue', '', 'Required reviewer gates:']",
+      "    for key, config in reviewer_items:",
+      "        gate_lines.append(f\"- {config['label']}: pass - `research_trajectory/trials/000001_progress_probe/reviews/{config['file']}`\")",
+      "    state_path = progress_ctx.root / 'research_trajectory' / 'STATE.md'",
+      "    state_path.write_text('\\n'.join(gate_lines), encoding='utf-8')",
+      "    progress = module.collect_trials()[0]['progress']",
+      "    assert progress['stage'] == 'gate_update' and progress['gate_updated'] is True and progress['reviewer_count'] == 7, progress",
+      "dashboard.delete_project({'project': progress_probe['id'], 'confirm': 'progress probe'})",
+      "export_probe = dashboard.create_project({'name': 'export probe'})",
+      "export_ctx = dashboard.context_for(export_probe['id'])",
+      "with module.using_project(export_probe['id']):",
+      "    original_threshold = module.EXPORT_CONFIRMATION_BYTES",
+      "    try:",
+      "        (export_ctx.root / 'PROJECT.md').write_text('# Export Probe\\n', encoding='utf-8')",
+      "        (export_ctx.root / 'research_trajectory').mkdir(parents=True, exist_ok=True)",
+      "        (export_ctx.root / 'research_trajectory' / 'CURRENT_FINDINGS.md').write_text('# Current Findings\\n\\nFinal finding.', encoding='utf-8')",
+      "        artifact_dir = export_ctx.root / 'research_trajectory' / 'trials' / '000001_export' / 'artifacts'",
+      "        artifact_dir.mkdir(parents=True, exist_ok=True)",
+      "        (artifact_dir / 'final_figure.png').write_bytes(b'final-figure')",
+      "        figure_dir = export_ctx.root / 'manuscript' / 'figures'",
+      "        figure_dir.mkdir(parents=True, exist_ok=True)",
+      "        (export_ctx.root / 'manuscript' / 'BLUEPRINT.md').write_text('Use `research_trajectory/trials/000001_export/artifacts/final_figure.png`.\\n', encoding='utf-8')",
+      "        (figure_dir / 'FIGURE_SPECS.md').write_text('Existing source files: `research_trajectory/trials/000001_export/artifacts/final_figure.png`\\n', encoding='utf-8')",
+      "        venue_dir = export_ctx.root / 'resources' / 'target_venue'",
+      "        venue_dir.mkdir(parents=True, exist_ok=True)",
+      "        for name in ['TARGET_VENUE.md', 'STYLE_NOTES.md', 'FIGURE_TABLE_NOTES.md', 'SEED_PAPERS.md']:",
+      "            (venue_dir / name).write_text(name + '\\n', encoding='utf-8')",
+      "        workspace_dir = export_ctx.root / 'workspace' / 'results'",
+      "        workspace_dir.mkdir(parents=True, exist_ok=True)",
+      "        (workspace_dir / 'model.bin').write_bytes(b'x' * 64)",
+      "        resources_dir = export_ctx.root / 'resources' / 'data_sources'",
+      "        resources_dir.mkdir(parents=True, exist_ok=True)",
+      "        (resources_dir / 'data.csv').write_text('a,b\\n1,2\\n', encoding='utf-8')",
+      "        symlink_created = False",
+      "        try:",
+      "            os.symlink('/definitely/missing/coauto-export.csv', resources_dir / 'missing.csv')",
+      "            symlink_created = True",
+      "        except (OSError, NotImplementedError):",
+      "            pass",
+      "        module.EXPORT_CONFIRMATION_BYTES = 32",
+      "        final_estimate = module.export_estimate('final_project')",
+      "        assert final_estimate['requires_confirmation'] is True, final_estimate",
+      "        final_plan = module.build_export_plan('final_project')",
+      "        final_paths = {item['bundle_path'] for item in final_plan['entries']}",
+      "        assert 'manuscript/BLUEPRINT.md' in final_paths, final_paths",
+      "        assert 'workspace/results/model.bin' in final_paths, final_paths",
+      "        assert 'resources/data_sources/data.csv' in final_paths, final_paths",
+      "        assert not any(path.startswith('research_trajectory/') for path in final_paths), final_paths",
+      "        if symlink_created:",
+      "            assert any(item['path'] == 'resources/data_sources/missing.csv' for item in final_estimate['missing_externals']), final_estimate['missing_externals']",
+      "        blueprint_estimate = module.export_estimate('blueprint')",
+      "        blueprint_paths = {item['bundle_path'] for item in blueprint_estimate['largest_files']}",
+      "        assert 'FINDINGS.md' in blueprint_paths, blueprint_paths",
+      "        assert any(path.startswith('assets/') for path in blueprint_paths), blueprint_paths",
+      "        assert not any(path.startswith('research_trajectory/') for path in blueprint_paths), blueprint_paths",
+      "        job = module.start_export({'kind': 'blueprint', 'confirmed': True})",
+      "        deadline = time.time() + 10",
+      "        status = job",
+      "        while status['status'] == 'packaging' and time.time() < deadline:",
+      "            time.sleep(0.05)",
+      "            status = module.export_status(job['id'])",
+      "        assert status['status'] == 'ready', status",
+      "        zip_path = pathlib.Path(module.EXPORT_JOBS[job['id']]['zip_path'])",
+      "        assert zip_path.exists(), zip_path",
+      "        with zipfile.ZipFile(zip_path) as archive:",
+      "            names = set(archive.namelist())",
+      "            assert {'README.md', 'PROJECT.md', 'BLUEPRINT.md', 'FIGURE_SPECS.md', 'FINDINGS.md', 'MANIFEST.json'} <= names, names",
+      "            assert any(name.startswith('assets/') and name.endswith('final_figure.png') for name in names), names",
+      "            assert not any(name.startswith('research_trajectory/') for name in names), names",
+      "            manifest = json.loads(archive.read('MANIFEST.json').decode('utf-8'))",
+      "            assert any(item['bundle_path'] == 'FINDINGS.md' and item['sha256'] for item in manifest['files']), manifest",
+      "    finally:",
+      "        module.EXPORT_CONFIRMATION_BYTES = original_threshold",
+      "dashboard.delete_project({'project': export_probe['id'], 'confirm': 'export probe'})",
       "ctx = dashboard.context_for(created['id'])",
       "proc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])",
       "ctx.session['process'] = proc",

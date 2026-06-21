@@ -3,7 +3,7 @@
   "templateVersion": "0.1.0",
   "templateName": "default",
   "createdBy": "CoAutoResearch",
-  "reviewerBaselineVersion": "2026-06-inline-blueprint",
+  "reviewerBaselineVersion": "2026-06-publication-ready-tables",
   "coreReviewerFiles": [
     "REVIEW_TAXONOMY.md",
     "FINAL_GATE_REVIEWER.md",

@@ -15,7 +15,7 @@
         }
       })();
     </script>
-    <link rel="stylesheet" href="/styles.css?v=20260620-run-ui2" />
+    <link rel="stylesheet" href="/styles.css?v=20260620-export-bundle1" />
   </head>
   <body>
     <div class="app-shell">
@@ -515,6 +515,26 @@
       </section>
     </dialog>
 
+    <dialog class="project-dialog export-confirm-dialog" id="export-confirm-dialog" aria-labelledby="export-confirm-title">
+      <section class="project-dialog-shell">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Export</p>
+            <h2 id="export-confirm-title">Large bundle</h2>
+            <p>This export is above the confirmation threshold.</p>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-export-confirm-close aria-label="Close export dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <section id="export-confirm-summary" class="export-confirm-summary"></section>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-export-confirm-cancel>Cancel</button>
+          <button class="primary-button" type="button" data-export-confirm-generate>Generate bundle</button>
+        </footer>
+      </section>
+    </dialog>
+
     <dialog class="launch-dialog" id="launch-dialog" aria-labelledby="launch-dialog-title">
       <section class="launch-dialog-shell">
         <header class="launch-dialog-head">
@@ -815,12 +835,14 @@
           </div>
         </header>
         <div class="file-viewer-body" id="file-viewer-body"></div>
-        <div class="file-viewer-resize-handle" data-file-viewer-resize role="separator" aria-orientation="horizontal" aria-label="Resize file preview" title="Drag to resize"></div>
+        <div class="file-viewer-resize-zone is-right" data-file-viewer-resize="right" role="separator" aria-orientation="vertical" aria-label="Resize file preview width" title="Drag to resize width"></div>
+        <div class="file-viewer-resize-zone is-bottom" data-file-viewer-resize="bottom" role="separator" aria-orientation="horizontal" aria-label="Resize file preview height" title="Drag to resize height"></div>
+        <div class="file-viewer-resize-zone file-viewer-resize-handle is-corner" data-file-viewer-resize="corner" role="separator" aria-orientation="horizontal" aria-label="Resize file preview" title="Drag to resize"></div>
       </section>
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260620-run-ui2"></script>
+    <script src="/app.js?v=20260620-export-bundle1"></script>
   </body>
 </html>

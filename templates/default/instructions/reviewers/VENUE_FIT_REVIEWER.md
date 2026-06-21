@@ -62,6 +62,8 @@ The seed papers are used to compare:
 * experiment / analysis organization;
 * figure and table density;
 * figure/table visual style;
+* whether active tables are formatted as publication-ready manuscript tables
+  rather than back-matter specs;
 * appendix or supplementary material expectations;
 * level of claim strength;
 * limitation and discussion style.
@@ -77,7 +79,9 @@ Evaluate:
 3. Does the manuscript blueprint resemble strong papers from the target venue in structure and pacing?
 4. Are the claims too weak, too broad, or mismatched for the venue?
 5. Is the evidence standard comparable to recent representative papers?
-6. Are the planned figures and tables aligned with the visual and explanatory style of the venue?
+6. Are the planned figures and tables aligned with the visual and explanatory
+   style of the venue, including publication-ready table format, density,
+   caption style, and whether tables belong in the main text or supplement?
 7. Does the project need more experiments, stronger analysis, clearer mechanism, better framing, or a different target venue?
 8. What specific gaps remain relative to the seed papers?
 

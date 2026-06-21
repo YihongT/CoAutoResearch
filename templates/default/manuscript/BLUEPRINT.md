@@ -146,15 +146,21 @@ Inclusion status: <active / candidate / supplement / deprecated>
 
 Purpose or result role:
 
-Columns, rows, or comparison logic:
+Table number/title:
+
+Publication-ready table:
+
+| Column 1 | Column 2 | Column 3 |
+|---|---|---|
+| <final row value> | <final row value> | <final row value> |
 
 Caption draft or current caption:
+
+Table notes / definitions / abbreviations: <none, or notes>
 
 Source artifact or spec path:
 
 Key result or conceptual contrast shown:
-
-Compact preview, if useful:
 
 Provenance links:
 

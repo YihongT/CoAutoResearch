@@ -39,12 +39,16 @@ Check:
 - Does each active figure/table state the result, conceptual basis, or local
   manuscript job it carries, not only its visual form?
 - Does `manuscript/BLUEPRINT.md` contain every active figure/table block in
-  manuscript reading order, with placement, inclusion status, role, content or
-  panel/table logic, complete caption, source artifact/spec path, local
-  evidence/provenance links, target-venue rationale, and remaining blocker?
-- For tables, is the `Spec+source` representation sufficient: compact tables
-  shown inline when useful, larger tables linked to a source artifact with
-  columns/rows, key results, and caption specified?
+  manuscript reading order, with placement, inclusion status, role, figure
+  content/panel layout or publication-ready table body, complete caption, source
+  artifact/spec path, local evidence/provenance links, target-venue rationale,
+  and remaining blocker?
+- For active tables, does the blueprint include the publication-ready Markdown
+  table body directly in the local manuscript position, with final intended
+  rows, columns, readable labels, caption, notes/definitions/abbreviations when
+  needed, source traceability, key result, and target-venue fit?
+- For figures, is a spec/visual brief sufficient for the current scope unless a
+  final rendered figure asset already exists?
 - If there are no active tables, does the blueprint explain why no table is
   needed, which candidate tables were considered, and where the needed
   comparison or evidence mapping is carried in the manuscript architecture?
@@ -58,9 +62,11 @@ checked. The final blueprint must also be self-contained for figure/table status
 and rationale in the exact manuscript location where each display belongs.
 Candidate assets, unresolved display inventory, missing captions, missing
 source artifacts, display specs that only live in `FIGURE_SPECS.md`, active
-figures/tables that only appear in a back-matter plan, missing local placement,
-missing result mapping, missing target-venue rationale, stale bundle notes, or
-"acceptable for now" displays require `Decision: continue`.
+figures/tables that only appear in a back-matter plan, active tables that are
+only column/row/comparison specs or source links rather than publication-ready
+inline tables, missing local placement, missing result mapping, missing
+target-venue rationale, stale bundle notes, or "acceptable for now" displays
+require `Decision: continue`.
 
 ## Output Schema
 

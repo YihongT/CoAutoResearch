@@ -87,9 +87,10 @@ Allowed:
 - manuscript story and architecture;
 - section/subsection/subsubsection plans;
 - paragraph or rhetorical-move writing obligations;
-- inline figure, table, algorithm, dataset, benchmark, and result blocks;
-- captions, labels, panel descriptions, compact table previews, and method
-  interface sketches;
+- inline figure, publication-ready table, algorithm, dataset, benchmark, and
+  result blocks;
+- captions, labels, panel descriptions, publication-ready table bodies, table
+  notes, and method interface sketches;
 - manuscript reviews;
 - appendix/supplementary plan;
 - provenance or audit indexes.
@@ -101,11 +102,11 @@ Not allowed by default:
 - trial logs as primary manuscript content;
 - full paper prose unless explicitly requested.
 
-Captions, figure labels, table titles, algorithm names, and compact display
-entries may be written as final deliverable text. Section and paragraph entries
-must remain writing plans: they should say what each paragraph must accomplish,
-which results and evidence it uses, and how it transitions, without drafting the
-full paper.
+Captions, figure labels, table titles, publication-ready table entries,
+algorithm names, and compact display entries may be written as final
+deliverable text. Section and paragraph entries must remain writing plans: they
+should say what each paragraph must accomplish, which results and evidence it
+uses, and how it transitions, without drafting the full paper.
 
 ---
 
@@ -213,16 +214,32 @@ Every active figure block must include:
 Every active table block must include:
 
 - placement;
+- table number/title;
 - inclusion status;
 - purpose or result role;
-- columns, rows, or comparison logic;
+- publication-ready Markdown table body in final row/column form;
 - exact caption draft or current caption;
+- table notes, definitions, or abbreviations when needed, or `none`;
 - source artifact path or source specification path;
 - key result or conceptual contrast shown;
-- compact preview when useful;
 - provenance links to findings, trials, or source files;
 - target-venue fit rationale;
 - remaining blocker, or `none`.
+
+For active manuscript tables, a spec is not enough. Column lists, row
+descriptions, comparison logic, source links, or `FIGURE_SPECS.md` entries do
+not substitute for the actual table body a reader would inspect in the
+manuscript. Use the label `Publication-ready table:` immediately before the
+Markdown table.
+
+The only exceptions are:
+
+- no active tables, with an explicit no-table rationale;
+- supplemental or appendix-only tables, which still require a publication-ready
+  table body in the appendix/supplement plan;
+- generated numeric tables too large for the main blueprint, which must include
+  a publication-ready excerpt, direct source file link, exact manuscript or
+  supplement placement, and remaining blocker value.
 
 If there are no active tables, say so in the relevant manuscript architecture
 location or in the appendix/supplement plan, and explain where the needed

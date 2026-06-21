@@ -18,7 +18,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = "8765";
 const DEFAULT_PROJECTS_DIR = "co-autoresearch-projects";
 const LEGACY_PROJECTS_DIR = "local-projects";
-const REVIEWER_BASELINE_VERSION = "2026-06-inline-blueprint";
+const REVIEWER_BASELINE_VERSION = "2026-06-publication-ready-tables";
 const CORE_REVIEWER_FILES = [
   "REVIEW_TAXONOMY.md",
   "FINAL_GATE_REVIEWER.md",

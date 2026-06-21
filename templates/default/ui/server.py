@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -35,9 +36,14 @@ FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection"
 MAX_TEXT_BYTES = 500_000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 RESOURCE_IMPORT_CHUNK_BYTES = 8 * 1024 * 1024
+EXPORT_CONFIRMATION_BYTES = 1 * 1024 * 1024 * 1024
+EXPORT_CHUNK_BYTES = 1024 * 1024
+EXPORT_JOB_TTL_SECONDS = 24 * 60 * 60
+EXPORT_STORE_WITHOUT_COMPRESSION_BYTES = 16 * 1024 * 1024
 AUTO_RESOURCE_SEARCH_MAX_RESULTS = 8
 AUTO_RESOURCE_SEARCH_MAX_DIRS = 2500
 AUTO_RESOURCE_SEARCH_MAX_DEPTH = 5
+ACTIVE_EXPECTED_TRIAL_MARKER_STATUSES = {"pending", "mismatch"}
 RESUME_SNAPSHOT_PATHS = [
     "PROJECT.md",
     "research_trajectory/STATE.md",
@@ -132,7 +138,7 @@ PREVIEWABLE_SUFFIXES = TEXT_PREVIEW_SUFFIXES | IMAGE_PREVIEW_SUFFIXES | PDF_PREV
 COLD_START_EDIT_FILES = [
     "resources/user_input/INITIAL_BRIEF.md",
 ]
-REVIEWER_BASELINE_VERSION = "2026-06-inline-blueprint"
+REVIEWER_BASELINE_VERSION = "2026-06-publication-ready-tables"
 CORE_REVIEWER_FILES = [
     "REVIEW_TAXONOMY.md",
     "FINAL_GATE_REVIEWER.md",
@@ -190,6 +196,14 @@ REQUIRED_REVIEWER_OUTPUTS = {
         "instruction": "instructions/reviewers/FINAL_GATE_REVIEWER.md",
     },
 }
+TRIAL_PROGRESS_STAGES = [
+    {"key": "planning", "label": "Planning"},
+    {"key": "working", "label": "Working"},
+    {"key": "synthesizing", "label": "Synthesizing"},
+    {"key": "reporting", "label": "Reporting"},
+    {"key": "reviewing", "label": "Reviewing"},
+    {"key": "gate_update", "label": "Gate update"},
+]
 REQUIRED_BLUEPRINT_SECTIONS = [
     "Target Venue / Audience / Article Type",
     "Target-Venue Organization Rationale",
@@ -1450,6 +1464,8 @@ RESEARCH_STATE_PATH = DynamicPath(lambda: current_project_context().research_sta
 TRAJECTORY_PATH = DynamicPath(lambda: current_project_context().trajectory_path)
 RESEARCH_SESSION = DynamicDict(lambda: current_project_context().session)
 RESEARCH_LOCK = DynamicLock()
+EXPORT_JOBS: dict[str, dict[str, Any]] = {}
+EXPORT_LOCK = threading.Lock()
 
 DEFAULT_CODEX_SETTINGS = {
     "model": "gpt-5.5",
@@ -3622,6 +3638,143 @@ def trial_report_summary(report: str) -> str:
     return first_meaningful_line(report, "No report summary yet")
 
 
+def path_mtime_iso(path: Path) -> str:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds")
+    except OSError:
+        return ""
+
+
+def latest_mtime_iso(paths: list[Path]) -> str:
+    latest = 0.0
+    for path in paths:
+        try:
+            latest = max(latest, path.stat().st_mtime)
+        except OSError:
+            continue
+    if latest <= 0:
+        return ""
+    return datetime.fromtimestamp(latest).astimezone().isoformat(timespec="seconds")
+
+
+def trial_gate_updated(trial_dir: Path, state_text: str = "") -> bool:
+    if not state_text and RESEARCH_STATE_PATH.exists():
+        state_text = safe_read(RESEARCH_STATE_PATH)
+    section = markdown_section(state_text, "Autoresearch Goal Gate") if state_text else ""
+    if not section:
+        return False
+    trial_root = project_relative_path(REPO_ROOT, trial_dir)
+    return trial_dir.name in section or trial_root in section
+
+
+def trial_progress_summary(trial_dir: Path, plan: str = "", report: str = "", artifacts: list[dict[str, Any]] | None = None, state_text: str = "") -> dict[str, Any]:
+    plan_path = trial_dir / "PLAN.md"
+    report_path = trial_dir / "REPORT.md"
+    artifacts_dir = trial_dir / "artifacts"
+    artifact_items = artifacts if artifacts is not None else (
+        [file_card(path) for path in artifacts_dir.rglob("*") if path.is_file() and path.name != ".gitkeep"]
+        if artifacts_dir.exists()
+        else []
+    )
+    review_statuses: dict[str, str] = {}
+    review_paths: list[Path] = []
+    for key in REQUIRED_REVIEWER_OUTPUTS:
+        path = reviewer_output_path(trial_dir, key)
+        status = reviewer_file_status(path)
+        review_statuses[key] = status
+        if path.exists() and path.is_file():
+            review_paths.append(path)
+    reviewer_total = len(REQUIRED_REVIEWER_OUTPUTS)
+    reviewer_count = len(review_paths)
+    reviewer_pass_count = sum(1 for status in review_statuses.values() if status == "pass")
+    plan_exists = plan_path.exists()
+    report_exists = report_path.exists()
+    artifacts_count = len(artifact_items)
+    gate_updated = trial_gate_updated(trial_dir, state_text)
+    touched_paths = [path for path in [plan_path, report_path] if path.exists()]
+    touched_paths.extend(review_paths)
+    touched_paths.extend(REPO_ROOT / str(item.get("path") or "") for item in artifact_items if item.get("path"))
+    if gate_updated and RESEARCH_STATE_PATH.exists():
+        touched_paths.append(RESEARCH_STATE_PATH)
+
+    if not plan_exists:
+        stage_index = 1
+        summary = "Planning · waiting for PLAN.md"
+        detail = "No trial plan has been written yet."
+    elif not artifacts_count and not report_exists:
+        stage_index = 2
+        summary = "Working · plan ready"
+        detail = first_meaningful_line(extract_section(plan, "Objective"), "Executing the trial plan.")
+    elif artifacts_count and not report_exists:
+        stage_index = 3
+        summary = f"Synthesizing · {artifacts_count} artifact{'s' if artifacts_count != 1 else ''} collected"
+        detail = "Artifacts exist; REPORT.md is not available yet."
+    elif report_exists and reviewer_count <= 0:
+        stage_index = 4
+        summary = "Reporting · REPORT.md ready"
+        detail = trial_report_summary(report)
+    elif reviewer_count < reviewer_total:
+        stage_index = 5
+        summary = f"Reviewing · {reviewer_count}/{reviewer_total} reviewer files"
+        detail = f"{reviewer_pass_count}/{reviewer_total} reviewer gates are pass."
+    else:
+        stage_index = 6
+        summary = "Gate update · STATE.md gate refreshed" if gate_updated else "Gate update · waiting for STATE.md gate"
+        detail = f"{reviewer_pass_count}/{reviewer_total} reviewer gates are pass."
+
+    stage = TRIAL_PROGRESS_STAGES[stage_index - 1]
+    return {
+        "stage": stage["key"],
+        "stage_label": stage["label"],
+        "stage_index": stage_index,
+        "total_stages": len(TRIAL_PROGRESS_STAGES),
+        "summary": summary,
+        "detail": detail,
+        "reviewer_count": reviewer_count,
+        "reviewer_pass_count": reviewer_pass_count,
+        "reviewer_total": reviewer_total,
+        "review_statuses": review_statuses,
+        "artifacts_count": artifacts_count,
+        "plan_exists": plan_exists,
+        "report_exists": report_exists,
+        "gate_updated": gate_updated,
+        "updated_at": latest_mtime_iso(touched_paths) or path_mtime_iso(trial_dir),
+        "stages": TRIAL_PROGRESS_STAGES,
+    }
+
+
+def active_trial_progress(iteration: int, state_text: str = "") -> dict[str, Any]:
+    if iteration <= 0:
+        return {}
+    for trial_dir in reversed(project_active_trial_dirs(REPO_ROOT)):
+        if trial_iteration_from_id(trial_dir.name) == iteration:
+            return trial_progress_summary(
+                trial_dir,
+                safe_read(trial_dir / "PLAN.md"),
+                safe_read(trial_dir / "REPORT.md"),
+                None,
+                state_text,
+            )
+    return {
+        "stage": "planning",
+        "stage_label": "Planning",
+        "stage_index": 1,
+        "total_stages": len(TRIAL_PROGRESS_STAGES),
+        "summary": "Planning · waiting for trial files",
+        "detail": f"Trial {iteration} has started, but its trial directory is not visible yet.",
+        "reviewer_count": 0,
+        "reviewer_pass_count": 0,
+        "reviewer_total": len(REQUIRED_REVIEWER_OUTPUTS),
+        "review_statuses": {},
+        "artifacts_count": 0,
+        "plan_exists": False,
+        "report_exists": False,
+        "gate_updated": False,
+        "updated_at": "",
+        "stages": TRIAL_PROGRESS_STAGES,
+    }
+
+
 def trial_checkpoint_dir(trial_id: str) -> Path:
     return REPO_ROOT / "research_trajectory" / "checkpoints" / slugify(trial_id, "trial")
 
@@ -3953,6 +4106,17 @@ def read_expected_trial_marker() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def active_expected_trial_iteration(marker: dict[str, Any]) -> int:
+    status = str(marker.get("status") or "").strip().lower()
+    if status not in ACTIVE_EXPECTED_TRIAL_MARKER_STATUSES:
+        return 0
+    try:
+        expected = int(marker.get("expected_iteration") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return expected if expected > 0 else 0
+
+
 def update_expected_trial_marker(payload: dict[str, Any]) -> None:
     payload = dict(payload)
     payload["updated_at"] = now_iso()
@@ -4025,6 +4189,7 @@ def maybe_checkpoint_latest_trial() -> dict[str, Any]:
 def collect_trials() -> list[dict[str, Any]]:
     direct_root = REPO_ROOT / "research_trajectory" / "trials"
     trajectory = read_trajectory_state()
+    state_text = safe_read(RESEARCH_STATE_PATH) if RESEARCH_STATE_PATH.exists() else ""
     archived_ids = set(trajectory.get("archived_trial_ids") or [])
     trial_roots = []
     if direct_root.is_dir():
@@ -4050,6 +4215,7 @@ def collect_trials() -> list[dict[str, Any]]:
             if artifacts_dir.exists():
                 artifacts = [file_card(p) for p in artifacts_dir.rglob("*") if p.is_file() and p.name != ".gitkeep"]
             checkpoint_path = trial_checkpoint_dir(trial_dir.name)
+            progress = trial_progress_summary(trial_dir, plan, report, artifacts, state_text)
             trials.append(
                 {
                     "id": trial_dir.name,
@@ -4070,6 +4236,7 @@ def collect_trials() -> list[dict[str, Any]]:
                     "checkpoint_path": rel_path(checkpoint_path) if checkpoint_path.exists() else "",
                     "checkpoint_exists": checkpoint_path.exists(),
                     "artifacts": artifacts,
+                    "progress": progress,
                 }
             )
     return trials
@@ -4588,6 +4755,769 @@ def collect_resources() -> list[dict[str, Any]]:
     for label, relative in RESOURCE_GROUPS.items():
         groups.append({"label": label, "path": relative, "files": list_files(relative)})
     return groups
+
+
+EXPORT_KIND_LABELS = {
+    "blueprint": "Blueprint Pack",
+    "final_project": "Final Project Pack",
+}
+EXPORT_EXCLUDED_NAMES = {
+    ".DS_Store",
+    ".env",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
+EXPORT_EXCLUDED_ROOTS = {
+    ".git",
+    "archive",
+    "instructions",
+    "research_trajectory",
+    "secrets",
+}
+EXPORT_EXCLUDED_ROOT_FILES = {"AGENTS.md", "CLAUDE.md"}
+
+
+def normalize_export_kind(value: Any) -> str:
+    kind = str(value or "").strip().lower().replace("-", "_")
+    if kind not in EXPORT_KIND_LABELS:
+        raise ValueError("Unknown export kind.")
+    return kind
+
+
+def export_runtime_dir() -> Path:
+    path = RUNTIME_DIR / "exports"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def valid_export_id(value: str) -> str:
+    export_id = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", export_id):
+        raise ValueError("Invalid export id.")
+    return export_id
+
+
+def export_project_label() -> str:
+    context = current_project_context()
+    summary = context.summary()
+    return str(summary.get("display_name") or summary.get("name") or context.id or "project")
+
+
+def export_filename(kind: str) -> str:
+    stem = slugify(export_project_label(), "project")
+    suffix = "blueprint-pack" if kind == "blueprint" else "final-project-pack"
+    return f"{stem}-{suffix}.zip"
+
+
+def export_path_entry(path: Path, root: Path | None = None) -> str:
+    try:
+        return path.relative_to(root or REPO_ROOT).as_posix()
+    except (OSError, ValueError):
+        return path.as_posix()
+
+
+def normalize_export_relative(value: str) -> str:
+    text = str(value or "").replace("\\", "/").strip().strip("`\"'")
+    text = re.sub(r"[#?:].*$", "", text)
+    text = text.lstrip("/")
+    parts = [part for part in Path(text).parts if part not in {"", "."}]
+    if not parts or any(part == ".." for part in parts):
+        return ""
+    return Path(*parts).as_posix()
+
+
+def export_skip_reason(relative_path: str, kind: str) -> str:
+    normalized = normalize_export_relative(relative_path)
+    if not normalized:
+        return "invalid path"
+    parts = Path(normalized).parts
+    if not parts:
+        return "invalid path"
+    if parts[0] in EXPORT_EXCLUDED_ROOTS:
+        return f"excluded root `{parts[0]}`"
+    if len(parts) == 1 and parts[0] in EXPORT_EXCLUDED_ROOT_FILES:
+        return "excluded project agent file"
+    if kind == "final_project" and (normalized == "manuscript/reviews" or normalized.startswith("manuscript/reviews/")):
+        return "excluded manuscript reviews"
+    for part in parts:
+        if part in EXPORT_EXCLUDED_NAMES:
+            return f"excluded cache or environment path `{part}`"
+    if normalized.startswith("ui/.runtime/") or normalized == "ui/.runtime":
+        return "excluded UI runtime"
+    return ""
+
+
+def export_entry_dict(
+    bundle_path: str,
+    source_path: Path | None = None,
+    source_relative: str = "",
+    content: str | bytes | None = None,
+    reason: str = "",
+    symlink_target: str = "",
+) -> dict[str, Any]:
+    size = 0
+    if source_path is not None:
+        try:
+            size = source_path.stat().st_size
+        except OSError:
+            size = 0
+    elif content is not None:
+        size = len(content if isinstance(content, bytes) else str(content).encode("utf-8"))
+    return {
+        "bundle_path": normalize_export_relative(bundle_path),
+        "source_path": source_path,
+        "source_relative": source_relative,
+        "content": content,
+        "size": size,
+        "reason": reason,
+        "symlink_target": symlink_target,
+        "missing": bool(reason),
+    }
+
+
+def unique_export_bundle_path(path: str, used: set[str]) -> str:
+    normalized = normalize_export_relative(path) or "file"
+    candidate = normalized
+    stem = Path(normalized).with_suffix("").as_posix()
+    suffix = Path(normalized).suffix
+    counter = 2
+    while candidate in used:
+        candidate = f"{stem}_{counter}{suffix}"
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+def add_generated_export_entry(entries: list[dict[str, Any]], used: set[str], bundle_path: str, content: str) -> None:
+    entries.append(export_entry_dict(unique_export_bundle_path(bundle_path, used), content=content))
+
+
+def add_file_export_entry(
+    entries: list[dict[str, Any]],
+    missing: list[dict[str, str]],
+    skipped: list[dict[str, str]],
+    used: set[str],
+    source: Path,
+    bundle_path: str,
+    source_relative: str = "",
+    kind: str = "final_project",
+    visited_dirs: set[str] | None = None,
+) -> None:
+    source_relative = source_relative or export_path_entry(source)
+    if source.is_symlink():
+        target_text = os.readlink(source)
+        target = source.resolve(strict=False)
+        if not target.exists():
+            missing.append({"path": source_relative, "target": target_text, "reason": "missing symlink target"})
+            return
+        if target.is_dir():
+            add_directory_export_entries(entries, missing, skipped, used, target, bundle_path, source_relative, kind, visited_dirs, symlink_target=target_text)
+            return
+        if target.is_file():
+            entries.append(export_entry_dict(unique_export_bundle_path(bundle_path, used), target, source_relative, symlink_target=target_text))
+            return
+        missing.append({"path": source_relative, "target": target_text, "reason": "unsupported symlink target"})
+        return
+    if not source.exists():
+        missing.append({"path": source_relative, "target": "", "reason": "missing source"})
+        return
+    if source.is_dir():
+        add_directory_export_entries(entries, missing, skipped, used, source, bundle_path, source_relative, kind, visited_dirs)
+        return
+    if source.is_file():
+        entries.append(export_entry_dict(unique_export_bundle_path(bundle_path, used), source, source_relative))
+
+
+def add_directory_export_entries(
+    entries: list[dict[str, Any]],
+    missing: list[dict[str, str]],
+    skipped: list[dict[str, str]],
+    used: set[str],
+    source: Path,
+    bundle_path: str,
+    source_relative: str,
+    kind: str,
+    visited_dirs: set[str] | None = None,
+    symlink_target: str = "",
+) -> None:
+    visited = visited_dirs if visited_dirs is not None else set()
+    try:
+        resolved = source.resolve()
+    except OSError:
+        missing.append({"path": source_relative, "target": symlink_target, "reason": "unreadable directory"})
+        return
+    resolved_key = resolved.as_posix()
+    if resolved_key in visited:
+        missing.append({"path": source_relative, "target": symlink_target or resolved_key, "reason": "symlink cycle"})
+        return
+    visited.add(resolved_key)
+    try:
+        children = sorted(source.iterdir(), key=lambda path: path.name.lower())
+    except OSError:
+        missing.append({"path": source_relative, "target": symlink_target, "reason": "unreadable directory"})
+        return
+    for child in children:
+        child_relative = f"{source_relative.rstrip('/')}/{child.name}" if source_relative else child.name
+        reason = export_skip_reason(child_relative, kind)
+        if reason:
+            skipped.append({"path": child_relative, "reason": reason})
+            continue
+        add_file_export_entry(
+            entries,
+            missing,
+            skipped,
+            used,
+            child,
+            f"{bundle_path.rstrip('/')}/{child.name}",
+            child_relative,
+            kind,
+            visited,
+        )
+    visited.discard(resolved_key)
+
+
+def export_readme(kind: str, estimate_only: bool = False) -> str:
+    label = EXPORT_KIND_LABELS[kind]
+    scope = (
+        "This package is a self-contained manuscript blueprint and final findings handoff."
+        if kind == "blueprint"
+        else "This package is a clean final project handoff. It intentionally excludes autoresearch trajectory, runtime, archive, and agent scaffolding."
+    )
+    return "\n".join(
+        [
+            f"# {label}",
+            "",
+            f"Project: {export_project_label()}",
+            f"Generated: {now_iso() if not estimate_only else '<generated at export time>'}",
+            "",
+            scope,
+            "",
+            "Included files are listed in `MANIFEST.json` with original project paths and SHA-256 hashes when available.",
+            "",
+        ]
+    )
+
+
+def export_method_runbook() -> str:
+    return "\n".join(
+        [
+            "# Method Runbook",
+            "",
+            "This clean handoff contains final project-facing files only.",
+            "",
+            "- `PROJECT.md`: final research direction.",
+            "- `FINDINGS.md`: promoted current findings summary.",
+            "- `manuscript/`: manuscript blueprint, figures, tables, sections, and appendix materials.",
+            "- `workspace/`: executable method code, configs, notebooks, and final generated outputs.",
+            "- `resources/`: raw inputs and project resources needed by the final workspace.",
+            "",
+            "Autoresearch trials, reviews, logs, checkpoints, runtime state, secrets, and agent instructions are intentionally excluded.",
+            "",
+        ]
+    )
+
+
+def blueprint_reference_paths() -> list[str]:
+    texts = [
+        safe_read(REPO_ROOT / "manuscript" / "BLUEPRINT.md"),
+        safe_read(REPO_ROOT / "manuscript" / "figures" / "FIGURE_SPECS.md"),
+    ]
+    matches: list[str] = []
+    pattern = re.compile(r"\b(?:manuscript|research_trajectory|resources|workspace|data|analysis|figures|outputs)/[^\s`\"')\]}>,;]+")
+    for text in texts:
+        for match in pattern.findall(text):
+            normalized = normalize_export_relative(match)
+            if normalized and normalized not in matches:
+                matches.append(normalized)
+    return matches
+
+
+def add_existing_relative(
+    entries: list[dict[str, Any]],
+    missing: list[dict[str, str]],
+    skipped: list[dict[str, str]],
+    used: set[str],
+    relative: str,
+    bundle_path: str,
+    kind: str,
+    allow_trajectory_asset: bool = False,
+) -> None:
+    normalized = normalize_export_relative(relative)
+    if not normalized:
+        return
+    reason = export_skip_reason(normalized, kind)
+    if reason and not (allow_trajectory_asset and normalized.startswith("research_trajectory/")):
+        skipped.append({"path": normalized, "reason": reason})
+        return
+    source = REPO_ROOT / normalized
+    if not source.exists() and not source.is_symlink():
+        missing.append({"path": normalized, "target": "", "reason": "missing source"})
+        return
+    add_file_export_entry(entries, missing, skipped, used, source, bundle_path, normalized, kind)
+
+
+def build_export_plan(kind: str) -> dict[str, Any]:
+    kind = normalize_export_kind(kind)
+    cleanup_old_exports()
+    entries: list[dict[str, Any]] = []
+    missing: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
+    used: set[str] = set()
+    add_generated_export_entry(entries, used, "README.md", export_readme(kind, estimate_only=True))
+    add_existing_relative(entries, missing, skipped, used, "PROJECT.md", "PROJECT.md", kind)
+    add_existing_relative(entries, missing, skipped, used, "research_trajectory/CURRENT_FINDINGS.md", "FINDINGS.md", kind, allow_trajectory_asset=True)
+    if kind == "blueprint":
+        add_existing_relative(entries, missing, skipped, used, "manuscript/BLUEPRINT.md", "BLUEPRINT.md", kind)
+        add_existing_relative(entries, missing, skipped, used, "manuscript/figures/FIGURE_SPECS.md", "FIGURE_SPECS.md", kind)
+        for relative in [
+            "resources/target_venue/TARGET_VENUE.md",
+            "resources/target_venue/STYLE_NOTES.md",
+            "resources/target_venue/FIGURE_TABLE_NOTES.md",
+            "resources/target_venue/SEED_PAPERS.md",
+        ]:
+            add_existing_relative(entries, missing, skipped, used, relative, Path(relative).name, kind)
+        for relative in blueprint_reference_paths():
+            if relative in {"manuscript/BLUEPRINT.md", "manuscript/figures/FIGURE_SPECS.md"}:
+                continue
+            source = REPO_ROOT / relative
+            if source.exists() or source.is_symlink():
+                bundle_path = f"assets/{Path(relative).name or 'asset'}"
+                add_file_export_entry(entries, missing, skipped, used, source, bundle_path, relative, kind)
+    else:
+        add_existing_relative(entries, missing, skipped, used, "manuscript", "manuscript", kind)
+        add_existing_relative(entries, missing, skipped, used, "workspace", "workspace", kind)
+        add_existing_relative(entries, missing, skipped, used, "resources", "resources", kind)
+        add_generated_export_entry(entries, used, "METHOD_RUNBOOK.md", export_method_runbook())
+    add_generated_export_entry(entries, used, "MANIFEST.json", "{\n  \"schema_version\": 1\n}\n")
+
+    for root in sorted(EXPORT_EXCLUDED_ROOTS):
+        skipped.append({"path": root, "reason": "not part of final result export"})
+    skipped.extend({"path": path, "reason": "secret/runtime/agent scaffolding excluded"} for path in sorted(EXPORT_EXCLUDED_ROOT_FILES))
+    total_bytes = sum(int(entry.get("size") or 0) for entry in entries if not entry.get("missing"))
+    files = [entry for entry in entries if not entry.get("missing")]
+    large_files = [
+        export_entry_public(entry)
+        for entry in sorted(files, key=lambda item: int(item.get("size") or 0), reverse=True)
+        if int(entry.get("size") or 0) >= EXPORT_CONFIRMATION_BYTES
+    ]
+    largest_files = [export_entry_public(entry) for entry in sorted(files, key=lambda item: int(item.get("size") or 0), reverse=True)[:20]]
+    return {
+        "kind": kind,
+        "label": EXPORT_KIND_LABELS[kind],
+        "filename": export_filename(kind),
+        "entries": entries,
+        "total_bytes": total_bytes,
+        "file_count": len(files),
+        "largest_files": largest_files,
+        "large_files": large_files,
+        "skipped": skipped,
+        "missing_externals": missing,
+        "requires_confirmation": total_bytes >= EXPORT_CONFIRMATION_BYTES or bool(large_files),
+        "confirmation_threshold_bytes": EXPORT_CONFIRMATION_BYTES,
+    }
+
+
+def export_entry_public(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bundle_path": str(entry.get("bundle_path") or ""),
+        "source_path": str(entry.get("source_relative") or ""),
+        "size": int(entry.get("size") or 0),
+        "missing": bool(entry.get("missing")),
+        "reason": str(entry.get("reason") or ""),
+        "symlink_target": str(entry.get("symlink_target") or ""),
+    }
+
+
+def export_estimate(kind: str) -> dict[str, Any]:
+    plan = build_export_plan(kind)
+    public = {key: value for key, value in plan.items() if key != "entries"}
+    public["ok"] = True
+    return public
+
+
+class ExportCancelled(Exception):
+    pass
+
+
+def export_terminal_status(status: str) -> bool:
+    return status in {"ready", "failed", "cancelled"}
+
+
+def cleanup_old_exports() -> None:
+    cutoff = time.time() - EXPORT_JOB_TTL_SECONDS
+    stale_ids: list[str] = []
+    active_dirs: set[Path] = set()
+    current_project_id = current_project_context().id
+    with EXPORT_LOCK:
+        for export_id, job in list(EXPORT_JOBS.items()):
+            work_dir = Path(str(job.get("work_dir") or "")) if job.get("work_dir") else None
+            if work_dir:
+                active_dirs.add(work_dir)
+            updated = float(job.get("updated_at_epoch") or job.get("created_at_epoch") or 0)
+            if job.get("project_id") == current_project_id and export_terminal_status(str(job.get("status") or "")) and updated < cutoff:
+                stale_ids.append(export_id)
+        for export_id in stale_ids:
+            job = EXPORT_JOBS.pop(export_id, None)
+            if job and job.get("work_dir"):
+                active_dirs.discard(Path(str(job.get("work_dir"))))
+    root = export_runtime_dir()
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return
+    for child in children:
+        if not child.is_dir() or child in active_dirs:
+            continue
+        try:
+            if child.stat().st_mtime < cutoff:
+                shutil.rmtree(child, ignore_errors=True)
+        except OSError:
+            continue
+
+
+def export_public_estimate_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    public = {key: value for key, value in plan.items() if key != "entries"}
+    public["ok"] = True
+    return public
+
+
+def export_zip_path(export_id: str, filename: str) -> str:
+    return f"/api/export/download?id={quote(export_id)}&filename={quote(filename)}"
+
+
+def export_job_public(job: dict[str, Any]) -> dict[str, Any]:
+    export_id = str(job.get("id") or "")
+    filename = str(job.get("filename") or "export.zip")
+    status = str(job.get("status") or "packaging")
+    public = {
+        "id": export_id,
+        "kind": str(job.get("kind") or ""),
+        "label": str(job.get("label") or ""),
+        "filename": filename,
+        "status": status,
+        "phase": str(job.get("phase") or status),
+        "created_at": str(job.get("created_at") or ""),
+        "updated_at": str(job.get("updated_at") or ""),
+        "total_bytes": int(job.get("total_bytes") or 0),
+        "bytes_done": int(job.get("bytes_done") or 0),
+        "file_count": int(job.get("file_count") or 0),
+        "files_done": int(job.get("files_done") or 0),
+        "current_file": str(job.get("current_file") or ""),
+        "error": str(job.get("error") or ""),
+        "requires_confirmation": bool(job.get("requires_confirmation")),
+        "cancel_requested": bool(job.get("cancel_requested")),
+        "largest_files": job.get("largest_files") or [],
+        "large_files": job.get("large_files") or [],
+        "skipped": job.get("skipped") or [],
+        "missing_externals": job.get("missing_externals") or [],
+        "confirmation_threshold_bytes": int(job.get("confirmation_threshold_bytes") or EXPORT_CONFIRMATION_BYTES),
+        "download_url": export_zip_path(export_id, filename) if status == "ready" else "",
+    }
+    return public
+
+
+def export_job_for_current_project(export_id: str) -> dict[str, Any]:
+    clean_id = valid_export_id(export_id)
+    with EXPORT_LOCK:
+        job = EXPORT_JOBS.get(clean_id)
+        if not job or job.get("project_id") != current_project_context().id:
+            raise ValueError("Export job not found.")
+        return job
+
+
+def update_export_job(export_id: str, **fields: Any) -> None:
+    with EXPORT_LOCK:
+        job = EXPORT_JOBS.get(export_id)
+        if not job:
+            return
+        job.update(fields)
+        job["updated_at_epoch"] = time.time()
+        job["updated_at"] = now_iso()
+
+
+def export_cancel_requested(export_id: str) -> bool:
+    with EXPORT_LOCK:
+        return bool(EXPORT_JOBS.get(export_id, {}).get("cancel_requested"))
+
+
+def check_export_cancelled(export_id: str) -> None:
+    if export_cancel_requested(export_id):
+        raise ExportCancelled()
+
+
+def export_entry_compression(entry: dict[str, Any]) -> int:
+    size = int(entry.get("size") or 0)
+    if size >= EXPORT_STORE_WITHOUT_COMPRESSION_BYTES:
+        return zipfile.ZIP_STORED
+    bundle_path = str(entry.get("bundle_path") or "")
+    source = entry.get("source_path")
+    suffix = Path(bundle_path).suffix.lower()
+    if source is not None:
+        try:
+            suffix = Path(source).suffix.lower() or suffix
+        except TypeError:
+            pass
+    if source is None or suffix in TEXT_PREVIEW_SUFFIXES:
+        return zipfile.ZIP_DEFLATED
+    return zipfile.ZIP_STORED
+
+
+def export_zip_info(entry: dict[str, Any], compression: int) -> zipfile.ZipInfo:
+    bundle_path = str(entry.get("bundle_path") or "file")
+    info = zipfile.ZipInfo(bundle_path)
+    source = entry.get("source_path")
+    try:
+        timestamp = datetime.fromtimestamp(Path(source).stat().st_mtime) if source is not None else datetime.now()
+    except OSError:
+        timestamp = datetime.now()
+    info.date_time = timestamp.timetuple()[:6]
+    info.compress_type = compression
+    info.external_attr = 0o644 << 16
+    return info
+
+
+def write_export_entry_to_zip(archive: zipfile.ZipFile, entry: dict[str, Any], export_id: str) -> dict[str, Any]:
+    bundle_path = str(entry.get("bundle_path") or "")
+    update_export_job(export_id, current_file=bundle_path, phase="packaging")
+    compression = export_entry_compression(entry)
+    info = export_zip_info(entry, compression)
+    digest = hashlib.sha256()
+    bytes_written = 0
+    content = entry.get("content")
+    source_path = entry.get("source_path")
+    with archive.open(info, "w", force_zip64=True) as destination:
+        if source_path is None:
+            data = content if isinstance(content, bytes) else str(content or "").encode("utf-8")
+            for offset in range(0, len(data), EXPORT_CHUNK_BYTES):
+                check_export_cancelled(export_id)
+                chunk = data[offset:offset + EXPORT_CHUNK_BYTES]
+                destination.write(chunk)
+                digest.update(chunk)
+                bytes_written += len(chunk)
+                with EXPORT_LOCK:
+                    job = EXPORT_JOBS.get(export_id)
+                    if job:
+                        job["bytes_done"] = int(job.get("bytes_done") or 0) + len(chunk)
+                        job["updated_at_epoch"] = time.time()
+                        job["updated_at"] = now_iso()
+        else:
+            with Path(source_path).open("rb") as source:
+                while True:
+                    check_export_cancelled(export_id)
+                    chunk = source.read(EXPORT_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    destination.write(chunk)
+                    digest.update(chunk)
+                    bytes_written += len(chunk)
+                    with EXPORT_LOCK:
+                        job = EXPORT_JOBS.get(export_id)
+                        if job:
+                            job["bytes_done"] = int(job.get("bytes_done") or 0) + len(chunk)
+                            job["updated_at_epoch"] = time.time()
+                            job["updated_at"] = now_iso()
+    with EXPORT_LOCK:
+        job = EXPORT_JOBS.get(export_id)
+        if job:
+            job["files_done"] = int(job.get("files_done") or 0) + 1
+            job["updated_at_epoch"] = time.time()
+            job["updated_at"] = now_iso()
+    return {
+        "bundle_path": bundle_path,
+        "source_path": str(entry.get("source_relative") or ""),
+        "size": bytes_written,
+        "sha256": digest.hexdigest(),
+        "symlink_target": str(entry.get("symlink_target") or ""),
+    }
+
+
+def build_export_manifest(job: dict[str, Any], manifest_entries: list[dict[str, Any]]) -> bytes:
+    generated_at = now_iso()
+    manifest_files = list(manifest_entries)
+    manifest_self = {"bundle_path": "MANIFEST.json", "source_path": "", "size": 0, "sha256": "", "generated": True}
+    manifest = {
+        "schema_version": 1,
+        "kind": str(job.get("kind") or ""),
+        "label": str(job.get("label") or ""),
+        "filename": str(job.get("filename") or ""),
+        "project": current_project_context().summary(),
+        "generated_at": generated_at,
+        "total_source_bytes": int(job.get("total_bytes") or 0),
+        "file_count": int(job.get("file_count") or 0),
+        "files": manifest_files + [manifest_self],
+        "skipped": job.get("skipped") or [],
+        "missing_externals": job.get("missing_externals") or [],
+    }
+    data = json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+    for _ in range(3):
+        manifest_self["size"] = len(data)
+        data = json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+    return data
+
+
+def write_export_manifest_to_zip(archive: zipfile.ZipFile, job: dict[str, Any], manifest_entries: list[dict[str, Any]], export_id: str) -> None:
+    data = build_export_manifest(job, manifest_entries)
+    digest = hashlib.sha256(data).hexdigest()
+    info = zipfile.ZipInfo("MANIFEST.json")
+    info.date_time = datetime.now().timetuple()[:6]
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = 0o644 << 16
+    update_export_job(export_id, current_file="MANIFEST.json", phase="packaging")
+    with archive.open(info, "w", force_zip64=True) as destination:
+        for offset in range(0, len(data), EXPORT_CHUNK_BYTES):
+            check_export_cancelled(export_id)
+            chunk = data[offset:offset + EXPORT_CHUNK_BYTES]
+            destination.write(chunk)
+            with EXPORT_LOCK:
+                job_state = EXPORT_JOBS.get(export_id)
+                if job_state:
+                    job_state["bytes_done"] = int(job_state.get("bytes_done") or 0) + len(chunk)
+                    job_state["updated_at_epoch"] = time.time()
+                    job_state["updated_at"] = now_iso()
+    with EXPORT_LOCK:
+        job_state = EXPORT_JOBS.get(export_id)
+        if job_state:
+            job_state["files_done"] = int(job_state.get("files_done") or 0) + 1
+            job_state["manifest_sha256"] = digest
+            job_state["updated_at_epoch"] = time.time()
+            job_state["updated_at"] = now_iso()
+
+
+def run_export_job(export_id: str) -> None:
+    with EXPORT_LOCK:
+        job = EXPORT_JOBS.get(export_id)
+        if not job:
+            return
+        project_id = str(job.get("project_id") or "")
+        entries = list(job.get("entries") or [])
+        partial_path = Path(str(job.get("partial_path") or ""))
+        final_path = Path(str(job.get("zip_path") or ""))
+    with using_project(project_id):
+        try:
+            partial_path.parent.mkdir(parents=True, exist_ok=True)
+            if partial_path.exists():
+                partial_path.unlink()
+            update_export_job(export_id, status="packaging", phase="packaging", current_file="")
+            manifest_entries: list[dict[str, Any]] = []
+            with zipfile.ZipFile(partial_path, "w", allowZip64=True, compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+                for entry in entries:
+                    if str(entry.get("bundle_path") or "") == "MANIFEST.json":
+                        continue
+                    check_export_cancelled(export_id)
+                    manifest_entries.append(write_export_entry_to_zip(archive, entry, export_id))
+                with EXPORT_LOCK:
+                    manifest_job = dict(EXPORT_JOBS.get(export_id) or {})
+                write_export_manifest_to_zip(archive, manifest_job, manifest_entries, export_id)
+            check_export_cancelled(export_id)
+            os.replace(partial_path, final_path)
+            with EXPORT_LOCK:
+                job_state = EXPORT_JOBS.get(export_id)
+                if job_state:
+                    job_state["status"] = "ready"
+                    job_state["phase"] = "ready"
+                    job_state["current_file"] = ""
+                    job_state["bytes_done"] = max(int(job_state.get("bytes_done") or 0), int(job_state.get("total_bytes") or 0))
+                    job_state["files_done"] = max(int(job_state.get("files_done") or 0), int(job_state.get("file_count") or 0))
+                    job_state["updated_at_epoch"] = time.time()
+                    job_state["updated_at"] = now_iso()
+        except ExportCancelled:
+            try:
+                if partial_path.exists():
+                    partial_path.unlink()
+            except OSError:
+                pass
+            update_export_job(export_id, status="cancelled", phase="cancelled", current_file="", error="")
+        except Exception as exc:
+            try:
+                if partial_path.exists():
+                    partial_path.unlink()
+            except OSError:
+                pass
+            update_export_job(export_id, status="failed", phase="failed", current_file="", error=str(exc))
+
+
+def prepare_export_plan_for_job(plan: dict[str, Any]) -> None:
+    kind = str(plan.get("kind") or "")
+    for entry in plan.get("entries") or []:
+        if str(entry.get("bundle_path") or "") == "README.md":
+            entry["content"] = export_readme(kind, estimate_only=False)
+            entry["size"] = len(str(entry.get("content") or "").encode("utf-8"))
+
+
+def start_export(payload: dict[str, Any]) -> dict[str, Any]:
+    kind = normalize_export_kind(payload.get("kind"))
+    confirmed = bool(payload.get("confirmed") or payload.get("confirmation") or payload.get("confirm"))
+    plan = build_export_plan(kind)
+    prepare_export_plan_for_job(plan)
+    estimate = export_public_estimate_from_plan(plan)
+    if plan.get("requires_confirmation") and not confirmed:
+        raise ValueError("Export requires confirmation.")
+    export_id = uuid.uuid4().hex
+    work_dir = export_runtime_dir() / export_id
+    filename = str(plan.get("filename") or export_filename(kind))
+    created_at = now_iso()
+    job = {
+        "id": export_id,
+        "project_id": current_project_context().id,
+        "kind": kind,
+        "label": str(plan.get("label") or EXPORT_KIND_LABELS[kind]),
+        "filename": filename,
+        "status": "packaging",
+        "phase": "packaging",
+        "created_at": created_at,
+        "updated_at": created_at,
+        "created_at_epoch": time.time(),
+        "updated_at_epoch": time.time(),
+        "total_bytes": int(plan.get("total_bytes") or 0),
+        "bytes_done": 0,
+        "file_count": int(plan.get("file_count") or 0),
+        "files_done": 0,
+        "current_file": "",
+        "error": "",
+        "requires_confirmation": bool(plan.get("requires_confirmation")),
+        "confirmation_threshold_bytes": int(plan.get("confirmation_threshold_bytes") or EXPORT_CONFIRMATION_BYTES),
+        "largest_files": plan.get("largest_files") or [],
+        "large_files": plan.get("large_files") or [],
+        "skipped": plan.get("skipped") or [],
+        "missing_externals": plan.get("missing_externals") or [],
+        "entries": plan.get("entries") or [],
+        "estimate": estimate,
+        "work_dir": str(work_dir),
+        "partial_path": str(work_dir / "bundle.partial.zip"),
+        "zip_path": str(work_dir / "bundle.zip"),
+        "cancel_requested": False,
+    }
+    thread = threading.Thread(target=run_export_job, args=(export_id,), name=f"export-{export_id[:8]}", daemon=True)
+    job["thread"] = thread
+    with EXPORT_LOCK:
+        EXPORT_JOBS[export_id] = job
+    thread.start()
+    with EXPORT_LOCK:
+        return export_job_public(EXPORT_JOBS[export_id])
+
+
+def export_status(export_id: str) -> dict[str, Any]:
+    cleanup_old_exports()
+    job = export_job_for_current_project(export_id)
+    with EXPORT_LOCK:
+        return export_job_public(job)
+
+
+def cancel_export(payload: dict[str, Any]) -> dict[str, Any]:
+    job = export_job_for_current_project(str(payload.get("id") or payload.get("export_id") or ""))
+    with EXPORT_LOCK:
+        job["cancel_requested"] = True
+        if str(job.get("status") or "") == "packaging":
+            job["phase"] = "cancelling"
+        job["updated_at_epoch"] = time.time()
+        job["updated_at"] = now_iso()
+        return export_job_public(job)
 
 
 def build_overview() -> dict[str, Any]:
@@ -5855,6 +6785,20 @@ def paragraph_plan_complete(section_body: str) -> bool:
     )
 
 
+def markdown_has_table(text: str) -> bool:
+    lines = str(text or "").splitlines()
+    for index, line in enumerate(lines[:-1]):
+        if "|" not in line:
+            continue
+        divider = lines[index + 1].strip()
+        if "|" not in divider:
+            continue
+        cells = [cell.strip() for cell in divider.strip("|").split("|")]
+        if cells and all(re.match(r"^:?-{3,}:?$", cell) for cell in cells):
+            return True
+    return False
+
+
 def final_gate_review_schema_blockers() -> list[str]:
     review_paths = list(REPO_ROOT.glob("research_trajectory/trials/*/reviews/FINAL_GATE_REVIEW.md"))
     review_paths.extend(REPO_ROOT.glob("research_trajectory/*/trials/*/reviews/FINAL_GATE_REVIEW.md"))
@@ -5985,9 +6929,11 @@ def final_blueprint_consistency_blockers() -> list[str]:
             continue
         for label in (
             "Placement:",
+            "Table number/title:",
             "Purpose or result role:",
-            "Columns, rows, or comparison logic:",
+            "Publication-ready table:",
             "Caption draft or current caption:",
+            "Table notes / definitions / abbreviations:",
             "Source artifact or spec path:",
             "Key result or conceptual contrast shown:",
             "Provenance links:",
@@ -5996,6 +6942,8 @@ def final_blueprint_consistency_blockers() -> list[str]:
         ):
             if label not in body:
                 blockers.append(f"Inline table `{title}` is missing `{label}`.")
+        if not markdown_has_table(body):
+            blockers.append(f"Inline table `{title}` is missing a publication-ready Markdown table body.")
     for title, body in algorithm_blocks:
         if not active_block(body):
             continue
@@ -6060,7 +7008,7 @@ def final_gate_consistency_blockers() -> list[str]:
     return blockers
 
 
-def read_autoresearch_gate() -> dict[str, Any]:
+def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
     if not RESEARCH_STATE_PATH.exists():
         return {
             "exists": False,
@@ -6118,7 +7066,7 @@ def read_autoresearch_gate() -> dict[str, Any]:
     status = overall_status
     if overall_status == "pass" and not all_reviewers_passed:
         status = "continue"
-    elif overall_status == "pass":
+    elif overall_status == "pass" and enforce_consistency:
         consistency_blockers = final_gate_consistency_blockers()
         if consistency_blockers:
             status = "continue"
@@ -6236,8 +7184,10 @@ def research_session_snapshot() -> dict[str, Any]:
         current_mode = str(RESEARCH_SESSION.get("mode", "") or "")
         current_proc = RESEARCH_SESSION.get("process")
         current_running = bool(current_proc and current_proc.poll() is None)
+        current_status = str(RESEARCH_SESSION.get("status", "") or "")
     chat_guard_active = current_mode == "chat" and current_running
-    gate = read_autoresearch_gate() if chat_guard_active else repair_autoresearch_gate_if_needed()
+    completed_goal_snapshot = current_status == "completed" and current_mode in {"goal", "research"} and not current_running
+    gate = read_autoresearch_gate(enforce_consistency=False) if chat_guard_active or completed_goal_snapshot else repair_autoresearch_gate_if_needed()
     trajectory = read_trajectory_state() if chat_guard_active else sync_trajectory_state("snapshot")
     with RESEARCH_LOCK:
         RESEARCH_SESSION["gate"] = gate
@@ -6278,10 +7228,12 @@ def research_session_snapshot() -> dict[str, Any]:
         trajectory_mismatch = False
         if running and mode in {"goal", "research"} and not gate_has_passed(gate):
             marker = read_expected_trial_marker()
-            expected_iteration = int(marker.get("expected_iteration") or 0) if marker else 0
-            if marker.get("status") == "mismatch":
+            expected_iteration = active_expected_trial_iteration(marker)
+            if str(marker.get("status") or "").strip().lower() == "mismatch" and expected_iteration > 0:
                 trajectory_mismatch = True
-            active_trial_iteration = expected_iteration or loop_iteration
+            active_trial_iteration = expected_iteration or latest_iteration or loop_iteration
+        state_text = safe_read(RESEARCH_STATE_PATH) if RESEARCH_STATE_PATH.exists() else ""
+        active_progress = active_trial_progress(active_trial_iteration, state_text) if active_trial_iteration > 0 else {}
         active_run = {
             "running": running,
             "mode": mode,
@@ -6300,6 +7252,7 @@ def research_session_snapshot() -> dict[str, Any]:
             ),
             "trajectory_mismatch": trajectory_mismatch,
             "wait_state": wait_state,
+            "progress": active_progress,
         }
         return {
             "id": RESEARCH_SESSION.get("id", ""),
@@ -7839,6 +8792,19 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     relative = query.get("path", [""])[0]
                     self.serve_repo_file(unquote(relative))
                     return
+                if parsed.path == "/api/export/estimate":
+                    query = parse_qs(parsed.query)
+                    self.send_json(export_estimate(query.get("kind", [""])[0]))
+                    return
+                if parsed.path == "/api/export/status":
+                    query = parse_qs(parsed.query)
+                    result = export_status(query.get("id", [""])[0])
+                    self.send_json({"ok": True, "export": result, **result})
+                    return
+                if parsed.path == "/api/export/download":
+                    query = parse_qs(parsed.query)
+                    self.serve_export_download(query.get("id", [""])[0])
+                    return
                 if parsed.path == "/api/local/browse":
                     query = parse_qs(parsed.query)
                     local_path = query.get("path", [""])[0]
@@ -7942,6 +8908,14 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     result = cancel_resource_import(payload)
                     self.send_json({"ok": True, "result": result, **result})
                     return
+                if parsed.path == "/api/export/start":
+                    result = start_export(payload)
+                    self.send_json({"ok": True, "export": result, **result})
+                    return
+                if parsed.path == "/api/export/cancel":
+                    result = cancel_export(payload)
+                    self.send_json({"ok": True, "export": result, **result})
+                    return
                 if parsed.path == "/api/cold-start":
                     self.send_json({"ok": True, "result": write_cold_start(payload)})
                     return
@@ -8009,6 +8983,38 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", f'inline; filename="{path.name}"')
         self.end_headers()
         self.wfile.write(data)
+
+    def serve_export_download(self, export_id: str) -> None:
+        try:
+            job = export_job_for_current_project(export_id)
+        except ValueError:
+            self.send_error(404)
+            return
+        with EXPORT_LOCK:
+            public = export_job_public(job)
+            path = Path(str(job.get("zip_path") or ""))
+        if public.get("status") != "ready" or not path.exists() or not path.is_file():
+            self.send_error(404)
+            return
+        filename = str(public.get("filename") or "export.zip").replace('"', "")
+        try:
+            size = path.stat().st_size
+            handle = path.open("rb")
+        except OSError:
+            self.send_error(404)
+            return
+        with handle:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}')
+            self.end_headers()
+            while True:
+                chunk = handle.read(EXPORT_CHUNK_BYTES)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
 
     def serve_static(self, request_path: str) -> None:
         relative = "index.html" if request_path in {"", "/"} else unquote(request_path.lstrip("/"))

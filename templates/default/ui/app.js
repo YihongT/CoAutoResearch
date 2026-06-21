@@ -35,11 +35,20 @@ let openProjectMenuId = "";
 let pendingRenameProject = null;
 let pendingDeleteProject = null;
 let selectedTrialIndex = 0;
-let trialStripScrollLeft = 0;
+let trialStripScrollState = {
+  mode: "auto",
+  left: 0,
+  liveIteration: 0,
+  selectedIteration: 0,
+  touchedAt: 0,
+};
 let selectedResumeTrialContext = null;
 let pendingResumeTrialConfirm = null;
 let pendingRestartAutoresearchConfirm = null;
 let activeLargeResourceImportId = "";
+let activeExportJob = null;
+let exportPollTimer = null;
+let pendingExportEstimate = null;
 let optimisticResearchSession = null;
 let fileViewerResizeState = null;
 let fileViewerReturnPath = "";
@@ -452,13 +461,27 @@ function inlineMarkup(text) {
     .replaceAll(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 
-function markdownToHtml(text) {
+function markdownHeadingId(title) {
+  const base = String(title || "")
+    .replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, "$1")
+    .replaceAll(/`([^`]+)`/g, "$1")
+    .replaceAll(/\*\*([^*]+)\*\*/g, "$1")
+    .replaceAll(/<[^>]*>/g, "")
+    .toLowerCase()
+    .replaceAll(/&[a-z0-9#]+;/g, "")
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "");
+  return base || "section";
+}
+
+function markdownToHtml(text, options = {}) {
   const lines = String(text || "").split(/\r?\n/);
   const html = [];
   let paragraph = [];
   let list = [];
   let inCode = false;
   let code = [];
+  const headingIds = new Map();
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -550,12 +573,20 @@ function markdownToHtml(text) {
       html.push(tableHtml(rows, alignments));
       continue;
     }
-    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
       flushParagraph();
       flushList();
       const level = heading[1].length;
-      html.push(`<h${level}>${inlineMarkup(heading[2])}</h${level}>`);
+      let idAttr = "";
+      if (options.headingAnchors) {
+        const baseId = markdownHeadingId(heading[2]);
+        const count = headingIds.get(baseId) || 0;
+        headingIds.set(baseId, count + 1);
+        const id = count ? `${baseId}-${count + 1}` : baseId;
+        idAttr = ` id="${escapeHtml(id)}"`;
+      }
+      html.push(`<h${level}${idAttr}>${inlineMarkup(heading[2])}</h${level}>`);
       continue;
     }
     const listItem = line.match(/^[-*]\s+(.+)$/);
@@ -1835,6 +1866,11 @@ function activeRunWaitState() {
   return typeof wait === "object" && wait ? wait : {};
 }
 
+function activeRunProgress() {
+  const progress = activeRun().progress || {};
+  return typeof progress === "object" && progress ? progress : {};
+}
+
 function activeRunMode() {
   return String(activeRun().mode || sessionState().mode || "").toLowerCase();
 }
@@ -2796,7 +2832,6 @@ function renderFramingConversation() {
   if (nextHtml !== lastFramingHtml) {
     const renderedDraft = document.querySelector(".project-rendered");
     if (renderedDraft) projectRenderedScrollTop = renderedDraft.scrollTop;
-    rememberTrialStripScroll();
     thread.innerHTML = nextHtml;
     lastFramingHtml = nextHtml;
     requestAnimationFrame(() => {
@@ -3846,6 +3881,10 @@ function effectiveIteration(entry, currentIteration) {
   if (inferred > 0) return inferred;
   const explicit = Number(entry?.iteration || 0);
   if (explicit > 0) {
+    const liveIteration = isLiveGoalSession() ? activeRunTrialIteration() : 0;
+    if (liveIteration > explicit && isCodexRuntimeEntry(entry)) {
+      return currentIteration >= liveIteration ? currentIteration : liveIteration;
+    }
     if (currentIteration > explicit && isCodexRuntimeEntry(entry)) return currentIteration;
     return explicit;
   }
@@ -3854,6 +3893,69 @@ function effectiveIteration(entry, currentIteration) {
     return Math.max(1, currentIteration || currentTrialIndex());
   }
   return currentIteration;
+}
+
+const TRIAL_PROGRESS_STAGES = [
+  { key: "planning", label: "Planning" },
+  { key: "working", label: "Working" },
+  { key: "synthesizing", label: "Synthesizing" },
+  { key: "reporting", label: "Reporting" },
+  { key: "reviewing", label: "Reviewing" },
+  { key: "gate_update", label: "Gate update" },
+];
+
+function trialProgressForIteration(iteration, report = null) {
+  const target = Number(iteration || 0);
+  if (!target) return {};
+  if (isTrialLive(target)) return activeRunProgress();
+  const source = report || reportForIteration(target);
+  const progress = source?.progress || {};
+  return progress && typeof progress === "object" ? progress : {};
+}
+
+function trialProgressSummaryText(progress, fallback = "") {
+  const summary = cleanText(progress?.summary, "");
+  if (summary) return summary;
+  const label = cleanText(progress?.stage_label, "");
+  const reviewerCount = Number(progress?.reviewer_count || 0);
+  const reviewerTotal = Number(progress?.reviewer_total || 0);
+  const artifactsCount = Number(progress?.artifacts_count || 0);
+  if (label && reviewerTotal > 0 && label.toLowerCase().includes("review")) return `${label} · ${reviewerCount}/${reviewerTotal} reviewer files`;
+  if (label && artifactsCount > 0) return `${label} · ${artifactsCount} artifact${artifactsCount === 1 ? "" : "s"}`;
+  if (label) return label;
+  return fallback;
+}
+
+function trialProgressDetailText(progress) {
+  const detail = cleanText(progress?.detail, "");
+  const updated = cleanText(progress?.updated_at, "");
+  if (detail && updated) return `${detail} · updated ${formatTimestamp(updated)}`;
+  return detail;
+}
+
+function trialProgressStepperHtml(progress) {
+  if (!progress || typeof progress !== "object") return "";
+  const totalStages = Number(progress.total_stages || TRIAL_PROGRESS_STAGES.length);
+  const currentIndex = Math.max(1, Math.min(Number(progress.stage_index || 0), totalStages || TRIAL_PROGRESS_STAGES.length));
+  if (!currentIndex) return "";
+  const stages = Array.isArray(progress.stages) && progress.stages.length ? progress.stages : TRIAL_PROGRESS_STAGES;
+  return `
+    <div class="trial-progress-stepper" aria-label="Trial progress">
+      ${stages
+        .map((stage, index) => {
+          const step = index + 1;
+          const state = step < currentIndex ? "complete" : step === currentIndex ? "current" : "pending";
+          const label = cleanText(stage?.label, `Stage ${step}`);
+          return `
+            <span class="trial-progress-step is-${state}" title="${escapeHtml(label)}">
+              <span class="trial-progress-marker" aria-hidden="true">${state === "complete" ? "✓" : escapeHtml(step)}</span>
+              <span>${escapeHtml(label)}</span>
+            </span>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
@@ -3867,6 +3969,9 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const status = running ? "running" : reportStatus === "reported" ? "completed" : reportStatus || (report ? "completed" : "active");
   const latestCompletedIteration = currentTrialIndex();
   const marksAutoresearchComplete = isGoalPassed() && Number(iteration) === Number(latestCompletedIteration);
+  const progress = trialProgressForIteration(iteration, report);
+  const progressSummary = trialProgressSummaryText(progress, "");
+  const progressDetail = trialProgressDetailText(progress);
   return `
     <article class="trial-report-card ${running ? "is-running" : report ? "is-complete" : "is-pending"}" data-trial-panel="${escapeHtml(iteration)}">
       <div class="trial-report-head">
@@ -3877,6 +3982,9 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
         </div>
         <span>${report ? `${escapeHtml(report.id)} / ${escapeHtml(report.report_path)}` : "Report pending"}</span>
       </div>
+      ${trialProgressStepperHtml(progress)}
+      ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
+      ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
       <p>${escapeHtml(summary)}</p>
       <div class="trial-report-actions">
         ${report?.report_path && !running ? `<button class="secondary-button small-button" type="button" data-trial-continue="${escapeHtml(iteration)}">Continue from this trial</button>` : ""}
@@ -3913,11 +4021,16 @@ function runningTrialStatusHtml(trial) {
   const entries = Array.isArray(trial?.entries) ? trial.entries : [];
   const report = trial?.report || reportForIteration(iteration);
   const reportSummary = cleanText(report?.report_summary, "");
+  const progress = trialProgressForIteration(iteration, report);
+  const progressSummary = trialProgressSummaryText(progress, "");
+  const progressDetail = trialProgressDetailText(progress);
   const latestEntry = latestTrialProgressEntry(entries);
   const latestText = latestEntry
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : reportSummary || agentWaitStateText() || "Waiting for agent events...";
+    : reportSummary || progressSummary || agentWaitStateText() || "Preparing trial progress...";
   const eventLabel = entries.length ? `${entries.length} event${entries.length === 1 ? "" : "s"}` : "waiting";
+  const waitNotice = agentWaitStateHtml();
+  const showWaitNotice = Boolean(waitNotice && (latestEntry || reportSummary || progressSummary));
   const actions = [
     report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : "",
     report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : "",
@@ -3937,7 +4050,10 @@ function runningTrialStatusHtml(trial) {
           ${runControlButtonsHtml()}
         </div>
       </div>
-      ${agentWaitStateHtml() || `<p>${escapeHtml(compactText(latestText, 240))}</p>`}
+      ${trialProgressStepperHtml(progress)}
+      <p>${escapeHtml(compactText(latestText, 240))}</p>
+      ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
+      ${showWaitNotice ? waitNotice : ""}
       ${actions ? `<div class="trial-report-actions">${actions}</div>` : ""}
       ${
         entries.length
@@ -3960,16 +4076,112 @@ function clampTrialStripScrollLeft(strip, value) {
   return max ? Math.min(requested, max) : requested;
 }
 
-function rememberTrialStripScroll(strip = document.querySelector(".trial-strip-scroll")) {
+const TRIAL_STRIP_MANUAL_EXPIRE_MS = 30000;
+
+function liveTrialStripIteration() {
+  return isLiveGoalSession() ? activeRunTrialIteration() : 0;
+}
+
+function resetTrialStripToAuto(liveIteration = liveTrialStripIteration()) {
+  trialStripScrollState = {
+    ...trialStripScrollState,
+    mode: "auto",
+    liveIteration,
+    touchedAt: 0,
+  };
+}
+
+function updateTrialStripLiveScope() {
+  const liveIteration = liveTrialStripIteration();
+  if (liveIteration !== trialStripScrollState.liveIteration) {
+    resetTrialStripToAuto(liveIteration);
+  }
+  return liveIteration;
+}
+
+function markTrialStripManual(strip, options = {}) {
   if (!strip) return;
-  trialStripScrollLeft = clampTrialStripScrollLeft(strip, strip.scrollLeft);
+  trialStripScrollState = {
+    mode: "manual",
+    left: clampTrialStripScrollLeft(strip, options.left ?? strip.scrollLeft),
+    liveIteration: liveTrialStripIteration(),
+    selectedIteration: Number(options.selectedIteration || selectedTrialIndex || 0),
+    touchedAt: Date.now(),
+  };
+}
+
+function trialStripManualActive() {
+  if (trialStripScrollState.mode !== "manual") return false;
+  if (Date.now() - Number(trialStripScrollState.touchedAt || 0) > TRIAL_STRIP_MANUAL_EXPIRE_MS) {
+    resetTrialStripToAuto();
+    return false;
+  }
+  return true;
+}
+
+function rememberTrialStripScroll(strip = document.querySelector(".trial-strip-scroll"), options = {}) {
+  if (!strip) return;
+  if (options.manual) markTrialStripManual(strip, options);
+}
+
+function bindTrialStripScrollState(strip) {
+  if (!strip || strip.dataset.trialStripScrollBound === "true") return;
+  strip.dataset.trialStripScrollBound = "true";
+  const noteUserIntent = () => {
+    strip.dataset.trialStripUserScroll = "true";
+  };
+  strip.addEventListener("pointerdown", noteUserIntent, { passive: true });
+  strip.addEventListener("touchstart", noteUserIntent, { passive: true });
+  strip.addEventListener("wheel", noteUserIntent, { passive: true });
+  strip.addEventListener("keydown", noteUserIntent);
+  strip.addEventListener("scroll", () => {
+    if (strip.dataset.trialStripUserScroll === "true") {
+      markTrialStripManual(strip);
+    }
+  }, { passive: true });
+}
+
+function activeTrialChip(strip) {
+  if (!strip) return null;
+  return strip.querySelector(".trial-chip.is-running") || strip.querySelector(".trial-chip.is-active");
+}
+
+function scrollTrialStripToActive(strip) {
+  const chip = activeTrialChip(strip);
+  if (!chip) return false;
+  const stripRect = strip.getBoundingClientRect();
+  const chipRect = chip.getBoundingClientRect();
+  const pad = 14;
+  if (chipRect.left >= stripRect.left + pad && chipRect.right <= stripRect.right - pad) {
+    return false;
+  }
+  const nextLeft = strip.scrollLeft + chipRect.left - stripRect.left - Math.max(0, (strip.clientWidth - chip.offsetWidth) / 2);
+  strip.scrollLeft = clampTrialStripScrollLeft(strip, nextLeft);
+  trialStripScrollState = {
+    ...trialStripScrollState,
+    mode: "auto",
+    left: strip.scrollLeft,
+    liveIteration: liveTrialStripIteration(),
+  };
+  return true;
 }
 
 function restoreTrialStripScroll() {
   const strip = document.querySelector(".trial-strip-scroll");
   if (!strip) return;
-  strip.scrollLeft = clampTrialStripScrollLeft(strip, trialStripScrollLeft);
-  strip.addEventListener("scroll", () => rememberTrialStripScroll(strip), { passive: true });
+  bindTrialStripScrollState(strip);
+  updateTrialStripLiveScope();
+  if (trialStripManualActive()) {
+    strip.scrollLeft = clampTrialStripScrollLeft(strip, trialStripScrollState.left);
+    return;
+  }
+  if (scrollTrialStripToActive(strip)) return;
+  trialStripScrollState = {
+    ...trialStripScrollState,
+    mode: "auto",
+    left: clampTrialStripScrollLeft(strip, strip.scrollLeft),
+    liveIteration: liveTrialStripIteration(),
+  };
 }
 
 function iterationNavHtml(trials, activeTrial) {
@@ -4035,6 +4247,12 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
 function entryTimeValue(entry) {
   const value = Date.parse(String(entry?.created_at || ""));
   return Number.isFinite(value) ? value : 0;
+}
+
+function formatTimestamp(value) {
+  const parsed = Date.parse(String(value || ""));
+  if (!Number.isFinite(parsed)) return String(value || "");
+  return new Date(parsed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatWorkedDuration(seconds) {
@@ -5062,27 +5280,7 @@ function renderTablesPanel(manuscript) {
     return `
       <section class="manuscript-tables">
         ${plans
-          .map((section) => {
-            const caption = manuscriptFieldValue(section, ["Caption draft or current caption", "Caption draft", "Caption"]);
-            const sourcePath = firstArtifactPath([
-              manuscriptFieldValue(section, ["Source artifact path", "Source artifact", "Artifact path"]),
-              section.body,
-            ].filter(Boolean).join("\n"));
-            return `
-              <article class="table-plan-row">
-                <header class="paper-section-head">
-                  <p>Table blueprint</p>
-                  <h4>${escapeHtml(cleanText(section.title, "Untitled table"))}</h4>
-                </header>
-                ${manuscriptActionsHtml([
-                  copyButton([`### ${section.title}`, section.body].join("\n\n"), "Copy table", "Table content copied."),
-                  caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
-                  sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
-                ])}
-                <div class="markdown-preview">${markdownToHtml(section.body)}</div>
-              </article>
-            `;
-          })
+          .map((section) => manuscriptTableCardHtml({ ...section, kind: "table", is_artifact: true }))
           .join("")}
       </section>
     `;
@@ -5113,12 +5311,29 @@ function renderTraceabilityPanel(manuscript) {
   return sectionList(manuscript.claims, "No traceability map is available yet.");
 }
 
+function manuscriptArchitectureBlocks(manuscript) {
+  const primary = (manuscript.architecture || manuscript.sections || []).filter(sectionHasRealContent);
+  const artifacts = (manuscript.inline_artifacts || []).filter(sectionHasRealContent);
+  const seen = new Set();
+  return [...primary, ...artifacts].filter((block) => {
+    const key = [
+      (block.is_artifact ? String(block.kind || "artifact") : "section").toLowerCase(),
+      cleanText(block.path, ""),
+      cleanText(block.title, ""),
+      cleanText(block.body, "").slice(0, 120),
+    ].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function renderArchitectureOverview(manuscript) {
   const toc = cleanText(manuscript.toc, "");
   if (hasRealText(toc)) {
     return `<div class="markdown-preview architecture-overview">${markdownToHtml(toc)}</div>`;
   }
-  const blocks = (manuscript.architecture || manuscript.sections || []).filter(sectionHasRealContent);
+  const blocks = manuscriptArchitectureBlocks(manuscript);
   if (!blocks.length) return empty("No manuscript architecture overview is available yet.");
   return `
     <nav class="architecture-toc" aria-label="Manuscript architecture">
@@ -5165,11 +5380,122 @@ function artifactKindLabel(kind) {
   if (value === "figure") return "Figure";
   if (value === "table") return "Table";
   if (value === "algorithm") return "Algorithm / method";
+  if (value === "method") return "Method";
+  if (value === "dataset") return "Dataset";
+  if (value === "benchmark") return "Benchmark";
   if (value === "result") return "Dataset / benchmark / result";
   return "Artifact";
 }
 
+function isAbstractArchitectureBlock(block) {
+  const title = cleanText(block?.title, "").toLowerCase();
+  return /^abstract(?:\s+plan|\b)/.test(title);
+}
+
+function firstMarkdownTable(text) {
+  const lines = String(text || "").replaceAll(/\r\n/g, "\n").split("\n");
+  const splitTableRow = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  const isDivider = (line) => {
+    if (!line.includes("|")) return false;
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+  };
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    if (!lines[index].includes("|") || !isDivider(lines[index + 1])) continue;
+    const tableLines = [lines[index], lines[index + 1]];
+    index += 2;
+    while (index < lines.length && lines[index].trim() && lines[index].includes("|")) {
+      tableLines.push(lines[index]);
+      index += 1;
+    }
+    return tableLines.join("\n");
+  }
+  return "";
+}
+
+function publicationReadyTableMarkdown(block) {
+  const field = manuscriptFieldValue(block, ["Publication-ready table", "Publication ready table", "Table body"]);
+  return firstMarkdownTable(field) || firstMarkdownTable(block?.body || "");
+}
+
+function manuscriptAbstractCardHtml(block) {
+  const paragraphPlan = paragraphPlanHtml(block);
+  const fieldGrid = architectureFieldGridHtml(block);
+  const fallback = fieldGrid || paragraphPlan ? "" : `<div class="markdown-preview">${markdownToHtml(block.body)}</div>`;
+  return `
+    <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="paper-section-row manuscript-abstract-card depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
+      <header class="paper-section-head abstract-section-head">
+        <p>Abstract</p>
+        <h4>${escapeHtml(cleanText(block.title, "Abstract plan"))}</h4>
+      </header>
+      ${fieldGrid}
+      ${paragraphPlan}
+      ${fallback}
+    </article>
+  `;
+}
+
+function manuscriptTableCardHtml(block) {
+  const status = manuscriptFieldValue(block, ["Inclusion status", "Status"]);
+  const placement = manuscriptFieldValue(block, ["Placement"]);
+  const role = manuscriptFieldValue(block, ["Purpose or result role", "Argument or result role", "Purpose"]);
+  const tableTitle = manuscriptFieldValue(block, ["Table number/title", "Table title", "Title"]) || cleanText(block.title, "Untitled table");
+  const tableBody = publicationReadyTableMarkdown(block);
+  const caption = manuscriptFieldValue(block, ["Caption draft or current caption", "Caption draft", "Caption"]);
+  const notes = manuscriptFieldValue(block, ["Table notes / definitions / abbreviations", "Table notes", "Notes"]);
+  const sourcePath = firstArtifactPath([
+    manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source artifact"]),
+    block.body,
+  ].filter(Boolean).join("\n"));
+  const details = [
+    ["Placement", placement],
+    ["Purpose / role", role],
+    ["Key result / contrast", manuscriptFieldValue(block, ["Key result or conceptual contrast shown"])],
+    ["Provenance", manuscriptFieldValue(block, ["Provenance links", "Source links"])],
+    ["Target-venue fit", manuscriptFieldValue(block, ["Target-venue fit rationale"])],
+    ["Remaining blocker", manuscriptFieldValue(block, ["Remaining blocker"])],
+  ].filter(([, value]) => hasRealText(value));
+  return `
+    <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card manuscript-table-card artifact-table depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
+      <header class="figure-spec-head table-card-head">
+        <div>
+          <p>Publication-ready table</p>
+          <h4>${escapeHtml(tableTitle)}</h4>
+        </div>
+        ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
+      </header>
+      ${manuscriptActionsHtml([
+        copyButton([`${"#".repeat(Number(block.level || 4))} ${block.title}`, block.body].join("\n\n"), "Copy block", "Table block copied."),
+        tableBody ? copyButton(tableBody, "Copy table", "Table copied.") : "",
+        caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
+        sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
+      ])}
+      ${caption ? `<blockquote class="figure-caption table-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
+      ${tableBody ? `<div class="publication-table-preview markdown-preview">${markdownToHtml(tableBody)}</div>` : `<p class="table-missing-warning">Missing publication-ready table body. Active tables must include a Markdown table in this block.</p>`}
+      ${hasRealText(notes) ? `<div class="table-notes markdown-preview"><strong>Notes.</strong> ${markdownToHtml(notes)}</div>` : ""}
+      ${details.length ? `
+        <dl class="paper-field-grid artifact-field-grid">
+          ${details
+            .map(([label, value]) => `
+              <div>
+                <dt>${escapeHtml(label)}</dt>
+                <dd><div class="markdown-preview">${markdownToHtml(value)}</div></dd>
+              </div>
+            `)
+            .join("")}
+        </dl>
+      ` : ""}
+      ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
+      <details class="figure-spec-full">
+        <summary>Full block</summary>
+        <div class="markdown-preview">${markdownToHtml(block.body)}</div>
+      </details>
+    </article>
+  `;
+}
+
 function manuscriptArtifactCardHtml(block) {
+  if (String(block.kind || "").toLowerCase() === "table") return manuscriptTableCardHtml(block);
   const kind = artifactKindLabel(block.kind);
   const status = manuscriptFieldValue(block, ["Inclusion status", "Status"]);
   const placement = manuscriptFieldValue(block, ["Placement"]);
@@ -5182,14 +5508,14 @@ function manuscriptArtifactCardHtml(block) {
   const details = [
     ["Placement", placement],
     ["Purpose / role", role],
-    ["Content", manuscriptFieldValue(block, ["Content and panel layout", "Columns, rows, or comparison logic", "Pseudocode / interface sketch", "Metric or result summary"])],
+    ["Content", manuscriptFieldValue(block, ["Content and panel layout", "Pseudocode / interface sketch", "Metric or result summary"])],
     ["Evidence / basis", manuscriptFieldValue(block, ["Result shown or conceptual basis", "Key result or conceptual contrast shown", "Validation evidence", "Manuscript claim supported in plain language"])],
     ["Provenance", manuscriptFieldValue(block, ["Provenance links", "Source links"])],
     ["Target-venue fit", manuscriptFieldValue(block, ["Target-venue fit rationale"])],
     ["Remaining blocker", manuscriptFieldValue(block, ["Remaining blocker"])],
   ].filter(([, value]) => hasRealText(value));
   return `
-    <article class="manuscript-artifact-card artifact-${escapeHtml(String(block.kind || "artifact"))} depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
+    <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card artifact-${escapeHtml(String(block.kind || "artifact"))} depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
       <header class="figure-spec-head">
         <div>
           <p>${escapeHtml(kind)} block</p>
@@ -5226,11 +5552,12 @@ function manuscriptArtifactCardHtml(block) {
 
 function manuscriptArchitectureBlockHtml(block) {
   if (block.is_artifact) return manuscriptArtifactCardHtml(block);
+  if (isAbstractArchitectureBlock(block)) return manuscriptAbstractCardHtml(block);
   const paragraphPlan = paragraphPlanHtml(block);
   const fieldGrid = architectureFieldGridHtml(block);
   const fallback = fieldGrid || paragraphPlan ? "" : `<div class="markdown-preview">${markdownToHtml(block.body)}</div>`;
   return `
-    <article class="paper-section-row architecture-section-row depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
+    <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="paper-section-row architecture-section-row depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
       <header class="paper-section-head">
         <p>${escapeHtml(block.path && block.path !== block.title ? block.path : "Manuscript section")}</p>
         <h4>${escapeHtml(cleanText(block.title, "Untitled section"))}</h4>
@@ -5243,7 +5570,7 @@ function manuscriptArchitectureBlockHtml(block) {
 }
 
 function renderManuscriptArchitecture(manuscript) {
-  const blocks = (manuscript.architecture || []).filter(sectionHasRealContent);
+  const blocks = manuscriptArchitectureBlocks(manuscript);
   if (blocks.length) {
     return `<section class="manuscript-architecture">${blocks.map(manuscriptArchitectureBlockHtml).join("")}</section>`;
   }
@@ -5284,6 +5611,7 @@ function renderManuscriptPanel() {
     </div>
   `;
   return [
+    contextCard("Export final results", renderExportPanel(), "Clean bundles for handoff or review."),
     contextCard("Architecture overview", renderArchitectureOverview(manuscript), "Full target-venue table of contents for the planned manuscript."),
     contextCard("Manuscript architecture", renderManuscriptArchitecture(manuscript), "Self-contained section order with local claims, evidence, displays, methods, results, and captions where they belong."),
     contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
@@ -5421,7 +5749,7 @@ function addResourcePath(path, options = {}) {
 function formatBytes(value) {
   const bytes = Number(value || 0);
   if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
+  const units = ["B", "KB", "MB", "GB", "TB"];
   let amount = bytes;
   let index = 0;
   while (amount >= 1024 && index < units.length - 1) {
@@ -5429,6 +5757,260 @@ function formatBytes(value) {
     index += 1;
   }
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
+}
+
+function exportKindLabel(kind) {
+  return kind === "final_project" ? "Final Project Pack" : "Blueprint Pack";
+}
+
+function exportJobTerminal(job) {
+  return ["ready", "failed", "cancelled"].includes(String(job?.status || ""));
+}
+
+function exportStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "estimating") return "Estimating";
+  if (value === "packaging") return "Packaging";
+  if (value === "cancelling") return "Cancelling";
+  if (value === "ready") return "Ready";
+  if (value === "failed") return "Failed";
+  if (value === "cancelled") return "Cancelled";
+  return value ? value[0].toUpperCase() + value.slice(1) : "Preparing";
+}
+
+function exportProgressPercent(job) {
+  const total = Number(job?.total_bytes || 0);
+  const done = Number(job?.bytes_done || 0);
+  if (!total) return exportJobTerminal(job) ? 100 : 0;
+  return Math.max(0, Math.min(100, (done / total) * 100));
+}
+
+function exportSummaryLine(job) {
+  if (!job) return "";
+  const status = String(job.status || job.phase || "");
+  if (status === "estimating") return "Estimating bundle size";
+  if (status === "ready") return `${formatBytes(job.bytes_done || job.total_bytes)} packaged`;
+  if (status === "failed") return job.error || "Export failed.";
+  if (status === "cancelled") return "Export cancelled.";
+  const filesDone = Number(job.files_done || 0);
+  const fileCount = Number(job.file_count || 0);
+  const bytesDone = Number(job.bytes_done || 0);
+  const totalBytes = Number(job.total_bytes || 0);
+  const parts = [];
+  if (fileCount) parts.push(`${filesDone}/${fileCount} files`);
+  if (totalBytes) parts.push(`${formatBytes(bytesDone)} / ${formatBytes(totalBytes)}`);
+  return parts.join(" · ") || "Packaging";
+}
+
+function exportFileRows(files, limit = 8) {
+  const items = Array.isArray(files) ? files.slice(0, limit) : [];
+  if (!items.length) return `<p class="export-muted">None</p>`;
+  return `<ul class="export-file-list">
+    ${items.map((item) => `
+      <li>
+        <code>${escapeHtml(item.bundle_path || item.source_path || "file")}</code>
+        <span>${formatBytes(item.size || 0)}</span>
+      </li>
+    `).join("")}
+  </ul>`;
+}
+
+function exportPathRows(paths, limit = 10) {
+  const items = Array.isArray(paths) ? paths.slice(0, limit) : [];
+  if (!items.length) return `<p class="export-muted">None</p>`;
+  return `<ul class="export-file-list is-compact">
+    ${items.map((item) => `
+      <li>
+        <code>${escapeHtml(item.path || item.bundle_path || "path")}</code>
+        <span>${escapeHtml(item.reason || item.target || "")}</span>
+      </li>
+    `).join("")}
+  </ul>`;
+}
+
+function renderExportProgress(job) {
+  if (!job) return "";
+  const status = String(job.status || job.phase || "packaging");
+  const percent = exportProgressPercent(job);
+  const currentFile = job.current_file ? `<code title="${escapeHtml(job.current_file)}">${escapeHtml(job.current_file)}</code>` : "";
+  const canCancel = ["packaging", "cancelling"].includes(status) && !job.cancel_requested;
+  const canDownload = status === "ready" && job.id;
+  return `
+    <section class="export-job is-${escapeHtml(status)}" aria-live="polite">
+      <div class="export-job-head">
+        <div>
+          <strong>${escapeHtml(job.label || exportKindLabel(job.kind))}</strong>
+          <span>${escapeHtml(exportSummaryLine(job))}</span>
+        </div>
+        <span class="export-status-pill">${escapeHtml(exportStatusLabel(job.phase || status))}</span>
+      </div>
+      <div class="export-progress-track" aria-hidden="true">
+        <span style="width: ${percent.toFixed(1)}%"></span>
+      </div>
+      <div class="export-job-meta">
+        <span>${formatBytes(job.bytes_done || 0)} / ${formatBytes(job.total_bytes || 0)}</span>
+        <span>${Number(job.files_done || 0)} / ${Number(job.file_count || 0)} files</span>
+      </div>
+      ${currentFile ? `<div class="export-current-file">${currentFile}</div>` : ""}
+      ${job.error ? `<p class="export-error">${escapeHtml(job.error)}</p>` : ""}
+      <div class="export-job-actions">
+        ${canCancel ? `<button class="secondary-button small-button" type="button" data-export-cancel="${escapeHtml(job.id)}">Cancel</button>` : ""}
+        ${canDownload ? `<button class="primary-button small-button" type="button" data-export-download="${escapeHtml(job.id)}">Download</button>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function renderExportPanel() {
+  const busy = activeExportJob && !exportJobTerminal(activeExportJob);
+  return `
+    <div class="export-panel">
+      <div class="export-actions">
+        <button class="secondary-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download blueprint pack</button>
+        <button class="secondary-button" type="button" data-export-kind="final_project" ${busy ? "disabled" : ""}>Download final project pack</button>
+      </div>
+      <p class="export-note">Final files only. Trajectory, runtime, archive, secrets, caches, and agent instructions stay out.</p>
+      ${renderExportProgress(activeExportJob)}
+    </div>
+  `;
+}
+
+function renderExportEstimateDetails(estimate) {
+  return `
+    <div class="export-confirm-summary">
+      <div class="export-confirm-grid">
+        <div><span>Total size</span><strong>${formatBytes(estimate?.total_bytes || 0)}</strong></div>
+        <div><span>Files</span><strong>${Number(estimate?.file_count || 0)}</strong></div>
+        <div><span>Threshold</span><strong>${formatBytes(estimate?.confirmation_threshold_bytes || 0)}</strong></div>
+      </div>
+      <details open>
+        <summary>Largest files</summary>
+        ${exportFileRows(estimate?.largest_files || [], 10)}
+      </details>
+      <details>
+        <summary>Files over threshold</summary>
+        ${exportFileRows(estimate?.large_files || [], 10)}
+      </details>
+      <details>
+        <summary>Skipped content</summary>
+        ${exportPathRows(estimate?.skipped || [], 12)}
+      </details>
+      <details>
+        <summary>Missing externals</summary>
+        ${exportPathRows(estimate?.missing_externals || [], 12)}
+      </details>
+    </div>
+  `;
+}
+
+function setActiveExportJob(job) {
+  activeExportJob = job || null;
+  if (activePanel === "manuscript") renderContext();
+}
+
+async function beginExportFlow(kind) {
+  const cleanKind = kind === "final_project" ? "final_project" : "blueprint";
+  setActiveExportJob({
+    kind: cleanKind,
+    label: exportKindLabel(cleanKind),
+    status: "estimating",
+    phase: "estimating",
+    total_bytes: 0,
+    bytes_done: 0,
+    file_count: 0,
+    files_done: 0,
+  });
+  try {
+    const estimate = await api(`/api/export/estimate?kind=${encodeURIComponent(cleanKind)}`);
+    if (estimate.requires_confirmation) {
+      setActiveExportJob(null);
+      openExportConfirmDialog(estimate);
+      return;
+    }
+    await startExportJob(cleanKind, false);
+  } catch (error) {
+    setActiveExportJob({ kind: cleanKind, label: exportKindLabel(cleanKind), status: "failed", phase: "failed", error: error.message });
+    showToast(error.message, true);
+  }
+}
+
+async function startExportJob(kind, confirmed = false) {
+  clearTimeout(exportPollTimer);
+  const response = await api("/api/export/start", {
+    method: "POST",
+    body: JSON.stringify({ kind, confirmed }),
+  });
+  const job = response.export || response.result || response;
+  setActiveExportJob(job);
+  scheduleExportPoll();
+  showToast("Export started.");
+  return job;
+}
+
+function scheduleExportPoll(delay = 900) {
+  clearTimeout(exportPollTimer);
+  if (!activeExportJob?.id || exportJobTerminal(activeExportJob)) return;
+  exportPollTimer = setTimeout(pollExportStatus, delay);
+}
+
+async function pollExportStatus() {
+  if (!activeExportJob?.id || exportJobTerminal(activeExportJob)) return;
+  try {
+    const response = await api(`/api/export/status?id=${encodeURIComponent(activeExportJob.id)}`);
+    const job = response.export || response.result || response;
+    setActiveExportJob(job);
+    scheduleExportPoll(job.status === "packaging" ? 900 : 1400);
+  } catch (error) {
+    setActiveExportJob({ ...activeExportJob, status: "failed", phase: "failed", error: error.message });
+  }
+}
+
+async function cancelExportJob(exportId) {
+  if (!exportId) return;
+  try {
+    const response = await api("/api/export/cancel", {
+      method: "POST",
+      body: JSON.stringify({ id: exportId }),
+    });
+    const job = response.export || response.result || response;
+    setActiveExportJob(job);
+    scheduleExportPoll(400);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function downloadExportJob(exportId) {
+  const job = activeExportJob?.id === exportId ? activeExportJob : null;
+  const path = job?.download_url || `/api/export/download?id=${encodeURIComponent(exportId)}`;
+  window.location.href = apiPath(path);
+}
+
+function openExportConfirmDialog(estimate) {
+  pendingExportEstimate = estimate;
+  const dialog = $("#export-confirm-dialog");
+  const summary = $("#export-confirm-summary");
+  const title = $("#export-confirm-title");
+  if (title) title.textContent = `${estimate.label || exportKindLabel(estimate.kind)} is large`;
+  if (summary) summary.innerHTML = renderExportEstimateDetails(estimate);
+  dialog?.showModal();
+}
+
+function closeExportConfirmDialog() {
+  pendingExportEstimate = null;
+  $("#export-confirm-dialog")?.close();
+}
+
+async function confirmExportDialog() {
+  const estimate = pendingExportEstimate;
+  if (!estimate?.kind) return;
+  closeExportConfirmDialog();
+  try {
+    await startExportJob(estimate.kind, true);
+  } catch (error) {
+    setActiveExportJob({ kind: estimate.kind, label: exportKindLabel(estimate.kind), status: "failed", phase: "failed", error: error.message });
+    showToast(error.message, true);
+  }
 }
 
 function resourceImportDestination(category) {
@@ -6305,6 +6887,301 @@ function inlineEditorHtml(payload, compact = false) {
   `;
 }
 
+function isLatestManuscriptPath(path) {
+  return repoRelativePath(path) === LATEST_MANUSCRIPT_PATH;
+}
+
+function blueprintAnchorForTitle(title) {
+  return markdownHeadingId(cleanText(title, "section"));
+}
+
+function blueprintArtifactFallbackPath(block) {
+  return firstArtifactPath([
+    manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source code or artifact links", "Source artifact", "Provenance links", "Source links"]),
+    block.body,
+  ].filter(Boolean).join("\n"));
+}
+
+function blueprintSidebarItemHtml(item) {
+  const label = cleanText(item.label, "Untitled");
+  const meta = cleanText(item.meta, "");
+  const eyebrow = cleanText(item.eyebrow, "");
+  const depth = Math.max(1, Math.min(6, Number(item.depth || 1)));
+  const classes = ["blueprint-sidebar-item", `depth-${depth}`, item.kind ? `kind-${item.kind}` : "", item.disabled ? "is-disabled" : ""].filter(Boolean).join(" ");
+  const content = `
+      ${eyebrow ? `<span class="blueprint-sidebar-eyebrow">${escapeHtml(eyebrow)}</span>` : ""}
+      <span class="blueprint-sidebar-label">${escapeHtml(label)}</span>
+      ${meta ? `<span class="blueprint-sidebar-meta">${escapeHtml(meta)}</span>` : ""}
+  `;
+  if (item.anchor) {
+    return `
+      <button class="${classes}" type="button" data-blueprint-anchor="${escapeHtml(item.anchor)}"${item.fallbackPath ? ` data-blueprint-fallback="${escapeHtml(item.fallbackPath)}"` : ""}>
+        ${content}
+      </button>
+    `;
+  }
+  if (item.path) {
+    return `
+      <button class="${classes}" type="button" data-inline-fullscreen="${escapeHtml(item.path)}">
+        ${content}
+      </button>
+    `;
+  }
+  return `
+    <button class="${classes}" type="button" disabled>
+      ${content}
+    </button>
+  `;
+}
+
+function blueprintSidebarSectionHtml(title, items, emptyText) {
+  const rows = (items || []).filter(Boolean);
+  const count = rows.length;
+  return `
+    <details class="blueprint-sidebar-section">
+      <summary>
+        <span>${escapeHtml(title)}</span>
+        <small>${escapeHtml(String(count))}</small>
+      </summary>
+      <div class="blueprint-sidebar-list">
+        ${rows.length ? rows.join("") : `<p class="blueprint-sidebar-empty">${escapeHtml(emptyText)}</p>`}
+      </div>
+    </details>
+  `;
+}
+
+function blueprintTocItemsFromMarkdown(toc) {
+  return String(toc || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const text = line.trim();
+      if (!text) return null;
+      const heading = text.match(/^(#{1,6})\s+(.+)$/);
+      const bullet = text.match(/^[-*]\s+(.+)$/);
+      const body = heading ? heading[2] : bullet ? bullet[1] : text;
+      const link = body.match(/\[([^\]\n]+)\]\(#([^)]+)\)/);
+      const label = link ? link[1] : body.replace(/^\d+(?:\.\d+)*\.?\s+/, "").replaceAll(/[`*_]/g, "");
+      const anchor = link ? link[2] : blueprintAnchorForTitle(label);
+      return blueprintSidebarItemHtml({
+        label,
+        anchor,
+        depth: heading ? heading[1].length : Math.max(1, Math.floor((line.length - line.trimStart().length) / 2) + 1),
+        kind: "outline",
+      });
+    })
+    .filter(Boolean);
+}
+
+function blueprintHeadingRowsFromText(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const heading = line.trimEnd().match(/^(#{1,6})\s+(.+)$/);
+      if (!heading) return null;
+      const title = heading[2].trim();
+      return {
+        title,
+        level: heading[1].length,
+        anchor: blueprintAnchorForTitle(title),
+      };
+    })
+    .filter(Boolean);
+}
+
+function blueprintTextArtifactKind(title) {
+  const match = String(title || "").trim().match(/^(Figure|Table|Algorithm|Method|Dataset|Benchmark|Result)\b/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function blueprintOutlineItems(manuscript, sourceText = "") {
+  const blocks = (manuscript.architecture || manuscript.sections || [])
+    .filter(sectionHasRealContent)
+    .filter((block) => !block.is_artifact);
+  if (blocks.length) {
+    return blocks.map((block) => blueprintSidebarItemHtml({
+      label: cleanText(block.title, "Untitled section"),
+      meta: block.path && block.path !== block.title ? block.path : "",
+      anchor: blueprintAnchorForTitle(block.title),
+      depth: block.level || 1,
+      kind: "outline",
+    }));
+  }
+  const tocItems = blueprintTocItemsFromMarkdown(manuscript.toc);
+  if (tocItems.length) return tocItems;
+  return blueprintHeadingRowsFromText(sourceText)
+    .filter((row) => !blueprintTextArtifactKind(row.title))
+    .map((row) => blueprintSidebarItemHtml({
+      label: row.title,
+      anchor: row.anchor,
+      depth: row.level,
+      kind: "outline",
+    }));
+}
+
+function blueprintArtifactItems(manuscript, kinds, sourceText = "") {
+  const allowed = new Set(kinds);
+  const blocks = [
+    ...(manuscript.inline_artifacts || []),
+    ...(manuscript.architecture || []).filter((block) => block.is_artifact),
+  ].filter((block, index, all) => {
+    const kind = String(block.kind || "").toLowerCase();
+    const key = `${kind}:${cleanText(block.title, "")}:${cleanText(block.path, "")}`;
+    return allowed.has(kind) && all.findIndex((candidate) => {
+      const candidateKind = String(candidate.kind || "").toLowerCase();
+      const candidateKey = `${candidateKind}:${cleanText(candidate.title, "")}:${cleanText(candidate.path, "")}`;
+      return candidateKey === key;
+    }) === index;
+  });
+  if (blocks.length) return blocks.map((block) => {
+    const kind = String(block.kind || "artifact").toLowerCase();
+    const status = manuscriptFieldValue(block, ["Inclusion status", "Status"]);
+    const placement = manuscriptFieldValue(block, ["Placement"]);
+    const fallbackPath = blueprintArtifactFallbackPath(block);
+    const meta = [status ? figureSpecExcerpt(status, 80) : "", placement ? figureSpecExcerpt(placement, 100) : ""].filter(Boolean).join(" · ");
+    return blueprintSidebarItemHtml({
+      label: cleanText(block.title, `${artifactKindLabel(kind)} block`),
+      meta,
+      eyebrow: artifactKindLabel(kind),
+      anchor: blueprintAnchorForTitle(block.title),
+      fallbackPath,
+      depth: block.level || 4,
+      kind,
+    });
+  });
+  return blueprintHeadingRowsFromText(sourceText)
+    .map((row) => ({ ...row, kind: blueprintTextArtifactKind(row.title) }))
+    .filter((row) => allowed.has(row.kind))
+    .map((row) => blueprintSidebarItemHtml({
+      label: row.title,
+      meta: "From BLUEPRINT.md",
+      eyebrow: artifactKindLabel(row.kind),
+      anchor: row.anchor,
+      depth: row.level,
+      kind: row.kind,
+    }));
+}
+
+function blueprintTableItems(manuscript, sourceText = "") {
+  const tables = blueprintArtifactItems(manuscript, ["table"], sourceText);
+  if (tables.length) return tables;
+  const rationale = cleanText(manuscript.no_table_rationale, "");
+  if (!rationale) return [];
+  return [blueprintSidebarItemHtml({
+    label: "No active table",
+    meta: figureSpecExcerpt(rationale, 150),
+    kind: "table",
+    disabled: true,
+  })];
+}
+
+function latestBlueprintReviewSelection(reviews) {
+  const visible = (reviews || []).filter(hasVisibleReview);
+  const numbered = visible
+    .map((review) => ({ review, number: reviewTrialNumber(reviewTrialId(review)) }))
+    .filter((entry) => Number.isFinite(entry.number));
+  const activeIteration = activeRunTrialIteration();
+  let trialNumber = 0;
+  if (activeIteration && numbered.some((entry) => entry.number === activeIteration)) {
+    trialNumber = activeIteration;
+  } else if (numbered.length) {
+    trialNumber = Math.max(...numbered.map((entry) => entry.number));
+  } else if (activeIteration) {
+    trialNumber = activeIteration;
+  }
+  return {
+    trialNumber,
+    reviews: trialNumber ? numbered.filter((entry) => entry.number === trialNumber).map((entry) => entry.review) : [],
+    emptyText: trialNumber ? `No saved reviews for Trial ${trialNumber} yet.` : "No saved reviewer files yet.",
+  };
+}
+
+function blueprintReviewItems(reviews) {
+  return (reviews || [])
+    .filter(hasVisibleReview)
+    .sort((a, b) => reviewSortKey(a).localeCompare(reviewSortKey(b)))
+    .map((review) => {
+      const path = repoRelativePath(review.path || "");
+      const reviewer = cleanText(review.reviewer, "") || basename(path || review.name || "Review").replace(/_REVIEW\.md$/i, "").replaceAll("_", " ");
+      const decision = reviewDecision(review);
+      const trial = reviewReadableTrial(reviewTrialId(review));
+      return blueprintSidebarItemHtml({
+        label: reviewer,
+        meta: [decision, trial].filter(Boolean).join(" · "),
+        eyebrow: basename(path || review.name || "Review"),
+        path,
+        kind: "review",
+      });
+    });
+}
+
+function blueprintSidebarHtml(manuscript, reviews, sourceText = "") {
+  const reviewSelection = latestBlueprintReviewSelection(reviews);
+  return `
+    <aside class="blueprint-inspector-sidebar" aria-label="Blueprint inspector">
+      <div class="blueprint-sidebar-heading">
+        <p class="eyebrow">Blueprint inspector</p>
+        <h2>Current manuscript</h2>
+      </div>
+      ${blueprintSidebarSectionHtml("Outline", blueprintOutlineItems(manuscript, sourceText), "No manuscript outline parsed yet.")}
+      ${blueprintSidebarSectionHtml("Figures", blueprintArtifactItems(manuscript, ["figure"], sourceText), "No inline figures parsed yet.")}
+      ${blueprintSidebarSectionHtml("Tables", blueprintTableItems(manuscript, sourceText), "No inline tables parsed yet.")}
+      ${blueprintSidebarSectionHtml("Results / Methods", blueprintArtifactItems(manuscript, ["result", "algorithm", "dataset", "benchmark", "method"], sourceText), "No result or method blocks parsed yet.")}
+      ${blueprintSidebarSectionHtml("Reviews", blueprintReviewItems(reviewSelection.reviews), reviewSelection.emptyText)}
+    </aside>
+  `;
+}
+
+function blueprintStructuredBodyHtml(manuscript) {
+  const blocks = manuscriptArchitectureBlocks(manuscript);
+  const hasStructuredBlueprint = blocks.length || hasRealText(manuscript.toc) || hasRealText(manuscript.provenance || manuscript.traceability);
+  if (!hasStructuredBlueprint) return "";
+  return `
+    <div class="inline-preview blueprint-rendered blueprint-structured-preview">
+      <section class="blueprint-render-section">
+        <h3>Architecture overview</h3>
+        ${renderArchitectureOverview(manuscript)}
+      </section>
+      <section class="blueprint-render-section">
+        <h3>Manuscript architecture</h3>
+        ${renderManuscriptArchitecture(manuscript)}
+      </section>
+      <section class="blueprint-render-section">
+        <h3>Audit / provenance</h3>
+        ${renderManuscriptAuditPanel(manuscript)}
+      </section>
+    </div>
+  `;
+}
+
+function renderBlueprintInspector(payload) {
+  const manuscript = appState.summaries?.manuscript || {};
+  const reviews = appState.reviews || [];
+  const path = payload.path || LATEST_MANUSCRIPT_PATH;
+  const mode = inlineFileModes[path] || defaultInlineMode(payload);
+  inlineFileModes[path] = mode;
+  const editableInSource = payload.editable && mode === "source";
+  const renderedBody = payload.kind === "markdown" && mode === "rendered"
+    ? blueprintStructuredBodyHtml(manuscript) || `<div class="markdown-preview inline-preview blueprint-rendered">${markdownToHtml(payload.text || "", { headingAnchors: true })}</div>`
+    : inlineFileBodyHtml(payload, mode);
+  return `
+    <div class="blueprint-inspector">
+      ${blueprintSidebarHtml(manuscript, reviews, payload.text || "")}
+      <section class="inline-editor-shell blueprint-inspector-main" aria-label="Rendered blueprint">
+        <div class="inline-editor-head">
+          <span>${escapeHtml(path)}</span>
+          <div class="inline-editor-actions">
+            ${inlineModeSwitchHtml(path, payload, mode)}
+            ${editableInSource ? `<button class="secondary-button small-button" type="button" data-inline-save="${escapeHtml(path)}">Save & notify</button>` : ""}
+          </div>
+        </div>
+        <div class="inline-editor-grid">
+          ${renderedBody}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 async function loadInlineFile(path, container, compact = false) {
   try {
     const payload = await api(`/api/file?path=${encodeURIComponent(path)}`);
@@ -6326,7 +7203,10 @@ function setInlineFileMode(path, mode) {
   if (!payload) return;
   inlineFileModes[path] = mode;
   document.querySelectorAll(`[data-inline-file="${CSS.escape(path)}"], [data-inline-fullscreen-file="${CSS.escape(path)}"]`).forEach((container) => {
-    container.innerHTML = inlineEditorHtml(payload, container.dataset.compactInline === "true");
+    const fullscreen = container.dataset.inlineFullscreenFile === path;
+    container.innerHTML = fullscreen && isLatestManuscriptPath(path)
+      ? renderBlueprintInspector(payload)
+      : inlineEditorHtml(payload, container.dataset.compactInline === "true");
   });
 }
 
@@ -6403,7 +7283,10 @@ function startFileViewerResize(event) {
   event.preventDefault();
   event.stopPropagation();
   const rect = dialog.getBoundingClientRect();
+  const axis = ["right", "bottom", "corner"].includes(handle.dataset.fileViewerResize) ? handle.dataset.fileViewerResize : "corner";
   fileViewerResizeState = {
+    axis,
+    handle,
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
@@ -6411,6 +7294,7 @@ function startFileViewerResize(event) {
     height: rect.height,
   };
   handle.setPointerCapture?.(event.pointerId);
+  document.body.dataset.fileViewerResizeAxis = axis;
   document.body.classList.add("is-resizing-file-viewer");
 }
 
@@ -6419,9 +7303,12 @@ function updateFileViewerResize(event) {
   event.preventDefault();
   const dialog = $("#file-viewer-dialog");
   if (!dialog) return;
+  const deltaX = event.clientX - fileViewerResizeState.startX;
+  const deltaY = event.clientY - fileViewerResizeState.startY;
+  const axis = fileViewerResizeState.axis || "corner";
   const size = clampFileViewerSize(
-    fileViewerResizeState.width + event.clientX - fileViewerResizeState.startX,
-    fileViewerResizeState.height + event.clientY - fileViewerResizeState.startY
+    axis === "right" || axis === "corner" ? fileViewerResizeState.width + deltaX : fileViewerResizeState.width,
+    axis === "bottom" || axis === "corner" ? fileViewerResizeState.height + deltaY : fileViewerResizeState.height
   );
   dialog.style.width = `${size.width}px`;
   dialog.style.height = `${size.height}px`;
@@ -6430,7 +7317,7 @@ function updateFileViewerResize(event) {
 function finishFileViewerResize(event) {
   if (!fileViewerResizeState) return;
   const dialog = $("#file-viewer-dialog");
-  const handle = event?.target?.closest?.("[data-file-viewer-resize]") || document.querySelector("[data-file-viewer-resize]");
+  const handle = fileViewerResizeState.handle || event?.target?.closest?.("[data-file-viewer-resize]") || document.querySelector("[data-file-viewer-resize]");
   try {
     handle?.releasePointerCapture?.(fileViewerResizeState.pointerId);
   } catch (error) {
@@ -6438,6 +7325,7 @@ function finishFileViewerResize(event) {
   }
   fileViewerResizeState = null;
   document.body.classList.remove("is-resizing-file-viewer");
+  delete document.body.dataset.fileViewerResizeAxis;
   if (dialog) persistFileViewerSize(dialog);
 }
 
@@ -6487,7 +7375,8 @@ async function openInlineFullscreen(path, options = {}) {
   title.textContent = basename(resolvedPath);
   body.dataset.inlineFullscreenFile = resolvedPath;
   body.dataset.compactInline = "false";
-  body.innerHTML = inlineEditorHtml(payload, false);
+  body.dataset.fileViewerKind = isLatestManuscriptPath(resolvedPath) ? "blueprint" : String(payload.kind || "file");
+  body.innerHTML = body.dataset.fileViewerKind === "blueprint" ? renderBlueprintInspector(payload) : inlineEditorHtml(payload, false);
   updateFileViewerReturnAction(resolvedPath);
   applyFileViewerSize(dialog);
   if (dialog.showModal) dialog.showModal();
@@ -6504,6 +7393,7 @@ function closeInlineFullscreen() {
   if (body) {
     body.innerHTML = "";
     delete body.dataset.inlineFullscreenFile;
+    delete body.dataset.fileViewerKind;
   }
   fileViewerReturnPath = "";
   updateFileViewerReturnAction("");
@@ -7520,6 +8410,10 @@ function bindEvents() {
     event.preventDefault();
     closeLargeResourceImportDialog();
   });
+  $("#export-confirm-dialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeExportConfirmDialog();
+  });
   document.addEventListener("dragover", (event) => {
     if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
     event.preventDefault();
@@ -7650,6 +8544,32 @@ function bindEvents() {
       closeLargeResourceImportDialog();
       return;
     }
+    const startExport = event.target.closest("[data-export-kind]");
+    if (startExport) {
+      beginExportFlow(startExport.dataset.exportKind).catch((error) => showToast(error.message, true));
+      return;
+    }
+    const exportConfirmGenerate = event.target.closest("[data-export-confirm-generate]");
+    if (exportConfirmGenerate) {
+      confirmExportDialog().catch((error) => showToast(error.message, true));
+      return;
+    }
+    const exportConfirmCancel = event.target.closest("[data-export-confirm-cancel]");
+    const exportConfirmClose = event.target.closest("[data-export-confirm-close]");
+    if (exportConfirmCancel || exportConfirmClose) {
+      closeExportConfirmDialog();
+      return;
+    }
+    const exportCancel = event.target.closest("[data-export-cancel]");
+    if (exportCancel) {
+      cancelExportJob(exportCancel.dataset.exportCancel);
+      return;
+    }
+    const exportDownload = event.target.closest("[data-export-download]");
+    if (exportDownload) {
+      downloadExportJob(exportDownload.dataset.exportDownload);
+      return;
+    }
     const copyText = event.target.closest("[data-copy-text]");
     if (copyText) {
       event.preventDefault();
@@ -7716,6 +8636,22 @@ function bindEvents() {
       saveInlineFile(save.dataset.inlineSave, save.closest(".inline-editor-shell"));
       return;
     }
+    const blueprintAnchor = event.target.closest("[data-blueprint-anchor]");
+    if (blueprintAnchor) {
+      const anchor = blueprintAnchor.dataset.blueprintAnchor || "";
+      const viewerBody = $("#file-viewer-body");
+      const target = anchor
+        ? viewerBody?.querySelector?.(`#${CSS.escape(anchor)}`) || document.getElementById?.(anchor)
+        : null;
+      if (target) {
+        target.scrollIntoView({ block: "start", behavior: "smooth" });
+      } else if (blueprintAnchor.dataset.blueprintFallback) {
+        openInlineFullscreen(blueprintAnchor.dataset.blueprintFallback, { returnPath: LATEST_MANUSCRIPT_PATH });
+      } else {
+        showToast("That blueprint section is not visible in the rendered file yet.", true);
+      }
+      return;
+    }
     const inlineFullscreen = event.target.closest("[data-inline-fullscreen]");
     if (inlineFullscreen) {
       const sourcePath = repoRelativePath(
@@ -7771,16 +8707,17 @@ function bindEvents() {
       const strip = trialScroll.closest(".trial-strip")?.querySelector(".trial-strip-scroll");
       if (strip) {
         const delta = Number(trialScroll.dataset.trialScroll || 1) * Math.max(180, strip.clientWidth * 0.72);
-        trialStripScrollLeft = clampTrialStripScrollLeft(strip, strip.scrollLeft + delta);
-        strip.scrollLeft = trialStripScrollLeft;
+        const nextLeft = clampTrialStripScrollLeft(strip, strip.scrollLeft + delta);
+        strip.scrollLeft = nextLeft;
+        markTrialStripManual(strip, { left: nextLeft });
       }
       return;
     }
     const trialSelect = event.target.closest("[data-trial-select]");
     if (trialSelect) {
       const strip = trialSelect.closest(".trial-strip")?.querySelector(".trial-strip-scroll");
-      rememberTrialStripScroll(strip);
       selectedTrialIndex = Number(trialSelect.dataset.trialSelect || 0);
+      rememberTrialStripScroll(strip, { manual: true, selectedIteration: selectedTrialIndex });
       renderFramingConversation();
       requestAnimationFrame(restoreTrialStripScroll);
       return;
