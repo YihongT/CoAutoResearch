@@ -8349,6 +8349,13 @@ async function coldStartFromPrepare() {
     $("#cold-file-editor")?.focus();
     return;
   }
+  if (resumeFromTrial) {
+    const sent = await sendSessionComposerMessage(input);
+    if (!sent) return;
+    await loadOverview(true);
+    scrollFramingToBottomSoon();
+    return;
+  }
   const displayInput = input || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
   let composerSnapshot = null;
   try {
@@ -8945,7 +8952,15 @@ function bindEvents() {
     }
     const submitResumeTrial = event.target.closest("[data-resume-trial-submit]");
     if (submitResumeTrial) {
-      coldStartFromPrepare();
+      event.preventDefault();
+      event.stopPropagation();
+      const input = String($("#cold-file-editor")?.value || "").trim();
+      sendSessionComposerMessage(input)
+        .then((sent) => {
+          if (!sent) return;
+          loadOverview(true).then(scrollFramingToBottomSoon).catch((error) => showToast(error.message, true));
+        })
+        .catch((error) => showToast(error.message, true));
       return;
     }
     const browserOpen = event.target.closest("[data-browser-open]");

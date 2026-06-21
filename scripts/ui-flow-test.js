@@ -963,6 +963,30 @@ async function testResumeFromTrialRequiresConfirmationAndSendsPayload() {
   assert.equal(app.context.__apiCalls[0].body.resumeFromTrial.checkpointExists, false);
 }
 
+async function testPrepareSubmitWithResumeContextSendsResumePayload() {
+  const app = loadAppContext();
+  app.coldEditor.value = "Collect a cross-company and cross-region results corpus.";
+  app.run(`
+    __setResumeTrialContext({
+      id: "000012_final_blueprint_gate_repair",
+      path: "research_trajectory/trials/000012_final_blueprint_gate_repair",
+      iteration: 12,
+      name: "000012_final_blueprint_gate_repair",
+      reportPath: "research_trajectory/trials/000012_final_blueprint_gate_repair/REPORT.md",
+      checkpointPath: "research_trajectory/checkpoints/000012_final_blueprint_gate_repair",
+      checkpointExists: true
+    });
+  `);
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__confirmCalls.length, 1, "prepare submit with a staged trial must confirm the fork");
+  assert.equal(app.context.__confirmCalls[0].context.id, "000012_final_blueprint_gate_repair");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/resume-from-trial");
+  assert.equal(app.context.__apiCalls[0].body.message, "Collect a cross-company and cross-region results corpus.");
+  assert.equal(app.context.__apiCalls[0].body.resumeFromTrial.id, "000012_final_blueprint_gate_repair");
+  const [message] = app.context.__messages();
+  assert.equal(message.resumeFromTrial.id, "000012_final_blueprint_gate_repair", "visible user message should show the resume context");
+}
+
 async function testResumeFromTrialCancelPreservesComposer() {
   const app = loadAppContext();
   app.coldEditor.value = "Do not submit yet.";
@@ -2638,6 +2662,7 @@ testButtonInventoryHasHandlers();
 await testImmediateUserMessage();
 await testAttachmentOnlyMessage();
 await testResumeFromTrialRequiresConfirmationAndSendsPayload();
+await testPrepareSubmitWithResumeContextSendsResumePayload();
 await testResumeFromTrialCancelPreservesComposer();
 await testResumeTrialSlashCommandIsBlocked();
 await testFailedSessionSendRestoresComposerState();

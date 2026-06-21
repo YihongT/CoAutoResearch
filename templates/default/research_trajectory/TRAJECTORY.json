@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "active_epoch": "current",
+  "fork_id": "",
+  "base_trial": "",
+  "latest_active_trial": "",
+  "next_trial_number": 1,
+  "archived_trial_ids": [],
+  "gate_schema_version": 1,
+  "updated_at": "2026-06-21T01:33:00-04:00",
+  "last_sync_reason": "overview"
+}
