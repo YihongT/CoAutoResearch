@@ -1500,6 +1500,318 @@ textarea:focus {
   line-height: 1.58;
 }
 
+.manuscript-story-map {
+  display: grid;
+  gap: 18px;
+}
+
+.story-map-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  gap: 18px;
+  align-items: start;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--accent) 28%);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent) 4%);
+}
+
+.story-map-kicker {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.story-map-hero h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 23px;
+  line-height: 1.18;
+}
+
+.story-map-core {
+  max-width: 82ch;
+  margin-top: 10px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.story-map-core :where(p, ul, ol) {
+  margin: 0;
+}
+
+.story-map-core :where(p + p, ul + p, p + ul) {
+  margin-top: 9px;
+}
+
+.story-map-meta {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+}
+
+.story-map-meta div {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.story-map-meta div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.story-map-meta dt {
+  margin: 0;
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.story-map-meta dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.story-map-nav {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 90%, var(--paper) 10%);
+}
+
+.story-map-nav h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.story-map-toc,
+.story-map-link-list {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.story-map-toc :where(ul, ol) {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.story-map-link-list {
+  display: grid;
+  gap: 6px;
+}
+
+.story-map-link-list a {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.story-map-link-list span {
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.story-section-list {
+  display: grid;
+  gap: 16px;
+}
+
+.story-section-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--line-strong);
+}
+
+.story-section-card:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.story-section-head {
+  display: grid;
+  gap: 4px;
+}
+
+.story-section-head p {
+  margin: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.story-section-head h4 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.story-section-brief {
+  max-width: 86ch;
+  padding: 12px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 68%, var(--line) 32%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent) 4%);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.story-section-brief :where(p, ul, ol) {
+  margin: 0;
+}
+
+.story-section-brief :where(p + p, ul + p, p + ul) {
+  margin-top: 8px;
+}
+
+.story-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.story-point {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.story-point.is-main,
+.story-point.is-display-empty {
+  grid-column: 1 / -1;
+}
+
+.story-point h5,
+.story-displays > h5,
+.story-raw-fields > h5 {
+  margin: 0;
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.story-point-body,
+.story-display-note {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.story-point-body :where(p, ul, ol),
+.story-display-note :where(p, ul, ol) {
+  margin: 0;
+}
+
+.story-point-body :where(p + p, ul + p, p + ul),
+.story-display-note :where(p + p, ul + p, p + ul) {
+  margin-top: 7px;
+}
+
+.story-displays {
+  display: grid;
+  gap: 10px;
+}
+
+.story-artifact-list {
+  display: grid;
+  gap: 10px;
+}
+
+.story-artifact-card {
+  padding: 12px 14px;
+}
+
+.story-artifact-head h5 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.story-artifact-card .story-point {
+  padding: 0;
+}
+
+.story-artifact-card .figure-caption {
+  background: color-mix(in srgb, var(--paper) 88%, var(--surface) 12%);
+}
+
+.story-details {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.story-details > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.story-details[open] {
+  padding-top: 4px;
+}
+
+.story-raw-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.story-unplaced {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--warning) 36%, var(--line) 64%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning-bg) 54%, var(--surface) 46%);
+}
+
+.story-unplaced h4,
+.story-unplaced p {
+  margin: 0;
+}
+
+.story-unplaced h4 {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.story-unplaced p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .paper-section-row,
 .figure-plan-row,
 .table-plan-row {
@@ -1559,6 +1871,100 @@ textarea:focus {
   margin: 0;
 }
 
+.architecture-field-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.architecture-field-row {
+  display: grid;
+  grid-template-columns: 142px minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.architecture-field-row.is-long {
+  grid-column: 1 / -1;
+}
+
+.architecture-field-row dt {
+  margin: 0;
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.architecture-field-row dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.architecture-field-value {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.62;
+}
+
+.architecture-field-value :where(p, ul, ol) {
+  margin: 0;
+}
+
+.architecture-field-value :where(p + p, ul + p, p + ul, ol + p, p + ol) {
+  margin-top: 8px;
+}
+
+.architecture-field-value :where(ul, ol) {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+}
+
+.architecture-field-value code {
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-soft);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.architecture-field-value .markdown-table-wrap {
+  margin: 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.architecture-field-value table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.48;
+}
+
+.architecture-field-value :where(th, td) {
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.architecture-field-value :where(th:last-child, td:last-child) {
+  border-right: 0;
+}
+
 .paragraph-plan-block {
   display: grid;
   gap: 8px;
@@ -1574,6 +1980,55 @@ textarea:focus {
 
 .paragraph-plan-block .markdown-table-wrap {
   margin: 0;
+}
+
+.architecture-paragraph-plan {
+  padding-top: 2px;
+}
+
+.paragraph-plan-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 900px) {
+  .manuscript-export-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .manuscript-export-bar .export-panel {
+    justify-items: stretch;
+  }
+
+  .manuscript-export-bar .export-actions {
+    justify-content: flex-start;
+  }
+
+  .manuscript-export-bar .export-note {
+    max-width: none;
+    text-align: left;
+  }
+
+  .architecture-field-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .architecture-field-row,
+  .architecture-field-row.is-long {
+    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .story-map-hero,
+  .story-section-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .story-map-link-list a {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
 }
 
 .paper-linked-block {
@@ -1595,6 +2050,57 @@ textarea:focus {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.manuscript-export-bar {
+  position: sticky;
+  top: 10px;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--paper) 6%);
+  box-shadow: 0 10px 28px rgba(38, 43, 37, 0.08);
+}
+
+.manuscript-export-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.manuscript-export-copy strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.manuscript-export-copy span {
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.manuscript-export-bar .export-panel {
+  justify-items: end;
+  min-width: 0;
+}
+
+.manuscript-export-bar .export-actions {
+  justify-content: flex-end;
+}
+
+.manuscript-export-bar .export-note {
+  max-width: 420px;
+  text-align: right;
+}
+
+.manuscript-export-bar .export-job {
+  width: min(520px, 100%);
 }
 
 .export-panel {
@@ -1897,7 +2403,7 @@ textarea:focus {
 }
 
 .abstract-section-head h4 {
-  font-size: clamp(20px, 2vw, 26px);
+  font-size: 22px;
 }
 
 .manuscript-artifact-card.artifact-figure {
@@ -11233,7 +11739,7 @@ html[data-theme] .review-chip {
   color: var(--link) !important;
 }
 
-html[data-theme] :is(.figure-spec-card, .figure-spec-card.is-compact, .manuscript-artifact-card, .architecture-toc-row, .paper-field-grid dd .markdown-preview, .figure-plan-row > .markdown-preview, .table-plan-row > .markdown-preview, .table-empty-rationale .markdown-preview, .figure-caption) {
+html[data-theme] :is(.figure-spec-card, .figure-spec-card.is-compact, .manuscript-artifact-card, .architecture-toc-row, .artifact-field-grid dd .markdown-preview, .figure-plan-row > .markdown-preview, .table-plan-row > .markdown-preview, .table-empty-rationale .markdown-preview, .figure-caption) {
   border-color: var(--panel-border) !important;
   background: var(--panel-bg) !important;
   color: var(--panel-ink) !important;

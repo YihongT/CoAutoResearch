@@ -5015,10 +5015,12 @@ function paragraphPlanHtml(section) {
   const plan = manuscriptFieldValue(section, ["Paragraph plan", "Paragraph-level plan", "Writing plan"]);
   if (!hasRealText(plan)) return "";
   return `
-    <div class="paragraph-plan-block">
+    <section class="paragraph-plan-block architecture-paragraph-plan">
       <h5>Paragraph plan</h5>
-      <div class="markdown-preview">${markdownToHtml(plan)}</div>
-    </div>
+      <div class="paragraph-plan-scroll">
+        <div class="architecture-field-value">${markdownToHtml(plan)}</div>
+      </div>
+    </section>
   `;
 }
 
@@ -5349,30 +5351,348 @@ function renderArchitectureOverview(manuscript) {
   `;
 }
 
-function architectureFieldGridHtml(block) {
-  const fields = [
-    ["Target-venue role", manuscriptFieldValue(block, ["Target-venue role", "Narrative role in target venue", "Section role"])],
-    ["Reader question", manuscriptFieldValue(block, ["Reader question answered", "Reader question"])],
-    ["Local thesis / purpose", manuscriptFieldValue(block, ["Local thesis / purpose", "Section thesis", "Thesis", "Purpose"])],
-    ["Local claims", manuscriptFieldValue(block, ["Local claims in plain language", "Accepted claims", "Claims"])],
-    ["Evidence / results / artifacts", manuscriptFieldValue(block, ["Local evidence, results, or artifacts", "Evidence", "Results / artifacts", "Results or artifacts"])],
-    ["Placed objects", manuscriptFieldValue(block, ["Placed displays / methods / results", "Figures / tables", "Displays / methods / results"])],
-    ["Qualifications", manuscriptFieldValue(block, ["Local qualifications", "Required qualifications", "Required qualification"])],
-    ["Transition", manuscriptFieldValue(block, ["Transition job"])],
+function dedupeManuscriptBlocks(blocks) {
+  const seen = new Set();
+  return (blocks || []).filter((block) => {
+    const key = [
+      String(block?.kind || "").toLowerCase(),
+      cleanText(block?.path, ""),
+      cleanText(block?.title, ""),
+      cleanText(block?.body, "").slice(0, 160),
+    ].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function manuscriptSectionBlocks(manuscript) {
+  const preferred = (manuscript.sections?.length ? manuscript.sections : manuscript.section_blueprint) || [];
+  const fallback = manuscript.architecture || [];
+  return dedupeManuscriptBlocks([...(preferred || []), ...(fallback || [])])
+    .filter(sectionHasRealContent)
+    .filter((block) => !block?.is_artifact);
+}
+
+function manuscriptArtifactBlocks(manuscript) {
+  return dedupeManuscriptBlocks([
+    ...(manuscript.inline_artifacts || []),
+    ...(manuscript.architecture || []).filter((block) => block?.is_artifact),
+    ...(manuscript.figure_plans || []).map((block) => ({ ...block, kind: block.kind || "figure", is_artifact: true })),
+    ...(manuscript.table_plans || []).map((block) => ({ ...block, kind: block.kind || "table", is_artifact: true })),
+  ])
+    .filter(sectionHasRealContent)
+    .filter((block) => block?.is_artifact);
+}
+
+function normalizedPathCandidates(block) {
+  const values = [
+    block?.path,
+    block?.title,
+    ...(Array.isArray(block?.parents) ? block.parents : []),
+  ];
+  return values.map((value) => normalizeManuscriptKey(value)).filter(Boolean);
+}
+
+function findArtifactSectionIndex(artifact, sections) {
+  const parents = Array.isArray(artifact?.parents) ? artifact.parents : [];
+  for (let index = parents.length - 1; index >= 0; index -= 1) {
+    const parentKey = normalizeManuscriptKey(parents[index]);
+    if (!parentKey) continue;
+    const matchIndex = sections.findIndex((section) => normalizedPathCandidates(section).includes(parentKey));
+    if (matchIndex >= 0) return matchIndex;
+  }
+
+  const artifactPath = normalizeManuscriptKey(artifact?.path);
+  if (artifactPath) {
+    let best = { index: -1, length: 0 };
+    sections.forEach((section, index) => {
+      for (const candidate of normalizedPathCandidates(section)) {
+        if (!candidate || artifactPath === candidate) continue;
+        if ((artifactPath.startsWith(`${candidate}-`) || artifactPath.startsWith(candidate)) && candidate.length > best.length) {
+          best = { index, length: candidate.length };
+        }
+      }
+    });
+    if (best.index >= 0) return best.index;
+  }
+
+  const placement = normalizeManuscriptKey(manuscriptFieldValue(artifact, ["Placement"]));
+  if (placement) {
+    const matchIndex = sections.findIndex((section) => normalizedPathCandidates(section).some((candidate) => candidate && placement.includes(candidate)));
+    if (matchIndex >= 0) return matchIndex;
+  }
+
+  return -1;
+}
+
+function buildManuscriptStoryMap(manuscript) {
+  const safeManuscript = manuscript || {};
+  const sections = manuscriptSectionBlocks(safeManuscript).map((section) => ({ section, artifacts: [] }));
+  const unplaced = [];
+  for (const artifact of manuscriptArtifactBlocks(safeManuscript)) {
+    const index = findArtifactSectionIndex(artifact, sections.map((node) => node.section));
+    if (index >= 0) sections[index].artifacts.push(artifact);
+    else unplaced.push(artifact);
+  }
+  return { sections, unplaced };
+}
+
+function storyMapMetaHtml(manuscript) {
+  manuscript = manuscript || {};
+  const rows = [
+    ["Target venue", manuscript.target],
+    ["Audience", manuscript.audience],
+    ["Article type", manuscript.article_type],
+    ["Contribution", manuscript.contribution],
+    ["Evidence standard", manuscript.evidence_standard],
   ].filter(([, value]) => hasRealText(value));
+  const coreStory = cleanText(manuscript.core_story, "");
+  if (!rows.length && !hasRealText(coreStory)) return "";
+  return `
+    <header class="story-map-hero">
+      <div>
+        <p class="story-map-kicker">Finished-results blueprint</p>
+        <h3>Manuscript story map</h3>
+        ${hasRealText(coreStory) ? `<div class="story-map-core">${markdownToHtml(coreStory)}</div>` : ""}
+      </div>
+      ${rows.length ? `
+        <dl class="story-map-meta">
+          ${rows.map(([label, value]) => `
+            <div>
+              <dt>${escapeHtml(label)}</dt>
+              <dd>${inlineMarkup(figureSpecExcerpt(value, 220))}</dd>
+            </div>
+          `).join("")}
+        </dl>
+      ` : ""}
+    </header>
+  `;
+}
+
+function storyMapNavHtml(manuscript, map) {
+  manuscript = manuscript || {};
+  const toc = cleanText(manuscript.toc, "");
+  if (hasRealText(toc)) {
+    return `
+      <nav class="story-map-nav" aria-label="Paper flow">
+        <h4>Paper flow</h4>
+        <div class="story-map-toc">${markdownToHtml(toc)}</div>
+      </nav>
+    `;
+  }
+  const rows = (map.sections || []).map(({ section }) => `
+    <a href="#${escapeHtml(blueprintAnchorForTitle(section.title))}">
+      <span>${escapeHtml(isAbstractArchitectureBlock(section) ? "Abstract" : "Section")}</span>
+      <strong>${escapeHtml(cleanText(section.title, "Untitled section"))}</strong>
+    </a>
+  `).join("");
+  return rows ? `
+    <nav class="story-map-nav" aria-label="Paper flow">
+      <h4>Paper flow</h4>
+      <div class="story-map-link-list">${rows}</div>
+    </nav>
+  ` : "";
+}
+
+function storyPointHtml(label, value, className = "") {
+  if (!hasRealText(value)) return "";
+  return `
+    <div class="story-point ${className}">
+      <h5>${escapeHtml(label)}</h5>
+      <div class="story-point-body">${markdownToHtml(value)}</div>
+    </div>
+  `;
+}
+
+function sectionWhyHereValue(section) {
+  const question = manuscriptFieldValue(section, ["Reader question answered", "Reader question"]);
+  const transition = manuscriptFieldValue(section, ["Transition job"]);
+  const parts = [];
+  if (hasRealText(question)) parts.push(`Reader question: ${question}`);
+  if (hasRealText(transition)) parts.push(`Transition: ${transition}`);
+  return parts.join("\n\n");
+}
+
+function nonEmptyDisplayText(value) {
+  const text = cleanText(value, "");
+  if (!hasRealText(text)) return "";
+  if (/^(?:none|no active display|no display|no displays|n\/a)\.?$/i.test(text)) return "";
+  return text;
+}
+
+function artifactTakeawayHtml(block) {
+  const kind = artifactKindLabel(block.kind);
+  const kindSlug = escapeHtml(normalizeManuscriptKey(block.kind) || "artifact");
+  const isTable = String(block.kind || "").toLowerCase() === "table";
+  const status = manuscriptFieldValue(block, ["Inclusion status", "Status"]);
+  const title = isTable
+    ? manuscriptFieldValue(block, ["Table number/title", "Table title", "Title"]) || cleanText(block.title, "Untitled table")
+    : cleanText(block.title, "Untitled artifact");
+  const takeaway = manuscriptFieldValue(block, [
+    "Reader takeaway",
+    "Purpose or result role",
+    "Argument or result role",
+    "Result shown or conceptual basis",
+    "Key result or conceptual contrast shown",
+    "Metric or result summary",
+    "Purpose",
+  ]);
+  const caption = manuscriptFieldValue(block, ["Caption draft or current caption", "Caption draft", "Caption"]);
+  const sourcePath = firstArtifactPath([
+    manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source code or artifact links", "Source artifact"]),
+    block.body,
+  ].filter(Boolean).join("\n"));
+  const tableBody = isTable ? publicationReadyTableMarkdown(block) : "";
+  const notes = isTable ? manuscriptFieldValue(block, ["Table notes / definitions / abbreviations", "Table notes", "Notes"]) : "";
+  return `
+    <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card story-artifact-card ${isTable ? "manuscript-table-card " : ""}artifact-${kindSlug}">
+      <header class="figure-spec-head story-artifact-head">
+        <div>
+          <p>${escapeHtml(kind)} block</p>
+          <h5>${escapeHtml(title)}</h5>
+        </div>
+        ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
+      </header>
+      ${manuscriptActionsHtml([
+        copyButton([`${"#".repeat(Number(block.level || 4))} ${block.title}`, block.body].join("\n\n"), "Copy block", "Artifact block copied."),
+        caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
+        sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
+      ])}
+      ${storyPointHtml("Reader takeaway", takeaway, "is-takeaway")}
+      ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
+      ${isTable ? (tableBody ? `<div class="publication-table-preview markdown-preview">${markdownToHtml(tableBody)}</div>` : `<p class="table-missing-warning">Missing publication-ready table body. Active tables must include a Markdown table in this block.</p>`) : ""}
+      ${hasRealText(notes) ? `<div class="table-notes markdown-preview"><strong>Notes.</strong> ${markdownToHtml(notes)}</div>` : ""}
+      ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
+      <details class="story-details artifact-full-block">
+        <summary>Full block</summary>
+        <div class="markdown-preview">${markdownToHtml(block.body)}</div>
+      </details>
+    </article>
+  `;
+}
+
+function sectionDisplaysHtml(node) {
+  const placed = nonEmptyDisplayText(manuscriptFieldValue(node.section, ["Placed displays / methods / results", "Figures / tables", "Displays / methods / results"]));
+  const artifacts = (node.artifacts || []).map(artifactTakeawayHtml).join("");
+  if (!hasRealText(placed) && !artifacts) {
+    return storyPointHtml("Displays", "No display, method, table, or result block is placed here.", "is-display-empty");
+  }
+  return `
+    <section class="story-displays">
+      <h5>Displays</h5>
+      ${hasRealText(placed) ? `<div class="story-display-note">${markdownToHtml(placed)}</div>` : ""}
+      ${artifacts ? `<div class="story-artifact-list">${artifacts}</div>` : ""}
+    </section>
+  `;
+}
+
+function sectionStoryDetailsHtml(section) {
+  const fieldList = architectureFieldListHtml(section);
+  const paragraphPlan = paragraphPlanHtml(section);
+  const qualification = manuscriptFieldValue(section, ["Local qualifications", "Required qualifications", "Required qualification"]);
+  if (!fieldList && !paragraphPlan && !hasRealText(qualification)) return "";
+  return `
+    <details class="story-details section-story-details">
+      <summary>Writing plan and constraints</summary>
+      ${hasRealText(qualification) ? storyPointHtml("Qualifications", qualification) : ""}
+      ${paragraphPlan}
+      ${fieldList ? `
+        <section class="story-raw-fields">
+          <h5>Structured fields</h5>
+          ${fieldList}
+        </section>
+      ` : ""}
+    </details>
+  `;
+}
+
+function sectionStoryHtml(node) {
+  const section = node.section;
+  const sectionBrief = manuscriptFieldValue(section, ["Section brief", "Reader-facing brief", "Story brief"]);
+  const mainTakeaway = manuscriptFieldValue(section, ["Local thesis / purpose", "Section thesis", "Thesis", "Purpose"]);
+  const claims = manuscriptFieldValue(section, ["Local claims in plain language", "Accepted claims", "Claims"]);
+  const evidence = manuscriptFieldValue(section, ["Local evidence, results, or artifacts", "Evidence", "Results / artifacts", "Results or artifacts"]);
+  const whyHere = sectionWhyHereValue(section);
+  const isAbstract = isAbstractArchitectureBlock(section);
+  return `
+    <article id="${escapeHtml(blueprintAnchorForTitle(section.title))}" class="story-section-card paper-section-row ${isAbstract ? "manuscript-abstract-card is-abstract" : ""} depth-${Math.max(3, Math.min(6, Number(section.level || 3)))}">
+      <header class="story-section-head">
+        <p>${escapeHtml(isAbstract ? "Abstract" : (section.path && section.path !== section.title ? section.path : "Manuscript section"))}</p>
+        <h4>${escapeHtml(cleanText(section.title, "Untitled section"))}</h4>
+      </header>
+      ${hasRealText(sectionBrief) ? `<div class="story-section-brief">${markdownToHtml(sectionBrief)}</div>` : ""}
+      <div class="story-section-grid">
+        ${storyPointHtml("Main takeaway", mainTakeaway, "is-main")}
+        ${storyPointHtml("What this section says", claims)}
+        ${storyPointHtml("Evidence / results", evidence)}
+        ${storyPointHtml("Why here", whyHere)}
+      </div>
+      ${sectionDisplaysHtml(node)}
+      ${sectionStoryDetailsHtml(section)}
+    </article>
+  `;
+}
+
+function unplacedArtifactsHtml(artifacts) {
+  if (!artifacts?.length) return "";
+  return `
+    <section class="story-unplaced">
+      <h4>Unplaced displays / result blocks</h4>
+      <p>These blocks are parsed from the blueprint but are not attached to a manuscript section.</p>
+      <div class="story-artifact-list">
+        ${artifacts.map(artifactTakeawayHtml).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderManuscriptStoryMap(manuscript) {
+  manuscript = manuscript || {};
+  const map = buildManuscriptStoryMap(manuscript);
+  if (!map.sections.length && !map.unplaced.length && !hasRealText(manuscript.core_story)) {
+    return empty("No manuscript story map is available yet.");
+  }
+  return `
+    <section class="manuscript-story-map">
+      ${storyMapMetaHtml(manuscript)}
+      ${storyMapNavHtml(manuscript, map)}
+      <div class="story-section-list">
+        ${map.sections.map(sectionStoryHtml).join("")}
+      </div>
+      ${unplacedArtifactsHtml(map.unplaced)}
+    </section>
+  `;
+}
+
+function architectureFieldListHtml(block) {
+  const fields = [
+    { label: "Target-venue role", value: manuscriptFieldValue(block, ["Target-venue role", "Narrative role in target venue", "Section role"]) },
+    { label: "Reader question", value: manuscriptFieldValue(block, ["Reader question answered", "Reader question"]) },
+    { label: "Local thesis / purpose", value: manuscriptFieldValue(block, ["Local thesis / purpose", "Section thesis", "Thesis", "Purpose"]) },
+    { label: "Local claims", value: manuscriptFieldValue(block, ["Local claims in plain language", "Accepted claims", "Claims"]) },
+    { label: "Evidence / results / artifacts", value: manuscriptFieldValue(block, ["Local evidence, results, or artifacts", "Evidence", "Results / artifacts", "Results or artifacts"]), long: true },
+    { label: "Placed objects", value: manuscriptFieldValue(block, ["Placed displays / methods / results", "Figures / tables", "Displays / methods / results"]), long: true },
+    { label: "Qualifications", value: manuscriptFieldValue(block, ["Local qualifications", "Required qualifications", "Required qualification"]) },
+    { label: "Transition", value: manuscriptFieldValue(block, ["Transition job"]) },
+  ].filter((field) => hasRealText(field.value));
   if (!fields.length) return "";
   return `
-    <dl class="paper-field-grid architecture-field-grid">
+    <dl class="architecture-field-list">
       ${fields
-        .map(([label, value]) => `
-          <div>
-            <dt>${escapeHtml(label)}</dt>
-            <dd><div class="markdown-preview">${markdownToHtml(value)}</div></dd>
+        .map((field) => `
+          <div class="architecture-field-row ${field.long ? "is-long" : "is-short"}">
+            <dt>${escapeHtml(field.label)}</dt>
+            <dd><div class="architecture-field-value">${markdownToHtml(field.value)}</div></dd>
           </div>
         `)
         .join("")}
     </dl>
   `;
+}
+
+function architectureFieldGridHtml(block) {
+  return architectureFieldListHtml(block);
 }
 
 function artifactKindLabel(kind) {
@@ -5570,11 +5890,7 @@ function manuscriptArchitectureBlockHtml(block) {
 }
 
 function renderManuscriptArchitecture(manuscript) {
-  const blocks = manuscriptArchitectureBlocks(manuscript);
-  if (blocks.length) {
-    return `<section class="manuscript-architecture">${blocks.map(manuscriptArchitectureBlockHtml).join("")}</section>`;
-  }
-  return renderPaperOutline(manuscript);
+  return renderManuscriptStoryMap(manuscript);
 }
 
 function renderManuscriptAuditPanel(manuscript) {
@@ -5611,13 +5927,24 @@ function renderManuscriptPanel() {
     </div>
   `;
   return [
-    contextCard("Export final results", renderExportPanel(), "Clean bundles for handoff or review."),
-    contextCard("Architecture overview", renderArchitectureOverview(manuscript), "Full target-venue table of contents for the planned manuscript."),
-    contextCard("Manuscript architecture", renderManuscriptArchitecture(manuscript), "Self-contained section order with local claims, evidence, displays, methods, results, and captions where they belong."),
+    renderManuscriptExportBar(),
+    contextCard("Manuscript story map", renderManuscriptArchitecture(manuscript), "Finished-results paper map in manuscript reading order."),
     contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
     contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
     contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
   ].join("");
+}
+
+function renderManuscriptExportBar() {
+  return `
+    <section class="manuscript-export-bar" aria-label="Final result export">
+      <div class="manuscript-export-copy">
+        <strong>Export final results</strong>
+        <span>Clean final bundles without autoresearch trajectory.</span>
+      </div>
+      ${renderExportPanel()}
+    </section>
+  `;
 }
 
 function autoloadInlineFiles(root) {
@@ -7138,11 +7465,7 @@ function blueprintStructuredBodyHtml(manuscript) {
   return `
     <div class="inline-preview blueprint-rendered blueprint-structured-preview">
       <section class="blueprint-render-section">
-        <h3>Architecture overview</h3>
-        ${renderArchitectureOverview(manuscript)}
-      </section>
-      <section class="blueprint-render-section">
-        <h3>Manuscript architecture</h3>
+        <h3>Manuscript story map</h3>
         ${renderManuscriptArchitecture(manuscript)}
       </section>
       <section class="blueprint-render-section">

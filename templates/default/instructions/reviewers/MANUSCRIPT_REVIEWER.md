@@ -61,17 +61,18 @@ venue fit, displays/methods/results, limitations, references, and
 self-contained readability. For manuscript-facing final pass,
 `manuscript/BLUEPRINT.md` must be self-contained and target-venue-ready:
 target-venue section titles/order/depth, abstract plan when applicable,
-paragraph-level writing plans, local claim/evidence/result explanations, inline
-figure/table/algorithm/dataset/benchmark/result blocks, captions,
-publication-ready inline table bodies for every active table, references,
-appendix/supplement posture, blocking missing evidence, required qualifications,
-provenance/audit index, and submission-readiness must all be explicit and
-mutually consistent.
+compact reader-facing section briefs, paragraph-level writing plans, local
+claim/evidence/result explanations, inline figure/table/algorithm/dataset/
+benchmark/result blocks with reader takeaways, captions, publication-ready
+inline table bodies for every active table, references, appendix/supplement
+posture, blocking missing evidence, required qualifications, provenance/audit
+index, and submission-readiness must all be explicit and mutually consistent.
 
-Each active titled unit must specify the target-venue role, reader question
-answered, local thesis or purpose, local claims in plain language, local
-evidence/results/artifacts, placed displays/methods/results, local
-qualifications, and transition job. Every paragraph row must map to the
+Each active titled unit must specify the target-venue role, a section brief
+that reads as finished-results paper-map prose, reader question answered, local
+thesis or purpose, local claims in plain language, local evidence/results/
+artifacts, placed displays/methods/results, local qualifications, and
+transition job. Every paragraph row must map to the
 relevant local evidence/result/artifact, display/method/result block, citation
 posture, qualification, and transition job. Generic rows such as "discuss
 results", unplaced figures/tables/algorithms/results, or sections that only

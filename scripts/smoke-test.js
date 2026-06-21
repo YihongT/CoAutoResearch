@@ -560,7 +560,7 @@ Confidence: medium
     throw new Error("framing composer and CoAutoResearch returns must share a centered column");
   }
   if (
-    !indexHtml.includes("20260620-export-bundle1") ||
+    !indexHtml.includes("20260620-story-map1") ||
     !stylesCss.includes("Reader typography: match the composer text across content surfaces.") ||
     !stylesCss.includes(".framing-message .transcript-body") ||
     !stylesCss.includes("font-family: var(--reader);")
@@ -569,6 +569,7 @@ Confidence: medium
   }
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
+  const blueprintTemplate = await fsp.readFile(path.join(root, "templates", "default", "manuscript", "BLUEPRINT.md"), "utf8");
   const manuscriptInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "MANUSCRIPT.md"), "utf8");
   const figureTableReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FIGURE_TABLE_REVIEWER.md"), "utf8");
   const finalGateReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
@@ -774,7 +775,7 @@ Confidence: medium
     !appJs.includes("markdownLinkHtml") ||
     !appJs.includes('transcriptContentHtml(message.text, { markdown: role === "assistant" })') ||
     !stylesCss.includes(".markdown-file-link") ||
-    !indexHtml.includes("20260620-export-bundle1")
+    !indexHtml.includes("20260620-story-map1")
   ) {
     throw new Error("Codex assistant responses must render Markdown in framing chat");
   }
@@ -825,7 +826,7 @@ Confidence: medium
     throw new Error("interrupted goal sessions must show resume controls instead of pause controls");
   }
   if (
-    !indexHtml.includes("app.js?v=20260620-export-bundle1") ||
+    !indexHtml.includes("app.js?v=20260620-story-map1") ||
     !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command"])') ||
     !appJs.includes('appendFramingMessage("user", displayText, { kind: "command" })') ||
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
@@ -883,7 +884,7 @@ Confidence: medium
     throw new Error("slash command pending state must start before the command row is rendered");
   }
   if (
-    !indexHtml.includes("styles.css?v=20260620-export-bundle1") ||
+    !indexHtml.includes("styles.css?v=20260620-story-map1") ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
     !appJs.includes("const latestRunStart = transcript.reduce") ||
     !appJs.includes("function framingProgressDetailsHtml()") ||
@@ -993,17 +994,28 @@ Confidence: medium
   if (
     !appJs.includes("function renderArchitectureOverview") ||
     !appJs.includes("function renderManuscriptArchitecture") ||
+    !appJs.includes("function buildManuscriptStoryMap") ||
+    !appJs.includes("function renderManuscriptStoryMap") ||
+    !appJs.includes("function sectionStoryHtml") ||
+    !appJs.includes("function artifactTakeawayHtml") ||
     !appJs.includes("function manuscriptArtifactCardHtml") ||
     !appJs.includes("function manuscriptTableCardHtml") ||
     !appJs.includes("function manuscriptAbstractCardHtml") ||
+    !appJs.includes("function renderManuscriptExportBar") ||
+    !appJs.includes("function architectureFieldListHtml") ||
     !appJs.includes("function publicationReadyTableMarkdown") ||
     !appJs.includes("Missing publication-ready table body") ||
     !appJs.includes("function renderManuscriptAuditPanel") ||
     !appJs.includes("function figureSpecCardsHtml") ||
     !appJs.includes("function figureSpecFields") ||
-    !appJs.includes('contextCard("Architecture overview"') ||
-    !appJs.includes('contextCard("Manuscript architecture"') ||
+    !appJs.includes('contextCard("Manuscript story map"') ||
+    appJs.includes('contextCard("Architecture overview"') ||
+    appJs.includes('contextCard("Manuscript architecture"') ||
     !appJs.includes('contextCard("Audit / provenance"') ||
+    !appJs.includes("Finished-results blueprint") ||
+    !appJs.includes("Main takeaway") ||
+    !appJs.includes("What this section says") ||
+    !appJs.includes("Reader takeaway") ||
     !appJs.includes("function paragraphPlanHtml") ||
     !appJs.includes("Paragraph plan") ||
     !appJs.includes("Provenance / audit index") ||
@@ -1015,6 +1027,8 @@ Confidence: medium
     !serverPy.includes('"architecture"') ||
     !serverPy.includes('"inline_artifacts"') ||
     !serverPy.includes('"toc"') ||
+    !serverPy.includes('"article_type"') ||
+    !serverPy.includes('"evidence_standard"') ||
     !serverPy.includes('"figure_plans"') ||
     !serverPy.includes('"table_plans"') ||
     !serverPy.includes('"provenance"') ||
@@ -1022,6 +1036,15 @@ Confidence: medium
     !stylesCss.includes(".figure-caption") ||
     !stylesCss.includes(".figure-status.is-caution") ||
     !stylesCss.includes(".manuscript-architecture") ||
+    !stylesCss.includes(".manuscript-story-map") ||
+    !stylesCss.includes(".story-map-hero") ||
+    !stylesCss.includes(".story-section-card") ||
+    !stylesCss.includes(".story-artifact-card") ||
+    !stylesCss.includes(".story-section-grid") ||
+    !stylesCss.includes(".manuscript-export-bar") ||
+    !stylesCss.includes(".architecture-field-list") ||
+    !stylesCss.includes(".architecture-field-row.is-long") ||
+    !stylesCss.includes(".paragraph-plan-scroll") ||
     !stylesCss.includes(".manuscript-artifact-card") ||
     !stylesCss.includes(".manuscript-abstract-card") ||
     !stylesCss.includes(".manuscript-table-card") ||
@@ -1033,6 +1056,24 @@ Confidence: medium
     !stylesCss.includes(".traceability-details")
   ) {
     throw new Error("manuscript panel must render a self-contained architecture blueprint with inline artifact blocks, provenance, and copy/open controls");
+  }
+  if (
+    !blueprintTemplate.includes("Section brief:") ||
+    !blueprintTemplate.includes("Reader takeaway:") ||
+    !manuscriptInstructions.includes("Section brief") ||
+    !compactText(manuscriptInstructions).includes("Reader takeaway") ||
+    !compactText(manuscriptInstructions).includes("finished-results paper map") ||
+    !compactText(finalGateReviewer).includes("reader-facing section briefs") ||
+    !compactText(finalGateReviewer).includes("reader takeaways")
+  ) {
+    throw new Error("blueprint contract must require readable section briefs and artifact reader takeaways");
+  }
+  if (
+    appJs.includes('class="paper-field-grid architecture-field-grid"') ||
+    stylesCss.includes(".paper-field-grid dd .markdown-preview") ||
+    stylesCss.includes("font-size: clamp(20px, 2vw, 26px)")
+  ) {
+    throw new Error("manuscript architecture fields must use the readable definition-list layout instead of auto-fit preview cards");
   }
   if (
     !manuscriptInstructions.includes("Publication-ready table:") ||
@@ -1699,8 +1740,11 @@ Confidence: medium
     "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_stop_reason': 'all_reviewer_gates_passed', 'loop_iteration': 11})",
     "completed_snapshot = module.research_session_snapshot()",
     "assert completed_snapshot['gate']['status'] == 'pass', completed_snapshot['gate']",
+    "assert completed_snapshot['active_run']['trial_iteration'] is None, completed_snapshot['active_run']",
+    "completed_marker = json.loads((root / 'research_trajectory' / 'NEXT_TRIAL.json').read_text(encoding='utf-8'))",
+    "assert completed_marker['status'] == 'complete', completed_marker",
     "assert 'Server repair:' not in (root / 'research_trajectory' / 'STATE.md').read_text(encoding='utf-8')",
-    "print(json.dumps({'complete_marker': complete_snapshot['active_run']['trial_iteration'], 'pending_marker': pending_snapshot['active_run']['trial_iteration'], 'completed_gate': completed_snapshot['gate']['status']}))"
+    "print(json.dumps({'complete_marker': complete_snapshot['active_run']['trial_iteration'], 'pending_marker': pending_snapshot['active_run']['trial_iteration'], 'completed_gate': completed_snapshot['gate']['status'], 'completed_marker_status': completed_marker['status']}))"
   ].join("\n");
   const activeTrialMarkerOutput = execFileSync(python.command, [
     ...python.args,
@@ -1717,13 +1761,14 @@ Confidence: medium
   if (
     !activeTrialMarkerOutput.includes('"complete_marker": 11') ||
     !activeTrialMarkerOutput.includes('"pending_marker": 12') ||
-    !activeTrialMarkerOutput.includes('"completed_gate": "pass"')
+    !activeTrialMarkerOutput.includes('"completed_gate": "pass"') ||
+    !activeTrialMarkerOutput.includes('"completed_marker_status": "complete"')
   ) {
     throw new Error(`active trial marker smoke test returned unexpected output: ${activeTrialMarkerOutput}`);
   }
 
   const resumeForkScript = [
-    "import importlib.util, json, os, pathlib, shutil",
+    "import importlib.util, json, os, pathlib, shutil, stat",
     "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
     "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
     "module = importlib.util.module_from_spec(spec)",
@@ -1755,6 +1800,9 @@ Confidence: medium
     "base_trial = module.active_reported_trials()[0]",
     "checkpoint = module.write_trial_checkpoint(base_trial)",
     "assert checkpoint['created'] is True, checkpoint",
+    "checkpoint_state = root / checkpoint['path'] / 'research_trajectory' / 'STATE.md'",
+    "checkpoint_state.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)",
+    "assert not (checkpoint_state.stat().st_mode & stat.S_IWUSR), oct(checkpoint_state.stat().st_mode)",
     "(root / 'PROJECT.md').write_text('# Later project should be restored away\\n', encoding='utf-8')",
     "calls = []",
     "def fake_start(prompt, *args, **kwargs):",
@@ -1767,6 +1815,8 @@ Confidence: medium
     "assert fork['fork_sequence'] == 1, fork",
     "assert pathlib.Path(root / fork['fork_manifest']).read_text(encoding='utf-8').startswith('# Resume Fork F0001'), fork",
     "assert fork['restore_mode'] == 'checkpoint', fork",
+    "restored_state = root / 'research_trajectory' / 'STATE.md'",
+    "assert restored_state.stat().st_mode & stat.S_IWUSR, oct(restored_state.stat().st_mode)",
     "assert not later.exists(), 'later checkpoint trial should be archived'",
     "assert fork['archived_trials'] and fork['archived_trials'][0]['from'].endswith('000002_later_superseded'), fork",
     "assert '# Checkpoint project' in (root / 'PROJECT.md').read_text(encoding='utf-8')",

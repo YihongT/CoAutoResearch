@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -2855,8 +2856,10 @@ def create_chat_protected_snapshot() -> dict[str, Any]:
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.is_symlink() or source.is_file():
                 shutil.copy2(source, target, follow_symlinks=False)
+                ensure_path_user_writable(target)
             elif source.is_dir():
                 shutil.copytree(source, target, symlinks=True)
+                ensure_tree_user_writable(target)
         entries.append(entry)
     manifest = {"id": snapshot_id, "created_at": now_iso(), "protected_paths": entries}
     (snapshot_root / "MANIFEST.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -2888,13 +2891,16 @@ def restore_chat_protected_snapshot(snapshot: dict[str, Any] | None) -> list[str
             continue
         backup = snapshot_root / "files" / relative
         if path_exists(source):
+            ensure_existing_destination_user_writable(source)
             remove_path(source)
         if before.get("exists"):
             source.parent.mkdir(parents=True, exist_ok=True)
             if backup.is_symlink() or backup.is_file():
                 shutil.copy2(backup, source, follow_symlinks=False)
+                ensure_path_user_writable(source)
             elif backup.is_dir():
                 shutil.copytree(backup, source, symlinks=True)
+                ensure_tree_user_writable(source)
         changed_paths.append(relative)
     return changed_paths
 
@@ -3539,8 +3545,12 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     section_architecture = [block for block in architecture if not block.get("is_artifact")]
     return {
         "target": clean_summary_value(value_after_label(target_section, "Target venue") or first_meaningful_line(target_section)),
+        "audience": clean_summary_value(value_after_label(target_section, "Audience")),
+        "article_type": clean_summary_value(value_after_label(target_section, "Article type")),
         "contribution": clean_summary_value(value_after_label(target_section, "Contribution posture") or value_after_label(target_section, "Contribution style")),
-        "core_story": clean_summary_value(first_meaningful_line(extract_section(blueprint_text, "Core Story"))),
+        "evidence_standard": clean_summary_value(value_after_label(target_section, "Evidence standard")),
+        "display_style": clean_summary_value(value_after_label(target_section, "Expected display / method / result style")),
+        "core_story": clean_summary_value(extract_section(blueprint_text, "Core Story")),
         "toc": toc,
         "architecture": architecture,
         "inline_artifacts": inline_artifacts,
@@ -3792,9 +3802,39 @@ def copy_snapshot_path(relative_path: str, destination_root: Path) -> str:
             else:
                 destination.unlink()
         shutil.copytree(source, destination, symlinks=True)
+        ensure_tree_user_writable(destination)
     else:
+        ensure_existing_destination_user_writable(destination)
         shutil.copy2(source, destination)
+        ensure_path_user_writable(destination)
     return relative_path
+
+
+def ensure_path_user_writable(path: Path) -> None:
+    try:
+        if path.is_symlink() or not path.exists():
+            return
+        current = path.stat().st_mode
+        wanted = stat.S_IRUSR | stat.S_IWUSR
+        if path.is_dir():
+            wanted |= stat.S_IXUSR
+        if (current & wanted) != wanted:
+            path.chmod(current | wanted)
+    except OSError:
+        return
+
+
+def ensure_tree_user_writable(path: Path) -> None:
+    ensure_path_user_writable(path)
+    if not path.is_dir() or path.is_symlink():
+        return
+    for child in path.rglob("*"):
+        ensure_path_user_writable(child)
+
+
+def ensure_existing_destination_user_writable(path: Path) -> None:
+    if path.exists() or path.is_symlink():
+        ensure_path_user_writable(path)
 
 
 def copy_resume_snapshot(destination_root: Path) -> list[str]:
@@ -3947,10 +3987,14 @@ def restore_snapshot_from(checkpoint_root: Path) -> list[str]:
                 if destination.is_dir() and not destination.is_symlink():
                     shutil.rmtree(destination)
                 else:
+                    ensure_existing_destination_user_writable(destination)
                     destination.unlink()
             shutil.copytree(source, destination, symlinks=True)
+            ensure_tree_user_writable(destination)
         else:
+            ensure_existing_destination_user_writable(destination)
             shutil.copy2(source, destination)
+            ensure_path_user_writable(destination)
         restored.append(relative_path)
     return restored
 
@@ -4123,6 +4167,15 @@ def update_expected_trial_marker(payload: dict[str, Any]) -> None:
     path = expected_trial_marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def complete_expected_trial_marker(reason: str) -> None:
+    marker = read_expected_trial_marker()
+    if active_expected_trial_iteration(marker) <= 0:
+        return
+    marker["status"] = "complete"
+    marker["completed_reason"] = reason
+    update_expected_trial_marker(marker)
 
 
 def validate_expected_trial_marker() -> None:
@@ -7219,6 +7272,7 @@ def research_session_snapshot() -> dict[str, Any]:
             loop_stop_reason = "all_reviewer_gates_passed"
             RESEARCH_SESSION["loop_active"] = False
             RESEARCH_SESSION["loop_stop_reason"] = loop_stop_reason
+            complete_expected_trial_marker("gate_passed")
         elif loop_stop_reason == "all_reviewer_gates_passed":
             loop_stop_reason = ""
             RESEARCH_SESSION["loop_stop_reason"] = ""
@@ -7433,6 +7487,7 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         return
     if gate_has_passed(gate):
         stop_autoresearch_loop("all_reviewer_gates_passed", gate)
+        complete_expected_trial_marker("gate_passed")
         append_research_log("Autoresearch loop complete: all reviewer gates passed.")
         return
     if gate.get("status") == "blocked":

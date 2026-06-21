@@ -16,6 +16,12 @@ where every result/display/method object belongs, what each paragraph must do,
 and which source artifacts support each local claim without bouncing through
 separate claim, evidence, figure, or table indexes.
 
+It should read like a finished-results paper map: not a speculative proposal,
+not camera-ready prose, and not a checklist. Each section should make clear
+what the final paper will say, what result or evidence supports it, what
+figure/table/method/result object is shown there, and why the section appears
+at that point in the target-venue reading order.
+
 For a final or gate-passing manuscript-facing deliverable, the blueprint must be
 target-venue-ready and readable as a paper map. Cross-references may support
 audit and provenance, but they must not replace local explanation.
@@ -103,10 +109,11 @@ Not allowed by default:
 - full paper prose unless explicitly requested.
 
 Captions, figure labels, table titles, publication-ready table entries,
-algorithm names, and compact display entries may be written as final
-deliverable text. Section and paragraph entries must remain writing plans: they
-should say what each paragraph must accomplish, which results and evidence it
-uses, and how it transitions, without drafting the full paper.
+algorithm names, compact display entries, `Section brief`, and `Reader
+takeaway` may be written as final deliverable-facing text. Section briefs must
+stay compact, usually 2-4 sentences. Paragraph entries must remain writing
+plans: they should say what each paragraph must accomplish, which results and
+evidence it uses, and how it transitions, without drafting the full paper.
 
 ---
 
@@ -157,6 +164,9 @@ Every titled unit in `Manuscript Architecture` must state:
 
 - target-venue title;
 - target-venue role;
+- section brief: 2-4 sentences of finished-results paper-map prose explaining
+  what this unit argues, what evidence/results/displays it uses, and why it
+  appears here;
 - reader question answered;
 - local thesis or purpose;
 - local claims in plain language;
@@ -200,6 +210,7 @@ Every active figure block must include:
 - placement;
 - inclusion status;
 - purpose or result role;
+- reader takeaway;
 - content and panel layout;
 - visual style;
 - exact caption draft or current caption;
@@ -217,6 +228,7 @@ Every active table block must include:
 - table number/title;
 - inclusion status;
 - purpose or result role;
+- reader takeaway;
 - publication-ready Markdown table body in final row/column form;
 - exact caption draft or current caption;
 - table notes, definitions, or abbreviations when needed, or `none`;
@@ -252,6 +264,7 @@ Every active algorithm or method block must include:
 - placement;
 - method or algorithm name;
 - purpose;
+- reader takeaway;
 - inputs and outputs;
 - pseudocode, interface sketch, or step sequence;
 - assumptions and failure modes;
@@ -265,6 +278,7 @@ Every active dataset, benchmark, or result block must include:
 
 - placement;
 - metric or result summary;
+- reader takeaway;
 - source artifact path;
 - comparison or baseline logic when applicable;
 - limitations and uncertainty;

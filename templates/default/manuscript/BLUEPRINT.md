@@ -66,9 +66,17 @@ Use the target venue's final reading order. Do not organize this section by
 claim IDs, evidence IDs, figure IDs, or table IDs. IDs may appear only as local
 provenance.
 
+For each titled unit, `Section brief` should be 2-4 sentences of finished-results
+paper-map prose: what this unit argues, what evidence/results/displays it uses,
+and why it appears here. Do not write expected-work or future-plan language.
+For each display/method/result block, `Reader takeaway` should state what a
+reader should understand from the object at this manuscript location.
+
 ### Section 1: <target-venue section title>
 
 Target-venue role:
+
+Section brief:
 
 Reader question answered:
 
@@ -93,6 +101,8 @@ Paragraph plan:
 #### Subsection 1.1: <subsection title>
 
 Target-venue role:
+
+Section brief:
 
 Reader question answered:
 
@@ -122,6 +132,8 @@ Inclusion status: <active / candidate / supplement / deprecated>
 
 Purpose or result role:
 
+Reader takeaway:
+
 Content and panel layout:
 
 Visual style:
@@ -145,6 +157,8 @@ Placement:
 Inclusion status: <active / candidate / supplement / deprecated>
 
 Purpose or result role:
+
+Reader takeaway:
 
 Table number/title:
 
@@ -174,6 +188,8 @@ Placement:
 
 Purpose:
 
+Reader takeaway:
+
 Inputs:
 
 Outputs:
@@ -193,6 +209,8 @@ Remaining blocker: <none, or exact blocker>
 Placement:
 
 Metric or result summary:
+
+Reader takeaway:
 
 Source artifact path:
 

@@ -51,10 +51,11 @@ Check:
 - if the goal is manuscript-facing, `manuscript/BLUEPRINT.md` is a
   self-contained, target-venue-ready blueprint with explicit organization,
   architecture overview/table of contents, target-manual section architecture,
-  paragraph-level writing plans, local claim/evidence/result explanations,
-  inline figure/table/algorithm/dataset/benchmark/result blocks, reference
-  plan, appendix/supplement plan, blockers, qualifications, provenance/audit
-  index, deprecated ideas, and submission-readiness summary.
+  compact reader-facing section briefs, paragraph-level writing plans, local
+  claim/evidence/result explanations, reader takeaways for inline
+  figure/table/algorithm/dataset/benchmark/result blocks, reference plan,
+  appendix/supplement plan, blockers, qualifications, provenance/audit index,
+  deprecated ideas, and submission-readiness summary.
 - if the target deliverable has an abstract, the blueprint plans the abstract
   according to the target manual: structured headings when required, otherwise
   4-6 unstructured rhetorical moves, plus target-venue role, claim/evidence
@@ -95,6 +96,7 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - target manual section title/order fidelity;
 - architecture overview / table of contents completeness;
 - paragraph plan completeness;
+- section brief readability as a finished-results paper map;
 - local claim/evidence/result explanation completeness;
 - blocking missing evidence status;
 - inline figure block completeness;

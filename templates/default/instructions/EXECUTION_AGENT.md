@@ -301,11 +301,12 @@ before the gate is marked pass. That step must update:
 `manuscript/BLUEPRINT.md` must be self-contained and target-venue-ready before
 final pass. It must include target venue/audience/article type, organization
 rationale, core story, architecture overview/table of contents, manuscript
-architecture in target-venue reading order, local claim/evidence/result
-explanations, inline figure/table/algorithm/dataset/benchmark/result blocks,
-reference/literature grounding plan, appendix/supplement plan, blocking missing
-evidence, required qualifications, provenance/audit index, deprecated ideas,
-and submission-readiness summary.
+architecture in target-venue reading order, compact reader-facing section
+briefs, local claim/evidence/result explanations, reader takeaways for inline
+figure/table/algorithm/dataset/benchmark/result blocks, reference/literature
+grounding plan, appendix/supplement plan, blocking missing evidence, required
+qualifications, provenance/audit index, deprecated ideas, and
+submission-readiness summary.
 
 Do not use a separate claim/evidence map, `Figure Plan`, `Table Plan`, or
 `manuscript/figures/FIGURE_SPECS.md` as the primary manuscript-reading path.
