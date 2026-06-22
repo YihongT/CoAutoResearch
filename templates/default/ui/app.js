@@ -171,8 +171,15 @@ const modelOptionsByBackend = {
   ],
 };
 
-const defaultThemeMode = "graphite-aurora";
-const allowedThemeModes = new Set([defaultThemeMode, "museum-tech", "dark-glass"]);
+const defaultThemeMode = "atelier-ivory";
+const allowedThemeModes = new Set([defaultThemeMode, "atelier-nocturne"]);
+const legacyThemeModes = {
+  "graphite-aurora": "atelier-ivory",
+  "museum-tech": "atelier-ivory",
+  "dark-glass": "atelier-nocturne",
+  "light": "atelier-ivory",
+  "dark": "atelier-nocturne",
+};
 let currentThemeMode = normalizeThemeMode(localStorage.getItem("coAutoResearchTheme") || document.documentElement.dataset.theme || defaultThemeMode);
 
 const localSlashCommandRegistry = {
@@ -521,6 +528,8 @@ function markdownToHtml(text, options = {}) {
   const html = [];
   let paragraph = [];
   let list = [];
+  let listType = "ul";
+  let quote = [];
   let inCode = false;
   let code = [];
   const headingIds = new Map();
@@ -532,8 +541,14 @@ function markdownToHtml(text, options = {}) {
   };
   const flushList = () => {
     if (!list.length) return;
-    html.push(`<ul>${list.map((item) => `<li>${inlineMarkup(item)}</li>`).join("")}</ul>`);
+    html.push(`<${listType}>${list.map((item) => `<li>${inlineMarkup(item)}</li>`).join("")}</${listType}>`);
     list = [];
+    listType = "ul";
+  };
+  const flushQuote = () => {
+    if (!quote.length) return;
+    html.push(`<blockquote>${inlineMarkup(quote.join(" "))}</blockquote>`);
+    quote = [];
   };
   const flushCode = () => {
     html.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
@@ -582,6 +597,7 @@ function markdownToHtml(text, options = {}) {
       } else {
         flushParagraph();
         flushList();
+        flushQuote();
         inCode = true;
       }
       continue;
@@ -593,8 +609,17 @@ function markdownToHtml(text, options = {}) {
     if (!line.trim()) {
       flushParagraph();
       flushList();
+      flushQuote();
       continue;
     }
+    const quoteLine = line.match(/^\s{0,3}>\s?(.*)$/);
+    if (quoteLine) {
+      flushParagraph();
+      flushList();
+      quote.push(quoteLine[1]);
+      continue;
+    }
+    if (quote.length) flushQuote();
     if (isRule(line)) {
       flushParagraph();
       flushList();
@@ -631,10 +656,14 @@ function markdownToHtml(text, options = {}) {
       html.push(`<h${level}${idAttr}>${inlineMarkup(heading[2])}</h${level}>`);
       continue;
     }
-    const listItem = line.match(/^[-*]\s+(.+)$/);
-    if (listItem) {
+    const orderedItem = line.match(/^\d{1,9}\.\s+(.+)$/);
+    const bulletItem = line.match(/^[-*]\s+(.+)$/);
+    if (orderedItem || bulletItem) {
       flushParagraph();
-      list.push(listItem[1]);
+      const nextType = orderedItem ? "ol" : "ul";
+      if (list.length && listType !== nextType) flushList();
+      listType = nextType;
+      list.push((orderedItem || bulletItem)[1]);
       continue;
     }
     paragraph.push(line.trim());
@@ -643,6 +672,7 @@ function markdownToHtml(text, options = {}) {
   if (inCode) flushCode();
   flushParagraph();
   flushList();
+  flushQuote();
   return html.join("") || "<p>No content yet.</p>";
 }
 
@@ -1034,7 +1064,7 @@ function hydrateTargetVenueField(options = {}) {
 
 function normalizeThemeMode(value) {
   const mode = String(value || "").trim().toLowerCase();
-  if (mode === "light") return defaultThemeMode;
+  if (legacyThemeModes[mode]) return legacyThemeModes[mode];
   return allowedThemeModes.has(mode) ? mode : defaultThemeMode;
 }
 

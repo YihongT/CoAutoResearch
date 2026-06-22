@@ -143,7 +143,7 @@ function loadAppContext() {
   });
   const settingsForm = element({
     elements: {
-      themeMode: field("graphite-aurora"),
+      themeMode: field("atelier-ivory"),
       settingsBackend: field("codex"),
       settingsModel: field("gpt-5.5"),
       settingsReasoningEffort: field("medium"),
@@ -2012,7 +2012,7 @@ async function testSettingsModalSaveSyncsScopedSessionSettings() {
     (async () => {
       const form = document.querySelector("#settings-form");
       form.querySelector = () => null;
-      form.elements.themeMode.value = "museum-tech";
+      form.elements.themeMode.value = "atelier-nocturne";
       form.elements.settingsModel.value = "gpt-5.2";
       form.elements.settingsReasoningEffort.value = "low";
       form.elements.settingsPermissionPreset.value = "full-access";
@@ -2086,21 +2086,25 @@ function testProjectScopedComposerDraftAndTargetVenueRestore() {
 function testThemeModePersistsAndApplies() {
   const app = loadAppContext();
   let theme = app.run('__themeState()');
-  assert.equal(theme.mode, "graphite-aurora");
-  assert.equal(theme.dataset, "graphite-aurora");
+  assert.equal(theme.mode, "atelier-ivory");
+  assert.equal(theme.dataset, "atelier-ivory");
   app.run('applyThemeMode("unsupported")');
   theme = app.run('__themeState()');
-  assert.equal(theme.mode, "graphite-aurora", "unsupported theme modes should normalize to Graphite Aurora");
-  assert.equal(theme.dataset, "graphite-aurora", "unsupported theme modes should leave the document on Graphite Aurora");
-  assert.equal(theme.stored, "graphite-aurora", "unsupported theme modes should persist as Graphite Aurora");
+  assert.equal(theme.mode, "atelier-ivory", "unsupported theme modes should normalize to Ivory");
+  assert.equal(theme.dataset, "atelier-ivory", "unsupported theme modes should leave the document on Ivory");
+  assert.equal(theme.stored, "atelier-ivory", "unsupported theme modes should persist as Ivory");
   app.run('applyThemeMode("light")');
   theme = app.run('__themeState()');
-  assert.equal(theme.dataset, "graphite-aurora", "legacy Light selection should map to Graphite Aurora");
-  assert.equal(theme.stored, "graphite-aurora", "legacy Light selection should persist as Graphite Aurora");
+  assert.equal(theme.dataset, "atelier-ivory", "legacy Light selection should map to Ivory");
+  assert.equal(theme.stored, "atelier-ivory", "legacy Light selection should persist as Ivory");
   app.run('applyThemeMode("dark-glass")');
   theme = app.run('__themeState()');
-  assert.equal(theme.dataset, "dark-glass");
-  assert.equal(theme.stored, "dark-glass");
+  assert.equal(theme.dataset, "atelier-nocturne", "legacy Dark Glass should map to Nocturne");
+  assert.equal(theme.stored, "atelier-nocturne", "legacy Dark Glass should persist as Nocturne");
+  app.run('applyThemeMode("atelier-nocturne")');
+  theme = app.run('__themeState()');
+  assert.equal(theme.dataset, "atelier-nocturne");
+  assert.equal(theme.stored, "atelier-nocturne");
 }
 
 function testTargetVenueUsesOnlyProjectScopedDraft() {

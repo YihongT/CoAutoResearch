@@ -6,22 +6,47 @@
     <title>CoAutoResearch</title>
     <script>
       (() => {
-        const allowedThemes = new Set(["graphite-aurora", "museum-tech", "dark-glass"]);
+        const allowedThemes = new Set(["atelier-ivory", "atelier-nocturne"]);
+        const legacy = {
+          "graphite-aurora": "atelier-ivory",
+          "museum-tech": "atelier-ivory",
+          "dark-glass": "atelier-nocturne",
+          "light": "atelier-ivory",
+          "dark": "atelier-nocturne",
+        };
         try {
-          const stored = localStorage.getItem("coAutoResearchTheme");
-          document.documentElement.dataset.theme = allowedThemes.has(stored) ? stored : "graphite-aurora";
+          let stored = localStorage.getItem("coAutoResearchTheme");
+          stored = legacy[stored] || stored;
+          document.documentElement.dataset.theme = allowedThemes.has(stored) ? stored : "atelier-ivory";
         } catch {
-          document.documentElement.dataset.theme = "graphite-aurora";
+          document.documentElement.dataset.theme = "atelier-ivory";
         }
       })();
     </script>
-    <link rel="stylesheet" href="/styles.css?v=20260621-viewstate-asc1" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png" />
+    <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/styles.css?v=20260621-atelier-1" />
   </head>
   <body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+      <symbol id="brand-mark-glyph" viewBox="0 0 32 32">
+        <circle cx="5.5" cy="24" r="2.7" fill="none" stroke="currentColor" stroke-width="1.9" />
+        <path d="M8.4 24 H15 L24.4 10.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+        <circle cx="15" cy="24" r="1.7" fill="currentColor" />
+        <circle cx="25.5" cy="8.5" r="3.2" fill="currentColor" />
+      </symbol>
+      <symbol id="ic-agents" viewBox="0 0 24 24"><path d="M12 3.2c.5 3.6 1.4 4.5 5 5-3.6.5-4.5 1.4-5 5-.5-3.6-1.4-4.5-5-5 3.6-.5 4.5-1.4 5-5Z"/><path d="M18.5 13.5c.25 1.6.7 2 2.3 2.3-1.6.25-2 .7-2.3 2.3-.25-1.6-.7-2-2.3-2.3 1.6-.3 2-.7 2.3-2.3Z"/></symbol>
+      <symbol id="ic-files" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h3.5l2 2.2H18a2 2 0 0 1 2 2v7.6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></symbol>
+      <symbol id="ic-resources" viewBox="0 0 24 24"><path d="M4.5 5.5A1.5 1.5 0 0 1 6 4h6v15H6a1.5 1.5 0 0 0-1.5 1.5Z"/><path d="M12 4h6a1.5 1.5 0 0 1 1.5 1.5V19H12Z"/></symbol>
+      <symbol id="ic-trials" viewBox="0 0 24 24"><path d="M9.5 3v6.2L4.8 17a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3l-4.7-7.8V3"/><path d="M8.5 3h7M8 13h8"/></symbol>
+      <symbol id="ic-reviews" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M8.6 12.2l2.3 2.3 4.5-4.8"/></symbol>
+      <symbol id="ic-manuscript" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4M9 13h6M9 16.5h4.5"/></symbol>
+    </defs></svg>
     <div class="app-shell">
       <aside class="rail" aria-label="CoAutoResearch navigation">
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true">A</div>
+          <div class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32"><use href="#brand-mark-glyph"/></svg></div>
           <div>
             <div class="brand-title">CoAutoResearch</div>
             <div class="brand-subtitle">Research agent</div>
@@ -48,12 +73,12 @@
 
         <nav class="rail-nav" aria-label="Views" hidden>
           <div class="rail-section-label">Current project</div>
-          <button class="rail-action is-active" type="button" data-view="chat">Agents</button>
-          <button class="rail-action" type="button" data-view="workspace">Project files</button>
-          <button class="rail-action" type="button" data-view="resources">Resources</button>
-          <button class="rail-action" type="button" data-view="trials">Trials</button>
-          <button class="rail-action" type="button" data-view="reviews">Reviews</button>
-          <button class="rail-action" type="button" data-view="manuscript">Manuscript</button>
+          <button class="rail-action is-active" type="button" data-view="chat"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-agents"/></svg><span>Agents</span></button>
+          <button class="rail-action" type="button" data-view="workspace"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-files"/></svg><span>Project files</span></button>
+          <button class="rail-action" type="button" data-view="resources"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-resources"/></svg><span>Resources</span></button>
+          <button class="rail-action" type="button" data-view="trials"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-trials"/></svg><span>Trials</span></button>
+          <button class="rail-action" type="button" data-view="reviews"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-reviews"/></svg><span>Reviews</span></button>
+          <button class="rail-action" type="button" data-view="manuscript"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-manuscript"/></svg><span>Manuscript</span></button>
         </nav>
 
         <div class="rail-footer">
@@ -712,16 +737,12 @@
               </div>
               <fieldset class="theme-mode-control" aria-label="Theme mode">
                 <label>
-                  <input type="radio" name="themeMode" value="graphite-aurora" data-theme-option />
-                  <span>Graphite Aurora</span>
+                  <input type="radio" name="themeMode" value="atelier-ivory" data-theme-option />
+                  <span>Ivory</span>
                 </label>
                 <label>
-                  <input type="radio" name="themeMode" value="museum-tech" data-theme-option />
-                  <span>Museum Tech</span>
-                </label>
-                <label>
-                  <input type="radio" name="themeMode" value="dark-glass" data-theme-option />
-                  <span>Dark Glass</span>
+                  <input type="radio" name="themeMode" value="atelier-nocturne" data-theme-option />
+                  <span>Nocturne</span>
                 </label>
               </fieldset>
             </div>

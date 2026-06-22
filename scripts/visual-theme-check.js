@@ -14,7 +14,8 @@ const stylesHref = pathToFileURL(path.join(root, "templates", "default", "ui", "
 const rmOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 150 };
 
 const themes = [
-  ["light", "Light"],
+  ["atelier-ivory", "Ivory"],
+  ["atelier-nocturne", "Nocturne"],
 ];
 
 const shots = [
@@ -263,13 +264,25 @@ function baseHead(theme, title) {
       }
     </style>
   </head>
-  <body class="visual-fixture">`;
+  <body class="visual-fixture">
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+      <symbol id="brand-mark-glyph" viewBox="0 0 32 32">
+        <circle cx="5.5" cy="24" r="2.7" fill="none" stroke="currentColor" stroke-width="1.9" />
+        <path d="M8.4 24 H15 L24.4 10.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+        <circle cx="15" cy="24" r="1.7" fill="currentColor" />
+        <circle cx="25.5" cy="8.5" r="3.2" fill="currentColor" />
+      </symbol>
+      <symbol id="ic-agents" viewBox="0 0 24 24"><path d="M12 3.2c.5 3.6 1.4 4.5 5 5-3.6.5-4.5 1.4-5 5-.5-3.6-1.4-4.5-5-5 3.6-.5 4.5-1.4 5-5Z"/><path d="M18.5 13.5c.25 1.6.7 2 2.3 2.3-1.6.25-2 .7-2.3 2.3-.25-1.6-.7-2-2.3-2.3 1.6-.3 2-.7 2.3-2.3Z"/></symbol>
+      <symbol id="ic-files" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h3.5l2 2.2H18a2 2 0 0 1 2 2v7.6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></symbol>
+      <symbol id="ic-resources" viewBox="0 0 24 24"><path d="M4.5 5.5A1.5 1.5 0 0 1 6 4h6v15H6a1.5 1.5 0 0 0-1.5 1.5Z"/><path d="M12 4h6a1.5 1.5 0 0 1 1.5 1.5V19H12Z"/></symbol>
+      <symbol id="ic-trials" viewBox="0 0 24 24"><path d="M9.5 3v6.2L4.8 17a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3l-4.7-7.8V3"/><path d="M8.5 3h7M8 13h8"/></symbol>
+    </defs></svg>`;
 }
 
 function railHtml() {
   return `<aside class="rail" aria-label="CoAutoResearch navigation">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true">A</div>
+      <div class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32"><use href="#brand-mark-glyph"/></svg></div>
       <div>
         <div class="brand-title">CoAutoResearch</div>
         <div class="brand-subtitle">Research agent</div>
@@ -277,10 +290,10 @@ function railHtml() {
     </div>
     <nav class="rail-nav" aria-label="Views">
       <div class="rail-section-label">Current project</div>
-      <button class="rail-action is-active" type="button">Agents</button>
-      <button class="rail-action" type="button">Project files</button>
-      <button class="rail-action" type="button">Resources</button>
-      <button class="rail-action" type="button">Trials</button>
+      <button class="rail-action is-active" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-agents"/></svg><span>Agents</span></button>
+      <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-files"/></svg><span>Project files</span></button>
+      <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-resources"/></svg><span>Resources</span></button>
+      <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-trials"/></svg><span>Trials</span></button>
     </nav>
     <div class="rail-footer">
       <button class="rail-settings-button" type="button"><span>Settings</span></button>
@@ -332,6 +345,17 @@ function dashboardHtml(theme, label) {
                     <li><a href="#">PROJECT.md</a> and <a href="#">BLUEPRINT.md</a> remain linked.</li>
                     <li>Evidence notes use <code>resources/</code> and trial reports for provenance.</li>
                   </ul>
+                  <ol>
+                    <li>Frame the question and record the brief.</li>
+                    <li>Run one coherent trial, then report.</li>
+                  </ol>
+                  <blockquote>A traceable trajectory you can defend and revise — not an artifact you cannot explain.</blockquote>
+                  <hr>
+                </div>
+                <div class="framing-progress" aria-label="Agent progress">
+                  <div class="framing-progress-row assistant">Planned the next coherent objective.</div>
+                  <div class="framing-progress-row tool">Ran Trial 8 and recorded the report.</div>
+                  <div class="framing-progress-row assistant">Updated findings and project state.</div>
                 </div>
               </div>
             </article>

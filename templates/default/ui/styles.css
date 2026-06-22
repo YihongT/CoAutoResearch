@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..800,35,1&family=Manrope:wght@400..800&family=Newsreader:opsz,wght@6..72,400..700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..500&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..500&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
 :root {
   color-scheme: light;
@@ -31,9 +31,17 @@
   --feedback-failed-bg: #ffe8e9;
   --danger-hover: #8f1720;
   --shadow: 0 18px 50px rgba(17, 24, 39, 0.1);
-  --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --display: Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --reader: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --bead: #c6bfae;
+  --ring: rgba(26, 24, 18, 0.16);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --radius-avatar: 50%;
 }
 
 * {
@@ -668,7 +676,7 @@ h3 {
 .markdown-preview code {
   padding: 1px 4px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--surface-soft);
   font-family: var(--mono);
   font-size: 12px;
@@ -1167,7 +1175,7 @@ textarea:focus {
   gap: 8px;
   min-height: 36px;
   padding: 6px 8px;
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--ink);
   cursor: pointer;
   list-style: none;
@@ -1304,7 +1312,7 @@ textarea:focus {
 .review-selected-group {
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(248, 250, 246, 0.76);
   box-shadow: 0 14px 36px rgba(38, 43, 37, 0.04);
 }
@@ -1337,7 +1345,7 @@ textarea:focus {
 .review-trial-group {
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(248, 250, 246, 0.76);
   box-shadow: 0 14px 36px rgba(38, 43, 37, 0.04);
 }
@@ -1426,7 +1434,7 @@ textarea:focus {
   gap: 12px;
   padding: 16px;
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 247, 0.92);
   box-shadow: 0 10px 28px rgba(38, 43, 37, 0.035);
 }
@@ -2058,7 +2066,7 @@ textarea:focus {
 .architecture-field-value code {
   padding: 1px 4px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--surface-soft);
   font-family: var(--mono);
   font-size: 12px;
@@ -2560,7 +2568,7 @@ textarea:focus {
 
 .publication-table-preview .markdown-table-wrap {
   margin: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--paper);
 }
 
@@ -3247,7 +3255,7 @@ summary:focus-visible {
   content: "";
   width: 14px;
   height: 14px;
-  border-radius: 5px;
+  border-radius: 8px;
   background: #fff;
   box-shadow:
     10px 0 0 rgba(255, 255, 255, 0.52),
@@ -3308,7 +3316,7 @@ summary:focus-visible {
 }
 
 .file-tab {
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .file-tab.is-active {
@@ -3368,7 +3376,7 @@ summary:focus-visible {
 .session-panel,
 .file-manager,
 .context-card {
-  border-radius: 14px;
+  border-radius: 12px;
 }
 
 .session-empty {
@@ -3386,7 +3394,7 @@ summary:focus-visible {
   place-items: center;
   width: 42px;
   height: 42px;
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 800;
@@ -3421,7 +3429,7 @@ summary:focus-visible {
 .tree-folder > summary,
 .tree-file,
 .tree-file-node > summary {
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .tree-file::before,
@@ -3444,7 +3452,7 @@ summary:focus-visible {
 @media (max-width: 820px) {
   .stage-strip {
     max-width: none;
-    border-radius: 14px;
+    border-radius: 12px;
   }
 
   .stage-pill {
@@ -3495,7 +3503,7 @@ body {
 .brand-mark {
   width: 34px;
   height: 34px;
-  border-radius: 11px;
+  border-radius: 12px;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent),
     #6d7e67;
@@ -3505,7 +3513,7 @@ body {
 .brand-mark::before {
   width: 13px;
   height: 13px;
-  border-radius: 4px;
+  border-radius: 8px;
   background: #f6f3ea;
   box-shadow:
     9px 0 0 rgba(246, 243, 234, 0.52),
@@ -3519,7 +3527,7 @@ body {
 
 .rail-action {
   min-height: 39px;
-  border-radius: 10px;
+  border-radius: 12px;
   color: rgba(246, 243, 234, 0.68);
 }
 
@@ -3629,7 +3637,7 @@ h2 {
 
 .cold-card {
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 16px;
 }
 
 .card-head {
@@ -3930,7 +3938,7 @@ textarea:focus {
   min-height: 58px;
   padding: 8px 10px;
   border: 1px solid rgba(32, 31, 27, 0.12);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 248, 0.94);
   box-shadow: 0 12px 30px rgba(31, 33, 28, 0.06);
 }
@@ -3940,7 +3948,7 @@ textarea:focus {
   place-items: center;
   width: 42px;
   height: 42px;
-  border-radius: 11px;
+  border-radius: 12px;
   background: #ff4545;
   color: #fff;
   font-size: 10px;
@@ -4102,7 +4110,7 @@ body.is-dragging-file .composer {
   max-height: min(760px, calc(100vh - 36px));
   padding: 0;
   border: 1px solid #cbd6ca;
-  border-radius: 18px;
+  border-radius: 16px;
   background: #fffefa;
   color: var(--ink);
   box-shadow: 0 28px 90px rgba(28, 34, 29, 0.18);
@@ -4287,7 +4295,7 @@ body.is-dragging-file .composer {
   width: 34px;
   height: 34px;
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--panel-bg-strong);
   color: var(--accent);
   font-family: var(--mono);
@@ -4444,7 +4452,7 @@ body.is-dragging-file .composer {
   max-width: 100%;
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 22px;
+  border-radius: 16px;
   padding: 14px 18px;
   background: rgba(255, 253, 247, 0.92);
   box-shadow: 0 10px 28px rgba(34, 39, 32, 0.055);
@@ -4480,7 +4488,7 @@ body.is-dragging-file .composer {
   max-width: min(340px, 100%);
   padding: 8px 10px;
   border: 1px solid rgba(32, 31, 27, 0.12);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 247, 0.94);
   box-shadow: 0 12px 30px rgba(31, 33, 28, 0.06);
 }
@@ -4569,7 +4577,7 @@ body.is-dragging-file .composer {
   width: min(680px, 100%);
   padding: 12px;
   border: 1px solid rgba(32, 31, 27, 0.14);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 253, 247, 0.95);
   box-shadow: 0 12px 34px rgba(31, 33, 28, 0.06);
 }
@@ -4583,7 +4591,7 @@ body.is-dragging-file .composer {
   min-height: 92px;
   padding: 12px;
   border: 1px solid rgba(32, 31, 27, 0.12);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 247, 0.88);
   color: var(--ink);
   font: inherit;
@@ -4643,7 +4651,7 @@ body.is-dragging-file .composer {
 .framing-progress-details {
   min-width: min(480px, 100%);
   border: 1px solid rgba(32, 31, 27, 0.08);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 247, 0.46);
 }
 
@@ -4733,7 +4741,7 @@ body.is-dragging-file .composer {
   align-items: baseline;
   padding: 8px 10px;
   border: 1px solid rgba(32, 31, 27, 0.08);
-  border-radius: 13px;
+  border-radius: 12px;
   background: rgba(255, 253, 247, 0.58);
 }
 
@@ -4893,7 +4901,7 @@ body.is-dragging-file .composer {
   width: min(100% - 48px, 1120px);
   margin: 20px auto 26px;
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 26px;
+  border-radius: 16px;
   background: rgba(255, 253, 247, 0.88);
   box-shadow: 0 20px 60px rgba(34, 39, 32, 0.08);
 }
@@ -4912,7 +4920,7 @@ body.is-dragging-file .composer {
   gap: 0;
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.08);
-  border-radius: 20px;
+  border-radius: 16px;
 }
 
 .project-draft-workbench #project-draft-editor {
@@ -4936,7 +4944,7 @@ body.is-dragging-file .composer {
   padding: 0;
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.14);
-  border-radius: 28px;
+  border-radius: 16px;
   background: #fffdf7;
   box-shadow: 0 30px 90px rgba(17, 20, 17, 0.22);
 }
@@ -5108,7 +5116,7 @@ body.is-dragging-file .composer {
 .resume-trial-warning {
   padding: 12px 14px;
   border: 1px solid rgba(150, 103, 38, 0.26);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 247, 226, 0.88);
   color: #7a4e18;
   font-size: 14px;
@@ -5160,7 +5168,7 @@ body.is-dragging-file .composer {
   min-height: 420px;
   padding: 20px 22px;
   border: 1px solid rgba(34, 39, 32, 0.12);
-  border-radius: 18px;
+  border-radius: 16px;
   background:
     linear-gradient(90deg, rgba(34, 39, 32, 0.035) 1px, transparent 1px) 0 0 / 48px 48px,
     rgba(255, 253, 247, 0.78);
@@ -5198,7 +5206,7 @@ body.is-dragging-file .composer {
   min-height: 38px;
   padding: 8px 10px;
   border: 1px solid rgba(244, 239, 227, 0.1);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(244, 239, 227, 0.08);
   color: rgba(244, 239, 227, 0.88);
   text-align: left;
@@ -5244,7 +5252,7 @@ body.is-dragging-file .composer {
   height: min(820px, calc(100vh - 70px));
   padding: 0;
   border: 1px solid rgba(23, 23, 19, 0.14);
-  border-radius: 26px;
+  border-radius: 16px;
   background: var(--surface);
   color: var(--ink);
   box-shadow: 0 36px 110px rgba(14, 16, 14, 0.26);
@@ -5299,7 +5307,7 @@ body.is-dragging-file .composer {
   min-height: 54px;
   padding: 10px 14px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   background: transparent;
   color: var(--ink);
   text-align: left;
@@ -5551,7 +5559,7 @@ body.is-dragging-file .composer {
   margin-top: 22px;
   padding: 17px 18px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--panel-bg-soft);
 }
 
@@ -5596,7 +5604,7 @@ body.is-dragging-file .composer {
   .settings-dialog {
     width: calc(100vw - 24px);
     height: calc(100vh - 24px);
-    border-radius: 20px;
+    border-radius: 16px;
   }
 
   .settings-shell {
@@ -5652,7 +5660,7 @@ body.is-dragging-file .composer {
 .transcript-empty {
   padding: 18px;
   border: 1px solid rgba(32, 31, 27, 0.1);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 253, 246, 0.72);
   color: rgba(32, 31, 27, 0.58);
 }
@@ -5697,7 +5705,7 @@ body.is-dragging-file .composer {
 .transcript-body,
 .transcript-edit-form {
   border: 1px solid rgba(32, 31, 27, 0.1);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 253, 246, 0.82);
   color: var(--ink);
   padding: 12px 14px;
@@ -5713,7 +5721,7 @@ body.is-dragging-file .composer {
   display: grid;
   gap: 16px;
   border: 1px solid rgba(32, 31, 27, 0.1);
-  border-radius: 22px;
+  border-radius: 16px;
   background: rgba(255, 253, 246, 0.86);
   color: var(--ink);
   padding: 16px;
@@ -5840,7 +5848,7 @@ body.is-dragging-file .composer {
   margin: 0;
   padding: 10px 12px;
   border: 1px solid rgba(32, 31, 27, 0.12);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(255, 253, 248, 0.72);
   color: var(--muted);
   font-size: 12px;
@@ -5954,7 +5962,7 @@ body.is-dragging-file .composer {
 
 .tool-event {
   border: 1px solid rgba(79, 102, 91, 0.16);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(247, 248, 241, 0.74);
   box-shadow: 0 10px 24px rgba(31, 33, 28, 0.035);
   overflow: hidden;
@@ -6014,7 +6022,7 @@ body.is-dragging-file .composer {
 
 .tool-group-event {
   border: 1px solid rgba(79, 102, 91, 0.16);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(247, 248, 241, 0.66);
   box-shadow: 0 10px 24px rgba(31, 33, 28, 0.035);
   overflow: hidden;
@@ -6156,7 +6164,7 @@ body.is-dragging-file .composer {
 
 .transcript-edit-form textarea {
   min-height: 130px;
-  border-radius: 14px;
+  border-radius: 12px;
   resize: vertical;
 }
 
@@ -6187,7 +6195,7 @@ body.is-dragging-file .composer {
 .session-empty,
 .thread,
 .composer {
-  border-radius: 18px;
+  border-radius: 16px;
 }
 
 .session-log {
@@ -6558,7 +6566,7 @@ h3,
 .brand-mark {
   width: 34px;
   height: 34px;
-  border-radius: 11px;
+  border-radius: 12px;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent),
     #627669;
@@ -6581,7 +6589,7 @@ h3,
 
 .rail-action {
   min-height: 38px;
-  border-radius: 10px;
+  border-radius: 12px;
   color: rgba(244, 239, 227, 0.68);
   font-weight: 650;
 }
@@ -6720,7 +6728,7 @@ h3,
 .context-card,
 .file-manager {
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 247, 0.9);
   box-shadow: 0 16px 42px rgba(38, 43, 37, 0.055);
   backdrop-filter: blur(10px);
@@ -6764,7 +6772,7 @@ input,
 select,
 textarea {
   border-color: var(--line-strong);
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fffdf7;
   color: var(--ink);
 }
@@ -6785,7 +6793,7 @@ textarea:focus {
 .file-chip,
 .file-tab,
 .tree-file {
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .primary-button,
@@ -6996,7 +7004,7 @@ textarea:focus {
   margin: 18px 0 24px;
   overflow-x: auto;
   border: 1px solid rgba(34, 39, 32, 0.12);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 247, 0.76);
 }
 
@@ -7112,12 +7120,12 @@ textarea:focus {
 }
 
 .composer {
-  border-radius: 14px;
+  border-radius: 12px;
 }
 
 .toast,
 .local-browser {
-  border-radius: 14px;
+  border-radius: 12px;
 }
 
 @media (max-width: 980px) {
@@ -7262,7 +7270,7 @@ textarea:focus {
   margin: 0 auto 16px;
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.14);
-  border-radius: 30px;
+  border-radius: 16px;
   background: #fffdf7;
   box-shadow: 0 18px 48px rgba(38, 43, 37, 0.08);
 }
@@ -7349,7 +7357,7 @@ textarea:focus {
   margin: 0 auto 26px;
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.1);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 253, 247, 0.78);
 }
 
@@ -7487,7 +7495,7 @@ h1,
 }
 
 .brief-editor-shell {
-  border-radius: 34px;
+  border-radius: 16px;
   background:
     linear-gradient(180deg, rgba(255, 253, 246, 0.98), rgba(255, 252, 244, 0.95));
   box-shadow:
@@ -7685,7 +7693,7 @@ h1,
   width: min(620px, calc(100vw - 36px));
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 16px;
   background: var(--panel-bg);
   color: var(--ink);
   box-shadow: 0 30px 90px rgba(31, 33, 28, 0.2);
@@ -7891,7 +7899,7 @@ h1,
   min-height: 0;
   margin: 0 auto;
   border: 1px solid rgba(32, 31, 27, 0.14);
-  border-radius: 28px;
+  border-radius: 16px;
   background: rgba(255, 253, 246, 0.82);
   box-shadow:
     0 22px 64px rgba(31, 33, 28, 0.08),
@@ -8087,7 +8095,7 @@ h1,
   position: relative;
   order: 4;
   margin: 0 auto 52px;
-  border-radius: 30px;
+  border-radius: 16px;
 }
 
 .stage-panel[data-stage-panel="1"] .brief-editor-shell .editor-head {
@@ -8233,7 +8241,7 @@ h1,
   width: 28px;
   height: 28px;
   border: 1px solid rgba(32, 31, 27, 0.14);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--accent);
 }
 
@@ -8802,7 +8810,7 @@ body.has-brief-dock {
   padding: 0 !important;
   overflow: visible !important;
   border: 1px solid rgba(32, 31, 27, 0.1) !important;
-  border-radius: 34px !important;
+  border-radius: 16px !important;
   background: var(--composer-bg) !important;
   box-shadow: 0 18px 54px color-mix(in srgb, var(--rail) 18%, transparent) !important;
   transform: translateX(-50%) !important;
@@ -9050,7 +9058,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   justify-self: start;
   overflow: hidden;
   border: 1px solid rgba(32, 31, 27, 0.1);
-  border-radius: 22px;
+  border-radius: 16px;
   background: rgba(255, 253, 246, 0.72);
   box-shadow: 0 16px 40px rgba(31, 33, 28, 0.045);
 }
@@ -9111,7 +9119,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 
 .restart-autoresearch-body code {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface-soft);
   padding: 1px 5px;
 }
@@ -9268,7 +9276,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   justify-self: start;
   padding: 13px 15px;
   border: 1px solid rgba(79, 102, 91, 0.18);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(239, 245, 237, 0.58);
   box-shadow: 0 14px 34px rgba(31, 33, 28, 0.045);
 }
@@ -9395,7 +9403,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 .trial-live-details {
   overflow: hidden;
   border: 1px solid rgba(79, 102, 91, 0.14);
-  border-radius: 15px;
+  border-radius: 12px;
   background: rgba(255, 253, 246, 0.58);
 }
 
@@ -9448,7 +9456,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   justify-self: start;
   overflow: hidden;
   border: 1px solid rgba(32, 31, 27, 0.1);
-  border-radius: 20px;
+  border-radius: 16px;
   background: rgba(255, 253, 246, 0.84);
   box-shadow: 0 16px 40px rgba(31, 33, 28, 0.06);
 }
@@ -9657,7 +9665,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 .file-change-event {
   overflow: hidden;
   border: 1px solid rgba(79, 102, 91, 0.18);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(247, 248, 241, 0.74);
   box-shadow: 0 10px 24px rgba(31, 33, 28, 0.035);
 }
@@ -9756,7 +9764,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 .inline-editor-shell {
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.12);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 253, 247, 0.92);
   box-shadow: 0 18px 44px rgba(38, 43, 37, 0.08);
 }
@@ -9861,7 +9869,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   padding: 0;
   overflow: hidden;
   border: 1px solid rgba(34, 39, 32, 0.14);
-  border-radius: 28px;
+  border-radius: 16px;
   background: #fffdf7;
   box-shadow: 0 34px 100px rgba(17, 20, 17, 0.26);
 }
@@ -9923,7 +9931,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 
 .file-viewer-body .inline-editor-shell {
   min-height: 100%;
-  border-radius: 22px;
+  border-radius: 16px;
 }
 
 .file-viewer-body .inline-fullscreen-button {
@@ -9961,7 +9969,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   overflow: auto;
   padding: 16px;
   border: 1px solid rgba(0, 93, 88, 0.16);
-  border-radius: 20px;
+  border-radius: 16px;
   background: rgba(252, 253, 249, 0.94);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
 }
@@ -10200,7 +10208,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   width: 26px;
   height: 26px;
   border: 1px solid rgba(0, 93, 88, 0.18);
-  border-radius: 10px;
+  border-radius: 12px;
   background:
     linear-gradient(135deg, transparent 46%, rgba(0, 93, 88, 0.62) 47%, rgba(0, 93, 88, 0.62) 53%, transparent 54%) 7px 11px / 12px 12px no-repeat,
     linear-gradient(135deg, transparent 46%, rgba(0, 93, 88, 0.4) 47%, rgba(0, 93, 88, 0.4) 53%, transparent 54%) 12px 13px / 8px 8px no-repeat,
@@ -10481,7 +10489,7 @@ body.is-resizing-file-viewer .file-viewer-body {
   min-height: 42px;
   padding: 9px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: transparent;
   color: var(--ink);
   font: inherit;
@@ -10561,7 +10569,7 @@ body.is-resizing-file-viewer .file-viewer-body {
   width: min(480px, calc(100vw - 42px));
   padding: 0;
   border: 1px solid rgba(23, 23, 19, 0.14);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--surface);
   color: var(--ink);
   box-shadow: 0 28px 90px rgba(14, 16, 14, 0.24);
@@ -10615,7 +10623,7 @@ body.is-resizing-file-viewer .file-viewer-body {
   gap: 12px;
   padding: 14px;
   border: 1px solid rgba(32, 31, 27, 0.12);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 253, 248, 0.78);
 }
 
@@ -10638,7 +10646,7 @@ body.is-resizing-file-viewer .file-viewer-body {
 
 .large-import-summary code {
   padding: 2px 5px;
-  border-radius: 5px;
+  border-radius: 8px;
   background: rgba(10, 103, 90, 0.08);
   color: var(--ink);
 }
@@ -10648,7 +10656,7 @@ body.is-resizing-file-viewer .file-viewer-body {
   gap: 8px;
   padding: 14px;
   border: 1px solid rgba(180, 35, 24, 0.2);
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(180, 35, 24, 0.07);
 }
 
@@ -11128,6 +11136,181 @@ html[data-theme="dark-glass"] {
   --warning-ink: #dcd9ff;
   --danger-bg: #321016;
   --danger-ink: #ffb1bb;
+}
+
+/* ===================================================================
+   ATELIER — the new visual system. Two themes (Ivory / Nocturne).
+   These html[data-theme] blocks beat every :root block, so they are
+   the authoritative runtime source for colour, fonts, radius, beads.
+   =================================================================== */
+html[data-theme="atelier-ivory"] {
+  color-scheme: light;
+  --bg: #f3f0e8;
+  --rail: #f3f0e8;
+  --rail-soft: #efebe1;
+  --rail-ink: #1a1812;
+  --surface: #f7f4ec;
+  --surface-soft: #efebe1;
+  --surface-tint: #e8e2d4;
+  --ink: #1a1812;
+  --muted: #5b5649;
+  --soft: #9c9486;
+  --line: rgba(26, 24, 18, 0.10);
+  --line-strong: rgba(26, 24, 18, 0.18);
+  --accent: #1a1812;
+  --accent-hover: #3a352c;
+  --accent-soft: rgba(26, 24, 18, 0.06);
+  --accent-2: #5b5649;
+  --accent-3: #5b5649;
+  --accent-warm: #9a7b3a;
+  --success: #4a6138;
+  --warning: #9a7b3a;
+  --danger: #a8482f;
+  --primary-ink: #f3f0e8;
+  --danger-primary-ink: #ffffff;
+  --feedback-saving-bg: #f0e7d4;
+  --feedback-saving-ink: #5f4a21;
+  --feedback-saved-bg: #e4ebdd;
+  --feedback-failed-bg: #f6e8e2;
+  --danger-hover: #8a3a26;
+  --shadow: 0 1px 2px rgba(46, 38, 18, 0.04), 0 12px 28px -16px rgba(46, 38, 18, 0.14);
+  --page-bg: #f3f0e8;
+  --page-ink: #1a1812;
+  --panel-bg: #f7f4ec;
+  --panel-bg-soft: #efebe1;
+  --panel-bg-strong: #fbf9f3;
+  --panel-ink: #1a1812;
+  --panel-muted: #5b5649;
+  --panel-border: rgba(26, 24, 18, 0.10);
+  --panel-border-strong: rgba(26, 24, 18, 0.18);
+  --assistant-bg: #f7f4ec;
+  --assistant-ink: #1a1812;
+  --assistant-muted: #5b5649;
+  --user-bubble-bg: #ece9e0;
+  --user-bubble-ink: #1a1812;
+  --user-bubble-muted: #5b5649;
+  --composer-bg: #fbf9f3;
+  --composer-ink: #1a1812;
+  --control-bg: #fbf9f3;
+  --control-bg-hover: rgba(26, 24, 18, 0.05);
+  --control-border: rgba(26, 24, 18, 0.16);
+  --control-ink: #1a1812;
+  --control-muted: #5b5649;
+  --primary-bg: #1a1812;
+  --primary-bg-hover: #3a352c;
+  --primary-text: #f3f0e8;
+  --secondary-bg: #f3f0e8;
+  --secondary-bg-hover: rgba(26, 24, 18, 0.05);
+  --secondary-text: #1a1812;
+  --code-bg: #ebe7dd;
+  --code-ink: #1a1812;
+  --code-block-bg: #fbf9f3;
+  --code-block-ink: #1a1812;
+  --link: #1a1812;
+  --link-hover: #000000;
+  --complete-bg: #e4ebdd;
+  --complete-ink: #3f5236;
+  --complete-border: rgba(95, 122, 82, 0.34);
+  --warning-bg: #efe6d2;
+  --warning-ink: #5f4a21;
+  --danger-bg: #f1ddd5;
+  --danger-ink: #8a3a26;
+  --bead: #c6bfae;
+  --ring: rgba(26, 24, 18, 0.16);
+  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --reader: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --radius-avatar: 50%;
+}
+
+html[data-theme="atelier-nocturne"] {
+  color-scheme: dark;
+  --bg: #13120d;
+  --rail: #13120d;
+  --rail-soft: #1b1914;
+  --rail-ink: #efe9db;
+  --surface: #1b1914;
+  --surface-soft: #17150f;
+  --surface-tint: #26221a;
+  --ink: #efe9db;
+  --muted: #a89f8d;
+  --soft: #6f6757;
+  --line: rgba(239, 233, 219, 0.10);
+  --line-strong: rgba(239, 233, 219, 0.18);
+  --accent: #efe9db;
+  --accent-hover: #fff8ea;
+  --accent-soft: rgba(239, 233, 219, 0.08);
+  --accent-2: #a89f8d;
+  --accent-3: #a89f8d;
+  --accent-warm: #d2a052;
+  --success: #8bab78;
+  --warning: #d2a052;
+  --danger: #dd7458;
+  --primary-ink: #13120d;
+  --danger-primary-ink: #13120d;
+  --feedback-saving-bg: #2b2416;
+  --feedback-saving-ink: #e6c389;
+  --feedback-saved-bg: #232a1d;
+  --feedback-failed-bg: #2c1d16;
+  --danger-hover: #e6917a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 30px -18px rgba(0, 0, 0, 0.6);
+  --page-bg: #13120d;
+  --page-ink: #efe9db;
+  --panel-bg: #1b1914;
+  --panel-bg-soft: #17150f;
+  --panel-bg-strong: #201d16;
+  --panel-ink: #efe9db;
+  --panel-muted: #a89f8d;
+  --panel-border: rgba(239, 233, 219, 0.10);
+  --panel-border-strong: rgba(239, 233, 219, 0.18);
+  --assistant-bg: #1b1914;
+  --assistant-ink: #efe9db;
+  --assistant-muted: #a89f8d;
+  --user-bubble-bg: #211e17;
+  --user-bubble-ink: #efe9db;
+  --user-bubble-muted: #a89f8d;
+  --composer-bg: #1b1914;
+  --composer-ink: #efe9db;
+  --control-bg: #1b1914;
+  --control-bg-hover: rgba(239, 233, 219, 0.06);
+  --control-border: rgba(239, 233, 219, 0.18);
+  --control-ink: #efe9db;
+  --control-muted: #a89f8d;
+  --primary-bg: #efe9db;
+  --primary-bg-hover: #fff8ea;
+  --primary-text: #13120d;
+  --secondary-bg: #1b1914;
+  --secondary-bg-hover: rgba(239, 233, 219, 0.06);
+  --secondary-text: #efe9db;
+  --code-bg: #211e17;
+  --code-ink: #efe9db;
+  --code-block-bg: #1b1914;
+  --code-block-ink: #efe9db;
+  --link: #efe9db;
+  --link-hover: #fff8ea;
+  --complete-bg: #232a1d;
+  --complete-ink: #a6c294;
+  --complete-border: rgba(139, 171, 120, 0.34);
+  --warning-bg: #2b2416;
+  --warning-ink: #e6c389;
+  --danger-bg: #2c1d16;
+  --danger-ink: #e6917a;
+  --bead: #4a463c;
+  --ring: rgba(239, 233, 219, 0.18);
+  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --reader: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --radius-avatar: 50%;
 }
 
 
@@ -12353,4 +12536,178 @@ html[data-theme="dark-glass"] .scroll-bottom-button:hover {
   border-color: #d8f7ff !important;
   background: linear-gradient(180deg, #a8e9ff 0%, #68d0ff 100%) !important;
   color: #03111b !important;
+}
+
+/* ===================================================================
+   ATELIER — Phase 2: brand mark (Through-Line glyph), nav icons,
+   in-conversation assistant avatar. Authoritative (last in source).
+   =================================================================== */
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  background: transparent !important;
+  border-radius: 0;
+  color: var(--rail-ink);
+  overflow: visible;
+}
+.brand-mark::before { content: none !important; }
+.brand-mark .brand-glyph {
+  width: 30px;
+  height: 30px;
+  display: block;
+}
+
+/* nav rows: icon + label, calm stroke language */
+.rail-action {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.rail-ic {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+}
+.rail-action.is-active .rail-ic { opacity: 1; }
+
+/* the Through-Line logo, in conversation, before the assistant name */
+.framing-message.assistant > .transcript-meta::before,
+.transcript-message.assistant > .transcript-meta::before,
+.transcript-message.final > .transcript-meta::before {
+  content: "";
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Ccircle%20cx='5.5'%20cy='24'%20r='2.7'%20fill='none'%20stroke='%23000'%20stroke-width='1.9'/%3E%3Cpath%20d='M8.4%2024%20H15%20L24.4%2010.2'%20fill='none'%20stroke='%23000'%20stroke-width='1.9'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3Ccircle%20cx='15'%20cy='24'%20r='1.7'%20fill='%23000'/%3E%3Ccircle%20cx='25.5'%20cy='8.5'%20r='3.2'%20fill='%23000'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Ccircle%20cx='5.5'%20cy='24'%20r='2.7'%20fill='none'%20stroke='%23000'%20stroke-width='1.9'/%3E%3Cpath%20d='M8.4%2024%20H15%20L24.4%2010.2'%20fill='none'%20stroke='%23000'%20stroke-width='1.9'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3Ccircle%20cx='15'%20cy='24'%20r='1.7'%20fill='%23000'/%3E%3Ccircle%20cx='25.5'%20cy='8.5'%20r='3.2'%20fill='%23000'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* ===================================================================
+   ATELIER — Phase 4: markdown prose. Headings in display serif, body in
+   reading serif, quiet bead bullets, mono ordered numerals, blockquote
+   rule, soft code, hairline tables, dotted horizontal rule.
+   =================================================================== */
+.markdown-preview {
+  font-family: var(--reader);
+  line-height: 1.7;
+}
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview h4,
+.markdown-preview h5,
+.markdown-preview h6 {
+  font-family: var(--display);
+  font-weight: 460;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+}
+.markdown-preview p,
+.markdown-preview li { font-family: var(--reader); }
+
+.markdown-preview ul { list-style: none; padding-left: 1.4em; }
+.markdown-preview ul > li { position: relative; }
+.markdown-preview ul > li::before {
+  content: "";
+  position: absolute;
+  left: -1.15em;
+  top: 0.62em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bead);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+.markdown-preview ol { list-style: none; padding-left: 1.7em; counter-reset: md-ol; }
+.markdown-preview ol > li { position: relative; counter-increment: md-ol; }
+.markdown-preview ol > li::before {
+  content: counter(md-ol);
+  position: absolute;
+  left: -1.7em;
+  top: 0.1em;
+  font-family: var(--mono);
+  font-size: 0.8em;
+  color: var(--soft);
+}
+.markdown-preview blockquote {
+  margin: 1.2em 0;
+  padding: 0.1em 0 0.1em 1.1em;
+  border-left: 2px solid var(--line-strong);
+  color: var(--muted);
+  font-style: italic;
+}
+.markdown-preview pre {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+}
+.markdown-preview pre code { background: none; border: none; }
+.markdown-preview table th {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+.markdown-preview hr {
+  border: none;
+  height: auto;
+  background: none;
+  margin: 2em 0;
+  text-align: center;
+}
+.markdown-preview hr::before {
+  content: "\00B7  \00B7  \00B7";
+  font-family: var(--mono);
+  letter-spacing: 0.4em;
+  color: var(--soft);
+}
+
+/* ===================================================================
+   ATELIER — Phase 5: quiet status dots + a timeline thread for the
+   sequential run-event list. Authoritative (last in source).
+   =================================================================== */
+.project-status-dot { background: color-mix(in srgb, var(--ink) 26%, transparent); }
+.project-status-dot.ready { background: var(--warning); }
+.project-status-dot.active { background: var(--success); }
+.project-status-dot.running {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.sync-dot { background: var(--success); }
+.thinking-dot { background: var(--muted); }
+
+/* run-event list as a quiet timeline: one thread, neutral beads */
+.framing-progress { position: relative; padding-left: 20px; }
+.framing-progress.is-empty { padding-left: 0; }
+.framing-progress.is-empty::before { display: none; }
+.framing-progress::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--line);
+}
+.framing-progress-row { position: relative; }
+.framing-progress-row::before {
+  content: "";
+  position: absolute;
+  left: -15px;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bead);
+  box-shadow: 0 0 0 3px var(--panel-bg);
 }
