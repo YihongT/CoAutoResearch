@@ -2361,6 +2361,140 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
     return base
 
 
+_AGENT_MODELS_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _format_claude_model_label(value: str) -> str:
+    """Turn an underlying CLI value like `claude-opus-4-8` or `opus` into a human label."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    full_match = re.match(r"^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?(?:-(\d{6,8}))?$", raw, re.IGNORECASE)
+    if full_match:
+        tier = full_match.group(1).capitalize()
+        major = full_match.group(2)
+        minor = full_match.group(3)
+        version = f"{major}.{minor}" if minor else major
+        return f"Claude {tier} {version}"
+    if raw.lower() in {"opus", "sonnet", "haiku", "fable", "mythos"}:
+        return f"Claude {raw.capitalize()}"
+    return raw
+
+
+def _format_codex_model_label(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if re.match(r"^gpt-\d", raw, re.IGNORECASE):
+        upper = raw.upper().replace("CODEX", "Codex").replace("MINI", "Mini").replace("SPARK", "Spark")
+        return upper
+    return raw
+
+
+def _parse_claude_models_from_help(help_text: str) -> list[tuple[str, str]]:
+    text = str(help_text or "")
+    found: dict[str, str] = {}
+    # Full model IDs are the safest signal: claude-opus-4-8, claude-sonnet-4-6, etc.
+    for match in re.finditer(r"\bclaude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)?(?:-\d{6,8})?\b", text, re.IGNORECASE):
+        value = match.group(0).lower()
+        found.setdefault(value, _format_claude_model_label(value))
+    # Shortcuts (opus / sonnet / haiku) appear in the --model option help text quoted or after commas.
+    for match in re.finditer(r"[\"'`,\s\[\(](opus|sonnet|haiku|fable|mythos)[\"'`,\s\]\)]", text, re.IGNORECASE):
+        value = match.group(1).lower()
+        found.setdefault(value, _format_claude_model_label(value))
+    return [(value, label) for value, label in found.items()]
+
+
+def _parse_codex_models_from_help(help_text: str) -> list[tuple[str, str]]:
+    text = str(help_text or "")
+    found: dict[str, str] = {}
+    for match in re.finditer(r"\bgpt-\d+(?:\.\d+)?(?:-[a-z0-9-]+)?\b", text, re.IGNORECASE):
+        value = match.group(0).lower()
+        found.setdefault(value, _format_codex_model_label(value))
+    return [(value, label) for value, label in found.items()]
+
+
+def _claude_model_sort_key(item: tuple[str, str]) -> tuple[int, int, int, str]:
+    value, _ = item
+    tier_order = {"opus": 0, "sonnet": 1, "haiku": 2, "fable": -1, "mythos": -2}
+    full = re.match(r"^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?", value, re.IGNORECASE)
+    if full:
+        tier = tier_order.get(full.group(1).lower(), 99)
+        # Newer versions first: negate major/minor for stable sort.
+        major = -int(full.group(2))
+        minor = -int(full.group(3) or 0)
+        return (tier, major, minor, value)
+    if value in tier_order:
+        return (tier_order[value], 0, 0, value)
+    return (99, 0, 0, value)
+
+
+def _codex_model_sort_key(item: tuple[str, str]) -> tuple[int, int, str]:
+    value, _ = item
+    match = re.match(r"^gpt-(\d+)(?:\.(\d+))?", value, re.IGNORECASE)
+    if match:
+        major = -int(match.group(1))
+        minor = -int(match.group(2) or 0)
+        return (major, minor, value)
+    return (99, 0, value)
+
+
+def agent_available_models(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    backend = normalize_agent_backend(backend)
+    process_env = env if env is not None else os.environ
+    try:
+        executable = resolve_agent_executable(backend, process_env)
+    except FileNotFoundError as exc:
+        return {
+            "backend": backend,
+            "source": "unavailable",
+            "models": [],
+            "probe_error": str(exc),
+            "executable": "",
+        }
+    cache_key = f"{backend}::{executable}"
+    cached = _AGENT_MODELS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    help_probe = run_agent_probe(executable, ["--help"], process_env, timeout=6.0)
+    if not help_probe.get("ok"):
+        result = {
+            "backend": backend,
+            "source": "fallback",
+            "models": [],
+            "probe_error": str(help_probe.get("output") or help_probe.get("error") or "Help probe failed."),
+            "executable": executable,
+        }
+        _AGENT_MODELS_CACHE[cache_key] = result
+        return result
+    help_text = str(help_probe.get("output") or "")
+    if backend == "claude":
+        pairs = _parse_claude_models_from_help(help_text)
+        pairs.sort(key=_claude_model_sort_key)
+    else:
+        pairs = _parse_codex_models_from_help(help_text)
+        pairs.sort(key=_codex_model_sort_key)
+    if not pairs:
+        result = {
+            "backend": backend,
+            "source": "fallback",
+            "models": [],
+            "probe_error": "Could not parse model list from CLI help.",
+            "executable": executable,
+        }
+        _AGENT_MODELS_CACHE[cache_key] = result
+        return result
+    result = {
+        "backend": backend,
+        "source": "discovered",
+        "models": [{"value": value, "label": label} for value, label in pairs],
+        "probe_error": None,
+        "executable": executable,
+    }
+    _AGENT_MODELS_CACHE[cache_key] = result
+    return result
+
+
 def agent_backend_status_payload(selected_backend: Any = "") -> dict[str, Any]:
     selected = normalize_agent_backend(selected_backend or selected_agent_backend_from_env())
     statuses = {backend: agent_setup_status(backend) for backend in sorted(ALLOWED_AGENT_BACKENDS)}
@@ -9054,6 +9188,11 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/settings":
                     self.send_json({"ok": True, "settings": public_ui_settings(), "secret_keys": SECRET_ENV_KEYS})
+                    return
+                if parsed.path == "/api/agent/models":
+                    query = parse_qs(parsed.query)
+                    backend = normalize_agent_backend(query.get("backend", [""])[0])
+                    self.send_json({"ok": True, **agent_available_models(backend)})
                     return
         except Exception as exc:
             self.send_json({"ok": False, "error": str(exc)}, status=400)

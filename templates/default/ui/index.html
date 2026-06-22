@@ -28,7 +28,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png" />
     <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260622-atelier-3" />
+    <link rel="stylesheet" href="/styles.css?v=20260622-atelier-22-agent-setup" />
   </head>
   <body>
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
@@ -100,6 +100,7 @@
       </aside>
 
       <main class="main-stage">
+        <div class="agent-status-banner" id="agent-status-banner" role="status" aria-live="polite" hidden></div>
         <section class="workspace-view chat-view is-active" id="chat-view" aria-label="Agent chat">
           <div class="chat-frame">
             <header class="chat-header is-framing">
@@ -351,7 +352,6 @@
         <section class="workspace-view material-view" id="material-view" aria-label="Project materials">
           <header class="material-header">
             <div>
-              <p class="eyebrow">Repository</p>
               <h1 id="material-title">Resources</h1>
             </div>
           </header>
@@ -782,7 +782,7 @@
                 <h3>Model and tool defaults</h3>
                 <p>Defaults used when this UI starts or resumes agent CLI sessions.</p>
               </div>
-              <div class="settings-doc-links">
+              <div class="settings-doc-links" id="settings-doc-links">
                 <a href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer">Models</a>
                 <a href="https://developers.openai.com/api/docs/guides/latest-model" target="_blank" rel="noreferrer">Latest model guide</a>
               </div>
@@ -864,8 +864,30 @@
       </section>
     </dialog>
 
+    <dialog class="project-dialog agent-setup-dialog" id="agent-setup-dialog" aria-labelledby="agent-setup-title">
+      <section class="project-dialog-shell">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">First-time setup</p>
+            <h2 id="agent-setup-title">Install an agent CLI to continue.</h2>
+          </div>
+          <button class="icon-button" type="button" data-agent-setup-close aria-label="Dismiss for now">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="agent-setup-body">
+          <p class="agent-setup-intro">CoAutoResearch drives research sessions through Claude Code or Codex CLI. Install one and re-check below to continue.</p>
+          <div class="agent-setup-grid" id="agent-setup-grid"></div>
+        </div>
+        <footer class="project-dialog-footer">
+          <button class="secondary-button" type="button" data-agent-setup-close>Continue anyway</button>
+          <button class="primary-button" type="button" data-agent-setup-recheck>I installed it — re-check</button>
+        </footer>
+      </section>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260621-viewstate-asc1"></script>
+    <script src="/app.js?v=20260622-atelier-24-claude-model-validate"></script>
   </body>
 </html>

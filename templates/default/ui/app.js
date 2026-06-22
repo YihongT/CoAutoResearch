@@ -165,9 +165,20 @@ const modelOptionsByBackend = {
     ["gpt-5.2", "GPT-5.2"],
   ],
   claude: [
-    ["sonnet", "Claude Sonnet"],
-    ["opus", "Claude Opus"],
-    ["haiku", "Claude Haiku"],
+    ["opus", "Claude Opus 4.8"],
+    ["sonnet", "Claude Sonnet 4.6"],
+    ["haiku", "Claude Haiku 4.5"],
+  ],
+};
+
+const backendDocLinks = {
+  codex: [
+    { label: "Models", href: "https://developers.openai.com/api/docs/models" },
+    { label: "Latest model guide", href: "https://developers.openai.com/api/docs/guides/latest-model" },
+  ],
+  claude: [
+    { label: "Models", href: "https://docs.claude.com/en/docs/about-claude/models/overview" },
+    { label: "Pick a model", href: "https://docs.claude.com/en/docs/about-claude/models/choosing-a-model" },
   ],
 };
 
@@ -980,6 +991,202 @@ function renderAllAgentStatusNotes() {
   renderAgentStatusNote("#settings-agent-status", $("#settings-form")?.elements?.settingsBackend?.value || activeSettingsBackend(), "settings");
   renderAgentStatusNote("#launch-agent-status", currentLaunchBackend(), "launch");
   renderAgentStatusNote("#project-agent-backend-note", $("#project-agent-backend")?.value || activeSettingsBackend(), "project");
+  renderAgentStatusBanner();
+}
+
+const agentInstallGuides = {
+  claude: {
+    label: "Claude Code",
+    install: "npm install -g @anthropic-ai/claude-code",
+    docs: "https://docs.claude.com/en/docs/claude-code/quickstart",
+    description: "Anthropic's CLI for driving Claude (Opus / Sonnet / Haiku) inside a terminal session.",
+  },
+  codex: {
+    label: "Codex",
+    install: "npm install -g @openai/codex",
+    docs: "https://developers.openai.com/codex/cli",
+    description: "OpenAI's CLI for GPT-5 family coding sessions.",
+  },
+};
+
+function backendInstallGuide(backend) {
+  return agentInstallGuides[normalizeAgentBackend(backend)] || agentInstallGuides.claude;
+}
+
+function renderAgentStatusBanner() {
+  const banner = document.getElementById("agent-status-banner");
+  if (!banner) return;
+  const envelope = agentStatusEnvelope();
+  const envWarning = String(envelope.env_warning || "").trim();
+  const forced = envForcedBackend();
+  const requested = normalizeAgentBackend(envelope.selected || activeSettingsBackend());
+  const effective = forced || requested;
+  const status = statusForBackend(effective);
+  const otherBackend = Object.keys(envelope.backends || {}).find((name) => normalizeAgentBackend(name) !== effective);
+  const otherStatus = otherBackend ? statusForBackend(otherBackend) : null;
+  const otherUsable = Boolean(otherStatus?.ok && !otherStatus?.blocking);
+
+  let tone = "";
+  let kicker = "";
+  let message = "";
+  const actions = [];
+
+  if (envWarning) {
+    tone = "warning";
+    kicker = "Configuration";
+    message = envWarning;
+    actions.push({ kind: "button", label: "Open settings", onClick: openSettingsDialog });
+  } else if (status?.blocking) {
+    tone = "error";
+    const label = agentLabel(effective);
+    kicker = `${label} unavailable`;
+    message = status.message || `${label} CLI is not installed or not authenticated.`;
+    const guide = backendInstallGuide(effective);
+    actions.push({ kind: "link", label: "Install guide", href: guide.docs });
+    if (otherUsable && otherBackend) {
+      const otherLabel = agentLabel(otherBackend);
+      actions.push({ kind: "button", label: `Switch to ${otherLabel}`, onClick: () => switchActiveBackend(otherBackend) });
+    }
+    actions.push({ kind: "button", label: "Open settings", onClick: openSettingsDialog });
+  } else if (status && statusTone(status) === "warning") {
+    tone = "warning";
+    kicker = `${agentLabel(effective)} readiness`;
+    message = status.message || "Status could not be confirmed.";
+    actions.push({ kind: "button", label: "Re-check", onClick: refreshAgentStatuses });
+  } else if (forced) {
+    tone = "info";
+    kicker = "Backend override";
+    message = `COAUTO_AGENT_BACKEND forces ${agentLabel(forced)}. Saved Settings choices apply once the env var is removed.`;
+  } else {
+    banner.classList.remove("is-visible");
+    banner.hidden = true;
+    banner.innerHTML = "";
+    return;
+  }
+
+  banner.hidden = false;
+  banner.classList.add("is-visible");
+  banner.dataset.tone = tone || "info";
+  const actionsHtml = actions
+    .map((action, index) => {
+      if (action.kind === "link") {
+        return `<a href="${escapeHtml(action.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label)}</a>`;
+      }
+      return `<button type="button" data-banner-action="${index}">${escapeHtml(action.label)}</button>`;
+    })
+    .join("");
+  banner.innerHTML = `
+    <span class="agent-status-banner-dot" aria-hidden="true"></span>
+    <div class="agent-status-banner-body">
+      <div class="agent-status-banner-kicker">${escapeHtml(kicker)}</div>
+      <div class="agent-status-banner-message">${escapeHtml(message)}</div>
+    </div>
+    <div class="agent-status-banner-actions">${actionsHtml}</div>
+  `;
+  banner.querySelectorAll("button[data-banner-action]").forEach((button) => {
+    const index = Number(button.dataset.bannerAction || 0);
+    const action = actions[index];
+    if (action?.onClick) button.addEventListener("click", action.onClick);
+  });
+}
+
+function openSettingsDialog() {
+  const dialog = document.getElementById("settings-dialog");
+  if (!dialog) return;
+  if (typeof loadUiSettings === "function") {
+    Promise.resolve(loadUiSettings()).finally(() => {
+      try { dialog.showModal(); } catch (_) { /* already open */ }
+    });
+  } else {
+    try { dialog.showModal(); } catch (_) { /* already open */ }
+  }
+}
+
+function switchActiveBackend(backend) {
+  const target = normalizeAgentBackend(backend);
+  const form = document.getElementById("session-settings-form");
+  if (form?.elements?.backend) {
+    form.elements.backend.value = target;
+  }
+  const settingsForm = document.getElementById("settings-form");
+  if (settingsForm?.elements?.settingsBackend) {
+    settingsForm.elements.settingsBackend.value = target;
+  }
+  const projectBackend = document.getElementById("project-agent-backend");
+  if (projectBackend) projectBackend.value = target;
+  try {
+    if (typeof settingsFromForm === "function") settingsFromForm();
+  } catch (_) {
+    // Form may not exist yet.
+  }
+  renderAllAgentStatusNotes();
+  refreshDiscoveredModels([target]);
+}
+
+async function refreshAgentStatuses() {
+  try {
+    const payload = await api("/api/settings");
+    uiSettings = payload.settings || uiSettings || {};
+    renderAllAgentStatusNotes();
+    renderAgentSetupCards();
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function allBackendsBlocking() {
+  const backends = agentStatusEnvelope().backends || {};
+  const entries = Object.values(backends).filter((status) => status && typeof status === "object");
+  if (!entries.length) return false;
+  return entries.every((status) => status.blocking === true);
+}
+
+function maybeShowAgentSetupDialog() {
+  const dialog = document.getElementById("agent-setup-dialog");
+  if (!dialog) return;
+  if (!allBackendsBlocking()) {
+    if (dialog.open) {
+      try { dialog.close(); } catch (_) { /* ignore */ }
+    }
+    return;
+  }
+  if (dialog.open) {
+    renderAgentSetupCards();
+    return;
+  }
+  renderAgentSetupCards();
+  try { dialog.showModal(); } catch (_) { /* may already be open */ }
+}
+
+function renderAgentSetupCards() {
+  const grid = document.getElementById("agent-setup-grid");
+  if (!grid) return;
+  const backends = agentStatusEnvelope().backends || {};
+  const order = ["claude", "codex"];
+  grid.innerHTML = order
+    .map((backend) => {
+      const status = backends[backend] || {};
+      const guide = backendInstallGuide(backend);
+      const ready = status.ok && !status.blocking;
+      const state = ready ? "ready" : "missing";
+      const stateLabel = ready ? "Ready" : "Not detected";
+      const detail = ready
+        ? (status.version || `${guide.label} CLI is installed and authenticated.`)
+        : (status.message || `${guide.label} CLI was not found on PATH.`);
+      return `
+        <article class="agent-setup-card" data-agent-setup-card="${escapeHtml(backend)}">
+          <div class="agent-setup-card-head">
+            <strong>${escapeHtml(guide.label)}</strong>
+            <span class="agent-setup-card-status" data-state="${escapeHtml(state)}">${escapeHtml(stateLabel)}</span>
+          </div>
+          <p>${escapeHtml(guide.description)}</p>
+          <p>${escapeHtml(detail)}</p>
+          <pre><code>${escapeHtml(guide.install)}</code></pre>
+          <a href="${escapeHtml(guide.docs)}" target="_blank" rel="noopener noreferrer">Open docs</a>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function scopedSessionSettings() {
@@ -3057,8 +3264,8 @@ function updateBriefDockGeometry() {
   const main = $(".main-stage");
   if (!shell || !main || !shell.classList.contains("is-framing-dock")) return;
   const rect = main.getBoundingClientRect();
-  const available = Math.max(320, rect.width - 48);
-  const width = Math.min(900, available);
+  const available = Math.max(320, rect.width - 96);
+  const width = Math.min(860, available);
   const left = rect.left + rect.width / 2;
   const height = Math.max(88, shell.getBoundingClientRect().height || 0);
   shell.style.setProperty("--brief-dock-left", `${left}px`);
@@ -3133,8 +3340,68 @@ function scrollFramingToBottomSoon() {
   });
 }
 
+const discoveredModelsByBackend = {};
+const modelDiscoveryInflight = {};
+
+function mergeModelOptionsLists(...lists) {
+  const seen = new Set();
+  const merged = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (!Array.isArray(entry) || entry.length < 1) continue;
+      const value = String(entry[0] || "").trim();
+      if (!value || seen.has(value)) continue;
+      const label = String(entry[1] || value).trim() || value;
+      seen.add(value);
+      merged.push([value, label]);
+    }
+  }
+  return merged;
+}
+
 function modelOptionsForBackend(backend) {
-  return modelOptionsByBackend[normalizeAgentBackend(backend)] || modelOptionsByBackend.codex;
+  const normalized = normalizeAgentBackend(backend);
+  const base = modelOptionsByBackend[normalized] || modelOptionsByBackend.codex;
+  const discovered = discoveredModelsByBackend[normalized];
+  if (Array.isArray(discovered) && discovered.length) {
+    return mergeModelOptionsLists(base, discovered);
+  }
+  return base;
+}
+
+async function discoverModelsForBackend(backend) {
+  const normalized = normalizeAgentBackend(backend);
+  if (modelDiscoveryInflight[normalized]) return modelDiscoveryInflight[normalized];
+  const promise = (async () => {
+    try {
+      const payload = await api(`/api/agent/models?backend=${encodeURIComponent(normalized)}`);
+      const list = Array.isArray(payload?.models) ? payload.models : [];
+      if (payload?.source === "discovered" && list.length) {
+        const pairs = list
+          .map((entry) => [String(entry?.value || "").trim(), String(entry?.label || entry?.value || "").trim()])
+          .filter(([value]) => value);
+        if (pairs.length) {
+          discoveredModelsByBackend[normalized] = pairs;
+          return pairs;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      delete modelDiscoveryInflight[normalized];
+    }
+  })();
+  modelDiscoveryInflight[normalized] = promise;
+  return promise;
+}
+
+async function refreshDiscoveredModels(backends = ["codex", "claude"]) {
+  const results = await Promise.all(backends.map((backend) => discoverModelsForBackend(backend)));
+  if (results.some((value) => Array.isArray(value) && value.length)) {
+    document.dispatchEvent(new CustomEvent("agent-models-updated"));
+  }
 }
 
 function syncModelSelectOptions(select, backend, selected = "") {
@@ -3144,6 +3411,16 @@ function syncModelSelectOptions(select, backend, selected = "") {
   select.innerHTML = options.map(([optionValue, label]) => `<option value="${escapeHtml(optionValue)}">${escapeHtml(label)}</option>`).join("");
   const allowed = new Set(options.map(([optionValue]) => optionValue));
   select.value = allowed.has(value) ? value : defaultSettingsForBackend(backend).model;
+  syncBackendDocLinks(backend);
+}
+
+function syncBackendDocLinks(backend) {
+  const container = document.getElementById("settings-doc-links");
+  if (!container) return;
+  const links = backendDocLinks[normalizeAgentBackend(backend)] || backendDocLinks.codex;
+  container.innerHTML = links
+    .map(({ label, href }) => `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`)
+    .join("");
 }
 
 function settingsFromForm() {
@@ -3227,7 +3504,13 @@ function normalizeSessionSettings(settings = {}) {
   const merged = { ...defaults, ...(settings || {}), backend };
   const allowedModels = new Set(modelOptionsForBackend(backend).map(([value]) => value));
   if (!merged.model || (backend === "codex" && !allowedModels.has(merged.model))) merged.model = defaults.model;
-  if (backend === "claude" && !String(merged.model || "").trim()) merged.model = defaults.model;
+  if (backend === "claude") {
+    const claudeModel = String(merged.model || "").trim();
+    // A claude model is valid if it is a known alias/discovered option, or a full
+    // claude-* model ID. Anything else (e.g. a leftover codex "gpt-5.5") is rejected.
+    const validClaudeModel = Boolean(claudeModel) && (allowedModels.has(claudeModel) || /^claude-/i.test(claudeModel));
+    if (!validClaudeModel) merged.model = defaults.model;
+  }
   merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend);
   merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
   merged.fastMode = Boolean(merged.fastMode);
@@ -3414,6 +3697,23 @@ async function loadUiSettings() {
     hydrateSettingsDialog(uiSettings);
     restoreSessionSettings();
     renderAllAgentStatusNotes();
+    renderAgentStatusBanner();
+    maybeShowAgentSetupDialog();
+    refreshDiscoveredModels().then(() => {
+      // Re-render model selects with discovered options if available.
+      try {
+        const form = document.getElementById("session-settings-form");
+        const backend = normalizeAgentBackend(form?.elements?.backend?.value || activeSettingsBackend());
+        const currentModel = form?.elements?.model?.value || "";
+        if (form?.elements?.model) syncModelSelectOptions(form.elements.model, backend, currentModel);
+        const composerModel = document.getElementById("composer-model");
+        if (composerModel) syncModelSelectOptions(composerModel, backend, composerModel.value || currentModel);
+        const settingsModel = document.querySelector('select[name="settingsModel"]');
+        if (settingsModel) syncModelSelectOptions(settingsModel, backend, settingsModel.value || currentModel);
+      } catch (_) {
+        // Best-effort refresh; ignore.
+      }
+    });
   } catch (error) {
     showToast(error.message, true);
   }
@@ -3441,7 +3741,24 @@ async function saveUiSettings(event) {
       uiSettings = payload.settings || {};
       settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
       hydrateSettingsDialog(uiSettings);
-      applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
+      // Force the per-session scoped backend to follow the Settings choice; otherwise
+      // a previously stickied scoped backend in localStorage would silently override.
+      const savedBackend = normalizeAgentBackend(uiSettings?.agent?.backend || "");
+      const scoped = scopedSessionSettings();
+      const scopedBackend = normalizeAgentBackend(scoped?.agent?.backend || scoped?.backend || "");
+      if (scopedBackend && scopedBackend !== savedBackend) {
+        const next = scoped && typeof scoped === "object" ? { ...scoped } : {};
+        next.agent = { ...(next.agent || {}), backend: savedBackend };
+        if (next.backend !== undefined) next.backend = savedBackend;
+        scopedSet("autoResearchSessionSettings", JSON.stringify(next));
+      }
+      const merged = normalizeSessionSettings({
+        ...providerSettingsFromUi(savedBackend),
+        ...(uiSettings?.[savedBackend] || {}),
+        backend: savedBackend,
+      });
+      applySessionSettings(merged, true);
+      renderAgentStatusBanner();
       showToast("Settings saved locally.");
     });
   } catch (error) {
@@ -4172,19 +4489,24 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
         ${report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : ""}
         ${report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : ""}
       </div>
-      ${
-        entries.length
+      ${(() => {
+        const activity = trialActivityEntries(entries);
+        return activity.length
           ? `<details class="trial-detail-activity">
               <summary>
                 <span>Trial activity</span>
-                <strong>${escapeHtml(entries.length)} event${entries.length === 1 ? "" : "s"}</strong>
+                <strong>${escapeHtml(activity.length)} event${activity.length === 1 ? "" : "s"}</strong>
               </summary>
-              <div class="trial-detail-events">${transcriptEntriesHtml(entries)}</div>
+              <div class="trial-detail-events">${transcriptEntriesHtml(activity)}</div>
             </details>`
-          : ""
-      }
+          : "";
+      })()}
     </article>
   `;
+}
+
+function trialActivityEntries(entries) {
+  return (entries || []).filter((entry) => transcriptRole(entry) !== "user");
 }
 
 function latestTrialProgressEntry(entries) {
@@ -4866,9 +5188,12 @@ function messageCopyButton(text, label = "Copy message", message = "Message copi
 }
 
 function inlineOpenButton(path, label = "Open source") {
-  const value = repoRelativePath(path);
+  const raw = String(path || "");
+  const zipSplit = raw.includes("::") ? raw.split("::", 1)[0] : raw;
+  const value = repoRelativePath(zipSplit);
   if (!value || value.includes("*")) return "";
-  return `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+  const adjustedLabel = raw.includes("::") && label === "Open source" ? "Open source archive" : label;
+  return `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(value)}" title="${escapeHtml(raw)}">${escapeHtml(adjustedLabel)}</button>`;
 }
 
 function renderTree(node, depth = 0) {
@@ -5158,7 +5483,7 @@ function reviewTrialStripHtml(groups, activeGroup) {
             const label = reviewTrialGroupLabel(group);
             const status = reviewGroupStatusLabel(group);
             return `
-              <button class="trial-chip review-trial-chip ${active ? "is-active" : ""}" type="button" data-review-trial-select="${escapeHtml(group.key)}" title="${escapeHtml(`${label} · ${status}`)}" aria-label="${escapeHtml(`${label}: ${status}`)}">
+              <button class="trial-chip review-trial-chip ${active ? "is-active" : ""}" type="button" data-review-trial-select="${escapeHtml(group.key)}" data-review-status="${escapeHtml(reviewGroupShortStatus(group))}" title="${escapeHtml(`${label} · ${status}`)}" aria-label="${escapeHtml(`${label}: ${status}`)}">
                 <strong class="trial-chip-index">${escapeHtml(reviewGroupIndexLabel(group))}</strong>
                 <span class="trial-chip-status">${escapeHtml(reviewGroupShortStatus(group))}</span>
               </button>
@@ -5343,11 +5668,21 @@ function markdownFieldValue(body, label) {
   const target = normalizeFieldLabel(label);
   const values = [];
   let collecting = false;
+  const looksLikeLabel = (candidate) => {
+    if (!candidate) return false;
+    if (candidate.length > 70) return false;
+    // Real field labels never contain prose punctuation in the label part.
+    if (/[.,;!?]/.test(candidate)) return false;
+    // Real field labels start with an uppercase letter (e.g. "Caption draft").
+    // Mid-prose "X: Y" fragments like "plus scenario: validated scope" start lowercase.
+    if (!/^[A-Z]/.test(candidate)) return false;
+    return true;
+  };
   for (const rawLine of String(body || "").replaceAll(/\r\n/g, "\n").split("\n")) {
     const trimmed = rawLine.trim();
     const line = trimmed.replace(/^[-*]\s+/, "");
     const match = line.match(/^([^:]{2,90}):\s*(.*)$/);
-    if (match) {
+    if (match && looksLikeLabel(match[1].trim())) {
       const current = normalizeFieldLabel(match[1]);
       if (collecting && current !== target) break;
       if (current === target) {
@@ -5367,6 +5702,24 @@ function manuscriptFieldValue(section, labels) {
     if (hasRealText(value)) return value;
   }
   return "";
+}
+
+function figureDescriptionPayload(block) {
+  const sections = [
+    { label: "Purpose or result role", alts: ["Purpose or result role", "Argument or result role", "Purpose"] },
+    { label: "Content and panel layout", alts: ["Content and panel layout", "Pseudocode / interface sketch", "Metric or result summary"] },
+    { label: "Visual style", alts: ["Visual style"] },
+    { label: "Caption draft or current caption", alts: ["Caption draft or current caption", "Caption draft", "Caption"] },
+  ];
+  return sections
+    .map(({ label, alts }) => {
+      const raw = manuscriptFieldValue(block, alts);
+      if (!hasRealText(raw)) return "";
+      const flat = String(raw).replace(/\s+/g, " ").trim();
+      return `${label}: ${flat}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function paragraphPlanHtml(section) {
@@ -5913,8 +6266,13 @@ function artifactTakeawayHtml(block) {
         ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
       </header>
       ${manuscriptActionsHtml([
-        copyButton([`${"#".repeat(Number(block.level || 4))} ${block.title}`, block.body].join("\n\n"), "Copy block", "Artifact block copied."),
-        caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
+        !isTable
+          ? copyButton(
+              figureDescriptionPayload(block),
+              "Copy description",
+              "Figure description copied.",
+            )
+          : "",
         sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
       ])}
       ${storyPointHtml("Reader takeaway", takeaway, "is-takeaway")}
@@ -6143,9 +6501,7 @@ function manuscriptTableCardHtml(block) {
         ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
       </header>
       ${manuscriptActionsHtml([
-        copyButton([`${"#".repeat(Number(block.level || 4))} ${block.title}`, block.body].join("\n\n"), "Copy block", "Table block copied."),
         tableBody ? copyButton(tableBody, "Copy table", "Table copied.") : "",
-        caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
         sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
       ])}
       ${caption ? `<blockquote class="figure-caption table-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
@@ -6202,8 +6558,6 @@ function manuscriptArtifactCardHtml(block) {
         ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
       </header>
       ${manuscriptActionsHtml([
-        copyButton([`${"#".repeat(Number(block.level || 4))} ${block.title}`, block.body].join("\n\n"), "Copy block", "Artifact block copied."),
-        caption ? copyButton(caption, "Copy caption", "Caption copied.") : "",
         sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
       ])}
       ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
@@ -7874,13 +8228,33 @@ function renderBlueprintInspector(payload) {
 
 async function loadInlineFile(path, container, compact = false) {
   try {
-    const payload = await api(`/api/file?path=${encodeURIComponent(path)}`);
+    let payload = await api(`/api/file?path=${encodeURIComponent(path)}`);
+    let resolvedPath = path;
+    if (payload?.exists && payload?.is_dir) {
+      const dirPath = path.replace(/\/+$/, "");
+      for (const name of ["REPORT.md", "README.md", "INDEX.md", "PLAN.md"]) {
+        const candidatePath = `${dirPath}/${name}`;
+        try {
+          const subPayload = await api(`/api/file?path=${encodeURIComponent(candidatePath)}`);
+          if (subPayload?.exists && !subPayload?.is_dir) {
+            payload = subPayload;
+            resolvedPath = candidatePath;
+            break;
+          }
+        } catch (_) {
+          // Try next candidate.
+        }
+      }
+    }
     if (!payload.exists || payload.is_dir) {
-      container.innerHTML = `<div class="tree-empty">${escapeHtml(payload.error || "File not found.")}</div>`;
+      const friendly = payload?.is_dir
+        ? `${path} is a folder — open it from Project files.`
+        : (payload.error || "File not found.");
+      container.innerHTML = `<div class="tree-empty">${escapeHtml(friendly)}</div>`;
       return;
     }
-    inlineFiles[payload.path || path] = payload.text || "";
-    inlineFilePayloads[payload.path || path] = payload;
+    inlineFiles[payload.path || resolvedPath] = payload.text || "";
+    inlineFilePayloads[payload.path || resolvedPath] = payload;
     container.dataset.compactInline = compact ? "true" : "false";
     container.innerHTML = inlineEditorHtml(payload, compact);
   } catch (error) {
@@ -8045,8 +8419,31 @@ async function openInlineFullscreen(path, options = {}) {
       return;
     }
   }
+  if (payload?.exists && payload?.is_dir) {
+    // Directory link: try the canonical entry files inside before giving up.
+    const dirPath = path.replace(/\/+$/, "");
+    const entryCandidates = ["REPORT.md", "README.md", "INDEX.md", "PLAN.md"];
+    for (const name of entryCandidates) {
+      const candidatePath = `${dirPath}/${name}`;
+      try {
+        const subPayload = inlineFilePayloads[candidatePath]
+          || (await api(`/api/file?path=${encodeURIComponent(candidatePath)}`));
+        if (subPayload?.exists && !subPayload?.is_dir) {
+          inlineFilePayloads[candidatePath] = subPayload;
+          payload = subPayload;
+          path = candidatePath;
+          break;
+        }
+      } catch (_) {
+        // Try next candidate.
+      }
+    }
+  }
   if (!payload?.exists || payload?.is_dir) {
-    showToast(payload?.error || "File not found.", true);
+    const friendly = payload?.is_dir
+      ? `${path} is a folder — open it from Project files.`
+      : (payload?.error || "File not found.");
+    showToast(friendly, true);
     return;
   }
   inlineFilePayloads[payload.path || path] = payload;
@@ -8980,8 +9377,34 @@ function bindEvents() {
     switchSettingsTab("general");
     $("#settings-dialog").showModal();
   });
+  $$("dialog").forEach((dialog) => {
+    dialog.addEventListener("click", (event) => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      const inside =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+      if (!inside) dialog.close();
+    });
+  });
   $$("[data-settings-close]").forEach((button) => {
     button.addEventListener("click", () => $("#settings-dialog").close());
+  });
+  $$("[data-agent-setup-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const dialog = document.getElementById("agent-setup-dialog");
+      if (dialog?.open) {
+        try { dialog.close(); } catch (_) { /* ignore */ }
+      }
+    });
+  });
+  $$("[data-agent-setup-recheck]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await refreshAgentStatuses();
+      maybeShowAgentSetupDialog();
+    });
   });
   $$(".settings-nav-button").forEach((button) => {
     button.addEventListener("click", () => switchSettingsTab(button.dataset.settingsTab));
