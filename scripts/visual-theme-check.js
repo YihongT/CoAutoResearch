@@ -22,6 +22,8 @@ const shots = [
   { name: "dashboard-desktop", width: 1440, height: 1000, kind: "dashboard" },
   { name: "dashboard-mobile", width: 390, height: 844, kind: "dashboard" },
   { name: "settings-desktop", width: 1440, height: 1000, kind: "settings" },
+  { name: "panels-desktop", width: 1440, height: 1200, kind: "panels" },
+  { name: "shell-desktop", width: 1440, height: 1000, kind: "shell" },
 ];
 
 function findChrome() {
@@ -454,6 +456,157 @@ function settingsHtml(theme, label) {
 </html>`;
 }
 
+function shellHtml(theme, label) {
+  return `${baseHead(theme, `${label} shell`)}
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+      <symbol id="ic-reviews" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M8.6 12.2l2.3 2.3 4.5-4.8"/></symbol>
+      <symbol id="ic-manuscript" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4M9 13h6M9 16.5h4.5"/></symbol>
+    </defs></svg>
+    <div class="app-shell">
+      <aside class="rail" aria-label="navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32"><use href="#brand-mark-glyph"/></svg></div>
+          <div><div class="brand-title">CoAutoResearch</div><div class="brand-subtitle">Research agent</div></div>
+        </div>
+        <section class="project-switcher" aria-label="Projects">
+          <div class="project-switcher-head"><div class="rail-section-label">Projects</div></div>
+          <div class="project-list">
+            <div class="project-switch-row is-active">
+              <button class="project-switch is-active" type="button">
+                <span class="project-status-dot active" aria-hidden="true"></span>
+                <span><strong>test</strong><small>Active · synced</small></span>
+              </button>
+            </div>
+            <div class="project-switch-row">
+              <button class="project-switch" type="button">
+                <span class="project-status-dot idle" aria-hidden="true"></span>
+                <span><strong>protein-design</strong><small>Idle</small></span>
+              </button>
+            </div>
+          </div>
+        </section>
+        <nav class="rail-nav" aria-label="Views">
+          <div class="rail-section-label">Current project</div>
+          <button class="rail-action is-active" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-agents"/></svg><span>Agents</span></button>
+          <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-files"/></svg><span>Project files</span></button>
+          <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-resources"/></svg><span>Resources</span></button>
+          <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-trials"/></svg><span>Trials</span></button>
+          <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-reviews"/></svg><span>Reviews</span></button>
+          <button class="rail-action" type="button"><svg class="rail-ic" viewBox="0 0 24 24"><use href="#ic-manuscript"/></svg><span>Manuscript</span></button>
+        </nav>
+        <div class="rail-footer">
+          <button class="rail-settings-button" type="button"><span>Settings</span></button>
+          <div class="rail-sync-row"><span class="sync-dot"></span><span>Reading files</span></div>
+        </div>
+      </aside>
+      <main class="main-stage">
+        <section class="workspace-view chat-view is-active">
+          <div class="chat-frame">
+            <header class="chat-header is-framing">
+              <div><p class="eyebrow">Project framing</p><h1>Diffusion models for protein design</h1></div>
+              <div class="header-tools"><div class="session-pill">No session</div></div>
+            </header>
+            <section class="cold-start-workspace">
+              <section class="stage-panel is-active" data-stage-panel="1">
+                <section class="assistant-card cold-card">
+                  <div class="card-head"><div>
+                    <p class="eyebrow">Framing</p>
+                    <h2>Where should the research begin?</h2>
+                    <p class="setup-copy">Describe the research topic, problem, scope, and any data or materials the agent should use. A proposal or prior writeup is recommended.</p>
+                  </div></div>
+                  <div class="compact-fields brief-context-fields">
+                    <label class="field"><span>Target venue / audience</span><input type="text" placeholder="Venue: Nature, NeurIPS, CHI, ICLR, policy memo; audience optional..." /></label>
+                  </div>
+                  <div class="material-quick-actions" aria-label="Browse or drop resources">
+                    <span class="material-actions-label">Browse or drop resources</span>
+                    <button class="material-action-chip" type="button"><span class="material-action-icon"><svg viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4.1c.7 0 1.3.3 1.8.8l1.1 1.2h4A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/></svg></span><span>Ongoing work</span></button>
+                    <button class="material-action-chip" type="button"><span class="material-action-icon"><svg viewBox="0 0 24 24"><path d="M6 4.8A2.8 2.8 0 0 1 8.8 2h8.7v20H8.8A2.8 2.8 0 0 1 6 19.2V4.8Zm3 1.7h5.8M9 10h5.8M9 13.5h4"/></svg></span><span>Papers</span></button>
+                  </div>
+                </section>
+              </section>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>`;
+}
+
+function panelsHtml(theme, label) {
+  return `${baseHead(theme, `${label} panels`)}
+    <main class="main-stage" style="display:block;">
+      <div style="display:grid; gap:36px; width:min(1080px, calc(100% - 64px)); margin:0 auto; padding:56px 0;">
+        <header class="material-header">
+          <p class="eyebrow">Manuscript</p>
+          <h1>Working blueprint</h1>
+          <p>Editorial document layout — mono eyebrows, Fraunces titles, hairline rules.</p>
+        </header>
+
+        <article class="story-section-card paper-section-row">
+          <header class="story-section-head">
+            <p>3.2 Method</p>
+            <h4>A calibrated estimator for sparse regimes</h4>
+          </header>
+          <div class="story-section-brief"><div class="markdown-preview"><p>The section brief reads as tonal prose with a quiet hairline rule, not a heavy accent bar.</p></div></div>
+          <div class="story-section-grid">
+            <div class="story-point is-main"><h5>Main takeaway</h5><div class="story-point-body"><div class="markdown-preview"><p>The estimator stays unbiased under the stated assumptions.</p></div></div></div>
+            <div class="story-point"><h5>Evidence / results</h5><div class="story-point-body"><div class="markdown-preview"><p>See Figure 2 and Table 1 for the calibration evidence.</p></div></div></div>
+          </div>
+          <div class="manuscript-artifact-card artifact-figure">
+            <p class="figure-type">Figure 2</p>
+            <span class="figure-status is-ready">Ready</span>
+            <p class="figure-caption">A self-contained visual argument for calibration quality.</p>
+          </div>
+        </article>
+
+        <section class="reviews-panel">
+          <article class="review-card">
+            <header class="review-card-head">
+              <div class="review-title-block">
+                <p class="review-kicker">final_gate_review.md</p>
+                <h3>final gate review</h3>
+              </div>
+              <button class="secondary-button small-button" type="button">Open</button>
+            </header>
+            <div class="review-meta-row">
+              <span class="review-chip">Accepted</span>
+              <span class="review-chip">3 claims</span>
+            </div>
+            <p class="review-summary">The revised manuscript clears the final autoresearch gate with traceable claims.</p>
+            <p class="review-path">manuscript/reviews/final_gate_review.md</p>
+          </article>
+        </section>
+
+        <section class="resource-panel">
+          <div class="resource-chip">
+            <div><strong>seed_paper.pdf</strong><small>resources/seed_paper.pdf - 1.2 MB</small></div>
+            <label class="resource-category-select"><span>Category</span><select><option>Seed paper</option></select></label>
+            <button class="secondary-button small-button" type="button">Open</button>
+          </div>
+        </section>
+
+        <dialog class="project-dialog" open style="position:relative; display:block; margin:0;">
+          <form class="project-dialog-shell" method="dialog">
+            <header class="project-dialog-head">
+              <div><p class="eyebrow">New project</p><h2>Create a research project.</h2></div>
+              <button class="icon-button dialog-close-button" type="button" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            </header>
+            <label class="field"><span>Project name</span><input type="text" placeholder="paper-a, dissertation-chapter..." /></label>
+            <label class="field"><span>Agent backend</span><select><option>Codex</option></select><small>Codex is the default.</small></label>
+            <p class="project-dialog-note">Creates a separate project from the clean template.</p>
+            <footer class="project-dialog-actions">
+              <button class="secondary-button" type="button">Cancel</button>
+              <button class="primary-button" type="submit">Create project</button>
+            </footer>
+          </form>
+        </dialog>
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
 async function main() {
   const chrome = findChrome();
   await fsp.rm(outDir, rmOptions);
@@ -461,7 +614,13 @@ async function main() {
 
   for (const [theme, label] of themes) {
     for (const shot of shots) {
-      const html = shot.kind === "settings" ? settingsHtml(theme, label) : dashboardHtml(theme, label);
+      const html = shot.kind === "settings"
+        ? settingsHtml(theme, label)
+        : shot.kind === "panels"
+          ? panelsHtml(theme, label)
+          : shot.kind === "shell"
+            ? shellHtml(theme, label)
+            : dashboardHtml(theme, label);
       const htmlPath = path.join(outDir, `${theme}-${shot.name}.html`);
       const pngPath = path.join(outDir, `${theme}-${shot.name}.png`);
       const userDataDir = path.join(os.tmpdir(), `co-auto-research-chrome-${process.pid}-${theme}-${shot.name}`);

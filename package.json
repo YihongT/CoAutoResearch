@@ -25,6 +25,7 @@
     "bin/",
     "templates/",
     "docs/",
+    "assets/",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

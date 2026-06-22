@@ -31,7 +31,7 @@
   --feedback-failed-bg: #ffe8e9;
   --danger-hover: #8f1720;
   --shadow: 0 18px 50px rgba(17, 24, 39, 0.1);
-  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font: var(--reader);
   --display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   --reader: "Newsreader", "Iowan Old Style", Georgia, serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -7808,6 +7808,7 @@ h1,
 .stage-panel[data-stage-panel="1"] .cold-card > .card-head {
   display: grid;
   place-items: center;
+  justify-content: center;
   padding: clamp(52px, 10vh, 108px) 18px 0;
   border-bottom: 0;
   background: transparent;
@@ -11217,7 +11218,7 @@ html[data-theme="atelier-ivory"] {
   --danger-ink: #8a3a26;
   --bead: #c6bfae;
   --ring: rgba(26, 24, 18, 0.16);
-  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font: var(--reader);
   --display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   --reader: "Newsreader", "Iowan Old Style", Georgia, serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -11302,7 +11303,7 @@ html[data-theme="atelier-nocturne"] {
   --danger-ink: #e6917a;
   --bead: #4a463c;
   --ring: rgba(239, 233, 219, 0.18);
-  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font: var(--reader);
   --display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   --reader: "Newsreader", "Iowan Old Style", Georgia, serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -12450,10 +12451,11 @@ html[data-theme] .file-manager-head p {
   }
 }
 
-/* Framing thread mode should not draw a flat rectangular canvas behind
-   the transcript. Message bubbles, project previews, trials, and the
-   composer own their surfaces; the outer cold-start shell is layout only. */
-html[data-theme] #cold-start-workspace.has-framing-thread .stage-panel[data-stage-panel="1"] .cold-card {
+/* The framing stage should not draw a flat rectangular canvas behind the
+   content (both before and after a thread exists). Message bubbles, project
+   previews, trials, and the composer own their surfaces; the outer cold-start
+   shell is layout only. */
+html[data-theme] #cold-start-workspace .stage-panel[data-stage-panel="1"] .cold-card {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -12557,12 +12559,15 @@ html[data-theme="dark-glass"] .scroll-bottom-button:hover {
   display: block;
 }
 
-/* nav rows: icon + label, calm stroke language */
-.rail-action {
+/* nav rows: icon + label, calm stroke language.
+   :not([hidden]) so app.js's `button.hidden = true` (gating Trials/Reviews/
+   Manuscript until they have content) still collapses the row. */
+.rail-action:not([hidden]) {
   display: flex;
   align-items: center;
   gap: 11px;
 }
+.rail-action[hidden] { display: none !important; }
 .rail-ic {
   width: 18px;
   height: 18px;
@@ -12710,4 +12715,706 @@ html[data-theme="dark-glass"] .scroll-bottom-button:hover {
   border-radius: 50%;
   background: var(--bead);
   box-shadow: 0 0 0 3px var(--panel-bg);
+}
+
+/* ===================================================================
+   ATELIER — typographic fidelity to the preview: the LABEL layer is
+   monospace (eyebrows, section labels, pills, meta), and display
+   headings are lighter with tighter tracking. Authoritative.
+   =================================================================== */
+.eyebrow,
+.rail-section-label {
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: 0.2em;
+}
+.session-pill {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.transcript-meta {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+.transcript-message.user .transcript-meta { color: var(--soft); }
+
+/* display headings: lighter weight, tighter, more editorial */
+h1,
+h2,
+.chat-header h1,
+.chat-header .eyebrow + h1 {
+  letter-spacing: -0.02em;
+}
+h1,
+.chat-header h1 { font-weight: 400; }
+h2 { font-weight: 440; }
+
+/* ===================================================================
+   ATELIER — Phase 6: recompose the conversation to the preview.
+   Assistant speaks as plain editorial prose (no card); the human's
+   line sits in a soft tinted bubble. More air, roomier header.
+   =================================================================== */
+/* assistant / final = plain text, no box, full reading measure */
+.framing-message.assistant > .transcript-body,
+.transcript-message.assistant > .transcript-body,
+.transcript-message.final > .transcript-body {
+  background: none;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 2px 0 0;
+}
+.framing-message.assistant,
+.transcript-message.assistant,
+.transcript-message.final { max-width: 100%; }
+
+/* the human's line = soft tinted bubble (themed, never hard black) */
+.framing-message.user > .transcript-body,
+.transcript-message.user > .transcript-body {
+  background: var(--user-bubble-bg);
+  color: var(--user-bubble-ink);
+  border: 1px solid transparent;
+  box-shadow: none;
+  border-radius: 16px;
+  padding: 11px 16px;
+}
+.framing-message.user { max-width: min(560px, 100%); }
+
+/* more air between turns + a touch narrower reading column */
+.framing-thread { gap: 26px; width: min(100% - 48px, 880px); }
+.framing-message .transcript-meta,
+.transcript-message .transcript-meta { margin-bottom: 9px; }
+
+/* header: let the title breathe like the preview hero */
+.chat-header { padding: 46px 0 24px; }
+.chat-header .eyebrow { margin-bottom: 14px; }
+
+/* ===================================================================
+   ATELIER — Part A: type roles. No system sans anywhere.
+   Display = Fraunces · Reading = Newsreader (default) · Mono = IBM Plex Mono (chrome).
+   Nav labels intentionally stay Reading (serif), matching the preview.
+   =================================================================== */
+body { font-family: var(--reader); }
+
+h1, h2, h3, h4, h5, h6, .brand-title { font-family: var(--display); }
+
+select,
+.primary-button, .secondary-button, .text-button, .mini-button, .send-button,
+.danger-button, .danger-primary-button, .icon-button, .small-button,
+.settings-save-button, .settings-close, .dialog-close-button, .copy-command-button,
+.pill, .session-pill, .stage-pill, .command-chip, .context-chip,
+.material-action-chip, .material-actions-label, .selected-material-type,
+.attachment-chip, .resource-chip, .resource-category-select,
+.trial-chip, .trial-scroll-button, .review-chip, .review-kicker,
+.file-tab, .file-name, .file-manager-count, .autosave-status, .source-path,
+.figure-status, .figure-type, .secret-status, .export-status-pill,
+.settings-nav-button, .settings-value, .settings-note,
+.eyebrow, .rail-section-label, .story-map-kicker, .review-group-eyebrow,
+th {
+  font-family: var(--mono);
+}
+
+/* ===================================================================
+   ATELIER — Part C1: shell & globals. Project switcher, rail footer,
+   the button system (ink / ghost / text), controls, pills & chips,
+   toast, empty states. Stray literals → tokens; calm hairlines.
+   =================================================================== */
+/* project switcher (dark rail): tokenized, calm */
+.project-switch { color: color-mix(in srgb, var(--rail-ink) 70%, transparent); }
+.project-switch:hover,
+.project-switch.is-active { color: var(--rail-ink); }
+.project-switch-row { border-radius: var(--radius-md); }
+.project-switch-row:hover,
+.project-switch-row.is-active { border-color: var(--line); background: var(--rail-soft); }
+
+/* rail footer + sync: ghost mono button, hairline */
+.rail-settings-button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: color-mix(in srgb, var(--rail-ink) 86%, transparent);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.rail-settings-button:hover { background: var(--rail-soft); color: var(--rail-ink); }
+.rail-sync-row {
+  color: var(--soft);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+/* button system: primary = ink fill · secondary = hairline ghost ·
+   text = mono link. All mono, quiet tracking, unified radius. */
+.primary-button, .secondary-button, .text-button, .mini-button {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  font-size: 13px;
+}
+.primary-button { background: var(--accent); border-color: var(--accent); color: var(--primary-ink); }
+.primary-button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.secondary-button, .mini-button {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+.secondary-button:hover, .mini-button:hover {
+  border-color: var(--ink);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.text-button { color: var(--muted); }
+.text-button:hover { color: var(--ink); background: transparent; }
+.send-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--primary-ink);
+  font-weight: 500;
+}
+.send-button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.icon-button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+}
+.icon-button:hover { border-color: var(--ink); color: var(--ink); }
+
+/* controls: hairline boxes (inputs stay reading for typed text; selects
+   are mono via Part A); field labels become mono micro-caps */
+input, select, textarea { border-color: var(--line); border-radius: var(--radius-sm); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+.field span, .field small {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+.theme-mode-control { border-color: var(--line); }
+.theme-mode-control span {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.theme-mode-control input:checked + span {
+  background: var(--accent);
+  color: var(--primary-ink);
+  box-shadow: none;
+}
+
+/* pills & chips: hairline, pill radius (mono is set in Part A) */
+.pill, .session-pill, .command-chip, .context-chip,
+.material-action-chip, .attachment-chip, .resource-chip {
+  border-color: var(--line);
+}
+.pill { background: var(--surface); color: var(--muted); }
+.command-chip { background: var(--surface-soft); color: var(--muted); }
+.context-chip { background: var(--surface); }
+.attachment-chip { background: var(--surface); box-shadow: var(--shadow); }
+.attachment-icon { background: var(--surface-tint); color: var(--muted); }
+.attachment-chip button.attachment-action-button {
+  border-color: var(--line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* toast: calm paper, hairline, soft shadow */
+.toast {
+  border-color: var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+
+/* empty states: calm paper, hairline, mono kicker */
+.empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.tree-empty, .resource-empty {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--soft);
+}
+.session-empty-mark { background: var(--accent-soft); color: var(--accent); }
+
+/* ===================================================================
+   ATELIER — Part C2: chat / framing finish. Stage strip, composer &
+   brief dock controls, control/session panels, raw-log console,
+   resume bar, project-draft workbench. Literals → tokens.
+   =================================================================== */
+/* stage strip (1·2·3): mono numerals, hairline, plain */
+.stage-pill { background: var(--surface-soft); border-color: var(--line); border-radius: var(--radius-md); }
+.stage-pill span {
+  border-color: var(--line-strong);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 500;
+}
+.stage-pill strong { font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.04em; }
+.stage-pill.is-active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.stage-pill.is-active span { border-color: var(--accent); background: var(--accent); color: var(--primary-ink); }
+.stage-pill.is-complete span { border-color: var(--success); color: var(--success); }
+
+/* brief dock: model / reasoning selects as quiet mono ghosts */
+.brief-editor-shell #cold-file-editor::placeholder { color: var(--soft); }
+html[data-theme="atelier-nocturne"] .brief-editor-shell #cold-file-editor::placeholder { color: var(--muted); }
+.brief-run-controls label { color: var(--muted); }
+.brief-run-controls label:hover { border-color: var(--line); background: var(--surface-soft); }
+.brief-run-controls select {
+  color: var(--control-ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* composer attach + suggestion chips */
+.composer-attach-button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: var(--shadow);
+}
+.composer-attach-button:hover { border-color: var(--ink); background: var(--accent-soft); color: var(--accent); }
+.composer-suggestion-chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  box-shadow: none;
+}
+.composer-suggestion-chip:hover { border-color: var(--ink); color: var(--ink); }
+
+/* control / session panels: plain ruled, hairline */
+.control-panel, .session-panel { border-color: var(--line); border-radius: var(--radius-md); background: var(--surface); }
+/* raw-log: a dark code console */
+.session-log {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--code-block-bg);
+  color: var(--code-block-ink);
+}
+
+/* resume command bar: calm paper, hairline, mono code */
+.resume-command-bar {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+.resume-command-bar span { color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; }
+.resume-command-bar code { color: var(--ink); font-family: var(--mono); }
+
+/* project-draft workbench: hairline split, tonal preview */
+.project-draft-workbench { border-color: var(--line); border-radius: var(--radius-lg); }
+.project-draft-preview { border-left-color: var(--line); background: var(--surface-soft); }
+
+/* ===================================================================
+   ATELIER — Part C3: material-view shell. Eyebrow + Fraunces title
+   rhythm, quick-action chips as quiet mono ghosts.
+   =================================================================== */
+.material-header { padding: 44px 0 20px; }
+.material-actions-label { color: var(--soft); }
+.material-action-chip {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: none;
+}
+.material-action-chip:hover { border-color: var(--ink); background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+#context-content { padding-bottom: 40px; }
+
+/* ===================================================================
+   ATELIER — Part C4: project files & resources. Ruled rows, mono meta,
+   the file-count as a Fraunces/mono stat block, tokenized chips.
+   =================================================================== */
+.file-manager { border-color: var(--line); border-radius: var(--radius-md); }
+.file-manager-head { border-bottom-color: var(--line); }
+.file-manager-count { border-color: var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
+.file-manager-count strong { font-family: var(--display); font-weight: 400; }
+.file-manager-count span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--soft); }
+.tree-shell { border-color: var(--line); border-radius: var(--radius-sm); }
+.tree-children { border-left-color: var(--line); }
+.tree-file::before,
+.tree-file-node > summary::before { border-color: var(--line-strong); background: var(--surface); box-shadow: inset -3px 3px 0 var(--accent-soft); }
+.tree-file-node[open] > summary { color: var(--accent); background: var(--surface-soft); border-color: var(--line); }
+.file-tab.is-active { border-color: var(--line); background: var(--surface); }
+.resource-uploader { border-color: var(--line); background: var(--surface-soft); }
+.resource-chip { background: var(--surface); border-radius: var(--radius-md); }
+.resource-chip small { font-family: var(--mono); color: var(--muted); }
+.resource-category-select span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--soft); }
+
+/* ===================================================================
+   ATELIER — Part C5: trials. Plain cards + timeline strip, Fraunces
+   headers, mono meta/status. The active index badge stays a dark chip
+   with white numerals (readable in both themes; pinned by tests).
+   =================================================================== */
+.trial-strip > span { color: var(--soft); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; }
+.trial-scroll-button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: none;
+}
+.trial-scroll-button:hover { border-color: var(--ink); color: var(--ink); transform: none; }
+.trial-chip {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: none;
+}
+.trial-chip:hover { border-color: var(--ink); color: var(--ink); transform: none; }
+.trial-chip-index { background: var(--surface-tint); }
+.trial-chip-status { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em; }
+.trial-chip.is-active { border-color: var(--line-strong); box-shadow: none; }
+
+.trial-history-card { box-shadow: var(--shadow); }
+.trial-history-head { border-bottom-color: var(--line); }
+.trial-history-head strong { font-family: var(--display); font-weight: 400; letter-spacing: -0.01em; }
+.trial-history-head span,
+.trial-history-head p { color: var(--soft); font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; }
+
+.trial-report-card { box-shadow: var(--shadow); }
+.trial-report-head strong { font-family: var(--display); font-weight: 400; letter-spacing: -0.01em; }
+.trial-report-head em {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.trial-report-head em.is-autoresearch-complete { border-color: var(--complete-border); background: var(--complete-bg); color: var(--complete-ink); }
+.trial-report-head span { color: var(--soft); }
+.trial-report-card p { color: var(--muted); }
+
+.trial-progress-step {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.trial-progress-step.is-complete { border-color: var(--complete-border); background: var(--complete-bg); color: var(--muted); }
+.trial-progress-step.is-current { border-color: var(--line-strong); background: var(--accent-soft); color: var(--ink); }
+.trial-progress-marker { background: var(--surface-tint); }
+
+/* ===================================================================
+   ATELIER — Part C6: reviews. Plain ruled list, hairline separation,
+   mono status chips and kickers.
+   =================================================================== */
+.review-selected-group { border-color: var(--line); background: var(--surface-soft); box-shadow: var(--shadow); }
+.review-card { border-color: var(--line); background: var(--surface); box-shadow: none; border-radius: var(--radius-md); }
+.review-card-head { gap: 16px; }
+.review-chip {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.review-summary { color: var(--ink); }
+.review-path { color: var(--soft); }
+
+/* ===================================================================
+   ATELIER — Part C7: manuscript (the deep surface). Editorial document
+   layout — mono eyebrows, Fraunces titles, hairline rules, tonal
+   section briefs; heavy left accent bars become quiet hairlines;
+   status as mono small-caps; export panel ruled + plain.
+   =================================================================== */
+/* story map */
+.story-map-hero {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-strong);
+  border-radius: var(--radius-md);
+}
+.story-map-nav { border-color: var(--line); border-radius: var(--radius-md); }
+.story-map-nav h4 { font-family: var(--display); font-weight: 400; letter-spacing: -0.01em; }
+.story-map-link-list a { color: var(--ink); }
+
+/* section cards: mono eyebrow → Fraunces title → tonal brief */
+.story-section-card { border-top-color: var(--line); }
+.story-section-head p,
+.paper-section-head p {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--soft);
+}
+.story-section-head h4,
+.paper-section-head h4 { font-family: var(--display); font-weight: 400; letter-spacing: -0.012em; color: var(--ink); }
+.story-section-brief {
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0;
+  color: var(--ink);
+}
+.story-point h5 {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--soft);
+}
+.paper-section-row { border-top-color: var(--line); }
+.paper-field-grid dt,
+.architecture-field-row dt {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--soft);
+}
+
+/* abstract: tonal panel, hairline left rule (not a heavy accent bar) */
+.manuscript-abstract-card { border: 1px solid var(--line); border-left: 2px solid var(--line-strong); border-radius: var(--radius-md); }
+
+/* artifacts / figures / tables */
+.manuscript-artifact-card { border-color: var(--line); border-radius: var(--radius-md); }
+.figure-type { color: var(--soft); font-family: var(--mono); }
+.figure-status {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.figure-status.is-caution { border-color: var(--warning-ink); background: var(--warning-bg); color: var(--warning-ink); }
+.figure-status.is-ready { border-color: var(--complete-border); background: var(--complete-bg); color: var(--complete-ink); }
+.figure-caption { border-radius: var(--radius-sm); }
+.publication-table-preview { border-color: var(--line); background: var(--surface); border-radius: var(--radius-sm); }
+.paragraph-plan-block h5 {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--soft);
+}
+
+/* architecture / audit */
+.architecture-toc-row { border-color: var(--line); background: var(--surface); border-radius: var(--radius-sm); }
+.architecture-field-list { border-top-color: var(--line); }
+.architecture-field-row { border-bottom-color: var(--line); }
+
+/* export bar + jobs: ruled, plain, mono status */
+.manuscript-export-bar {
+  border-color: var(--line);
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+.export-job { border-color: var(--line); background: var(--surface-soft); border-radius: var(--radius-sm); }
+.export-status-pill {
+  border-color: var(--line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.export-progress-track { background: var(--surface-tint); }
+.export-progress-track span { background: var(--accent); }
+.export-confirm-grid div { border-color: var(--line); background: var(--surface-soft); border-radius: var(--radius-sm); }
+.export-confirm-summary details { border-color: var(--line); background: var(--surface); border-radius: var(--radius-sm); }
+
+/* ===================================================================
+   ATELIER — Part C8: settings dialog. Section-header pattern, hairline
+   rows, mono nav/labels, plain secret cards. (Shell bg/border come from
+   the theme hard-override; here we set type, rules, radius, shadow.)
+   =================================================================== */
+.settings-dialog { border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.settings-sidebar { border-right-color: var(--line); }
+.settings-nav-button { font-size: 14px; letter-spacing: 0.02em; border-radius: var(--radius-md); }
+.settings-nav-button.is-active,
+.settings-nav-button:hover { background: var(--accent-soft); }
+.settings-titlebar { border-bottom-color: var(--line); }
+.settings-titlebar h2 { font-weight: 400; letter-spacing: -0.02em; }
+.settings-titlebar p { color: var(--muted); }
+.settings-row { border-bottom-color: var(--line); }
+.settings-row h3 { font-weight: 400; letter-spacing: -0.01em; }
+.settings-value { color: var(--muted); }
+.settings-doc-callout { border-radius: var(--radius-md); }
+.settings-doc-links a {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.settings-doc-links a:hover { border-color: var(--ink); }
+.settings-secret-card { border-radius: var(--radius-md); }
+.settings-secret-head em { color: var(--soft); }
+.secret-status { border-color: var(--line); }
+
+/* ===================================================================
+   ATELIER — Part C9: file viewer / inline editor. Split markdown reader
+   + mono filename bar; the editor & code preview stay dark code panels.
+   =================================================================== */
+.file-viewer-dialog { border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.file-viewer-head h2 { font-weight: 400; letter-spacing: -0.02em; }
+.file-code-preview { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--code-block-bg); color: var(--code-block-ink); }
+.inline-editor-shell { border-color: var(--line); border-radius: var(--radius-sm); }
+.inline-editor-head { border-bottom-color: var(--line); color: var(--muted); }
+.inline-editor { background: var(--code-block-bg); color: var(--code-block-ink); }
+.blueprint-inspector-sidebar { border-color: var(--line); background: var(--surface); border-radius: var(--radius-md); box-shadow: none; }
+.file-viewer-resize-handle { border-color: var(--line); }
+
+/* ===================================================================
+   ATELIER — Part C10: all other dialogs. Fraunces title, hairline
+   head/footer dividers, mono buttons, moderate radius, plain fields.
+   Shared base covers most; per-dialog tweaks for the browser, the
+   material-type grid, and warning/danger variants.
+   =================================================================== */
+/* shared base */
+.project-dialog { border-color: var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.project-dialog-head h2 { font-weight: 400; letter-spacing: -0.02em; }
+.project-dialog-note { color: var(--muted); }
+.project-dialog-note[data-tone="error"] { color: var(--danger); }
+
+/* launch dialog */
+.launch-dialog { border-color: var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
+.launch-dialog-head { border-bottom-color: var(--line); }
+.launch-dialog-head h2 { font-weight: 400; letter-spacing: -0.02em; }
+.launch-dialog-actions { border-top-color: var(--line); }
+
+/* local / resource browser */
+.local-browser { border-color: var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
+.local-browser-head { border-bottom-color: var(--line); }
+.browser-roots { border-bottom-color: var(--line); background: var(--surface-soft); }
+.root-chip {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.root-chip:hover { border-color: var(--ink); background: var(--accent-soft); }
+.browser-entry-row { border-radius: var(--radius-md); }
+
+/* material-type picker */
+.material-type-dialog { border-color: var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.material-type-shell h2 { font-weight: 400; letter-spacing: -0.02em; }
+.material-type-grid button {
+  border-color: var(--line);
+  background: var(--surface);
+  border-radius: var(--radius-md);
+}
+.material-type-grid button:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* warning / danger variants */
+.resume-trial-warning { border-color: var(--warning-ink); background: var(--warning-bg); color: var(--warning-ink); border-radius: var(--radius-md); }
+.large-import-summary { border-color: var(--line); background: var(--surface-soft); border-radius: var(--radius-md); }
+.large-import-summary code { background: var(--accent-soft); }
+.delete-warning { border-color: var(--danger); background: var(--danger-bg); border-radius: var(--radius-md); }
+.delete-warning p { color: var(--muted); }
+.danger-button { border-color: var(--danger); background: var(--danger); color: var(--danger-primary-ink); }
+
+/* ===================================================================
+   ATELIER — Part C11: fidelity pass to ui-preview/v9. The rail nav
+   becomes soft Newsreader rows with quiet line-icons; the project
+   switcher reads on paper (its status sub-line was a light-on-light
+   literal — invisible in Ivory); the framing hero uses light optical
+   Fraunces; phrase-length instruction labels return to reading serif
+   (mono stays reserved for short eyebrow / meta tokens).
+   theme-prefixed where needed to beat the older duplicate rail rules.
+   =================================================================== */
+/* nav rows: soft ink-2 Newsreader, line-icons at low opacity (v9 .nav a) */
+html[data-theme] .rail-action {
+  color: var(--muted);
+  font-family: var(--reader);
+  font-weight: 480;
+  font-size: 16px;
+  border-radius: 11px;
+  border-color: transparent;
+  background: transparent;
+}
+.rail-action .rail-ic { opacity: 0.6; stroke-width: 1.5; }
+html[data-theme] .rail-action:hover { color: var(--ink); background: var(--accent-soft); }
+.rail-action:hover .rail-ic { opacity: 0.85; }
+html[data-theme] .rail-action.is-active {
+  color: var(--ink);
+  background: var(--accent-soft);
+  font-weight: 560;
+  border-color: transparent;
+}
+.rail-action.is-active .rail-ic { opacity: 1; }
+
+/* project switcher: legible names + soft mono status; subtle active wash */
+html[data-theme] .project-switch strong { font-family: var(--reader); font-weight: 560; font-size: 14px; color: var(--rail-ink); }
+html[data-theme] .project-switch small {
+  color: var(--soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+html[data-theme] .project-switch-row.is-active,
+html[data-theme] .project-switch-row:hover,
+html[data-theme] .project-switch-row.is-active .project-switch,
+html[data-theme] .project-switch:hover { background: var(--accent-soft); border-color: transparent; color: var(--rail-ink); }
+.rail-section-label { font-size: 9px; letter-spacing: 0.24em; color: var(--soft); }
+
+/* framing hero: light optical Fraunces, tight tracking (v9 h1). The
+   earlier rule pins "SOFT"/"WONK" with no wght axis, so we restate the
+   axes explicitly (opsz high → display cut; wght low → hairline). */
+.chat-header h1,
+.cold-card .card-head h2,
+.cold-card > .card-head h2,
+.story-map-hero h1,
+.material-header h1 {
+  font-weight: 330;
+  letter-spacing: -0.03em;
+  font-optical-sizing: auto;
+  font-variation-settings: "opsz" 144, "wght" 330;
+}
+.cold-card .card-head h2,
+.cold-card > .card-head h2 { line-height: 1.0; }
+
+/* framing surface floats on the one paper (v9 "one quiet paper"), not a
+   tinted card. The old card-head used a near-white gradient literal that
+   made light text invisible in Nocturne — drop it, keep text on tokens. */
+html[data-theme] .assistant-card.cold-card { background: transparent; box-shadow: none; border-color: transparent; }
+html[data-theme] .cold-card > .card-head { background: transparent; border-bottom: none; }
+.cold-card .card-head h2 { color: var(--ink); }
+.cold-card .setup-copy { color: var(--muted); }
+
+/* instruction label → reading serif (a phrase, not a token) */
+html[data-theme] .material-actions-label {
+  font-family: var(--reader);
+  font-size: 14px;
+  font-weight: 440;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--soft);
 }

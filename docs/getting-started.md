@@ -18,11 +18,18 @@ autoresearch from the UI.
 
 Install:
 
-- Node.js 18 or newer
-- Python 3
-- Git
-- OpenAI Codex CLI for the default backend
-- Claude Code CLI if you want to use the optional Claude backend
+- **Node.js 18 or newer** — from the [Node.js downloads page](https://nodejs.org/en/download). Includes `npm`.
+- **Python 3** — from the [Python downloads page](https://www.python.org/downloads/). The CLI auto-detects `python3`, `python`, or Windows `py -3`; set `COAUTO_PYTHON` for another path.
+- **Git**
+- **OpenAI Codex CLI** (default backend) — see the [Codex CLI setup guide](https://developers.openai.com/codex/cli). On macOS/Linux/WSL2:
+
+  ```bash
+  curl -fsSL https://chatgpt.com/codex/install.sh | sh
+  # or: npm install -g @openai/codex
+  ```
+
+  Windows is supported through native Windows or WSL2 ([Codex Windows guide](https://developers.openai.com/codex/windows)).
+- **Claude Code CLI** (optional backend) — install and authenticate Claude Code to select `Claude Code` in the UI. CoAutoResearch talks to the CLI directly; no SDK is added.
 
 Check the basics:
 
