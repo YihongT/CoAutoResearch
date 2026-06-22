@@ -130,6 +130,7 @@ Required top-level sections:
 - `Architecture Overview / Table of Contents`
 - `Manuscript Architecture`
 - `Reference / Literature Grounding Plan`
+- `References`
 - `Appendix / Supplement Plan`
 - `Blocking Missing Evidence`
 - `Required Qualifications / Claim Constraints`
@@ -284,6 +285,43 @@ Every active dataset, benchmark, or result block must include:
 - limitations and uncertainty;
 - manuscript claim supported in plain language;
 - remaining blocker, or `none`.
+
+---
+
+## References
+
+`manuscript/BLUEPRINT.md` must contain a canonical `## References` section that
+holds the actual resolved reference list, not only a strategy description. The
+`Reference / Literature Grounding Plan` section states the reference *posture*;
+the `References` section is the *artifact* a reader would cite from. The two must
+be mutually consistent.
+
+The reference list is governed by two layers.
+
+**Layer 1 — fixed integrity contract (always required, venue-independent):**
+
+- Every entry carries, at minimum: author(s), title, venue or container, year,
+  and a stable locator (DOI preferred; otherwise a resolvable URL; otherwise an
+  unambiguous publisher/standard identifier).
+- One canonical entry per source, with a stable citation key. No duplicate
+  entries for the same work.
+- Bidirectional completeness: every inline citation resolves to exactly one
+  list entry, and every list entry is cited at least once in the manuscript
+  architecture. Orphan citations and uncited entries are blocking.
+- Locators must be resolvable. Placeholder, fabricated, or dead locators are
+  blocking.
+
+**Layer 2 — venue-bound presentation (read from `Target Venue / Audience /
+Article Type`):**
+
+- The citation and ordering style follows the declared target venue (for
+  example, a numbered Nature-style list for a Nature-family venue).
+- If the target venue does not fix a style, use one consistent style across all
+  entries — either numbered or author–year — and state which style is used.
+
+The full bibliographic source data (for example a `.bib` file) may continue to
+live under `workspace/`, but it is a secondary cache. The canonical
+reader-facing list is the `References` section in the blueprint.
 
 ---
 

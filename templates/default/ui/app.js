@@ -1058,15 +1058,15 @@ function renderAgentStatusBanner() {
     kicker = "Backend override";
     message = `COAUTO_AGENT_BACKEND forces ${agentLabel(forced)}. Saved Settings choices apply once the env var is removed.`;
   } else {
-    banner.classList.remove("is-visible");
-    banner.hidden = true;
-    banner.innerHTML = "";
+    if (banner.dataset.bannerKey !== "hidden") {
+      banner.classList.remove("is-visible");
+      banner.hidden = true;
+      banner.innerHTML = "";
+      banner.dataset.bannerKey = "hidden";
+    }
     return;
   }
 
-  banner.hidden = false;
-  banner.classList.add("is-visible");
-  banner.dataset.tone = tone || "info";
   const actionsHtml = actions
     .map((action, index) => {
       if (action.kind === "link") {
@@ -1075,6 +1075,13 @@ function renderAgentStatusBanner() {
       return `<button type="button" data-banner-action="${index}">${escapeHtml(action.label)}</button>`;
     })
     .join("");
+  // Skip rebuilding identical banner content on every poll tick.
+  const bannerKey = `${tone}|${kicker}|${message}|${actions.map((a) => a.label).join(",")}`;
+  if (banner.dataset.bannerKey === bannerKey) return;
+  banner.dataset.bannerKey = bannerKey;
+  banner.hidden = false;
+  banner.classList.add("is-visible");
+  banner.dataset.tone = tone || "info";
   banner.innerHTML = `
     <span class="agent-status-banner-dot" aria-hidden="true"></span>
     <div class="agent-status-banner-body">
@@ -2058,6 +2065,7 @@ function hasVisibleManuscript() {
     ...(manuscript.figure_specs || []),
   ];
   if (sections.some(sectionHasRealContent)) return true;
+  if ((manuscript.references || []).length) return true;
   return (manuscript.missing_evidence || []).some(hasRealText);
 }
 
@@ -3399,8 +3407,34 @@ async function discoverModelsForBackend(backend) {
 
 async function refreshDiscoveredModels(backends = ["codex", "claude"]) {
   const results = await Promise.all(backends.map((backend) => discoverModelsForBackend(backend)));
-  if (results.some((value) => Array.isArray(value) && value.length)) {
-    document.dispatchEvent(new CustomEvent("agent-models-updated"));
+  const updated = results.some((value) => Array.isArray(value) && value.length);
+  if (updated) document.dispatchEvent(new CustomEvent("agent-models-updated"));
+  return updated;
+}
+
+// Re-render each model <select> against ITS OWN form's backend. Skips a select
+// the user is actively interacting with (focused), and preserves its value.
+function resyncAllModelSelects() {
+  const sessionForm = document.getElementById("session-settings-form");
+  const settingsForm = document.getElementById("settings-form");
+  const targets = [
+    {
+      select: sessionForm?.elements?.model || null,
+      backend: normalizeAgentBackend(sessionForm?.elements?.backend?.value || activeSettingsBackend()),
+    },
+    {
+      select: document.getElementById("composer-model"),
+      backend: normalizeAgentBackend(sessionForm?.elements?.backend?.value || activeSettingsBackend()),
+    },
+    {
+      select: settingsForm?.elements?.settingsModel || null,
+      backend: normalizeAgentBackend(settingsForm?.elements?.settingsBackend?.value || activeSettingsBackend()),
+    },
+  ];
+  for (const { select, backend } of targets) {
+    if (!select) continue;
+    if (select === document.activeElement) continue; // don't fold an open dropdown
+    syncModelSelectOptions(select, backend, select.value || "");
   }
 }
 
@@ -3408,9 +3442,34 @@ function syncModelSelectOptions(select, backend, selected = "") {
   if (!select) return;
   const options = modelOptionsForBackend(backend);
   const value = String(selected || "").trim();
-  select.innerHTML = options.map(([optionValue, label]) => `<option value="${escapeHtml(optionValue)}">${escapeHtml(label)}</option>`).join("");
   const allowed = new Set(options.map(([optionValue]) => optionValue));
-  select.value = allowed.has(value) ? value : defaultSettingsForBackend(backend).model;
+  const resolvedValue = allowed.has(value) ? value : defaultSettingsForBackend(backend).model;
+
+  // Compute the desired option signature and compare with what is already rendered.
+  // If nothing would change, do NOT touch the DOM — rebuilding the <select>'s
+  // innerHTML would collapse it if the user has the dropdown open, and a no-op
+  // rebuild on every poll is exactly what caused the "folds when I expand it" bug.
+  const desiredSignature = options.map(([optionValue]) => optionValue).join("|");
+  const currentSignature = Array.from(select.options).map((opt) => opt.value).join("|");
+  const optionsUnchanged = desiredSignature === currentSignature;
+  const valueUnchanged = select.value === resolvedValue;
+
+  // Never rebuild a select the user is actively interacting with (its popup is open).
+  const isActive = select === document.activeElement;
+
+  if (optionsUnchanged) {
+    if (!valueUnchanged && !isActive) select.value = resolvedValue;
+    syncBackendDocLinks(backend);
+    return;
+  }
+  if (isActive) {
+    // Options differ but the dropdown is open; defer the rebuild until it closes
+    // so we don't fold it under the user.
+    syncBackendDocLinks(backend);
+    return;
+  }
+  select.innerHTML = options.map(([optionValue, label]) => `<option value="${escapeHtml(optionValue)}">${escapeHtml(label)}</option>`).join("");
+  select.value = resolvedValue;
   syncBackendDocLinks(backend);
 }
 
@@ -3699,20 +3758,12 @@ async function loadUiSettings() {
     renderAllAgentStatusNotes();
     renderAgentStatusBanner();
     maybeShowAgentSetupDialog();
-    refreshDiscoveredModels().then(() => {
-      // Re-render model selects with discovered options if available.
-      try {
-        const form = document.getElementById("session-settings-form");
-        const backend = normalizeAgentBackend(form?.elements?.backend?.value || activeSettingsBackend());
-        const currentModel = form?.elements?.model?.value || "";
-        if (form?.elements?.model) syncModelSelectOptions(form.elements.model, backend, currentModel);
-        const composerModel = document.getElementById("composer-model");
-        if (composerModel) syncModelSelectOptions(composerModel, backend, composerModel.value || currentModel);
-        const settingsModel = document.querySelector('select[name="settingsModel"]');
-        if (settingsModel) syncModelSelectOptions(settingsModel, backend, settingsModel.value || currentModel);
-      } catch (_) {
-        // Best-effort refresh; ignore.
-      }
+    refreshDiscoveredModels().then((updated) => {
+      // Only repaint selects if discovery actually added options, AND never while
+      // a dialog is open — rebuilding a <select> mid-interaction collapses it.
+      // Hydrate already set correct options before the dialog opened; the
+      // discovered extras get applied on the next open instead.
+      if (updated && !document.querySelector("dialog[open]")) resyncAllModelSelects();
     });
   } catch (error) {
     showToast(error.message, true);
@@ -4492,7 +4543,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
       ${(() => {
         const activity = trialActivityEntries(entries);
         return activity.length
-          ? `<details class="trial-detail-activity">
+          ? `<details class="trial-detail-activity" data-run-activity-details="trial-report-${escapeHtml(iteration)}"${runActivityOpenAttribute(`trial-report-${iteration}`)}>
               <summary>
                 <span>Trial activity</span>
                 <strong>${escapeHtml(activity.length)} event${activity.length === 1 ? "" : "s"}</strong>
@@ -4522,6 +4573,8 @@ function runningTrialStatusHtml(trial) {
   const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
   if (!iteration || !isTrialLive(iteration)) return "";
   const entries = Array.isArray(trial?.entries) ? trial.entries : [];
+  // Trial activity reflects agent/tool work only — never the human's steering messages.
+  const activity = trialActivityEntries(entries);
   const report = trial?.report || reportForIteration(iteration);
   const reportSummary = cleanText(report?.report_summary, "");
   const progress = trialProgressForIteration(iteration, report);
@@ -4531,7 +4584,7 @@ function runningTrialStatusHtml(trial) {
   const latestText = latestEntry
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
     : reportSummary || progressSummary || agentWaitStateText() || "Preparing trial progress...";
-  const eventLabel = entries.length ? `${entries.length} event${entries.length === 1 ? "" : "s"}` : "waiting";
+  const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice && (latestEntry || reportSummary || progressSummary));
   const actions = [
@@ -4559,13 +4612,13 @@ function runningTrialStatusHtml(trial) {
       ${showWaitNotice ? waitNotice : ""}
       ${actions ? `<div class="trial-report-actions">${actions}</div>` : ""}
       ${
-        entries.length
-          ? `<details class="trial-live-details">
+        activity.length
+          ? `<details class="trial-live-details" data-run-activity-details="trial-live-${escapeHtml(iteration)}"${runActivityOpenAttribute(`trial-live-${iteration}`)}>
               <summary>
                 <span>Live trial activity</span>
                 <strong>${escapeHtml(eventLabel)}</strong>
               </summary>
-              <div class="trial-detail-events">${transcriptEntriesHtml(entries)}</div>
+              <div class="trial-detail-events">${transcriptEntriesHtml(activity)}</div>
             </details>`
           : ""
       }
@@ -4993,9 +5046,16 @@ function toolGroupPreview(entries) {
 
 function transcriptToolGroupHtml(entries) {
   if (!entries.length) return "";
+  // Anchor the open-state key to the group's FIRST entry id, which stays stable
+  // even as more tool calls stream into the same group during a live run. This
+  // lets the existing run-activity persistence keep the group open across polls.
+  const anchorId = String(entries.find((entry) => entry?.id)?.id || "");
+  const key = anchorId ? `toolgroup-${anchorId}` : "";
+  const dataAttr = key ? ` data-run-activity-details="${escapeHtml(key)}"` : "";
+  const openAttr = key ? runActivityOpenAttribute(key) : "";
   return `
     <article class="transcript-message tool is-tool-group">
-      <details class="tool-group-event">
+      <details class="tool-group-event"${dataAttr}${openAttr}>
         <summary>
           <span>Tool calls</span>
           <strong>${escapeHtml(toolGroupSummary(entries))}</strong>
@@ -5370,6 +5430,7 @@ function reviewWorkflowOrder(review) {
     ["VENUE_FIT_REVIEW", "venue"],
     ["MANUSCRIPT_REVIEW", "manuscript"],
     ["FIGURE_TABLE_REVIEW", "figure"],
+    ["REFERENCE_REVIEW", "reference"],
     ["FINAL_GATE_REVIEW", "final"],
   ];
   const index = pairs.findIndex(([fileToken, reviewerToken]) => path.includes(fileToken) || reviewer.includes(reviewerToken));
@@ -6184,11 +6245,15 @@ function storyMapMetaHtml(manuscript) {
 function storyMapNavHtml(manuscript, map) {
   manuscript = manuscript || {};
   const toc = cleanText(manuscript.toc, "");
+  const referencesNav = (manuscript.references || []).length
+    ? `<a href="#manuscript-references"><span>References</span><strong>${(manuscript.references || []).length} references</strong></a>`
+    : "";
   if (hasRealText(toc)) {
     return `
       <nav class="story-map-nav" aria-label="Paper flow">
         <h4>Paper flow</h4>
         <div class="story-map-toc">${markdownToHtml(toc)}</div>
+        ${referencesNav ? `<div class="story-map-link-list">${referencesNav}</div>` : ""}
       </nav>
     `;
   }
@@ -6198,10 +6263,10 @@ function storyMapNavHtml(manuscript, map) {
       <strong>${escapeHtml(cleanText(section.title, "Untitled section"))}</strong>
     </a>
   `).join("");
-  return rows ? `
+  return rows || referencesNav ? `
     <nav class="story-map-nav" aria-label="Paper flow">
       <h4>Paper flow</h4>
-      <div class="story-map-link-list">${rows}</div>
+      <div class="story-map-link-list">${rows}${referencesNav}</div>
     </nav>
   ` : "";
 }
@@ -6631,6 +6696,40 @@ function renderManuscriptAuditPanel(manuscript) {
   return legacy || empty("No provenance or secondary audit notes are available yet.");
 }
 
+function renderManuscriptReferences(manuscript) {
+  manuscript = manuscript || {};
+  const references = (manuscript.references || []).filter((ref) => hasRealText(ref?.reference) || hasRealText(ref?.key));
+  if (!references.length) return empty("No resolved reference list is available yet.");
+  const status = cleanText(manuscript.reference_status, "");
+  const items = references.map((ref, index) => {
+    const locator = cleanText(ref.locator, "");
+    const isUrl = /^https?:\/\//i.test(locator);
+    const locatorHtml = locator
+      ? (isUrl
+        ? `<a class="reference-locator" href="${escapeHtml(locator)}" target="_blank" rel="noopener noreferrer">${escapeHtml(locator)}</a>`
+        : `<span class="reference-locator">${escapeHtml(locator)}</span>`)
+      : "";
+    return `
+      <li class="reference-item">
+        <span class="reference-index">${index + 1}</span>
+        <div class="reference-body">
+          <div class="reference-text">${inlineMarkup(cleanText(ref.reference, ""))}</div>
+          <div class="reference-meta">
+            ${hasRealText(ref.key) ? `<code class="reference-key">${escapeHtml(cleanText(ref.key, ""))}</code>` : ""}
+            ${locatorHtml}
+          </div>
+        </div>
+      </li>
+    `;
+  }).join("");
+  return `
+    <div class="manuscript-references" id="manuscript-references">
+      ${hasRealText(status) ? `<p class="reference-status">${inlineMarkup(status)}</p>` : ""}
+      <ol class="reference-list">${items}</ol>
+    </div>
+  `;
+}
+
 function renderManuscriptPanel() {
   const manuscript = appState.summaries?.manuscript || {};
   const blueprintViewer = `
@@ -6642,6 +6741,7 @@ function renderManuscriptPanel() {
     renderManuscriptExportBar(),
     contextCard("Manuscript story map", renderManuscriptArchitecture(manuscript), "Finished-results paper map in manuscript reading order."),
     contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
+    contextCard("References", renderManuscriptReferences(manuscript), "Resolved reference list for the current source candidate.", inlineOpenButton("manuscript/references.bib", "Open .bib")),
     contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
     contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
   ].join("");
@@ -8122,6 +8222,21 @@ function blueprintTableItems(manuscript, sourceText = "") {
   })];
 }
 
+function blueprintReferenceItems(manuscript) {
+  return (manuscript.references || [])
+    .filter((ref) => hasRealText(ref?.reference) || hasRealText(ref?.key))
+    .map((ref) => {
+      const yearMatch = String(ref.reference || "").match(/\b(?:19|20)\d{2}\b/);
+      return blueprintSidebarItemHtml({
+        label: cleanText(ref.key, "") || figureSpecExcerpt(cleanText(ref.reference, ""), 40),
+        meta: figureSpecExcerpt(cleanText(ref.reference, ""), 80),
+        eyebrow: yearMatch ? yearMatch[0] : "",
+        anchor: "manuscript-references",
+        kind: "reference",
+      });
+    });
+}
+
 function latestBlueprintReviewSelection(reviews) {
   const visible = (reviews || []).filter(hasVisibleReview);
   const numbered = visible
@@ -8174,6 +8289,7 @@ function blueprintSidebarHtml(manuscript, reviews, sourceText = "") {
       ${blueprintSidebarSectionHtml("Figures", blueprintArtifactItems(manuscript, ["figure"], sourceText), "No inline figures parsed yet.")}
       ${blueprintSidebarSectionHtml("Tables", blueprintTableItems(manuscript, sourceText), "No inline tables parsed yet.")}
       ${blueprintSidebarSectionHtml("Results / Methods", blueprintArtifactItems(manuscript, ["result", "algorithm", "dataset", "benchmark", "method"], sourceText), "No result or method blocks parsed yet.")}
+      ${blueprintSidebarSectionHtml("References", blueprintReferenceItems(manuscript), "No references parsed yet.")}
       ${blueprintSidebarSectionHtml("Reviews", blueprintReviewItems(reviewSelection.reviews), reviewSelection.emptyText)}
     </aside>
   `;
@@ -8189,6 +8305,11 @@ function blueprintStructuredBodyHtml(manuscript) {
         <h3>Manuscript story map</h3>
         ${renderManuscriptArchitecture(manuscript)}
       </section>
+      ${(manuscript.references || []).length ? `
+      <section class="blueprint-render-section">
+        <h3>References</h3>
+        ${renderManuscriptReferences(manuscript)}
+      </section>` : ""}
       <section class="blueprint-render-section">
         <h3>Audit / provenance</h3>
         ${renderManuscriptAuditPanel(manuscript)}

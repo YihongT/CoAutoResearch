@@ -62,7 +62,7 @@ Review results go into:
 - `manuscript/reviews/`, for manuscript-facing review.
 
 Core reviewer results always keep their canonical names under the current
-trial's `reviews/` directory. Spawned reviewers must not replace the seven core
+trial's `reviews/` directory. Spawned reviewers must not replace the eight core
 reviewer files required for the autoresearch gate.
 
 ## Record the Spawn

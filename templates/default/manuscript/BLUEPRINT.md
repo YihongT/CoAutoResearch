@@ -232,6 +232,28 @@ work.
 
 ---
 
+## References
+
+Canonical resolved reference list. This is the actual reader-facing list, not a
+strategy description (the strategy lives in `Reference / Literature Grounding
+Plan`).
+
+Format rules:
+
+- Each entry: author(s), title, venue or container, year, and a stable locator
+  (DOI preferred, else resolvable URL, else unambiguous publisher/standard ID).
+- One canonical entry and stable key per source; no duplicates.
+- Every inline citation must resolve to exactly one entry here, and every entry
+  here must be cited at least once in the manuscript architecture.
+- Use the citation/ordering style required by the target venue declared above.
+  If the venue does not fix one, use a single consistent style (numbered or
+  author–year) and state which here.
+
+<!-- Replace with the resolved list once sources are integrated, e.g.:
+1. Author A, Author B. Title. Venue, Year. https://doi.org/... -->
+
+---
+
 ## Appendix / Supplement Plan
 
 State whether appendix or supplement material is needed. If not needed, explain

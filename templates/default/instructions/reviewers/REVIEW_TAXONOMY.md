@@ -57,7 +57,7 @@ Every reviewer output must use this schema:
 
 ```markdown
 Reviewer: <reviewer name>
-Scope: <plan / trial / evidence / venue / manuscript / figure-table / process / final-gate / other>
+Scope: <plan / trial / evidence / venue / manuscript / figure-table / reference / process / final-gate / other>
 Decision: <pass / continue / blocked / needs_human>
 Gate impact: <pass / continue / blocked / needs_human>
 Confidence: <high / medium / low>
@@ -91,7 +91,7 @@ required action, unresolved qualification, or critical unassessed area remains,
 `Decision` and `Gate impact` must be `continue`, `blocked`, or `needs_human`,
 not `pass`.
 
-Every active trial must have all seven core reviewer files under
+Every active trial must have all eight core reviewer files under
 `research_trajectory/trials/<trial_id>/reviews/`. A reviewer file can only
 support the current gate for its own source trial. Do not carry a pass forward
 silently from a previous trial; if content is migrated or backfilled, declare it

@@ -149,6 +149,7 @@ CORE_REVIEWER_FILES = [
     "VENUE_FIT_REVIEWER.md",
     "MANUSCRIPT_REVIEWER.md",
     "FIGURE_TABLE_REVIEWER.md",
+    "REFERENCE_REVIEWER.md",
     "REVIEWER_SPAWNING.md",
 ]
 REVIEWER_BASELINE_RELATIVE_PATH = "instructions/.co-auto-research-instructions.json"
@@ -189,6 +190,12 @@ REQUIRED_REVIEWER_OUTPUTS = {
         "file": "FIGURE_TABLE_REVIEW.md",
         "scope": "figure-table",
         "instruction": "instructions/reviewers/FIGURE_TABLE_REVIEWER.md",
+    },
+    "reference": {
+        "label": "Reference reviewer",
+        "file": "REFERENCE_REVIEW.md",
+        "scope": "reference",
+        "instruction": "instructions/reviewers/REFERENCE_REVIEWER.md",
     },
     "final_gate": {
         "label": "Final gate reviewer",
@@ -1503,6 +1510,9 @@ ALLOWED_SANDBOXES = {"read-only", "workspace-write", "danger-full-access"}
 ALLOWED_APPROVAL_POLICIES = {"untrusted", "on-request", "never"}
 ALLOWED_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 AGENT_IDLE_NOTICE_SECONDS = 180
+# A rate-limit notice is dropped once events resume within this window — if the
+# agent is still producing events this recently, it is not actually rate limited.
+AGENT_RATE_LIMIT_CLEAR_SECONDS = 30
 AGENT_RATE_LIMIT_PATTERN = re.compile(
     r"\b(rate[-\s]?limit(?:ed|ing)?|429|too many requests|quota exceeded|usage limit|resource_exhausted)\b",
     re.IGNORECASE,
@@ -1776,9 +1786,29 @@ def seconds_since_iso(value: Any) -> int | None:
 
 
 def agent_notice_from_event(line: str, display: str = "") -> dict[str, Any]:
-    text = "\n".join(part for part in (line, display) if part).strip()
-    if not text:
+    raw = str(line or "")
+    if not raw.strip():
         return {}
+    # Only genuine error/system signals count as rate limits. The model's own
+    # output and tool results routinely mention "rate", "usage limit", "quota",
+    # etc. while researching safety topics — scanning that text produced false
+    # "Rate limit reported" notices. Restrict detection to error events and
+    # non-JSON diagnostic (stderr) lines.
+    is_error_signal = False
+    event: Any = None
+    try:
+        event = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        is_error_signal = True  # non-JSON line is diagnostic/stderr output
+    if isinstance(event, dict):
+        etype = str(event.get("type") or "").lower()
+        subtype = str(event.get("subtype") or "").lower()
+        has_error_field = bool(event.get("error") or event.get("is_error"))
+        if etype in {"error", "system_error"} or "error" in subtype or has_error_field:
+            is_error_signal = True
+    if not is_error_signal:
+        return {}
+    text = "\n".join(part for part in (raw, display) if part).strip()
     if AGENT_RATE_LIMIT_PATTERN.search(text):
         message = compact_single_line(display or text, 260)
         return {
@@ -1795,6 +1825,12 @@ def agent_wait_state_from_values(running: bool, last_event_at: Any, last_event_s
     kind = str(notice_payload.get("kind") or "").strip()
     message = str(notice_payload.get("message") or "").strip()
     stale = bool(running and age_seconds is not None and age_seconds >= AGENT_IDLE_NOTICE_SECONDS)
+    # A rate-limit notice is only meaningful while the agent is actually stalled.
+    # If fresh events are still flowing, the limit has cleared — drop the notice
+    # so it can't stick on screen after the agent resumes.
+    if kind == "rate_limited" and age_seconds is not None and age_seconds < AGENT_RATE_LIMIT_CLEAR_SECONDS:
+        kind = ""
+        message = ""
     if kind == "rate_limited":
         message = message or "Agent reported a rate limit or quota limit."
     elif stale:
@@ -3581,6 +3617,26 @@ def state_summary(state_text: str) -> dict[str, Any]:
     }
 
 
+def parse_reference_table(references_text: str) -> list[dict[str, str]]:
+    """Parse the ``## References`` markdown table into structured entries."""
+    entries: list[dict[str, str]] = []
+    for line in references_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        key = cells[0]
+        # Skip the header row and the |---|---| separator row.
+        if key.lower() == "key" or set(key) <= {"-", ":"}:
+            continue
+        if not meaningful_summary_value(key) and not meaningful_summary_value(cells[1]):
+            continue
+        entries.append({"key": key, "reference": cells[1], "locator": cells[2]})
+    return entries
+
+
 def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     sections = extract_sections(blueprint_text)
 
@@ -3676,6 +3732,9 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         if real_section(section) and str(section.get("title", "")).strip().lower() not in {"figures", "figure specs", "figure specifications"}
     ]
     toc = clean_summary_value(extract_section(blueprint_text, "Architecture Overview / Table of Contents"))
+    references_text = extract_section(blueprint_text, "References")
+    references = parse_reference_table(references_text)
+    reference_status = clean_summary_value(value_after_label(references_text, "Reference integrity status"))
     inline_artifacts = [block for block in architecture if block.get("is_artifact")]
     section_architecture = [block for block in architecture if not block.get("is_artifact")]
     return {
@@ -3697,6 +3756,8 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         "tables": [item for item in inline_artifacts if item.get("kind") == "table"] or table_sections,
         "table_plans": [item for item in inline_artifacts if item.get("kind") == "table"] or table_plans,
         "no_table_rationale": no_table_rationale,
+        "references": references,
+        "reference_status": reference_status,
         "provenance": provenance,
         "traceability": provenance,
         "missing_evidence": [item for item in list_section_items(extract_section(blueprint_text, "Blocking Missing Evidence") or extract_section(blueprint_text, "Missing Evidence")) if meaningful_summary_value(item)][:12],
@@ -7643,6 +7704,15 @@ def append_research_log(line: str) -> None:
             RESEARCH_SESSION["last_event_summary"] = compact_single_line(line, 260)
         if notice:
             RESEARCH_SESSION["agent_notice"] = notice
+        else:
+            # A fresh non-error event means the agent is producing output again.
+            # Drop any stale rate-limit notice so it cannot resurface if the agent
+            # later goes briefly idle.
+            existing = RESEARCH_SESSION.get("agent_notice")
+            if isinstance(existing, dict) and existing.get("kind") == "rate_limited":
+                age = seconds_since_iso(existing.get("detected_at"))
+                if age is None or age >= AGENT_RATE_LIMIT_CLEAR_SECONDS:
+                    RESEARCH_SESSION["agent_notice"] = {}
         if transcript and transcript.get("content"):
             RESEARCH_SESSION["transcript"].append(transcript_entry(**transcript))
         session_id = ""

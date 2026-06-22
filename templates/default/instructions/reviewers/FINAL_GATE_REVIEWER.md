@@ -17,7 +17,7 @@ domain, evidence, venue, manuscript, figure/table, process, or plan review.
 - `manuscript/figures/FIGURE_SPECS.md` when any figure/table/display is active
 - `resources/target_venue/SEED_PAPERS.md`, `STYLE_NOTES.md`, and
   `FIGURE_TABLE_NOTES.md` when a target venue is declared
-- all six other current-trial reviewer files under
+- all seven other current-trial reviewer files under
   `research_trajectory/trials/<trial_id>/reviews/`
 
 ## Output Location
@@ -103,6 +103,10 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - inline publication-ready table block or no-table rationale completeness;
 - inline algorithm/method/dataset/benchmark/result block completeness;
 - reference/literature grounding completeness;
+- reference list integrity: a canonical `References` section exists, the
+  Reference reviewer passed, and inline citations and list entries are
+  bidirectionally complete with no orphan citations, uncited entries, missing
+  required fields, duplicates, or unresolved locators;
 - appendix/supplement plan completeness;
 - provenance/audit index status;
 - stale contradiction scan result;

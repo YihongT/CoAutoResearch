@@ -162,13 +162,14 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 8. Execute mainly in `workspace/` or another clearly justified location.
 9. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
 10. Write `REPORT.md` after execution.
-11. Run or refresh all seven core reviewers for this trial and write their canonical files:
+11. Run or refresh all eight core reviewers for this trial and write their canonical files:
     - `reviews/PLAN_REVIEW.md`
     - `reviews/PROCESS_REVIEW.md`
     - `reviews/EVIDENCE_REVIEW.md`
     - `reviews/VENUE_FIT_REVIEW.md`
     - `reviews/MANUSCRIPT_REVIEW.md`
     - `reviews/FIGURE_TABLE_REVIEW.md`
+    - `reviews/REFERENCE_REVIEW.md`
     - `reviews/FINAL_GATE_REVIEW.md`
 12. A reviewer with little to assess still writes its file with a scoped judgment and explicit unassessed areas.
 13. Update only global files that genuinely changed:
@@ -243,7 +244,7 @@ Canonical review outputs for trial-level work belong in the relevant trial's
 Legacy `REVIEW.md` may exist only as a human-readable summary or compatibility
 record. Do not treat it as canonical when `reviews/` exists.
 
-Every active trial must produce all seven core reviewer files. No reviewer gate
+Every active trial must produce all eight core reviewer files. No reviewer gate
 may silently carry forward from an earlier trial. If a reviewer cannot assess
 much in the current trial, it must still write the current trial file with
 `Decision: continue`, `blocked`, or `needs_human` as appropriate and list what
@@ -260,7 +261,7 @@ Process review can still be the objective of a dedicated trial, for example:
 
 `research_trajectory/trials/000024_process_review/`
 
-That trial still writes all seven files under its own `reviews/` directory.
+That trial still writes all eight files under its own `reviews/` directory.
 
 Do not create `research_trajectory/process_reviews/`.
 Do not create `research_trajectory/reviewers/`.
@@ -328,7 +329,7 @@ completed" after evidence/final gates are claimed as pass.
 Before marking any gate as `pass`, read `instructions/reviewers/REVIEW_TAXONOMY.md`. Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results and require `continue` unless the relevant reviewer standard is fully satisfied.
 
 The Final gate reviewer is required before the loop can stop. It must confirm
-that all six other current-trial reviewer files exist and pass under the shared
+that all seven other current-trial reviewer files exist and pass under the shared
 output schema, and that no blocking issues, required actions, unresolved
 qualifications, active revision constraints, critical unassessed areas,
 outdated reviewer instructions, incomplete final blueprint sections, or stale
