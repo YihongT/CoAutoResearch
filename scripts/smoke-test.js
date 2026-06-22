@@ -477,6 +477,14 @@ Confidence: medium
     throw new Error("knowledge notes must use CORAL-style sparse topic notes with an index and trial-level capture outcomes");
   }
   const indexHtml = await fsp.readFile(path.join(root, "templates", "default", "ui", "index.html"), "utf8");
+  // Cache-busting asset versions are bumped on every UI revision; assert their
+  // presence and internal consistency rather than pinning exact literals (which
+  // would break CI on every design bump).
+  const stylesVersion = (indexHtml.match(/styles\.css\?v=([\w.-]+)/) || [])[1] || "";
+  const appVersion = (indexHtml.match(/app\.js\?v=([\w.-]+)/) || [])[1] || "";
+  if (!stylesVersion || !appVersion) {
+    throw new Error("index.html must reference styles.css and app.js with cache-busting ?v= version tokens");
+  }
   const readme = await fsp.readFile(path.join(root, "README.md"), "utf8");
   const docsConfig = await fsp.readFile(path.join(root, "docs", "conf.py"), "utf8");
   const docsRequirements = await fsp.readFile(path.join(root, "docs", "requirements.txt"), "utf8");
@@ -583,7 +591,7 @@ Confidence: medium
     throw new Error("framing composer and CoAutoResearch returns must share a centered column");
   }
   if (
-    !indexHtml.includes("20260621-viewstate-asc1") ||
+    !appVersion ||
     !stylesCss.includes("Reader typography: match the composer text across content surfaces.") ||
     !stylesCss.includes(".framing-message .transcript-body") ||
     !stylesCss.includes("font-family: var(--reader);")
@@ -798,7 +806,7 @@ Confidence: medium
     !appJs.includes("markdownLinkHtml") ||
     !appJs.includes('transcriptContentHtml(message.text, { markdown: role === "assistant" })') ||
     !stylesCss.includes(".markdown-file-link") ||
-    !indexHtml.includes("20260621-viewstate-asc1")
+    !appVersion
   ) {
     throw new Error("Codex assistant responses must render Markdown in framing chat");
   }
@@ -809,10 +817,10 @@ Confidence: medium
     !appJs.includes("function activeRunTrialIteration()") ||
     !appJs.includes("function isAutoresearchActiveRun()") ||
     !appJs.includes("const activeTrial = liveIteration || selectedTrial(trials)") ||
-    !appJs.includes("const countLabel = `${trials.length} trial") ||
-    !appJs.includes("reportedCount ? ` · ${reportedCount} reported`") ||
+    !appJs.includes("const countParts = [`${trials.length} active trial") ||
+    !appJs.includes("if (reportedCount) countParts.push(`${reportedCount} reported`)") ||
     appJs.includes("const activeTrial = selectedTrial(reports)") ||
-    !appJs.includes('reportStatus === "reported" ? "Done"') ||
+    !appJs.includes('reportStatus === "reported" ? "Reported"') ||
     !appJs.includes("Report pending") ||
     !appJs.includes("Report is not available yet. Agent activity for this trial is shown below.") ||
     !appJs.includes("function isGoalPassed()") ||
@@ -849,7 +857,7 @@ Confidence: medium
     throw new Error("interrupted goal sessions must show resume controls instead of pause controls");
   }
   if (
-    !indexHtml.includes("app.js?v=20260621-viewstate-asc1") ||
+    !appVersion ||
     !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command"])') ||
     !appJs.includes('appendFramingMessage("user", displayText, { kind: "command" })') ||
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
@@ -907,7 +915,7 @@ Confidence: medium
     throw new Error("slash command pending state must start before the command row is rendered");
   }
   if (
-    !indexHtml.includes("styles.css?v=20260621-atelier-1") ||
+    !stylesVersion ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
     !appJs.includes("const latestRunStart = transcript.reduce") ||
     !appJs.includes("function framingProgressDetailsHtml()") ||
@@ -1816,7 +1824,10 @@ Confidence: medium
     "    path.mkdir(parents=True, exist_ok=True)",
     "    (path / 'PLAN.md').write_text('# Plan\\n', encoding='utf-8')",
     "    (path / 'REPORT.md').write_text('# Report\\n\\n## Summary\\n\\n' + summary + '\\n', encoding='utf-8')",
-    "    (path / 'REVIEW.md').write_text('# Review\\n', encoding='utf-8')",
+    "    reviews = path / 'reviews'",
+    "    reviews.mkdir(parents=True, exist_ok=True)",
+    "    for review_name in module.REQUIRED_REVIEWER_FILES:",
+    "        (reviews / review_name).write_text('# Review\\n', encoding='utf-8')",
     "    return path",
     "base = make_trial('000001_base_boundary', 'Base checkpoint trial.')",
     "later = make_trial('000002_later_superseded', 'Later trial to archive.')",

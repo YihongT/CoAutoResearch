@@ -4099,6 +4099,14 @@ def latest_active_trial_iteration() -> int:
     return max([trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()], default=0)
 
 
+def latest_trial_dir_iteration() -> int:
+    # Latest trial directory present on disk, regardless of whether it is fully
+    # closed (reviews complete). Used for live status display so the trial the
+    # agent is actively working on (e.g. report written, reviews pending) is
+    # surfaced instead of a phantom not-yet-visible next trial.
+    return max([trial_iteration_from_id(path.name) for path in active_trial_dirs()], default=0)
+
+
 def next_active_trial_iteration() -> int:
     return max(1, latest_active_trial_iteration() + 1)
 
@@ -7425,7 +7433,7 @@ def research_session_snapshot() -> dict[str, Any]:
             expected_iteration = active_expected_trial_iteration(marker)
             if str(marker.get("status") or "").strip().lower() == "mismatch" and expected_iteration > 0:
                 trajectory_mismatch = True
-            active_trial_iteration = expected_iteration or latest_iteration or loop_iteration
+            active_trial_iteration = expected_iteration or latest_trial_dir_iteration() or loop_iteration
         state_text = safe_read(RESEARCH_STATE_PATH) if RESEARCH_STATE_PATH.exists() else ""
         active_progress = active_trial_progress(active_trial_iteration, state_text) if active_trial_iteration > 0 else {}
         active_run = {

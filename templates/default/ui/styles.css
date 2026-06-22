@@ -13433,3 +13433,305 @@ html[data-theme] .material-actions-label {
   text-transform: none;
   color: var(--soft);
 }
+
+/* ===================================================================
+   ATELIER — Part C14: chat / trials surface, aligned to ui-preview v9.
+   "One quiet paper. Separation by air + a whisper of line." No nested
+   cards, no heavy shadows; status tints survive only as small marks.
+   Authoritative — last in source, so it beats the earlier trial rules.
+   =================================================================== */
+
+/* brand mark → a circular ink coin with a paper glyph (matches the avatar
+   language in v9 and the round favicon). */
+html[data-theme] .brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--primary-text);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+html[data-theme] .brand-mark::before { content: none !important; }
+html[data-theme] .brand-mark .brand-glyph { width: 21px; height: 21px; display: block; }
+
+/* the trials container is layout only — dissolve the card */
+html[data-theme] .trial-history-card,
+html[data-theme] .trial-report-card {
+  width: min(900px, 100%);
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  overflow: visible;
+}
+html[data-theme] .trial-history-card { padding: 0 !important; }
+
+html[data-theme] .trial-history-head {
+  padding: 0 0 14px !important;
+  border-bottom: 1px solid var(--line);
+}
+html[data-theme] .trial-history-head strong {
+  font-family: var(--display);
+  font-weight: 420;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+html[data-theme] .trial-history-head span,
+html[data-theme] .trial-history-head p {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--soft);
+}
+html[data-theme] .trial-history-body { padding: 16px 0 0 !important; gap: 18px; }
+
+/* completion tag → a quiet hairline mark, the tint only as a small dot */
+html[data-theme] .autoresearch-complete-tag {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2, var(--muted));
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+html[data-theme] .autoresearch-complete-tag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+/* strip: ghost scroll buttons, quiet hairline trial chips */
+html[data-theme] .trial-strip > span {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+html[data-theme] .trial-scroll-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+html[data-theme] .trial-scroll-button:hover {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--ink);
+  transform: none;
+}
+
+html[data-theme] .trial-chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+html[data-theme] .trial-chip:hover {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--ink);
+  transform: none;
+}
+html[data-theme] .trial-chip-index {
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+html[data-theme] .trial-chip-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+/* incomplete: warm dot only, no fill */
+html[data-theme] .trial-chip.is-incomplete:not(.is-active):not(.is-running) {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+html[data-theme] .trial-chip.is-incomplete:not(.is-active):not(.is-running) .trial-chip-index {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+/* selected / running → inverted ink coin, fully legible (fixes dark-on-dark) */
+html[data-theme] :is(.trial-chip.is-active, .trial-chip.is-running) {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--primary-text);
+  box-shadow: none;
+}
+html[data-theme] :is(.trial-chip.is-active, .trial-chip.is-running) .trial-chip-index {
+  background: color-mix(in srgb, var(--primary-text) 18%, transparent);
+  color: var(--primary-text);
+  box-shadow: none;
+}
+html[data-theme] :is(.trial-chip.is-active, .trial-chip.is-running) .trial-chip-status {
+  color: var(--primary-text);
+}
+
+/* report: a flat section, separated from the strip by air + a whisper line */
+html[data-theme] .trial-report-card {
+  padding: 18px 0 0 !important;
+  border-top: 1px solid var(--line) !important;
+  gap: 12px;
+}
+html[data-theme] .trial-report-head strong {
+  font-family: var(--display);
+  font-weight: 420;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+html[data-theme] .trial-report-head em {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+html[data-theme] .trial-report-head em.is-autoresearch-complete {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink-2, var(--muted));
+}
+html[data-theme] .trial-report-head span {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--soft);
+}
+html[data-theme] .trial-report-card p { color: var(--muted); font-size: 15px; }
+html[data-theme] .trial-report-card p.trial-progress-summary {
+  font-family: var(--reader);
+  color: var(--ink);
+  font-size: 16px;
+}
+html[data-theme] .trial-report-card p.trial-progress-detail {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.04em;
+  color: var(--soft) !important;
+}
+
+/* stepper → quiet marks: small round bead + mono label, no coloured pills */
+html[data-theme] .trial-progress-stepper { gap: 14px 16px; }
+html[data-theme] .trial-progress-step {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+html[data-theme] .trial-progress-step.is-complete { color: var(--muted); }
+html[data-theme] .trial-progress-step.is-current { color: var(--ink); }
+html[data-theme] .trial-progress-marker {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--soft);
+  font-size: 9px;
+  font-weight: 500;
+}
+html[data-theme] .trial-progress-step.is-complete .trial-progress-marker {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--primary-text);
+}
+html[data-theme] .trial-progress-step.is-current .trial-progress-marker {
+  border-color: var(--ink);
+  background: transparent;
+  color: var(--ink);
+}
+
+/* trial activity → no box; a hairline divider + quiet mono summary row */
+html[data-theme] .trial-detail-activity {
+  margin-top: 2px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+html[data-theme] .trial-detail-activity > summary { padding: 12px 0 0; }
+html[data-theme] .trial-detail-activity > summary::before { color: var(--soft); }
+html[data-theme] .trial-detail-activity > summary span {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  color: var(--soft);
+}
+html[data-theme] .trial-detail-activity > summary strong {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+html[data-theme] .trial-detail-events { padding: 12px 0 0; }
+
+/* the inline command/status message at the top reads as a quiet note,
+   not a boxed pill */
+html[data-theme] .trial-report-actions .small-button { box-shadow: none; }
+
+/* ---- assistant message + chat thread: bare paper, never a faint box ----
+   The earlier atelier rule paints every .transcript-body with --assistant-bg
+   at a higher specificity than the "plain text" rule, so assistant turns
+   showed a lighter rectangle with text touching its edges. Re-assert v9:
+   assistant / final speak as plain text on the one paper; only the human's
+   line keeps a soft tinted bubble. */
+html[data-theme] :is(.framing-message.assistant, .framing-message.project-draft-message, .transcript-message.assistant, .transcript-message.final) > .transcript-body {
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 2px 0 0 !important;
+}
+html[data-theme] :is(.framing-message.assistant, .transcript-message.assistant, .transcript-message.final) > .transcript-body .markdown-preview {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+
+/* the chat thread is the paper itself — no card chrome around the turns */
+html[data-theme] #chat-thread.thread,
+html[data-theme] .session-stage #chat-thread {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 14px 0 18px !important;
+}
+
+/* ordered-list markers in a turn read as quiet mono ordinals, not heavy dots */
+html[data-theme] :is(.transcript-body, .markdown-preview) ol { padding-left: 1.6em; }
+html[data-theme] :is(.transcript-body, .markdown-preview) ol > li::marker {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  color: var(--soft);
+}
+
+/* composer floats on the one paper with v9's soft shadow, not a heavy slab */
+html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
+  box-shadow: var(--shadow) !important;
+}
