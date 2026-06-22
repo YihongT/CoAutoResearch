@@ -1145,13 +1145,14 @@ function clonePlainObject(value) {
 
 function nextOptimisticTrialIteration() {
   const trialIterations = (appState?.trials || [])
+    .filter((trial) => trial?.is_closed === true || (trial?.is_closed === undefined && String(trial?.report_path || "").trim()))
     .map((trial) => trialIterationValue(trial))
     .filter((value) => Number.isFinite(value) && value > 0);
-  const reportedLatest = Math.max(...trialIterations, 0);
-  const sessionIteration = Number(sessionState().loop_iteration || 0);
+  const closedLatest = Math.max(...trialIterations, 0);
   const trajectoryNext = Number(appState?.research_session?.trajectory?.next_trial_number || 0);
-  const latest = Math.max(reportedLatest, Number.isFinite(sessionIteration) ? sessionIteration : 0);
-  if (Number.isFinite(trajectoryNext) && trajectoryNext > latest) return trajectoryNext;
+  if (Number.isFinite(trajectoryNext) && trajectoryNext > 0) return trajectoryNext;
+  const sessionIteration = Number(sessionState().loop_iteration || 0);
+  const latest = Math.max(closedLatest, Number.isFinite(sessionIteration) ? sessionIteration : 0);
   return Math.max(1, latest + (latest ? 1 : 0));
 }
 
@@ -2575,7 +2576,7 @@ function goalLaunchMessage() {
 }
 
 function pruneStaleGoalLaunchMessages(messages) {
-  if (framingDraftPending || isSessionRunning() || hasGoalStarted() || visibleTrialReports().length) return messages;
+  if (framingDraftPending || isSessionRunning() || hasGoalStarted() || visibleTrials().length) return messages;
   return messages.filter((message) => !isGoalLaunchMessage(message));
 }
 
@@ -2631,7 +2632,7 @@ function restoreFramingMessages() {
       shouldPersist = true;
     }
   }
-  if (!hasGoalLaunchMessage(nextMessages) && (hasGoalStarted() || visibleTrialReports().length)) {
+  if (!hasGoalLaunchMessage(nextMessages) && (hasGoalStarted() || visibleTrials().length)) {
     const message = goalLaunchMessage();
     if (message) {
       const projectIndex = latestProjectIndex(nextMessages);
@@ -3987,11 +3988,15 @@ function trialIterationValue(trial) {
   return match ? Number(match[1]) : 0;
 }
 
-function visibleTrialReports() {
+function visibleTrials() {
   return (appState?.trials || [])
-    .filter((trial) => hasVisibleTrial(trial) && trial?.is_archived !== true && String(trial.report_path || "").trim())
+    .filter((trial) => hasVisibleTrial(trial) && trial?.is_archived !== true)
     .filter((trial) => !/^0*_?project_conversion/i.test(String(trial.id || "")))
     .sort((a, b) => trialIterationValue(a) - trialIterationValue(b) || String(a.id || "").localeCompare(String(b.id || "")));
+}
+
+function visibleTrialReports() {
+  return visibleTrials().filter((trial) => String(trial.report_path || "").trim());
 }
 
 function reportForIteration(iteration) {
@@ -3999,15 +4004,15 @@ function reportForIteration(iteration) {
   return visibleTrialReports().find((trial) => trialIterationValue(trial) === target) || null;
 }
 
-function currentTrialIndex(trials = visibleTrialReports()) {
+function currentTrialIndex(trials = visibleTrials()) {
   const loopIteration = activeRunTrialIteration();
-  const items = Array.isArray(trials) ? trials : visibleTrialReports();
+  const items = Array.isArray(trials) ? trials : visibleTrials();
   const iterations = items.map((trial) => Number(trial.iteration || trialIterationValue(trial) || 0)).filter(Boolean);
   const latest = Math.max(...iterations, 0);
   return Math.max(latest, 1);
 }
 
-function selectedTrial(trials = visibleTrialReports()) {
+function selectedTrial(trials = visibleTrials()) {
   if (!trials.length) return 0;
   const fallback = currentTrialIndex(trials);
   const value = Number(selectedTrialIndex || 0);
@@ -4059,7 +4064,7 @@ function effectiveIteration(entry, currentIteration) {
     return explicit;
   }
   if (startsGoalIteration(entry)) return Math.max(1, currentIteration + 1);
-  if ((hasGoalStarted() || visibleTrialReports().length > 0) && isCodexRuntimeEntry(entry)) {
+  if ((hasGoalStarted() || visibleTrials().length > 0) && isCodexRuntimeEntry(entry)) {
     return Math.max(1, currentIteration || currentTrialIndex());
   }
   return currentIteration;
@@ -4133,24 +4138,30 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const finalEntry = [...entries].reverse().find((entry) => ["final", "assistant"].includes(transcriptRole(entry)) && String(entry.content || "").trim());
   const fallback = finalEntry ? compactText(finalEntry.content, 260) : "";
   const reportSummary = cleanText(report?.report_summary, "");
-  const summary = reportSummary || fallback || (report ? "Summary is not available yet." : "Report is not available yet. Agent activity for this trial is shown below.");
-  const reportStatus = cleanText(report?.status, "");
+  const objective = cleanText(report?.objective, "");
+  const summary = reportSummary || fallback || objective || (report ? "Summary is not available yet." : "Report is not available yet. Agent activity for this trial is shown below.");
   const running = isTrialLive(iteration, report);
-  const status = running ? "running" : reportStatus === "reported" ? "completed" : reportStatus || (report ? "completed" : "active");
-  const latestCompletedIteration = currentTrialIndex();
+  const status = running ? "running" : trialStatusLabel(iteration, report).toLowerCase();
+  const latestCompletedIteration = currentTrialIndex(visibleTrialReports());
   const marksAutoresearchComplete = isGoalPassed() && Number(iteration) === Number(latestCompletedIteration);
   const progress = trialProgressForIteration(iteration, report);
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
+  const hasReport = Boolean(String(report?.report_path || "").trim());
+  const headerPath = hasReport
+    ? `${escapeHtml(report.id)} / ${escapeHtml(report.report_path)}`
+    : report
+      ? `${escapeHtml(report.id || `Trial ${iteration}`)} / Report pending`
+      : "Report pending";
   return `
-    <article class="trial-report-card ${running ? "is-running" : report ? "is-complete" : "is-pending"}" data-trial-panel="${escapeHtml(iteration)}">
+    <article class="trial-report-card ${running ? "is-running" : report?.is_closed === true ? "is-complete" : "is-pending"}" data-trial-panel="${escapeHtml(iteration)}">
       <div class="trial-report-head">
         <div>
           <strong>Trial ${escapeHtml(iteration)}</strong>
           <em>${escapeHtml(status)}</em>
           ${marksAutoresearchComplete ? `<em class="is-autoresearch-complete">Autoresearch complete</em>` : ""}
         </div>
-        <span>${report ? `${escapeHtml(report.id)} / ${escapeHtml(report.report_path)}` : "Report pending"}</span>
+        <span>${headerPath}</span>
       </div>
       ${trialProgressStepperHtml(progress)}
       ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
@@ -4250,6 +4261,16 @@ const TRIAL_STRIP_MANUAL_EXPIRE_MS = 30000;
 
 function liveTrialStripIteration() {
   return isLiveGoalSession() ? activeRunTrialIteration() : 0;
+}
+
+function trialStatusLabel(iteration, trial) {
+  if (isTrialLive(iteration, trial)) return "Running";
+  const reportStatus = cleanText(trial?.status, "");
+  if (trial?.is_closed === true) return "Done";
+  if (reportStatus === "blocked") return "Blocked";
+  if (String(trial?.report_path || "").trim()) return reportStatus === "reported" ? "Reported" : reportStatus || "Reported";
+  if (trial) return "Incomplete";
+  return "Active";
 }
 
 function resetTrialStripToAuto(liveIteration = liveTrialStripIteration()) {
@@ -4363,14 +4384,14 @@ function iterationNavHtml(trials, activeTrial) {
       <div class="trial-strip-scroll">
         ${trials
           .map(({ iteration, entries, report }) => {
-            const reportStatus = cleanText(report?.status, "");
             const running = isTrialLive(iteration, report);
-            const label = running ? "Running" : reportStatus === "reported" ? "Done" : reportStatus || (report ? "Done" : "Active");
+            const incomplete = Boolean(report) && !running && report?.is_closed !== true;
+            const label = trialStatusLabel(iteration, report);
             const title = report ? cleanText(report.id, `Trial ${iteration}`) : `Trial ${iteration}`;
             const active = Number(iteration) === Number(activeTrial);
-            const summary = report ? cleanText(report.report_summary, title) : title;
+            const summary = report ? cleanText(report.report_summary, cleanText(report.objective, title)) : title;
             return `
-              <button class="trial-chip ${active ? "is-active" : ""} ${running ? "is-running" : ""}" type="button" data-trial-select="${escapeHtml(iteration)}" title="${escapeHtml(compactText(summary, 180))}">
+              <button class="trial-chip ${active ? "is-active" : ""} ${running ? "is-running" : ""} ${incomplete ? "is-incomplete" : ""}" type="button" data-trial-select="${escapeHtml(iteration)}" title="${escapeHtml(compactText(summary, 180))}">
                 <strong class="trial-chip-index">${escapeHtml(iteration)}</strong>
                 <span class="trial-chip-status">${escapeHtml(label)}</span>
               </button>
@@ -4387,9 +4408,14 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
   if (!trials.length) return "";
   const selectedLabel = activeTrial ? `Trial ${activeTrial}` : "No trial selected";
   const reportedCount = trials.filter((trial) => trial.report?.report_path).length;
-  const countLabel = `${trials.length} trial${trials.length === 1 ? "" : "s"}${reportedCount ? ` · ${reportedCount} reported` : ""}`;
+  const incompleteCount = trials.filter((trial) => trial.report && trial.report?.is_closed !== true).length;
+  const countParts = [`${trials.length} active trial${trials.length === 1 ? "" : "s"}`];
+  if (reportedCount) countParts.push(`${reportedCount} reported`);
+  if (incompleteCount) countParts.push(`${incompleteCount} incomplete`);
+  const countLabel = countParts.join(" · ");
   const latest = trials[trials.length - 1];
-  const latestReport = latest?.report?.id ? cleanText(latest.report.id, "") : "";
+  const latestReported = [...trials].reverse().find((trial) => trial.report?.report_path);
+  const latestReport = latestReported?.report?.id ? cleanText(latestReported.report.id, "") : "";
   const activeTrialIsRunning = runningTrialData
     && activeTrialData
     && Number(runningTrialData.iteration) === Number(activeTrialData.iteration);
@@ -4555,11 +4581,11 @@ function buildFramingActivityByMessage(messages, entries) {
 }
 
 function trialTimelineContentHtml(entries, options = {}) {
-  if (!entries.length && !visibleTrialReports().length && !activeRunTrialIteration()) return "";
+  if (!entries.length && !visibleTrials().length && !activeRunTrialIteration()) return "";
   const omittedEntryIds = options.omittedEntryIds || new Set();
   const trialGroups = new Map();
   let currentIteration = 0;
-  const hasTrialContext = hasLaunched() || hasGoalStarted() || visibleTrialReports().length > 0;
+  const hasTrialContext = hasLaunched() || hasGoalStarted() || visibleTrials().length > 0;
   entries.forEach((entry) => {
     if (entry?.id && omittedEntryIds.has(String(entry.id))) return;
     const nextIteration = effectiveIteration(entry, currentIteration);
@@ -4574,7 +4600,7 @@ function trialTimelineContentHtml(entries, options = {}) {
     trialGroups.set(currentIteration, group);
   });
 
-  const reports = visibleTrialReports();
+  const reports = visibleTrials();
   const liveIteration = isLiveGoalSession() ? activeRunTrialIteration() : 0;
   const reportByIteration = new Map(reports.map((report) => [trialIterationValue(report), report]));
   const iterationValues = new Set([

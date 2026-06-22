@@ -197,6 +197,7 @@ REQUIRED_REVIEWER_OUTPUTS = {
         "instruction": "instructions/reviewers/FINAL_GATE_REVIEWER.md",
     },
 }
+REQUIRED_REVIEWER_FILES = tuple(config["file"] for config in REQUIRED_REVIEWER_OUTPUTS.values())
 TRIAL_PROGRESS_STAGES = [
     {"key": "planning", "label": "Planning"},
     {"key": "working", "label": "Working"},
@@ -4071,18 +4072,40 @@ def active_trial_dirs() -> list[Path]:
     return sorted(dirs, key=lambda path: (trial_iteration_from_id(path.name), path.name))
 
 
+def trial_dir_is_closed(trial_dir: Path) -> bool:
+    if not (trial_dir / "REPORT.md").is_file():
+        return False
+    review_dir = trial_dir / "reviews"
+    return review_dir.is_dir() and all((review_dir / name).is_file() for name in REQUIRED_REVIEWER_FILES)
+
+
+def closed_active_trial_dirs() -> list[Path]:
+    # The canonical resume boundary stops at the first unclosed active trial.
+    closed: list[Path] = []
+    for path in active_trial_dirs():
+        if not trial_dir_is_closed(path):
+            break
+        closed.append(path)
+    return closed
+
+
+def interrupted_tail_trial_dirs() -> list[Path]:
+    active = active_trial_dirs()
+    boundary_iteration = max([trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()], default=0)
+    return [path for path in active if trial_iteration_from_id(path.name) > boundary_iteration]
+
+
 def latest_active_trial_iteration() -> int:
-    return max([trial_iteration_from_id(path.name) for path in active_trial_dirs()], default=0)
+    return max([trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()], default=0)
 
 
 def next_active_trial_iteration() -> int:
-    state = read_trajectory_state()
-    return max(latest_active_trial_iteration() + 1, int(state.get("next_trial_number") or 1))
+    return max(1, latest_active_trial_iteration() + 1)
 
 
 def sync_trajectory_state(reason: str = "") -> dict[str, Any]:
     state = read_trajectory_state()
-    active = active_trial_dirs()
+    active = closed_active_trial_dirs()
     latest = active[-1].name if active else ""
     next_number = trial_iteration_from_id(latest) + 1 if latest else 1
     if (
@@ -4185,20 +4208,20 @@ def validate_expected_trial_marker() -> None:
     expected = int(marker.get("expected_iteration") or 0)
     if expected <= 0:
         return
-    active_iterations = [trial_iteration_from_id(path.name) for path in active_trial_dirs()]
-    if expected in active_iterations:
+    closed_iterations = [trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()]
+    if expected in closed_iterations:
         marker["status"] = "fulfilled"
         update_expected_trial_marker(marker)
         sync_trajectory_state("expected_trial_fulfilled")
         return
-    higher = [value for value in active_iterations if value > expected]
+    higher = [value for value in closed_iterations if value > expected]
     if higher:
         marker["status"] = "mismatch"
-        marker["actual_iterations"] = sorted(active_iterations)
+        marker["actual_iterations"] = sorted(closed_iterations)
         update_expected_trial_marker(marker)
         stop_autoresearch_loop("trajectory_mismatch", read_autoresearch_gate())
         append_research_log(
-            f"Trajectory mismatch: expected the agent to create Trial {expected}, but active trials are {sorted(active_iterations)}."
+            f"Trajectory mismatch: expected the agent to close Trial {expected}, but closed trials are {sorted(closed_iterations)}."
         )
 
 
@@ -4262,6 +4285,7 @@ def collect_trials() -> list[dict[str, Any]]:
             review_path = trial_review_path(trial_dir)
             review = safe_read(review_path) if review_path else ""
             report = safe_read(trial_dir / "REPORT.md")
+            is_closed = trial_dir_is_closed(trial_dir)
             objective = first_meaningful_line(extract_section(plan, "Objective"), "Objective not recorded")
             artifacts_dir = trial_dir / "artifacts"
             artifacts = []
@@ -4277,6 +4301,7 @@ def collect_trials() -> list[dict[str, Any]]:
                     "fork_id": str(trajectory.get("fork_id") or "") if is_active else "",
                     "is_active": is_active,
                     "is_archived": not is_active,
+                    "is_closed": is_closed,
                     "path": rel_path(trial_dir),
                     "objective": objective,
                     "status": infer_trial_status(plan, review, report),
@@ -4309,6 +4334,7 @@ def active_reported_trials() -> list[dict[str, Any]]:
             if trial.get("is_active")
             and str(trial.get("path") or "").startswith("research_trajectory/trials/")
             and str(trial.get("report_path") or "").strip()
+            and bool(trial.get("is_closed"))
             and not re.match(r"^0*_?project_conversion", str(trial.get("id") or ""), re.IGNORECASE)
         ],
         key=trial_sort_key,
@@ -4368,6 +4394,85 @@ def resume_forks_root() -> Path:
 
 def restarts_root() -> Path:
     return REPO_ROOT / "archive" / "restarts"
+
+
+def interrupted_trials_root() -> Path:
+    return REPO_ROOT / "archive" / "interrupted_trials"
+
+
+def next_interrupted_trial_sequence(root: Path | None = None) -> int:
+    root = root or interrupted_trials_root()
+    highest = 0
+    if root.exists():
+        for path in root.iterdir():
+            if not path.is_dir():
+                continue
+            match = re.match(r"T0*(\d+)_", path.name)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def archive_interrupted_trial_tail(reason: str) -> dict[str, Any]:
+    tail = interrupted_tail_trial_dirs()
+    if not tail:
+        sync_trajectory_state(reason)
+        return {"archived": [], "archive_root": "", "base_trial": "", "next_iteration": next_active_trial_iteration()}
+    root = interrupted_trials_root()
+    root.mkdir(parents=True, exist_ok=True)
+    sequence = next_interrupted_trial_sequence(root)
+    slug = slugify(reason, "interrupted")
+    archive_root = root / f"T{sequence:04d}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{slug}"
+    archive_root.mkdir(parents=True, exist_ok=False)
+    archived: list[dict[str, str]] = []
+    for source_path in tail:
+        if not source_path.exists():
+            continue
+        destination = unique_child_path(archive_root, source_path.name)
+        shutil.move(str(source_path), str(destination))
+        archived.append({"id": source_path.name, "from": rel_path(source_path), "to": rel_path(destination)})
+    state = sync_trajectory_state(reason)
+    marker = read_expected_trial_marker()
+    if marker and active_expected_trial_iteration(marker) > 0:
+        expected = int(marker.get("expected_iteration") or 0)
+        archived_iterations = [trial_iteration_from_id(item["id"]) for item in archived]
+        if expected in archived_iterations or any(value >= expected for value in archived_iterations):
+            marker["status"] = "interrupted"
+            marker["reason"] = reason
+            marker["archived_trials"] = archived
+            update_expected_trial_marker(marker)
+    manifest = archive_root / "MANIFEST.md"
+    manifest.write_text(
+        "\n".join(
+            [
+                f"# Interrupted Trial Tail T{sequence:04d}",
+                "",
+                f"Created: {now_iso()}",
+                f"Reason: `{reason}`",
+                f"Base closed trial: `{state.get('latest_active_trial') or 'none'}`",
+                f"Next trial number: `{state.get('next_trial_number')}`",
+                "",
+                "## Archived Trials",
+                "",
+                *[f"- `{item['from']}` -> `{item['to']}`" for item in archived],
+                "",
+                "These trials were not canonical resume boundaries because the active trial chain contained an unclosed trial.",
+            ]
+        ).rstrip()
+        + "\n",
+        encoding="utf-8",
+    )
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["session_id"] = ""
+        RESEARCH_SESSION["loop_iteration"] = latest_active_trial_iteration()
+        RESEARCH_SESSION["loop_stop_reason"] = reason
+    persist_research_session()
+    return {
+        "archived": archived,
+        "archive_root": rel_path(archive_root),
+        "base_trial": str(state.get("latest_active_trial") or ""),
+        "next_iteration": int(state.get("next_trial_number") or next_active_trial_iteration()),
+    }
 
 
 def next_resume_fork_sequence(root: Path | None = None) -> int:
@@ -7468,7 +7573,7 @@ def continue_autoresearch_loop_prompt(gate: dict[str, Any], next_iteration: int 
     expected = int(next_iteration or next_active_trial_iteration())
     return f"""/goal resume
 
-Continue the autoresearch loop in this same agent session.
+Continue the autoresearch loop from the current closed trajectory boundary.
 {fast_mode_prompt_section(fast_mode)}
 
 Current autoresearch gate status: {status}
@@ -7529,6 +7634,18 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         stop_autoresearch_loop("gate_requires_human_input", gate)
         append_research_log("Autoresearch loop paused because the gate requires human input.")
         return
+    cleanup = archive_interrupted_trial_tail("loop_continue_from_closed_boundary")
+    archived = cleanup.get("archived") or []
+    if archived:
+        iteration = latest_active_trial_iteration()
+        append_research_log(
+            "Archived interrupted trial tail before continuing from the last closed trial: "
+            + ", ".join(item["from"] for item in archived)
+        )
+        gate = read_autoresearch_gate()
+        with RESEARCH_LOCK:
+            RESEARCH_SESSION["gate"] = gate
+        persist_research_session()
     checkpoint_iteration = current_review_checkpoint_iteration(settings)
     if iteration >= checkpoint_iteration:
         stop_autoresearch_loop("review_checkpoint_reached", gate)
@@ -7537,13 +7654,14 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         )
         return
     append_research_log(
-        f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; resuming the same agent session for the next active trial."
+        f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; continuing from the last closed trial boundary."
     )
     next_iteration = next_active_trial_iteration()
+    resume_same_session = should_resume_research_session()
     start_research_run(
         continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode"))),
         "goal",
-        resume=True,
+        resume=resume_same_session,
         settings_payload=settings,
         display_prompt=f"Continue autoresearch loop (Trial {next_iteration}).",
         loop_active=True,
@@ -7607,6 +7725,9 @@ def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str
 
 
 def should_resume_research_session() -> bool:
+    status = str(RESEARCH_SESSION.get("status") or "").strip().lower()
+    if status in {"interrupted", "failed"}:
+        return False
     return bool(str(RESEARCH_SESSION.get("session_id") or "").strip())
 
 
@@ -8741,6 +8862,12 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         result["local"] = True
         return result
     if normalized == "/goal resume":
+        with RESEARCH_LOCK:
+            proc = RESEARCH_SESSION.get("process")
+            running = bool(proc and proc.poll() is None)
+        cleanup = {"archived": []}
+        if not running:
+            cleanup = archive_interrupted_trial_tail("goal_resume_from_closed_boundary")
         ensure_autoresearch_gate_for_loop()
         gate = read_autoresearch_gate()
         if gate_has_passed(gate):
@@ -8752,11 +8879,11 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
             return append_local_command_result(command, "The autoresearch goal is already passed; no new iteration was started.")
         settings = normalize_research_settings(settings_payload)
         review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
-        current_iteration = latest_active_trial_iteration()
-        next_iteration = max(1, current_iteration + 1)
         with RESEARCH_LOCK:
-            proc = RESEARCH_SESSION.get("process")
-            running = bool(proc and proc.poll() is None)
+            live_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        current_iteration = live_iteration if running and live_iteration > 0 else latest_active_trial_iteration()
+        next_iteration = next_active_trial_iteration()
+        with RESEARCH_LOCK:
             RESEARCH_SESSION["loop_active"] = True
             RESEARCH_SESSION["loop_stop_reason"] = ""
             RESEARCH_SESSION["settings"] = settings
@@ -8765,12 +8892,20 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         persist_research_session()
         if running:
             return append_local_command_result(command, "Goal loop resumed. The next iteration will start after the current agent turn finishes.")
+        archived = cleanup.get("archived") or []
+        if archived:
+            append_local_command_result(
+                command,
+                "Archived interrupted trial tail before resuming from the last closed trial: "
+                + ", ".join(item["from"] for item in archived),
+            )
+        resume_same_session = should_resume_research_session()
         return {
             "local": True,
             "session": start_research_run(
                 continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode"))),
                 "goal",
-                resume=True,
+                resume=resume_same_session,
                 settings_payload=settings,
                 display_prompt=command,
                 loop_active=True,

@@ -7768,6 +7768,10 @@ h1,
   padding-bottom: 8px;
 }
 
+.chat-header.is-framing {
+  display: none;
+}
+
 .chat-header.is-framing > div:first-child {
   min-width: 0;
 }
@@ -9228,6 +9232,12 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   border-color: rgba(79, 102, 91, 0.28);
   color: var(--ink);
   transform: translateY(-1px);
+}
+
+.trial-chip.is-incomplete:not(.is-active):not(.is-running) {
+  border-color: rgba(151, 111, 42, 0.28);
+  background: rgba(252, 246, 232, 0.92);
+  color: #7b5b24;
 }
 
 .trial-chip-index {
@@ -11872,6 +11882,12 @@ html[data-theme] :is(.theme-mode-control input:checked + span, .view-switch butt
   color: var(--primary-text);
 }
 
+html[data-theme] .trial-chip.is-incomplete:not(.is-active):not(.is-running) {
+  border-color: color-mix(in srgb, var(--warning, #9b6b2d) 42%, var(--control-border));
+  background: color-mix(in srgb, var(--warning, #9b6b2d) 10%, var(--secondary-bg));
+  color: var(--secondary-text);
+}
+
 html[data-theme] :is(button:disabled, textarea:disabled, .secondary-button:disabled, .composer-suggestion-chip:disabled) {
   opacity: 1;
   border-color: color-mix(in srgb, var(--control-border) 70%, transparent);
@@ -12455,6 +12471,9 @@ html[data-theme] .file-manager-head p {
    content (both before and after a thread exists). Message bubbles, project
    previews, trials, and the composer own their surfaces; the outer cold-start
    shell is layout only. */
+html[data-theme] #cold-start-workspace.has-framing-thread,
+html[data-theme] #cold-start-workspace.has-framing-thread .stage-panel[data-stage-panel="1"],
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-stage,
 html[data-theme] #cold-start-workspace .stage-panel[data-stage-panel="1"] .cold-card {
   border: 0 !important;
   background: transparent !important;
@@ -12465,7 +12484,7 @@ html[data-theme] #cold-start-workspace .stage-panel[data-stage-panel="1"] .cold-
    to the composer instead of floating deep inside the transcript. */
 html[data-theme] .scroll-bottom-button {
   left: var(--brief-dock-left, 50%) !important;
-  bottom: calc(var(--brief-dock-height, 132px) - 12px) !important;
+  bottom: calc(var(--brief-dock-height, 132px) + 12px) !important;
   width: 44px !important;
   height: 44px !important;
   border-color: color-mix(in srgb, var(--primary-bg) 72%, var(--control-border)) !important;
@@ -12489,10 +12508,6 @@ html[data-theme] .scroll-bottom-button svg {
   width: 23px !important;
   height: 23px !important;
   stroke-width: 2.8 !important;
-}
-
-html[data-theme] body.has-framing-scroll-button .brief-editor-shell.is-framing-dock .brief-composer-row {
-  padding-top: 36px !important;
 }
 
 /* Final compact composer text alignment. JS owns height autosizing; CSS keeps
