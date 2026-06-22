@@ -123,7 +123,7 @@ function assertThemeContrast(stylesCss) {
     ["warning-ink", "warning-bg", 4.5],
     ["danger-ink", "danger-bg", 4.5],
   ];
-  for (const theme of ["graphite-aurora", "museum-tech", "dark-glass"]) {
+  for (const theme of ["atelier-ivory", "atelier-nocturne"]) {
     const tokens = parseThemeTokens(stylesCss, theme);
     for (const [foregroundToken, backgroundToken, minimum] of requiredPairs) {
       const foreground = tokens[foregroundToken];
@@ -598,22 +598,22 @@ Confidence: medium
   const finalGateReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
   const themeOptionValues = [...indexHtml.matchAll(/name="themeMode"\s+value="([^"]+)"/g)].map((match) => match[1]);
   const explicitThemeBlocks = [...stylesCss.matchAll(/html\[data-theme="([^"]+)"\]/g)].map((match) => match[1]);
-  const expectedThemes = ["graphite-aurora", "museum-tech", "dark-glass"];
+  const expectedThemes = ["atelier-ivory", "atelier-nocturne"];
   if (
     themeOptionValues.length !== expectedThemes.length ||
     !expectedThemes.every((theme) => themeOptionValues.includes(theme)) ||
     !expectedThemes.every((theme) => explicitThemeBlocks.includes(theme)) ||
-    !indexHtml.includes('document.documentElement.dataset.theme = allowedThemes.has(stored) ? stored : "graphite-aurora"') ||
+    !indexHtml.includes('document.documentElement.dataset.theme = allowedThemes.has(stored) ? stored : "atelier-ivory"') ||
     !appJs.includes('localStorage.getItem("coAutoResearchTheme")') ||
     !appJs.includes('localStorage.setItem("coAutoResearchTheme", mode)') ||
     !appJs.includes("function applyThemeMode") ||
-    !appJs.includes('const defaultThemeMode = "graphite-aurora"') ||
-    !appJs.includes('new Set([defaultThemeMode, "museum-tech", "dark-glass"])') ||
+    !appJs.includes('const defaultThemeMode = "atelier-ivory"') ||
+    !appJs.includes('new Set([defaultThemeMode, "atelier-nocturne"])') ||
     !appJs.includes('$$("[data-theme-option]")') ||
     !stylesCss.includes(".theme-mode-control") ||
-    !readme.includes("Graphite Aurora, Museum Tech, and Dark Glass") ||
-    !gettingStartedDocs.includes("Graphite Aurora, Museum Tech, and Dark Glass") ||
-    !cliDocs.includes("Graphite Aurora, Museum Tech, and Dark Glass")
+    !readme.includes("Ivory and Nocturne") ||
+    !gettingStartedDocs.includes("Ivory and Nocturne") ||
+    !cliDocs.includes("Ivory and Nocturne")
   ) {
     throw new Error("settings must expose the persisted dashboard themes");
   }
@@ -907,7 +907,7 @@ Confidence: medium
     throw new Error("slash command pending state must start before the command row is rendered");
   }
   if (
-    !indexHtml.includes("styles.css?v=20260621-viewstate-asc1") ||
+    !indexHtml.includes("styles.css?v=20260621-atelier-1") ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
     !appJs.includes("const latestRunStart = transcript.reduce") ||
     !appJs.includes("function framingProgressDetailsHtml()") ||
