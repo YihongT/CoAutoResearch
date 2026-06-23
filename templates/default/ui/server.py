@@ -8152,7 +8152,7 @@ Additional user instruction for this launch:
 {instruction}
 
 Apply this launch instruction when choosing and executing the next research objective, but do not let it weaken the reviewer gate, provenance, or final-pass requirements below."""
-    return f"""/goal
+    return f"""/goal Complete the CoAutoResearch autoresearch loop from PROJECT.md only after every required reviewer gate is a strict pass.
 
 Start the autoresearch loop from the current PROJECT.md as the goal.
 
@@ -8267,7 +8267,7 @@ This selected trial did not have a saved checkpoint. Treat this as a best-effort
 - verify STATE.md, CURRENT_FINDINGS.md, manuscript files, and resources before relying on them;
 - if the restored state is inconsistent, repair the project state before creating substantive new claims.
 """
-    return f"""/goal resume from trial
+    return f"""/goal Resume the CoAutoResearch autoresearch loop from the selected trial boundary until every required reviewer gate is a strict pass.
 
 The user confirmed a human-directed fork of the autoresearch trajectory.
 
@@ -8531,7 +8531,7 @@ def write_restart_manifest(
 
 
 def restart_autoresearch_prompt(restart_id: str, manifest_path: str, reason: str) -> str:
-    return f"""/goal restart
+    return f"""/goal Restart the CoAutoResearch autoresearch loop from a clean active trajectory until every required reviewer gate is a strict pass.
 
 The user confirmed a full autoresearch restart.
 
@@ -9024,6 +9024,35 @@ def local_diff_message() -> str:
     return "\n".join(part for part in [status_text, diff_text] if part).strip()
 
 
+CLAUDE_GOAL_CLEAR_TERMS = {"clear", "stop", "off", "reset", "none", "cancel"}
+
+
+def command_backend_from_settings(settings_payload: Any | None) -> str:
+    if settings_payload is None:
+        return normalize_agent_backend(
+            RESEARCH_SESSION.get("backend")
+            or (RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}).get("backend")
+            or load_ui_settings().get("agent", {}).get("backend")
+        )
+    return normalize_agent_backend(normalize_research_settings(settings_payload).get("backend"))
+
+
+def is_claude_goal_command(normalized: str) -> bool:
+    return normalized == "/goal" or normalized.startswith("/goal ")
+
+
+def claude_goal_loop_active(normalized: str) -> bool | None:
+    if not is_claude_goal_command(normalized):
+        return None
+    argument = normalized[len("/goal"):].strip()
+    if not argument:
+        return None
+    first = argument.split(" ", 1)[0]
+    if first in CLAUDE_GOAL_CLEAR_TERMS:
+        return False
+    return True
+
+
 def handle_local_slash_command(command: str, normalized: str, settings_payload: Any | None) -> dict[str, Any] | None:
     if normalized == "/status":
         return append_local_command_result(command, local_status_message())
@@ -9031,6 +9060,8 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         return append_local_command_result(command, local_ps_message())
     if normalized == "/diff":
         return append_local_command_result(command, local_diff_message())
+    if command_backend_from_settings(settings_payload) == "claude" and is_claude_goal_command(normalized):
+        return None
     if normalized == "/goal":
         gate = read_autoresearch_gate()
         return append_local_command_result(
@@ -9137,15 +9168,25 @@ def start_research_command(payload: dict[str, Any]) -> dict[str, Any]:
     if not command.startswith("/"):
         command = f"/{command}"
     normalized = re.sub(r"\s+", " ", command.lower()).strip()
-    local = handle_local_slash_command(command, normalized, payload.get("settings"))
+    settings_payload = payload.get("settings")
+    backend = command_backend_from_settings(settings_payload)
+    if backend == "claude" and normalized == "/goal pause":
+        command = "/goal stop"
+        normalized = "/goal stop"
+    local = handle_local_slash_command(command, normalized, settings_payload)
     if local is not None:
         return local
     loop_active: bool | None = None
-    if normalized in {"/goal pause", "/goal clear"}:
+    if backend == "claude":
+        loop_active = claude_goal_loop_active(normalized)
+    elif normalized in {"/goal pause", "/goal clear"}:
         loop_active = False
     elif normalized == "/goal resume":
         loop_active = True
-    return {"session": start_research_run(command, "command", resume=True, settings_payload=payload.get("settings"), loop_active=loop_active)}
+    resume = True
+    if backend == "claude" and is_claude_goal_command(normalized):
+        resume = should_resume_research_session()
+    return {"session": start_research_run(command, "command", resume=resume, settings_payload=settings_payload, loop_active=loop_active)}
 
 
 def stop_research_session() -> dict[str, Any]:

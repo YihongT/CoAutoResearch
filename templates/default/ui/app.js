@@ -171,6 +171,8 @@ const modelOptionsByBackend = {
   ],
 };
 
+const claudeAutoresearchGoalCommand = "/goal Complete the CoAutoResearch autoresearch loop from PROJECT.md only after every required reviewer gate is a strict pass.";
+
 const backendDocLinks = {
   codex: [
     { label: "Models", href: "https://developers.openai.com/api/docs/models" },
@@ -2155,6 +2157,14 @@ function shellQuote(value) {
 function sessionBackend() {
   const session = sessionState();
   return normalizeAgentBackend(session.backend || session.settings?.backend || activeSettingsBackend());
+}
+
+function sessionGoalResumeCommand() {
+  return sessionBackend() === "claude" ? claudeAutoresearchGoalCommand : "/goal resume";
+}
+
+function sessionGoalPauseCommand() {
+  return sessionBackend() === "claude" ? "/goal stop" : "/goal pause";
 }
 
 function agentResumeCommand() {
@@ -8958,7 +8968,7 @@ function renderComposerSuggestions() {
     addChip("Status", "/status");
     addChip("Diff", "/diff");
   } else if (gateIncompletePass) {
-    addChip("Resume autoresearch", "/goal resume");
+    addChip("Resume autoresearch", sessionGoalResumeCommand());
     addActionChip("Restart autoresearch", "data-restart-autoresearch");
     addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
@@ -8970,15 +8980,15 @@ function renderComposerSuggestions() {
     addChip("Status", "/status");
     addChip("Processes", "/ps");
   } else if (interrupted) {
-    addChip("Resume autoresearch", "/goal resume");
+    addChip("Resume autoresearch", sessionGoalResumeCommand());
     addChip("Show autoresearch", "/goal");
     addChip("Status", "/status");
     addChip("Diff", "/diff");
   } else {
     if (loopActive) {
-      addChip("Pause autoresearch", "/goal pause");
+      addChip("Pause autoresearch", sessionGoalPauseCommand());
     } else {
-      addChip("Resume autoresearch", "/goal resume");
+      addChip("Resume autoresearch", sessionGoalResumeCommand());
     }
     addActionChip("Restart autoresearch", "data-restart-autoresearch");
     addChip("Show autoresearch", "/goal");
@@ -9119,6 +9129,9 @@ async function sendSessionComposerMessage(message) {
   }
   let isCommand = text.startsWith("/");
   const normalizedCommand = isCommand ? text.toLowerCase().replace(/\s+/g, " ").trim() : "";
+  const commandSettings = isCommand ? settingsFromForm() : null;
+  const commandBackend = normalizeAgentBackend(commandSettings?.backend || sessionBackend());
+  const isProductRestartCommand = normalizedCommand === "/goal restart" && commandBackend !== "claude";
   let messageText = text;
   if (resumeFromTrial && isCommand) {
     showToast("Remove the Continue from Trial chip before sending a slash command, or send a normal instruction for this fork.", true);
@@ -9128,7 +9141,7 @@ async function sendSessionComposerMessage(message) {
     const confirmed = await confirmResumeTrialSend(resumeFromTrial, messageText, attachments);
     if (!confirmed) return false;
   }
-  if (normalizedCommand === "/goal restart") {
+  if (isProductRestartCommand) {
     const confirmed = await confirmRestartAutoresearch(text);
     if (!confirmed) return false;
   }
@@ -9153,7 +9166,7 @@ async function sendSessionComposerMessage(message) {
     renderFramingConversation();
     scrollFramingToBottomSoon();
   }
-  const endpoint = normalizedCommand === "/goal restart"
+  const endpoint = isProductRestartCommand
     ? "/api/research/restart"
     : isCommand
       ? "/api/research/command"
@@ -9163,10 +9176,10 @@ async function sendSessionComposerMessage(message) {
   let response = null;
   try {
     const files = await collectUploadFiles();
-    const body = normalizedCommand === "/goal restart"
-      ? { message: text, settings: settingsFromForm() }
+    const body = isProductRestartCommand
+      ? { message: text, settings: commandSettings }
       : isCommand
-      ? { command: text, settings: settingsFromForm() }
+      ? { command: text, settings: commandSettings }
       : { message: messageText || displayText, files, resourceLinks: collectResourceLinks(), resumeFromTrial, settings: settingsFromForm() };
     if (appendedMessage) await persistFramingMessages();
     response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
@@ -9453,7 +9466,7 @@ async function handleStopSession() {
 }
 
 async function handlePauseAutoresearch() {
-  await sendCommand("/goal pause");
+  await sendCommand(sessionGoalPauseCommand());
 }
 
 function resizeComposer() {

@@ -863,7 +863,11 @@ Confidence: medium
   }
   if (
     !appJs.includes("function isSessionInterrupted()") ||
-    !appJs.includes('addChip("Resume autoresearch", "/goal resume");') ||
+    !appJs.includes("function sessionGoalResumeCommand()") ||
+    !appJs.includes("function sessionGoalPauseCommand()") ||
+    !appJs.includes("claudeAutoresearchGoalCommand") ||
+    !appJs.includes('addChip("Resume autoresearch", sessionGoalResumeCommand());') ||
+    !appJs.includes('addChip("Pause autoresearch", sessionGoalPauseCommand());') ||
     !appJs.includes('"Gate incomplete"') ||
     !appJs.includes('interrupted ? "Goal interrupted"')
   ) {
@@ -1422,6 +1426,22 @@ Confidence: medium
       "assert '--permission-mode' in new_cmd and 'bypassPermissions' in new_cmd, new_cmd",
       "assert '--disallowedTools' in new_cmd and 'WebSearch,WebFetch' in new_cmd, new_cmd",
       "assert '--resume' in resume_cmd and '00000000-0000-0000-0000-000000000123' in resume_cmd, resume_cmd",
+      "assert module.is_claude_goal_command('/goal') is True",
+      "assert module.is_claude_goal_command('/goal finish the work') is True",
+      "assert module.is_claude_goal_command('/goalkeeper') is False",
+      "assert module.claude_goal_loop_active('/goal') is None",
+      "assert module.claude_goal_loop_active('/goal finish the work') is True",
+      "assert all(module.claude_goal_loop_active('/goal ' + term) is False for term in ('clear', 'stop', 'off', 'reset', 'none', 'cancel'))",
+      "assert module.handle_local_slash_command('/goal', '/goal', {'backend': 'claude'}) is None",
+      "assert module.handle_local_slash_command('/goal clear', '/goal clear', {'backend': 'claude'}) is None",
+      "captured = []",
+      "module.start_research_run = lambda prompt, mode, resume, settings_payload=None, loop_active=None, **kwargs: captured.append({'prompt': prompt, 'mode': mode, 'resume': resume, 'loop_active': loop_active, 'settings': settings_payload}) or {'ok': True}",
+      "context.session.update({'session_id': '', 'backend': 'claude', 'settings': settings, 'logs': [], 'raw_logs': [], 'transcript': [], 'status': ''})",
+      "module.start_research_command({'command': '/goal pause', 'settings': {'backend': 'claude'}})",
+      "assert captured[-1]['prompt'] == '/goal stop' and captured[-1]['loop_active'] is False and captured[-1]['resume'] is False, captured[-1]",
+      "context.session.update({'session_id': '00000000-0000-0000-0000-000000000123', 'status': 'completed'})",
+      "module.start_research_command({'command': '/goal Complete the work', 'settings': {'backend': 'claude'}})",
+      "assert captured[-1]['prompt'] == '/goal Complete the work' and captured[-1]['loop_active'] is True and captured[-1]['resume'] is True, captured[-1]",
       "system_line = json.dumps({'type': 'system', 'subtype': 'init', 'session_id': '00000000-0000-0000-0000-000000000999'})",
       "assistant_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Final assistant text.'}], 'stop_reason': 'end_turn', 'usage': {'input_tokens': 3, 'output_tokens': 5}}})",
       "tool_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'pwd'}}], 'stop_reason': 'tool_use'}})",
@@ -1466,9 +1486,18 @@ Confidence: medium
       "spec.loader.exec_module(module)",
       "base = module.autoresearch_goal_prompt()",
       "custom = module.autoresearch_goal_prompt('Prioritize source-level evidence.')",
+      "assert base.startswith('/goal Complete the CoAutoResearch autoresearch loop'), base.splitlines()[0]",
+      "assert not base.startswith('/goal\\n'), base.splitlines()[0]",
+      "assert custom.startswith('/goal Complete the CoAutoResearch autoresearch loop'), custom.splitlines()[0]",
       "assert 'Additional user instruction for this launch' not in base",
       "assert 'Prioritize source-level evidence.' in custom",
       "assert 'Required reviewer gates must all be strict `pass`' in custom",
+      "resume = module.resume_from_trial_prompt({'id': 'trial_1', 'path': 'research_trajectory/trials/trial_1', 'report_path': 'research_trajectory/trials/trial_1/REPORT.md', 'checkpoint_path': ''}, 'Continue from here.', 'best_effort', 'archive/resume_forks/fork_1/manifest.json', 'research_trajectory/human_interventions/INDEX.md', [], 1, 2)",
+      "assert resume.startswith('/goal Resume the CoAutoResearch autoresearch loop'), resume.splitlines()[0]",
+      "assert not resume.startswith('/goal\\n'), resume.splitlines()[0]",
+      "restart = module.restart_autoresearch_prompt('restart_1', 'archive/restarts/restart_1/restart_manifest.json', '')",
+      "assert restart.startswith('/goal Restart the CoAutoResearch autoresearch loop'), restart.splitlines()[0]",
+      "assert not restart.startswith('/goal\\n'), restart.splitlines()[0]",
       "assert module.infer_trial_status('Resource intake is no longer blocked by stale clues.', '', '# Report\\n\\nReplaced scaffold placeholders.') == 'reported'",
       "assert module.infer_trial_status('Status: blocked', '', '') == 'blocked'",
       "print('launch-prompt-ok')",
@@ -1733,7 +1762,7 @@ Confidence: medium
     "state.write_text(continue_gate, encoding='utf-8')",
     "context.session.update({'loop_active': False, 'mode': 'goal', 'loop_iteration': 100, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': 'review_checkpoint_reached', 'settings': {'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000000', 'logs': [], 'raw_logs': [], 'transcript': []})",
     "module.start_research_run = lambda *args, **kwargs: {'ok': True, 'kwargs': kwargs}",
-    "resumed = module.handle_local_slash_command('/goal resume', '/goal resume', {'reviewCheckpointInterval': 25})",
+    "resumed = module.handle_local_slash_command('/goal resume', '/goal resume', {'backend': 'codex', 'reviewCheckpointInterval': 25})",
     "assert resumed and resumed.get('local') is True, resumed",
     "assert context.session['loop_active'] is True, context.session",
     "assert context.session['loop_review_checkpoint_iteration'] == 26, context.session",
