@@ -951,6 +951,24 @@ async function testImmediateUserMessage() {
   assert.equal(app.context.__apiCalls[0].body.message, "Can you explain the project?");
 }
 
+async function testRunningOrdinaryMessageIsBlocked() {
+  const app = loadAppContext();
+  app.run('__setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] })');
+  const sent = await app.run('sendSessionComposerMessage("Can you show progress?")');
+  assert.equal(sent, false, "ordinary chat should not send while an autoresearch run is active");
+  assert.equal(app.context.__apiCalls.length, 0, "blocked ordinary running chat must not call backend");
+  assert.equal(app.context.__toastMessages.at(-1).message, "Wait for the current agent run to finish before sending another message.");
+}
+
+async function testRunningInterventionMessageIsAllowed() {
+  const app = loadAppContext();
+  app.run('__setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] })');
+  const sent = await app.run('sendSessionComposerMessage("intervention: change target venue to Nature Machine Intelligence")');
+  assert.equal(sent, true, "explicit intervention should send while an autoresearch run is active");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat");
+  assert.equal(app.context.__apiCalls[0].body.message, "intervention: change target venue to Nature Machine Intelligence");
+}
+
 async function testAttachmentOnlyMessage() {
   const app = loadAppContext();
   app.run('__setSelectedResources([{ path: "/tmp/paper.pdf", category: "literature" }])');
@@ -1155,6 +1173,32 @@ async function testRestartCancelPreservesComposer() {
   assert.equal(app.coldEditor.value, "/goal restart", "cancelled restart should preserve typed command");
 }
 
+async function testClaudeGoalControlsUseProductCommands() {
+  const app = loadAppContext();
+  const commands = app.run(`
+    __setSession({
+      id: "s-claude",
+      session_id: "00000000-0000-0000-0000-000000000cla",
+      backend: "claude",
+      settings: { backend: "claude" },
+      status: "completed",
+      mode: "goal"
+    });
+    ({ resume: sessionGoalResumeCommand(), pause: sessionGoalPauseCommand() });
+  `);
+  assert.equal(commands.resume, "/goal resume", "Claude resume must use the CoAutoResearch product command");
+  assert.equal(commands.pause, "/goal pause", "Claude pause must not be normalized to Claude Code /goal stop");
+
+  app.coldEditor.value = "/goal restart";
+  app.run("__installBlockingCollect()");
+  const pending = app.run('sendSessionComposerMessage("/goal restart")');
+  assert.equal(app.context.__restartConfirmCalls.length, 1, "Claude restart must still use product restart confirmation");
+  app.context.__resolveCollect();
+  await pending;
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/restart", "Claude /goal restart must route through CoAutoResearch restart");
+  assert.equal(app.context.__apiCalls[0].body.message, "/goal restart");
+}
+
 function testStaleOverviewDoesNotSwallowPendingUser() {
   const app = loadAppContext();
   app.run(`
@@ -1350,7 +1394,7 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
         status_label: "Codex is working on Trial 1"
       },
       transcript: [
-        { id: "tu1", role: "user", kind: "user", raw_type: "ui.goal", content: "Start autoresearch loop with /goal.", created_at: "2026-06-17T10:00:00.000Z" },
+        { id: "tu1", role: "user", kind: "user", raw_type: "ui.goal", content: "Start autoresearch loop.", created_at: "2026-06-17T10:00:00.000Z" },
         { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "codex exec resume", created_at: "2026-06-17T10:00:01.000Z" },
         { id: "ta1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking sources.", created_at: "2026-06-17T10:00:04.000Z" },
         { id: "tc2", role: "command", kind: "command", raw_type: "process.started", content: "git status --short", created_at: "2026-06-17T10:00:05.000Z" }
@@ -2842,6 +2886,8 @@ function testNavigationStatePersistsPanelAndScroll() {
 testButtonInventoryHasHandlers();
 testNavigationStatePersistsPanelAndScroll();
 await testImmediateUserMessage();
+await testRunningOrdinaryMessageIsBlocked();
+await testRunningInterventionMessageIsAllowed();
 await testAttachmentOnlyMessage();
 await testResumeFromTrialRequiresConfirmationAndSendsPayload();
 await testPrepareSubmitWithResumeContextSendsResumePayload();
@@ -2852,6 +2898,7 @@ await testSuccessfulSessionSendClearsComposerDraft();
 await testSlashCommandVisibleAndIgnoredAsUnanswered();
 await testRestartCommandRequiresConfirmationAndSendsRestartEndpoint();
 await testRestartCancelPreservesComposer();
+await testClaudeGoalControlsUseProductCommands();
 testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 await testEditTruncatesLaterConversationBeforeResend();

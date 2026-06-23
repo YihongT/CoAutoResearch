@@ -171,8 +171,6 @@ const modelOptionsByBackend = {
   ],
 };
 
-const claudeAutoresearchGoalCommand = "/goal Complete the CoAutoResearch autoresearch loop from PROJECT.md only after every required reviewer gate is a strict pass.";
-
 const backendDocLinks = {
   codex: [
     { label: "Models", href: "https://developers.openai.com/api/docs/models" },
@@ -1397,7 +1395,7 @@ function optimisticAutoresearchSession(settings) {
         id: `optimistic_goal_user_${Date.now()}`,
         role: "user",
         title: "User",
-        content: "Start autoresearch loop with /goal.",
+        content: "Start autoresearch loop.",
         raw_type: "ui.goal",
         created_at: startedAt,
         iteration,
@@ -2160,11 +2158,11 @@ function sessionBackend() {
 }
 
 function sessionGoalResumeCommand() {
-  return sessionBackend() === "claude" ? claudeAutoresearchGoalCommand : "/goal resume";
+  return "/goal resume";
 }
 
 function sessionGoalPauseCommand() {
-  return sessionBackend() === "claude" ? "/goal stop" : "/goal pause";
+  return "/goal pause";
 }
 
 function agentResumeCommand() {
@@ -2390,6 +2388,33 @@ function canSendLocalSlashControl(text) {
   if (!isLocalSlashControl(normalized)) return false;
   if (localSlashCommandRegistry[normalized]?.requiresSession) return hasLaunched() && hasSession();
   return true;
+}
+
+function isHumanInterventionCandidateText(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (/^\s*(human\s+intervention|formal\s+intervention|intervention|人类干预|正式干预|干预)\s*[:：]/i.test(value)) return true;
+  const lower = value.toLowerCase();
+  if (/[?？]\s*$/.test(value) && /\b(status|progress|log|logs|where|summarize|summary|explain|what is|what's|show me|tell me)\b|进度|状态|日志|哪里|在哪|解释|总结|是什么/i.test(value)) return false;
+  return (
+    /\b(stop using|do not use|don't use|avoid|reject|invalidate|prioritize|focus on|use this|use the attached|use attached|pivot to|switch to)\b/i.test(lower) ||
+    /\b(change|switch|set|move|pivot|revise|update)\b.{0,80}\b(target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b/i.test(lower) ||
+    /\b(target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b.{0,60}\b(to|should be|is now|must|needs to|instead)\b/i.test(lower) ||
+    /(?:改变|更改|修改|调整|换成|改成|转向|聚焦|优先).{0,40}(?:方向|计划|方法|资源|数据集|venue|期刊|目标|claim|主张|范围|约束|优先级)/.test(value) ||
+    /(?:不要|别|停止|避免).{0,40}(?:用|使用|采用|依赖|引用)/.test(value) ||
+    /(?:目标|venue|期刊|claim|主张|方法|资源|数据集|方向|计划|范围|约束|优先级).{0,40}(?:改成|换成|变成|优先|不要|别|停止|必须|需要)/.test(value)
+  );
+}
+
+function canSendInterventionDuringRun(text, attachments, resumeFromTrial) {
+  const mode = String(sessionState().mode || "").toLowerCase();
+  return (
+    isSessionRunning() &&
+    ["goal", "research", "command"].includes(mode) &&
+    !resumeFromTrial &&
+    Array.isArray(attachments) &&
+    isHumanInterventionCandidateText(text)
+  );
 }
 
 function isUiLocalTranscript(entry) {
@@ -2780,8 +2805,8 @@ function isGoalLaunchMessage(message) {
     message.kind === "goal-launch" ||
     text === "start autoresearch." ||
     text === "start autoresearch" ||
-    text === "start autoresearch with /goal." ||
-    text === "start autoresearch with /goal" ||
+    text === "start autoresearch loop." ||
+    text === "start autoresearch loop" ||
     text === "/goal"
   );
 }
@@ -4403,7 +4428,7 @@ function selectedTrial(trials = visibleTrials()) {
 function startsGoalIteration(entry) {
   const rawType = String(entry?.raw_type || "").toLowerCase();
   const content = String(entry?.content || "").toLowerCase();
-  return rawType === "ui.goal" || content.includes("start autoresearch loop with /goal") || content.includes("continue autoresearch loop");
+  return rawType === "ui.goal" || content.includes("start autoresearch loop") || content.includes("continue autoresearch loop");
 }
 
 function isCodexRuntimeEntry(entry) {
@@ -8624,6 +8649,14 @@ function filesFromApiResponse(payload) {
 
 function notifyResourceHandlingFromResponse(payload) {
   const files = filesFromApiResponse(payload);
+  const intervention = files && typeof files.intervention === "object" ? files.intervention : null;
+  if (intervention?.path) {
+    framingReplyPending = false;
+    pendingFramingUserMessageId = "";
+    framingPendingSince = 0;
+    showToast(`Human intervention recorded: ${intervention.path}`);
+    return;
+  }
   const savedFiles = Array.isArray(files.saved_files) ? files.saved_files : [];
   const links = Array.isArray(files.resource_links) ? files.resource_links : [];
   const clues = Array.isArray(files.resource_clues) ? files.resource_clues : [];
@@ -9123,15 +9156,15 @@ async function sendSessionComposerMessage(message) {
   let resumeFromTrial = selectedResumeTrialPayload();
   if (!text && !attachments.length && !resumeFromTrial) return false;
   const localControl = canSendLocalSlashControl(text);
-  if (!canSendSessionComposerMessage() && !localControl) {
+  const interventionDuringRun = canSendInterventionDuringRun(text, attachments, resumeFromTrial);
+  if (!canSendSessionComposerMessage() && !localControl && !interventionDuringRun) {
     showToast("Wait for the current agent run to finish before sending another message.", true);
     return false;
   }
   let isCommand = text.startsWith("/");
   const normalizedCommand = isCommand ? text.toLowerCase().replace(/\s+/g, " ").trim() : "";
   const commandSettings = isCommand ? settingsFromForm() : null;
-  const commandBackend = normalizeAgentBackend(commandSettings?.backend || sessionBackend());
-  const isProductRestartCommand = normalizedCommand === "/goal restart" && commandBackend !== "claude";
+  const isProductRestartCommand = normalizedCommand === "/goal restart";
   let messageText = text;
   if (resumeFromTrial && isCommand) {
     showToast("Remove the Continue from Trial chip before sending a slash command, or send a normal instruction for this fork.", true);

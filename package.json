@@ -1,7 +1,7 @@
 {
   "name": "co-auto-research",
   "version": "0.1.2",
-  "description": "Human-centered AI research scaffolding with traceable evidence and steerable progress.",
+  "description": "A self-improving, autonomous AI research partner you stay in control of — with traceable evidence and steerable progress.",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "npm@11.9.0",
@@ -44,6 +44,8 @@
   },
   "keywords": [
     "research",
+    "self-improving",
+    "autonomous",
     "human-centered",
     "codex",
     "scaffold",

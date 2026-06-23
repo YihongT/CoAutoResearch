@@ -248,6 +248,7 @@ def new_research_session() -> dict[str, Any]:
         "loop_max_iterations": AUTORESEARCH_MAX_ITERATIONS,
         "loop_review_checkpoint_iteration": 0,
         "loop_stop_reason": "",
+        "loop_instruction": "",
         "gate": {},
         "last_event_at": "",
         "last_event_summary": "",
@@ -1718,7 +1719,7 @@ def write_default_project_ui_settings(project_root: Path, backend: Any = "") -> 
 WATCHED_PATHS = [
     "PROJECT.md",
     "research_trajectory/STATE.md",
-    "research_trajectory/interventions",
+    "research_trajectory/human_interventions",
     "research_trajectory",
     "manuscript/BLUEPRINT.md",
     "manuscript/reviews",
@@ -4853,6 +4854,133 @@ def write_resume_intervention(
     return rel_path(path)
 
 
+EXPLICIT_INTERVENTION_RE = re.compile(
+    r"^\s*(?:human\s+intervention|formal\s+intervention|intervention|人类干预|正式干预|干预)\s*[:：]",
+    re.IGNORECASE,
+)
+INTERVENTION_EN_PATTERNS = [
+    re.compile(r"\b(?:stop using|do not use|don't use|avoid|reject|invalidate|prioritize|focus on|use this|use the attached|use attached|pivot to|switch to)\b", re.IGNORECASE),
+    re.compile(r"\b(?:change|switch|set|move|pivot|revise|update)\b.{0,80}\b(?:target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b", re.IGNORECASE),
+    re.compile(r"\b(?:target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b.{0,60}\b(?:to|should be|is now|must|needs to|instead)\b", re.IGNORECASE),
+]
+INTERVENTION_ZH_PATTERNS = [
+    re.compile(r"(?:改变|更改|修改|调整|换成|改成|转向|聚焦|优先).{0,40}(?:方向|计划|方法|资源|数据集|venue|期刊|目标|claim|主张|范围|约束|优先级)"),
+    re.compile(r"(?:不要|别|停止|避免).{0,40}(?:用|使用|采用|依赖|引用)"),
+    re.compile(r"(?:目标|venue|期刊|claim|主张|方法|资源|数据集|方向|计划|范围|约束|优先级).{0,40}(?:改成|换成|变成|优先|不要|别|停止|必须|需要)"),
+]
+ORDINARY_CHAT_RE = re.compile(
+    r"(?:\b(?:status|progress|log|logs|where|summarize|summary|explain|what is|what's|show me|tell me)\b|进度|状态|日志|哪里|在哪|解释|总结|是什么)",
+    re.IGNORECASE,
+)
+
+
+def has_autoresearch_context() -> bool:
+    with RESEARCH_LOCK:
+        mode = str(RESEARCH_SESSION.get("mode") or "").strip().lower()
+        loop_active = bool(RESEARCH_SESSION.get("loop_active"))
+        loop_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        session_id = str(RESEARCH_SESSION.get("session_id") or "").strip()
+    if loop_active or loop_iteration > 0 or mode in {"goal", "research", "command"}:
+        return True
+    if session_id and mode not in {"", "framing", "chat"}:
+        return True
+    trials_dir = REPO_ROOT / "research_trajectory" / "trials"
+    if trials_dir.is_dir() and any(child.is_dir() for child in trials_dir.iterdir()):
+        return True
+    state_text = safe_read(RESEARCH_STATE_PATH) if RESEARCH_STATE_PATH.exists() else ""
+    if "Autoresearch Goal Gate" in state_text:
+        return True
+    return False
+
+
+def is_human_intervention_candidate(message: str, attachments: dict[str, Any] | None = None) -> bool:
+    text = str(message or "").strip()
+    if not has_autoresearch_context():
+        return False
+    if EXPLICIT_INTERVENTION_RE.search(text):
+        return True
+    if not text:
+        return False
+    lowered = text.lower()
+    if text.endswith(("?", "？")) and ORDINARY_CHAT_RE.search(text):
+        return False
+    if any(pattern.search(lowered) for pattern in INTERVENTION_EN_PATTERNS):
+        return True
+    if any(pattern.search(text) for pattern in INTERVENTION_ZH_PATTERNS):
+        return True
+    return False
+
+
+def write_chat_intervention(
+    original_message: str,
+    prepared_message: str,
+    attachments: dict[str, Any],
+    settings: dict[str, Any],
+) -> str:
+    root = REPO_ROOT / "research_trajectory" / "human_interventions"
+    root.mkdir(parents=True, exist_ok=True)
+    intervention_number = next_intervention_id()
+    path = root / f"I{intervention_number:04d}_ui_intervention.md"
+    backend = normalize_agent_backend(settings.get("backend"))
+    with RESEARCH_LOCK:
+        session_id = str(RESEARCH_SESSION.get("session_id") or "").strip()
+        run_id = str(RESEARCH_SESSION.get("id") or "").strip()
+        mode = str(RESEARCH_SESSION.get("mode") or "").strip()
+    uploaded = attachments.get("saved_files", []) if isinstance(attachments, dict) else []
+    linked = attachments.get("resource_links", []) if isinstance(attachments, dict) else []
+    clues = attachments.get("resource_clues", []) if isinstance(attachments, dict) else []
+    metadata = attachments.get("metadata_files", []) if isinstance(attachments, dict) else []
+    lines = [
+        f"# I{intervention_number:04d} UI Human Intervention",
+        "",
+        f"Created: {now_iso()}",
+        "Source: UI chat",
+        f"Backend: `{backend}`",
+        f"Session id: `{session_id or 'none'}`",
+        f"Run id: `{run_id or 'none'}`",
+        f"Run mode: `{mode or 'idle'}`",
+        "",
+        "## User Instruction",
+        "",
+        original_message.strip() or "(No text; attached resources were submitted with this intervention.)",
+        "",
+        "## Attached Context",
+        "",
+    ]
+    if not uploaded and not linked and not clues and not metadata:
+        lines.append("- No additional files or resources were attached with this intervention.")
+    for item in uploaded:
+        lines.append(f"- Uploaded file: `{item}`")
+    for item in linked:
+        if isinstance(item, dict):
+            lines.append(f"- {item.get('mode', 'linked')} {item.get('category', 'resource')}: `{item.get('path', '')}`")
+    for item in clues:
+        if isinstance(item, dict):
+            lines.append(f"- Resource clue: `{item.get('reference', '')}` ({item.get('status', '')})")
+    for item in metadata:
+        lines.append(f"- Metadata file: `{item}`")
+    if prepared_message.strip() and prepared_message.strip() != original_message.strip():
+        lines.extend(["", "## Prepared Agent Context", "", prepared_message.strip()])
+    lines.extend(
+        [
+            "",
+            "## Effective Consequence",
+            "",
+            "- Treat this as the latest formal human intervention.",
+            "- Apply it before the next autoresearch step or trial.",
+            "- Update canonical research state and manuscript-facing artifacts only as required by `instructions/INTERVENTION_PROTOCOL.md`.",
+        ]
+    )
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+    index_path = root / "INDEX.md"
+    existing = safe_read(index_path) if index_path.exists() else "# Human Interventions\n"
+    entry = f"- `I{intervention_number:04d}` UI intervention: `{rel_path(path)}`"
+    if entry not in existing:
+        index_path.write_text(existing.rstrip() + "\n" + entry + "\n", encoding="utf-8")
+    return rel_path(path)
+
+
 def write_resume_fork_manifest(
     fork_root: Path,
     fork_id: str,
@@ -5094,8 +5222,8 @@ def collect_reviews() -> list[dict[str, Any]]:
 
 
 def collect_interventions() -> dict[str, Any]:
-    pending_dir = REPO_ROOT / "research_trajectory/interventions/pending"
-    formal_dir = REPO_ROOT / "research_trajectory/interventions"
+    pending_dir = REPO_ROOT / "research_trajectory/human_interventions/pending"
+    formal_dir = REPO_ROOT / "research_trajectory/human_interventions"
     pending = []
     formal = []
     if pending_dir.exists():
@@ -5109,7 +5237,7 @@ def collect_interventions() -> dict[str, Any]:
             }
             for path in sorted(formal_dir.glob("I[0-9]*.md"))
         ]
-    index = read_text_file("research_trajectory/interventions/INDEX.md")
+    index = read_text_file("research_trajectory/human_interventions/INDEX.md")
     return {"pending": pending, "formal": formal, "index": index}
 
 
@@ -7781,14 +7909,32 @@ Fast mode is enabled for this autoresearch loop:
 - do not lower reviewer standards, skip required reviewer files, omit provenance, or mark partial work as pass."""
 
 
-def continue_autoresearch_loop_prompt(gate: dict[str, Any], next_iteration: int | None = None, fast_mode: bool = False) -> str:
+def goal_instruction_prompt_section(instruction: str = "") -> str:
+    text = str(instruction or "").strip()
+    if not text:
+        return ""
+    return f"""
+
+Additional CoAutoResearch goal instruction from the user:
+{text}
+
+Apply this instruction when choosing and executing the next trial objective, but do not let it weaken reviewer standards, provenance requirements, or final-pass requirements."""
+
+
+def continue_autoresearch_loop_prompt(
+    gate: dict[str, Any],
+    next_iteration: int | None = None,
+    fast_mode: bool = False,
+    goal_instruction: str = "",
+) -> str:
     status = gate.get("raw_status") or gate.get("status") or "missing"
     summary = gate.get("summary") or "No reviewer gate summary yet."
     expected = int(next_iteration or next_active_trial_iteration())
-    return f"""/goal resume
+    return f"""Continue the CoAutoResearch autoresearch process from the current closed trajectory boundary. Complete exactly the next coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
 
-Continue the autoresearch loop from the current closed trajectory boundary.
+This is one bounded agent invocation. The CoAutoResearch server owns the outer loop and will inspect the gate after this run to decide whether another trial is needed.
 {fast_mode_prompt_section(fast_mode)}
+{goal_instruction_prompt_section(goal_instruction)}
 
 Current autoresearch gate status: {status}
 
@@ -7820,7 +7966,31 @@ Otherwise, run exactly the next coherent autoresearch iteration needed to move t
 7. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
 8. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end, with each reviewer line pointing to the current trial's reviewer file path.
 
-Do not stop merely because one trial completed, a plan was approved, a manuscript architecture is coherent, a venue fit is plausible, or evidence is supported with qualification. Stop only when all seven current-trial reviewer files have `Decision: pass` and `Gate impact: pass` with no blocking issues, required actions, unresolved qualifications, active revision constraints, or critical unassessed areas."""
+This invocation is complete after the Trial {expected} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start Trial {expected + 1} in this invocation.
+
+Required reviewer gates must all be strict `pass` before the overall autoresearch goal is complete. Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results unless the relevant reviewer standard and Final gate standard are fully satisfied."""
+
+
+def intervention_goal_prompt(intervention_path: str, message: str, fast_mode: bool = False) -> str:
+    return f"""Apply the latest formal human intervention, then complete exactly the next coherent CoAutoResearch trial boundary. Update the autoresearch gate, then stop and return control to the UI.
+
+A formal human intervention was recorded from UI chat.
+{fast_mode_prompt_section(fast_mode)}
+
+Intervention file:
+- `{intervention_path}`
+
+Original user instruction:
+{message.strip() or "(No text; attached resources were submitted with this intervention.)"}
+
+Before creating or continuing any trial:
+1. read AGENTS.md;
+2. read instructions/INTERVENTION_PROTOCOL.md;
+3. read the latest formal human intervention file above;
+4. apply the intervention to canonical project state;
+5. update research_trajectory/STATE.md, research_trajectory/CURRENT_FINDINGS.md, and manuscript-facing artifacts only where the intervention requires it.
+
+Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md, REPORT.md, all seven reviewer files, and the updated `Autoresearch Goal Gate` section. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
 
 
 def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
@@ -7829,6 +7999,7 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         mode = str(RESEARCH_SESSION.get("mode") or "")
         settings = dict(RESEARCH_SESSION.get("settings") or {})
         iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        goal_instruction = str(RESEARCH_SESSION.get("loop_instruction") or "")
     if not loop_active or mode not in {"goal", "command"}:
         return
     gate = read_autoresearch_gate()
@@ -7873,7 +8044,7 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
     next_iteration = next_active_trial_iteration()
     resume_same_session = should_resume_research_session()
     start_research_run(
-        continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode"))),
+        continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode")), goal_instruction),
         "goal",
         resume=resume_same_session,
         settings_payload=settings,
@@ -7900,7 +8071,7 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
         restored_paths = restore_chat_protected_snapshot(protected_snapshot if isinstance(protected_snapshot, dict) else None)
         if restored_paths:
             append_research_log(
-                "Chat mode guard restored protected autoresearch artifacts; use Start autoresearch or `/goal` to create trials: "
+                "Chat mode guard restored protected autoresearch artifacts; use the Start/Resume autoresearch controls to create trials: "
                 + ", ".join(restored_paths)
             )
         with RESEARCH_LOCK:
@@ -8152,11 +8323,11 @@ Additional user instruction for this launch:
 {instruction}
 
 Apply this launch instruction when choosing and executing the next research objective, but do not let it weaken the reviewer gate, provenance, or final-pass requirements below."""
-    return f"""/goal Complete the CoAutoResearch autoresearch loop from PROJECT.md only after every required reviewer gate is a strict pass.
-
-Start the autoresearch loop from the current PROJECT.md as the goal.
+    return f"""Start the CoAutoResearch autoresearch process from PROJECT.md. Complete exactly the next coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
 
 This is after the user-facing framing pass. Do not rerun cold-start framing just to rewrite PROJECT.md.
+
+This is one bounded agent invocation. The CoAutoResearch server owns the outer loop and will inspect the gate after this run to decide whether another trial is needed.
 {instruction_section}
 {fast_mode_prompt_section(fast_mode)}
 
@@ -8172,7 +8343,7 @@ Use the repository instructions:
 - read instructions/reviewers/FINAL_GATE_REVIEWER.md
 - create or update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
 
-This is not complete after one trial. Run the next autoresearch iteration and maintain the reviewer gate:
+Run exactly the next autoresearch iteration and maintain the reviewer gate:
 1. choose one coherent next research objective;
 2. create the next trial under research_trajectory/trials/;
 3. write PLAN.md before execution;
@@ -8186,6 +8357,8 @@ This is not complete after one trial. Run the next autoresearch iteration and ma
    - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Final gate;
    - the current trial reviewer file path on each reviewer gate line;
    - the next action if any gate is not pass.
+
+This invocation is complete after the current trial boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation.
 
 Required reviewer gates must all be strict `pass` before the autoresearch goal is complete, including the Final gate reviewer. If any current-trial reviewer file is missing, not pass, or has any blocking issue, required action, unresolved qualification, active revision constraint, or critical unassessed area, set `Status: continue` unless human input is truly required.
 
@@ -8222,7 +8395,7 @@ Hard boundary:
 - Do not create, edit, delete, rename, or summarize as newly completed anything under `research_trajectory/trials/`.
 - Do not update `research_trajectory/STATE.md`, `research_trajectory/CURRENT_FINDINGS.md`, `research_trajectory/TRAJECTORY.json`, `research_trajectory/NEXT_TRIAL.json`, or `research_trajectory/checkpoints/`.
 - Do not create reviewer files, trial reports, manuscript gate files, or mark any trial/gate/reviewer as pass, completed, or current.
-- Do not run the autoresearch loop from this chat path. If the user asks to continue research, start autoresearch, run trials, overqualify the work, or otherwise perform the loop, tell them to use the Start autoresearch button or an explicit `/goal` command, and do not modify protected autoresearch artifacts.
+- Do not run the autoresearch loop from this chat path. If the user asks to continue research, start autoresearch, run trials, overqualify the work, or otherwise perform the loop, tell them to use the Start/Resume autoresearch controls, and do not modify protected autoresearch artifacts.
 
 Allowed behavior:
 - Answer questions from current project files.
@@ -8267,7 +8440,7 @@ This selected trial did not have a saved checkpoint. Treat this as a best-effort
 - verify STATE.md, CURRENT_FINDINGS.md, manuscript files, and resources before relying on them;
 - if the restored state is inconsistent, repair the project state before creating substantive new claims.
 """
-    return f"""/goal Resume the CoAutoResearch autoresearch loop from the selected trial boundary until every required reviewer gate is a strict pass.
+    return f"""Resume the CoAutoResearch autoresearch process from the selected trial boundary. Complete exactly the next coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
 
 The user confirmed a human-directed fork of the autoresearch trajectory.
 
@@ -8302,7 +8475,9 @@ Read:
 - all seven core reviewer instructions under instructions/reviewers/
 - instructions/reviewers/FINAL_GATE_REVIEWER.md
 
-Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do. Write all seven reviewer files under the current trial `reviews/` directory, update the autoresearch gate with those paths, and stop only when the strict reviewer gate standard is met or human input is required."""
+Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do.
+
+Write PLAN.md, REPORT.md, all seven reviewer files under the current trial `reviews/` directory, and update the autoresearch gate with those paths. This invocation is complete after the Trial {next_iteration} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: dict[str, Any]) -> dict[str, Any]:
@@ -8365,6 +8540,7 @@ def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: 
         RESEARCH_SESSION["loop_iteration"] = base_iteration
         RESEARCH_SESSION["loop_active"] = True
         RESEARCH_SESSION["loop_stop_reason"] = ""
+        RESEARCH_SESSION["loop_instruction"] = ""
         RESEARCH_SESSION["settings"] = settings
         RESEARCH_SESSION["loop_max_iterations"] = review_checkpoint_interval
         RESEARCH_SESSION["loop_review_checkpoint_iteration"] = base_iteration + review_checkpoint_interval
@@ -8531,7 +8707,7 @@ def write_restart_manifest(
 
 
 def restart_autoresearch_prompt(restart_id: str, manifest_path: str, reason: str) -> str:
-    return f"""/goal Restart the CoAutoResearch autoresearch loop from a clean active trajectory until every required reviewer gate is a strict pass.
+    return f"""Restart the CoAutoResearch autoresearch process from a clean active trajectory. Complete exactly the first coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
 
 The user confirmed a full autoresearch restart.
 
@@ -8557,7 +8733,7 @@ Read:
 - instructions/reviewers/REVIEW_TAXONOMY.md
 - all seven core reviewer instructions under instructions/reviewers/
 
-Write all seven reviewer files under each new active trial `reviews/` directory. Stop only when the strict autoresearch final gate passes, or when human input is required."""
+Create Trial 1 under `research_trajectory/trials/`. Write PLAN.md, REPORT.md, all seven reviewer files under the current trial `reviews/` directory, and update the autoresearch gate with those paths. This invocation is complete after the Trial 1 boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
@@ -8714,6 +8890,7 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
         RESEARCH_SESSION["loop_max_iterations"] = AUTORESEARCH_MAX_ITERATIONS
         RESEARCH_SESSION["loop_review_checkpoint_iteration"] = 0
         RESEARCH_SESSION["loop_stop_reason"] = ""
+        RESEARCH_SESSION["loop_instruction"] = ""
     ensure_autoresearch_gate_for_loop()
     settings = normalize_research_settings(payload.get("settings"))
     session = start_research_run(
@@ -8721,7 +8898,7 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
         "goal",
         resume=resume,
         settings_payload=settings,
-        display_prompt="Start autoresearch loop with /goal.",
+        display_prompt="Start autoresearch loop.",
         loop_active=True,
         reset_review_checkpoint=True,
     )
@@ -8790,6 +8967,8 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
     message, attachments = attach_message_resources(payload, message)
     if not display_message and any(attachments.get(key) for key in ("saved_files", "resource_links", "resource_clues", "metadata_files")):
         display_message = "Attached resources."
+    if is_human_intervention_candidate(display_message or message, attachments):
+        return start_chat_intervention(payload, display_message, message, attachments)
     return {
         "files": attachments,
         "session": start_research_run(
@@ -8799,6 +8978,64 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
             settings_payload=payload.get("settings"),
             display_prompt=display_message,
         ),
+    }
+
+
+def start_chat_intervention(
+    payload: dict[str, Any],
+    display_message: str,
+    prepared_message: str,
+    attachments: dict[str, Any],
+) -> dict[str, Any]:
+    settings = normalize_research_settings(payload.get("settings"))
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        running = bool(proc and proc.poll() is None)
+        mode = str(RESEARCH_SESSION.get("mode") or "")
+        if running and mode not in {"goal", "research", "command"}:
+            raise ValueError("Wait for the current framing/chat run to finish before recording a research intervention.")
+    intervention_path = write_chat_intervention(display_message, prepared_message, attachments, settings)
+    with RESEARCH_LOCK:
+        if running:
+            RESEARCH_SESSION["loop_active"] = True
+            RESEARCH_SESSION["loop_stop_reason"] = ""
+            RESEARCH_SESSION["settings"] = settings
+    if running:
+        display = display_message or "Human intervention."
+        append_transcript("user", "user", "User", display, "ui.chat", True)
+        append_transcript(
+            "assistant",
+            "assistant",
+            "CoAutoResearch",
+            f"Human intervention recorded: `{intervention_path}`. It will be applied before the next autoresearch step.",
+            "item.completed",
+            False,
+        )
+        append_research_log(f"Human intervention recorded: {intervention_path}")
+        persist_research_session()
+        return {
+            "files": {
+                **attachments,
+                "intervention": {"path": intervention_path, "status": "recorded", "running": True},
+            },
+            "session": research_session_snapshot(),
+        }
+    ensure_autoresearch_gate_for_loop()
+    session = start_research_run(
+        intervention_goal_prompt(intervention_path, prepared_message or display_message, bool(settings.get("fastMode"))),
+        "goal",
+        resume=should_resume_research_session(),
+        settings_payload=settings,
+        display_prompt=display_message or "Human intervention.",
+        loop_active=True,
+        reset_review_checkpoint=True,
+    )
+    return {
+        "files": {
+            **attachments,
+            "intervention": {"path": intervention_path, "status": "started", "running": False},
+        },
+        "session": session,
     }
 
 
@@ -9024,33 +9261,58 @@ def local_diff_message() -> str:
     return "\n".join(part for part in [status_text, diff_text] if part).strip()
 
 
-CLAUDE_GOAL_CLEAR_TERMS = {"clear", "stop", "off", "reset", "none", "cancel"}
-
-
-def command_backend_from_settings(settings_payload: Any | None) -> str:
-    if settings_payload is None:
-        return normalize_agent_backend(
-            RESEARCH_SESSION.get("backend")
-            or (RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}).get("backend")
-            or load_ui_settings().get("agent", {}).get("backend")
+def start_custom_goal_instruction(command: str, goal_instruction: str, settings_payload: Any | None) -> dict[str, Any]:
+    instruction = str(goal_instruction or "").strip()
+    if not instruction:
+        return append_local_command_result(command, "No CoAutoResearch goal instruction was provided.")
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        running = bool(proc and proc.poll() is None)
+    cleanup = {"archived": []}
+    if not running:
+        cleanup = archive_interrupted_trial_tail("goal_instruction_from_closed_boundary")
+    ensure_autoresearch_gate_for_loop()
+    gate = read_autoresearch_gate()
+    settings = normalize_research_settings(settings_payload)
+    review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+    with RESEARCH_LOCK:
+        live_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+    current_iteration = live_iteration if running and live_iteration > 0 else latest_active_trial_iteration()
+    next_iteration = next_active_trial_iteration()
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["loop_active"] = True
+        RESEARCH_SESSION["loop_stop_reason"] = ""
+        RESEARCH_SESSION["loop_instruction"] = instruction
+        RESEARCH_SESSION["settings"] = settings
+        RESEARCH_SESSION["loop_max_iterations"] = review_checkpoint_interval
+        RESEARCH_SESSION["loop_review_checkpoint_iteration"] = current_iteration + review_checkpoint_interval
+    persist_research_session()
+    if running:
+        return append_local_command_result(
+            command,
+            "Recorded the CoAutoResearch goal instruction. The current run is still active; the next loop iteration will apply it.",
         )
-    return normalize_agent_backend(normalize_research_settings(settings_payload).get("backend"))
-
-
-def is_claude_goal_command(normalized: str) -> bool:
-    return normalized == "/goal" or normalized.startswith("/goal ")
-
-
-def claude_goal_loop_active(normalized: str) -> bool | None:
-    if not is_claude_goal_command(normalized):
-        return None
-    argument = normalized[len("/goal"):].strip()
-    if not argument:
-        return None
-    first = argument.split(" ", 1)[0]
-    if first in CLAUDE_GOAL_CLEAR_TERMS:
-        return False
-    return True
+    archived = cleanup.get("archived") or []
+    if archived:
+        append_local_command_result(
+            command,
+            "Archived interrupted trial tail before starting from the last closed trial: "
+            + ", ".join(item["from"] for item in archived),
+        )
+    resume_same_session = should_resume_research_session()
+    return {
+        "local": True,
+        "session": start_research_run(
+            continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode")), instruction),
+            "goal",
+            resume=resume_same_session,
+            settings_payload=settings,
+            display_prompt=command,
+            loop_active=True,
+            reset_review_checkpoint=True,
+            loop_iteration_override=next_iteration,
+        ),
+    }
 
 
 def handle_local_slash_command(command: str, normalized: str, settings_payload: Any | None) -> dict[str, Any] | None:
@@ -9060,8 +9322,6 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         return append_local_command_result(command, local_ps_message())
     if normalized == "/diff":
         return append_local_command_result(command, local_diff_message())
-    if command_backend_from_settings(settings_payload) == "claude" and is_claude_goal_command(normalized):
-        return None
     if normalized == "/goal":
         gate = read_autoresearch_gate()
         return append_local_command_result(
@@ -9097,6 +9357,17 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
             RESEARCH_SESSION["loop_active"] = False
             RESEARCH_SESSION["loop_iteration"] = 0
             RESEARCH_SESSION["loop_stop_reason"] = "cleared_by_user"
+            RESEARCH_SESSION["loop_instruction"] = ""
+        persist_research_session()
+        return append_local_command_result(
+            command,
+            "Cleared the UI goal loop state. The project files and STATE.md gate were not deleted.",
+        )
+    if normalized in {"/goal stop", "/goal off", "/goal reset", "/goal none", "/goal cancel"}:
+        with RESEARCH_LOCK:
+            RESEARCH_SESSION["loop_active"] = False
+            RESEARCH_SESSION["loop_stop_reason"] = "cleared_by_user"
+            RESEARCH_SESSION["loop_instruction"] = ""
         persist_research_session()
         return append_local_command_result(
             command,
@@ -9126,6 +9397,7 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
         with RESEARCH_LOCK:
             live_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+            goal_instruction = str(RESEARCH_SESSION.get("loop_instruction") or "")
         current_iteration = live_iteration if running and live_iteration > 0 else latest_active_trial_iteration()
         next_iteration = next_active_trial_iteration()
         with RESEARCH_LOCK:
@@ -9148,7 +9420,7 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
         return {
             "local": True,
             "session": start_research_run(
-                continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode"))),
+                continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode")), goal_instruction),
                 "goal",
                 resume=resume_same_session,
                 settings_payload=settings,
@@ -9158,6 +9430,9 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
                 loop_iteration_override=next_iteration,
             ),
         }
+    if normalized.startswith("/goal "):
+        goal_instruction = re.sub(r"^/goal\b", "", command, flags=re.IGNORECASE).strip()
+        return start_custom_goal_instruction(command, goal_instruction, settings_payload)
     return None
 
 
@@ -9169,24 +9444,10 @@ def start_research_command(payload: dict[str, Any]) -> dict[str, Any]:
         command = f"/{command}"
     normalized = re.sub(r"\s+", " ", command.lower()).strip()
     settings_payload = payload.get("settings")
-    backend = command_backend_from_settings(settings_payload)
-    if backend == "claude" and normalized == "/goal pause":
-        command = "/goal stop"
-        normalized = "/goal stop"
     local = handle_local_slash_command(command, normalized, settings_payload)
     if local is not None:
         return local
-    loop_active: bool | None = None
-    if backend == "claude":
-        loop_active = claude_goal_loop_active(normalized)
-    elif normalized in {"/goal pause", "/goal clear"}:
-        loop_active = False
-    elif normalized == "/goal resume":
-        loop_active = True
-    resume = True
-    if backend == "claude" and is_claude_goal_command(normalized):
-        resume = should_resume_research_session()
-    return {"session": start_research_run(command, "command", resume=resume, settings_payload=settings_payload, loop_active=loop_active)}
+    return {"session": start_research_run(command, "command", resume=True, settings_payload=settings_payload)}
 
 
 def stop_research_session() -> dict[str, Any]:

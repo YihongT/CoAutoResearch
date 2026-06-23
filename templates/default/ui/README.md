@@ -66,7 +66,7 @@ No npm or pip install is required.
 - Chat: enabled only after a session exists, and sends follow-up instructions through Codex `exec resume` or Claude Code `--resume`.
 - Continue: resumes the current session and asks it to continue the research loop without an extra user instruction.
 - Session controls: passes provider-specific model, reasoning effort, permissions, live web search, and advanced Codex `-c key=value` overrides where applicable.
-- Slash commands: sends commands such as `/goal`, `/ps`, `/status`, `/permissions`, `/model`, `/plan`, and `/diff` to the current session.
+- Slash commands: handles CoAutoResearch controls such as `/goal`, `/goal pause`, `/goal resume`, `/ps`, `/status`, and `/diff` locally; other provider/tool commands can still be sent to the current session.
 - Left sidebar: switches the main area between Agents, Resources, Trials, Reviews, and Manuscript.
 - Project switcher: in multi-project mode, the left sidebar switches between
   independent generated projects. Each project has its own files, UI runtime
@@ -93,6 +93,6 @@ The UI writes only when the user submits a form:
 - Source preview save: supported text files inside the repository.
 - Target venue text: `resources/target_venue/TARGET_VENUE.md`.
 - Local resources: files or folders selected in the UI are attached into `resources/ongoing_work/`, `resources/literature/`, `resources/proposals/`, or `resources/data_sources/` based on the selected type; the backend creates symlinks when possible and falls back to copy only when symlink creation fails.
-- Agent runs: whatever repository files the active Codex or Claude Code session edits after the user launches autoresearch, continues, chats, or sends slash commands.
+- Agent runs: whatever repository files the active Codex or Claude Code session edits after the user launches autoresearch, continues, chats, or sends provider/tool commands.
 
 Do not put real secrets into uploaded files or markdown resources.

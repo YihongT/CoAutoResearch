@@ -4,10 +4,11 @@
 
 # CoAutoResearch
 
-**An AI research partner you stay in control of.**
+**A self-improving autonomous research partner you stay in control of.**
 
-An open-source research agent that does the work *with* you — running trials,
-drafting your manuscript, and tracking every claim — while you stay able to
+An open-source research agent that works *with* you and sharpens its own work
+trial by trial — planning the next step, running it, reviewing it against
+reviewer gates, and revising until it holds up — while you stay able to
 understand, steer, and defend the project at every step.
 
 [![npm](https://img.shields.io/npm/v/co-auto-research)](https://www.npmjs.com/package/co-auto-research)
@@ -115,7 +116,7 @@ If you use CoAutoResearch in your research, please cite it:
 
 ```bibtex
 @software{coautoresearch2026,
-  title        = {CoAutoResearch: An AI research partner you stay in control of},
+  title        = {CoAutoResearch: A self-improving autonomous research partner you stay in control of},
   author       = {Tang, Yihong},
   year         = {2026},
   howpublished = {\url{https://github.com/YihongT/CoAutoResearch}}
