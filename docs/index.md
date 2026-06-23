@@ -44,6 +44,7 @@ npm install -g co-auto-research@latest
 :maxdepth: 2
 
 getting-started
+best-practices
 cli
 ```
 
