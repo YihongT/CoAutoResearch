@@ -39,6 +39,7 @@ const REQUIRED_REVIEWER_OUTPUTS = {
   venue_fit: { label: "Venue fit reviewer", file: "VENUE_FIT_REVIEW.md", scope: "venue", instruction: "instructions/reviewers/VENUE_FIT_REVIEWER.md" },
   manuscript: { label: "Manuscript reviewer", file: "MANUSCRIPT_REVIEW.md", scope: "manuscript", instruction: "instructions/reviewers/MANUSCRIPT_REVIEWER.md" },
   figure_table: { label: "Figure/table reviewer", file: "FIGURE_TABLE_REVIEW.md", scope: "figure-table", instruction: "instructions/reviewers/FIGURE_TABLE_REVIEWER.md" },
+  reference: { label: "Reference reviewer", file: "REFERENCE_REVIEW.md", scope: "reference", instruction: "instructions/reviewers/REFERENCE_REVIEWER.md" },
   final_gate: { label: "Final gate reviewer", file: "FINAL_GATE_REVIEW.md", scope: "final-gate", instruction: "instructions/reviewers/FINAL_GATE_REVIEWER.md" }
 };
 
@@ -186,6 +187,7 @@ function reviewerKeyForLabel(label) {
   if (clean.startsWith("venue")) return "venue_fit";
   if (clean.startsWith("manuscript")) return "manuscript";
   if (clean.startsWith("figure") || clean.startsWith("table") || clean.includes("figure/table")) return "figure_table";
+  if (clean.startsWith("reference")) return "reference";
   if (clean.startsWith("final")) return "final_gate";
   return "";
 }

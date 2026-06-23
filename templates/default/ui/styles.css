@@ -285,6 +285,12 @@ h3 {
   display: block;
 }
 
+.material-view.is-active {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .chat-frame {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -2260,8 +2266,9 @@ textarea:focus {
   position: sticky;
   top: 10px;
   z-index: 30;
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 14px;
   align-items: start;
   padding: 12px 14px;
@@ -2278,6 +2285,7 @@ textarea:focus {
   display: grid;
   gap: 2px;
   min-width: 0;
+  flex: 1 1 240px;
 }
 
 .manuscript-export-copy strong {
@@ -2295,6 +2303,7 @@ textarea:focus {
 .manuscript-export-bar .export-panel {
   justify-items: end;
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .manuscript-export-bar .export-actions {
@@ -10622,7 +10631,7 @@ body.is-resizing-file-viewer .file-viewer-body {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: rgba(245, 239, 227, 0.56);
+  color: color-mix(in srgb, var(--rail-ink) 58%, transparent);
 }
 
 .project-menu-button:hover,
@@ -14221,4 +14230,66 @@ html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--ink);
+}
+
+/* Final shell centering guard: the rail is fixed, so the main stage owns the
+   viewport space to its right and material pages center within that workspace. */
+html[data-theme] .app-shell {
+  display: block;
+}
+
+html[data-theme] .main-stage {
+  margin-left: var(--rail-width);
+  width: calc(100vw - var(--rail-width));
+  max-width: calc(100vw - var(--rail-width));
+}
+
+html[data-theme] .material-view.is-active {
+  align-items: center;
+}
+
+html[data-theme] :is(.material-header, .context-content) {
+  align-self: center;
+  margin-inline: auto;
+}
+
+html[data-theme] .context-content > * {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+html[data-theme] .launch-dialog-shell {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+html[data-theme] .launch-settings-form {
+  min-height: 0;
+  max-height: none;
+}
+
+@media (max-width: 760px) {
+  html[data-theme] .brief-editor-shell.is-framing-dock {
+    max-height: min(58vh, 360px) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  html[data-theme] .brief-editor-shell.is-framing-dock #cold-file-editor {
+    max-height: 112px !important;
+  }
+
+  html[data-theme] .brief-editor-shell.is-framing-dock .composer-suggestion-row {
+    max-height: 132px;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 820px) {
+  html[data-theme] .main-stage {
+    margin-left: 0;
+    width: 100%;
+    max-width: 100%;
+  }
 }

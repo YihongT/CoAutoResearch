@@ -39,6 +39,7 @@
     "verify": "node scripts/verify-template.js",
     "smoke": "node scripts/smoke-test.js",
     "visual:themes": "node scripts/visual-theme-check.js",
+    "audit:ui": "node scripts/ui-audit-check.js",
     "pack:dry-run": "npm pack --dry-run"
   },
   "keywords": [

@@ -2,13 +2,14 @@
 
 ## Supported Versions
 
-Security reports should target the latest released version. The first planned
-package version is `0.1.0`.
+Security fixes target the latest version published on npm. Please upgrade to the
+latest release before reporting.
 
 ## Reporting a Vulnerability
 
-Please report security issues privately through GitHub security advisories once
-the repository is published, or email <yihong.tang.edu@gmail.com>. Do not open a
+Please report security issues privately through GitHub security advisories
+(**Security → Report a vulnerability** on the repository), or email
+<yihong.tang.edu@gmail.com>. Do not open a
 public issue for secrets exposure, arbitrary command execution, path traversal,
 or UI access-control problems.
 

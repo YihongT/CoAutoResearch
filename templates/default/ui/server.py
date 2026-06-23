@@ -399,6 +399,8 @@ def reviewer_key_for_label(label: str) -> str:
         return "manuscript"
     if clean.startswith("figure") or clean.startswith("table") or "figure/table" in clean:
         return "figure_table"
+    if clean.startswith("reference"):
+        return "reference"
     if clean.startswith("final"):
         return "final_gate"
     return ""
@@ -665,7 +667,7 @@ def normalize_state_gate_references(project_root: Path, latest_trial: Path | Non
         return desired
 
     updated = re.sub(
-        r"^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure/table reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$",
+        r"^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure/table reviewer|Reference reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$",
         replace_line,
         text,
         flags=re.MULTILINE,

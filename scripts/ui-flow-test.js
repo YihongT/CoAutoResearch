@@ -271,6 +271,9 @@ function loadAppContext() {
     document: {
       body: element(),
       documentElement: { scrollHeight: 0, clientHeight: 0, dataset: {} },
+      getElementById(id) {
+        return elements.get(`#${id}`) || null;
+      },
       querySelector(selector) {
         return elements.get(selector) || null;
       },
@@ -876,6 +879,7 @@ function handledButtonDataAttrs(appJs) {
   const attrs = new Set();
   for (const match of appJs.matchAll(/closest\("\[data-([a-z0-9-]+)(?:[=\]"])/gi)) attrs.add(match[1]);
   for (const match of appJs.matchAll(/\$\$\("\[data-([a-z0-9-]+)(?:[=\]"])/gi)) attrs.add(match[1]);
+  for (const match of appJs.matchAll(/querySelector(?:All)?\("[^"]*\[data-([a-z0-9-]+)(?:[=\]"])/gi)) attrs.add(match[1]);
   return attrs;
 }
 
@@ -2412,13 +2416,13 @@ function testBlueprintInspectorRendersSidebarForLatestManuscriptOnly() {
       level: 2,
       is_artifact: false,
       path: "Abstract",
-      body: "Target-venue role: Summarize the argument.\nSection brief: The abstract states the finished argument and evidence posture without drafting final prose.\nLocal thesis / purpose: Calibration is the paper's central result.\nLocal claims in plain language: The paper advances one bounded claim.\nLocal evidence, results, or artifacts: E1 supports the claim.\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|\n| A1 | State contribution | Summarize the result. | E1 | none | no citations | none | open paper |"
+      body: "Target-venue role: Summarize the argument.\nSection brief: The abstract states the finished argument and evidence posture without drafting final prose.\nLocal thesis / purpose: Calibration is the paper's central result.\nLocal claims in plain language: The paper advances one bounded claim.\nEvidence: E1 supports the claim.\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|\n| A1 | State contribution | Summarize the result. | E1 | none | no citations | none | open paper |"
     }, {
       title: "Section 2: Calibration result",
       level: 2,
       is_artifact: false,
       path: "Section 2",
-      body: "Target-venue role: Results-like argument.\nSection brief: This section explains the calibration result, ties it to reviewed evidence, and places the figure and table where readers need them.\nReader question answered: What result should the reader take away?\nLocal thesis / purpose: Calibration changes the observed outcome in the accepted evidence.\nLocal claims in plain language: The local claim is understandable without opening an ID map.\nLocal evidence, results, or artifacts: Evidence E1 supports the local result.\nPlaced displays / methods / results: Figure F000001 and Table T000001.\nTransition job: sets up interpretation."
+      body: "Target-venue role: Results-like argument.\nSection brief: This section explains the calibration result, ties it to reviewed evidence, and places the figure and table where readers need them.\nReader question answered: What result should the reader take away?\nLocal thesis / purpose: Calibration changes the observed outcome in the accepted evidence.\nLocal claims in plain language: The local claim is understandable without opening an ID map.\nEvidence: Evidence E1 supports the local result.\nPlaced displays / methods / results: Figure F000001 and Table T000001.\nTransition job: sets up interpretation."
     }],
     inline_artifacts: [{
       title: "Figure F000001: Calibration Map",
@@ -2508,7 +2512,7 @@ function testBlueprintInspectorRendersSidebarForLatestManuscriptOnly() {
   assert.equal(html.includes("Finished-results blueprint"), true);
   assert.equal(html.includes("Main takeaway"), true);
   assert.equal(html.includes("What this section says"), true);
-  assert.equal(html.includes("Evidence / results"), true);
+  assert.equal(html.includes("Evidence / results") || html.includes("Evidence / results / artifacts"), true);
   assert.equal(html.includes("Displays"), true);
   assert.equal(html.includes("manuscript-abstract-card"), true);
   assert.equal(html.includes("architecture-field-list"), true);
@@ -2638,7 +2642,7 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "Reader question answered: What result should the reader take away?",
         "Local thesis / purpose: Calibration changes the observed outcome in the accepted evidence.",
         "Local claims in plain language: The local claim is understandable without opening an ID map.",
-        "Local evidence, results, or artifacts: Evidence E1 supports the local result.",
+        "Evidence: Evidence E1 supports the local result.",
         "Placed displays / methods / results: Figure F000001.",
         "Local qualifications: none.",
         "Transition job: sets up interpretation.",
@@ -2742,7 +2746,7 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("paper-field-grid architecture-field-grid"), false);
   assert.equal(html.includes("Main takeaway"), true);
   assert.equal(html.includes("What this section says"), true);
-  assert.equal(html.includes("Evidence / results"), true);
+  assert.equal(html.includes("Evidence / results") || html.includes("Evidence / results / artifacts"), true);
   assert.equal(html.includes("Why here"), true);
   assert.equal(html.includes("This section states the calibration result"), true);
   assert.equal(html.includes("Frame contribution"), true);
@@ -2759,8 +2763,7 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("Shows the calibration map at the point of use."), true);
   assert.equal(html.includes("compact visual result"), true);
   assert.equal(html.includes("Calibration map caption"), true);
-  assert.equal(html.includes("Copy block"), true);
-  assert.equal(html.includes("Copy caption"), true);
+  assert.equal(html.includes("Copy description"), true);
   assert.equal(html.includes("Open source"), true);
   assert.equal(html.includes("manuscript/figures/calibration_map.pdf"), true);
   assert.equal(html.includes("No active tables are present because the current evidence is figure-led."), true);

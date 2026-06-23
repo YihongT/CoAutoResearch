@@ -25,6 +25,16 @@ experiments, write a paper, done. CoAutoResearch optimizes for **research
 ownership** — the result isn't a finished artifact you can't explain, it's a
 traceable research trajectory you can actually use, revise, and defend.
 
+<details>
+<summary><strong>What's new</strong></summary>
+
+- **0.1.1** — Default dashboard project folder is now `co-autoresearch-projects/` (legacy `local-projects/` still discovered).
+- **0.1.0** — Initial release: immutable project template; `co-auto-research` CLI (`init` / `ui` / `doctor` / `ls` / `attach`); remote-server tunneling; product-docs site.
+
+Full history in [CHANGELOG.md](CHANGELOG.md).
+
+</details>
+
 ## Quick start
 
 ```bash
@@ -36,6 +46,10 @@ browser. Click **+** in the sidebar to create a project, then describe where you
 research should begin. Attach local files with the composer `+` button — they're
 copied into your project's `resources/user_input/attachments/` so the agent can
 cite them later.
+
+Bringing a proposal, a deep-research report, or a half-finished project? See
+[Best practices](docs/best-practices.md) for the recommended ways to start — and
+how to turn the blueprint into a finished paper.
 
 You'll need **Node 18+** and one agent CLI — **Codex** (default) or **Claude
 Code**. The few-minute setup is in [Getting started](docs/getting-started.md).
@@ -86,6 +100,7 @@ Generated projects keep the pieces that make research usable, separate and legib
 
 - [Getting started](docs/getting-started.md) — install, prerequisites, first project
 - [Concepts](docs/conceptual-framework.md) — how the research loop works
+- [Best practices](docs/best-practices.md) — how to start well, and turn the blueprint into a paper
 - [CLI reference](docs/cli.md) — every command and flag
 - [Multiple projects](docs/multiple-projects.md) · [Remote servers](docs/remote-server.md) · [Platform support](docs/platforms.md) · [Upgrading projects](docs/upgrading.md)
 
@@ -93,6 +108,19 @@ Generated projects keep the pieces that make research usable, separate and legib
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md), which also
 covers running from a source checkout.
+
+## Citation
+
+If you use CoAutoResearch in your research, please cite it:
+
+```bibtex
+@software{coautoresearch2026,
+  title        = {CoAutoResearch: An AI research partner you stay in control of},
+  author       = {Tang, Yihong},
+  year         = {2026},
+  howpublished = {\url{https://github.com/YihongT/CoAutoResearch}}
+}
+```
 
 ## License & contact
 

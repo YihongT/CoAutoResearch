@@ -583,7 +583,20 @@ Confidence: medium
     throw new Error("rail navigation hidden state must not be overridden by display styles");
   }
   if (
-    !stylesCss.includes("--framing-column-width: 900px") ||
+    !stylesCss.includes("Final shell centering guard") ||
+    !stylesCss.includes("html[data-theme] .app-shell") ||
+    !stylesCss.includes("html[data-theme] .main-stage") ||
+    !stylesCss.includes("margin-left: var(--rail-width);") ||
+    !stylesCss.includes("width: calc(100vw - var(--rail-width));") ||
+    !stylesCss.includes("max-width: calc(100vw - var(--rail-width));") ||
+    !stylesCss.includes("html[data-theme] :is(.material-header, .context-content)") ||
+    !stylesCss.includes("margin-inline: auto;") ||
+    !/html\[data-theme\]\s+\.context-content\s*>\s*\*\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?\}/.test(stylesCss)
+  ) {
+    throw new Error("material workspace pages must center inside the fixed-rail main stage without grid-item overflow");
+  }
+  if (
+    !/--framing-column-width:\s*\d+px/.test(stylesCss) ||
     !stylesCss.includes(".brief-editor-shell.is-framing-dock") ||
     !stylesCss.includes(".framing-message.user") ||
     !stylesCss.includes("justify-self: center !important")
@@ -1014,11 +1027,11 @@ Confidence: medium
   if (
     !appJs.includes('class="trial-chip-index"') ||
     !appJs.includes('class="trial-chip-status"') ||
-    !stylesCss.includes(".trial-chip-index") ||
-    !stylesCss.includes("width: 28px;") ||
-    !stylesCss.includes("height: 28px;") ||
-    !stylesCss.includes(".trial-chip.is-active .trial-chip-index") ||
-    !stylesCss.includes("color: #ffffff;")
+    !stylesCss.includes("html[data-theme] .trial-chip-index") ||
+    !stylesCss.includes("height: 22px;") ||
+    !stylesCss.includes("html[data-theme] :is(.trial-chip.is-active, .trial-chip.is-running) .trial-chip-index") ||
+    !stylesCss.includes("background: color-mix(in srgb, var(--primary-text) 18%, transparent);") ||
+    !stylesCss.includes("color: var(--primary-text);")
   ) {
     throw new Error("trial strip numbers must render as high-contrast fixed-size badges");
   }
@@ -1052,7 +1065,7 @@ Confidence: medium
     !appJs.includes("Provenance / audit index") ||
     !appJs.includes("Secondary figure specs") ||
     !appJs.includes("data-copy-text") ||
-    !appJs.includes("Copy block") ||
+    !appJs.includes("Copy description") ||
     !appJs.includes("Copy caption") ||
     !appJs.includes("markdownFileButtonHtml") ||
     !serverPy.includes('"architecture"') ||
@@ -1628,7 +1641,8 @@ Confidence: medium
     "        if key == 'final_gate':",
     "            continue",
     "        (review_dir / config['file']).write_text(review_template.format(reviewer=config['label'], scope=config['scope'], instruction=config['instruction']), encoding='utf-8')",
-    "    (review_dir / 'FINAL_GATE_REVIEW.md').write_text(\"\"\"Reviewer: Final gate reviewer\nScope: final-gate\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `instructions/reviewers/FINAL_GATE_REVIEWER.md`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n\n## Context Summary\n\nSmoke test final gate fixture.\n\n## Artifact Consistency Audit\n\n- reviewer baseline status: current\n- final blueprint section completeness: complete\n- target manual section title/order fidelity: complete\n- paragraph plan completeness: complete\n- accepted claims vs candidate claims status: accepted\n- blocking missing evidence status: none\n- figure plan completeness: complete\n- figure paragraph placement completeness: complete\n- table plan or no-table rationale completeness: complete\n- table paragraph placement and source/result completeness: complete\n- reference/literature grounding completeness: complete\n- appendix/supplement plan completeness: complete\n- stale contradiction scan result: none\n- exact reason the gate can pass: all required checks passed\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\", encoding='utf-8')",
+    "    (review_dir / 'FINAL_GATE_REVIEW.md').write_text(\"\"\"Reviewer: Final gate reviewer\nScope: final-gate\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `instructions/reviewers/FINAL_GATE_REVIEWER.md`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/REFERENCE_REVIEW.md`\n\n## Context Summary\n\nSmoke test final gate fixture.\n\n## Artifact Consistency Audit\n\n- reviewer baseline status: current\n- final blueprint section completeness: complete\n- target manual section title/order fidelity: complete\n- paragraph plan completeness: complete\n- accepted claims vs candidate claims status: accepted\n- blocking missing evidence status: none\n- figure plan completeness: complete\n- figure paragraph placement completeness: complete\n- table plan or no-table rationale completeness: complete\n- table paragraph placement and source/result completeness: complete\n- reference/literature grounding completeness: complete\n- appendix/supplement plan completeness: complete\n- stale contradiction scan result: none\n- exact reason the gate can pass: all required checks passed\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\", encoding='utf-8')",
+    "    module.write_reviewer_baseline_metadata(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
     "assert module.normalize_gate_status('ready for targeted revision') == 'continue'",
     "assert module.normalize_gate_status('completed') == 'continue'",
     "assert module.normalize_gate_status('approved') == 'continue'",
@@ -1636,25 +1650,25 @@ Confidence: medium
     "assert module.normalize_gate_status('pass - architecture coherent; targeted revision required') == 'continue'",
     "assert module.normalize_gate_status('pass - all completed trials have approved plans and reports.') == 'pass'",
     "assert module.normalize_gate_status('pass - no blockers remain') == 'pass'",
-    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\", encoding='utf-8')",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Reference reviewer: pass\n- Final gate reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\", encoding='utf-8')",
     "gate = module.read_autoresearch_gate()",
     "assert gate['overall_status'] == 'pass', gate",
     "assert gate['status'] == 'continue', gate",
     "assert gate['reviewer_statuses']['evidence'] == 'continue', gate",
     "assert gate['all_reviewers_passed'] is False, gate",
     "assert module.gate_has_passed(gate) is False, gate",
-    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Reference reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
     "missing_final = module.read_autoresearch_gate()",
     "assert missing_final['status'] == 'continue', missing_final",
     "assert 'final_gate' in missing_final['missing_reviewers'], missing_final",
     "assert module.gate_has_passed(missing_final) is False, missing_final",
-    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- Process reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- Evidence reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- Venue fit reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- Manuscript reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- Figure/table reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- Final gate reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md`\n\nNext action: none.\n\"\"\", encoding='utf-8')",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- Process reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- Evidence reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- Venue fit reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- Manuscript reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- Figure/table reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- Reference reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/REFERENCE_REVIEW.md`\n- Final gate reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md`\n\nNext action: none.\n\"\"\", encoding='utf-8')",
     "stale = module.read_autoresearch_gate()",
     "assert stale['status'] == 'continue', stale",
     "assert stale['consistency_blockers'], stale",
     "assert module.gate_has_passed(stale) is False, stale",
     "write_final_artifacts()",
-    "pass_gate_with_paths = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md\n- Process reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md\n- Evidence reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md\n- Venue fit reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md\n- Manuscript reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md\n- Figure/table reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md\n- Final gate reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md\n\nNext action: none.\n\"\"\"",
+    "pass_gate_with_paths = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md\n- Process reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md\n- Evidence reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md\n- Venue fit reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md\n- Manuscript reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md\n- Figure/table reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md\n- Reference reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/REFERENCE_REVIEW.md\n- Final gate reviewer: pass - research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md\n\nNext action: none.\n\"\"\"",
     "evidence_review = review_dir / 'EVIDENCE_REVIEW.md'",
     "original_evidence = evidence_review.read_text(encoding='utf-8')",
     "evidence_review.write_text(original_evidence.replace('Decision: pass', 'Decision: continue').replace('Gate impact: pass', 'Gate impact: continue'), encoding='utf-8')",
@@ -1665,7 +1679,7 @@ Confidence: medium
     "evidence_review.write_text(original_evidence, encoding='utf-8')",
     "collected = module.collect_reviews()",
     "trial_review_paths = sorted(item['path'] for item in collected if '000001_final_smoke/reviews/' in item['path'])",
-    "assert len(trial_review_paths) == 7, trial_review_paths",
+    "assert len(trial_review_paths) == 8, trial_review_paths",
     "state.write_text(pass_gate_with_paths, encoding='utf-8')",
     "passed = module.read_autoresearch_gate()",
     "assert passed['status'] == 'pass', passed",
@@ -1699,8 +1713,8 @@ Confidence: medium
     "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
     "module._CONTEXT.project = context",
     "state = context.research_state_path",
-    "continue_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: continue\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Final gate reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\"",
-    "pass_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- Process reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- Evidence reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- Venue fit reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- Manuscript reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- Figure/table reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- Final gate reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md`\n\nNext action: none.\n\"\"\"",
+    "continue_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: continue\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Reference reviewer: pass\n- Final gate reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\"",
+    "pass_gate = \"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- Process reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- Evidence reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- Venue fit reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- Manuscript reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- Figure/table reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- Reference reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/REFERENCE_REVIEW.md`\n- Final gate reviewer: pass - `research_trajectory/trials/000001_final_smoke/reviews/FINAL_GATE_REVIEW.md`\n\nNext action: none.\n\"\"\"",
     "assert module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL == 100",
     "assert module.normalize_review_checkpoint_interval(None) == 100",
     "assert module.normalize_research_settings({'reviewCheckpointInterval': '25'})['reviewCheckpointInterval'] == 25",
@@ -1756,7 +1770,7 @@ Confidence: medium
     "(root / 'PROJECT.md').write_text('# Marker Smoke\\n', encoding='utf-8')",
     "(root / 'research_trajectory' / 'trials' / '000011_final_gate' ).mkdir(parents=True)",
     "(root / 'research_trajectory' / 'trials' / '000011_final_gate' / 'REPORT.md').write_text('# Report\\n', encoding='utf-8')",
-    "(root / 'research_trajectory' / 'STATE.md').write_text(\"\"\"# Research State\\n\\n## Autoresearch Goal Gate\\n\\nStatus: continue\\n\\nRequired reviewer gates:\\n- Plan reviewer: continue\\n- Process reviewer: continue\\n- Evidence reviewer: continue\\n- Venue fit reviewer: continue\\n- Manuscript reviewer: continue\\n- Figure/table reviewer: continue\\n- Final gate reviewer: continue\\n\\nNext action: continue.\\n\"\"\", encoding='utf-8')",
+    "(root / 'research_trajectory' / 'STATE.md').write_text(\"\"\"# Research State\\n\\n## Autoresearch Goal Gate\\n\\nStatus: continue\\n\\nRequired reviewer gates:\\n- Plan reviewer: continue\\n- Process reviewer: continue\\n- Evidence reviewer: continue\\n- Venue fit reviewer: continue\\n- Manuscript reviewer: continue\\n- Figure/table reviewer: continue\\n- Reference reviewer: continue\\n- Final gate reviewer: continue\\n\\nNext action: continue.\\n\"\"\", encoding='utf-8')",
     "context = module.ProjectContext(root)",
     "module._CONTEXT.project = context",
     "class RunningProc:",
@@ -2114,7 +2128,7 @@ Confidence: medium
       "    state_path = progress_ctx.root / 'research_trajectory' / 'STATE.md'",
       "    state_path.write_text('\\n'.join(gate_lines), encoding='utf-8')",
       "    progress = module.collect_trials()[0]['progress']",
-      "    assert progress['stage'] == 'gate_update' and progress['gate_updated'] is True and progress['reviewer_count'] == 7, progress",
+      "    assert progress['stage'] == 'gate_update' and progress['gate_updated'] is True and progress['reviewer_count'] == len(reviewer_items), progress",
       "dashboard.delete_project({'project': progress_probe['id'], 'confirm': 'progress probe'})",
       "export_probe = dashboard.create_project({'name': 'export probe'})",
       "export_ctx = dashboard.context_for(export_probe['id'])",

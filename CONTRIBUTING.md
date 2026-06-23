@@ -1,11 +1,30 @@
 # Contributing
 
-This file is for contributors and maintainers. User-facing setup and product
-usage belong in `README.md` and `docs/`.
+Thanks for your interest in CoAutoResearch! Contributions of all kinds are
+welcome — bug reports, feature ideas, documentation, and code.
 
-## Local Checks
+The project follows a standard fork-and-pull-request workflow. By participating,
+you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Clone the repository for development:
+User-facing setup and product usage live in [README.md](README.md) and
+[docs/](docs/); this file is for people changing the project itself.
+
+## Ways to contribute
+
+- **Report a bug** or **request a feature** by opening an issue — please search
+  existing issues first.
+- **Ask a question** or share an idea in GitHub Discussions.
+- **Send a change** as a pull request (see below).
+
+For anything beyond a small fix, please open an issue first so we can agree on
+the approach before you invest time — it avoids surprises during review.
+
+Found a security problem? Do **not** open a public issue — see
+[SECURITY.md](SECURITY.md).
+
+## Development setup
+
+Clone the repository:
 
 ```bash
 git clone https://github.com/YihongT/CoAutoResearch.git
@@ -18,26 +37,45 @@ Install the local checkout as the global CLI while developing:
 npm link
 ```
 
-After that, `co-auto-research` points at this checkout. Pulling changes updates
-the command implementation without reinstalling the package.
+`co-auto-research` now points at this checkout, so pulling changes updates the
+command without reinstalling.
 
-Run the same checks before opening or merging changes:
+To compare behavior with the current published package, install the latest npm
+release in a separate shell or environment:
 
 ```bash
-npm test
-npm run pack:dry-run
+npm install -g co-auto-research@latest
 ```
 
-The test script verifies the reusable project template, UI flow expectations,
-and CLI smoke behavior.
+## Pull request workflow
 
-## Documentation Site
+1. **Fork** the repository and create a branch from `main`
+   (for example, `git checkout -b fix/clearer-error-message`).
+2. Make your change. Keep it focused — one logical change per pull request.
+3. Run the checks locally; they must pass:
 
-The public documentation source lives in `docs/`. It should stay written from a
+   ```bash
+   npm test
+   npm run pack:dry-run
+   ```
+
+   `npm test` verifies the reusable project template, UI flow expectations, and
+   CLI smoke behavior.
+4. Write a clear commit message and PR description: what changed and why, and
+   link the related issue (for example, `Closes #123`).
+5. Open the pull request against `main`. A maintainer will review — please
+   respond to feedback and keep your branch up to date.
+
+By submitting a contribution, you agree that it is licensed under the project's
+[Apache-2.0](LICENSE) license.
+
+## Documentation site
+
+The public documentation source lives in `docs/` and should stay written from a
 user perspective: installation, first run, continuing work, platform notes, and
 safe remote use.
 
-To test the docs site locally:
+To preview the docs site locally:
 
 ```bash
 python -m pip install -r docs/requirements.txt
@@ -47,40 +85,11 @@ python -m http.server 4027 --directory /tmp/coauto-docs-site
 
 Do not add GitHub Pages setup instructions to the public docs navigation.
 
-## npm Publishing
+## Releasing
 
-Before the first public npm release:
-
-1. Confirm the package name in `package.json` is available or choose a scoped
-   package name.
-2. Configure npm trusted publishing for this GitHub repository.
-3. Keep `npm test` and `npm run pack:dry-run` passing on all CI platforms.
-4. Bump `package.json` to a new version before each publish; npm versions are
-   immutable once published.
-5. Publish a GitHub Release for the version. The release workflow runs tests,
-   performs a package dry run, then publishes with provenance.
-
-The workflow publish step is:
+Publishing to npm is handled by maintainers — see [RELEASING.md](RELEASING.md).
+Release publishes use npm provenance:
 
 ```bash
-npm publish --provenance --access public
-```
-
-The trusted publisher settings should match:
-
-- owner: `YihongT`
-- repository: `CoAutoResearch`
-- workflow: `release.yml`
-- publish command: `npm publish`
-
-After publication, user-facing installation can become:
-
-```bash
-npm install -g co-auto-research
-```
-
-Updates can then use:
-
-```bash
-npm install -g co-auto-research@latest
+npm publish --provenance
 ```

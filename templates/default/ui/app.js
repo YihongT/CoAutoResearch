@@ -3450,7 +3450,8 @@ function syncModelSelectOptions(select, backend, selected = "") {
   // innerHTML would collapse it if the user has the dropdown open, and a no-op
   // rebuild on every poll is exactly what caused the "folds when I expand it" bug.
   const desiredSignature = options.map(([optionValue]) => optionValue).join("|");
-  const currentSignature = Array.from(select.options).map((opt) => opt.value).join("|");
+  const renderedOptions = select.options || select.querySelectorAll?.("option") || [];
+  const currentSignature = Array.from(renderedOptions).map((opt) => opt.value).join("|");
   const optionsUnchanged = desiredSignature === currentSignature;
   const valueUnchanged = select.value === resolvedValue;
 
