@@ -74,6 +74,10 @@ function loadAppContext() {
       this.clickCount += 1;
     },
   });
+  const resumeCommandBar = element({ hidden: true });
+  const resumeCommandLabel = element();
+  const resumeCommandText = element();
+  const copyResumeCommand = element();
   const trialStripScroll = element({
     clientWidth: 300,
     scrollWidth: 1200,
@@ -233,6 +237,10 @@ function loadAppContext() {
     ["#composer-reasoning", composerReasoning],
     ["#settings-summary", element()],
     ["#session-settings", element()],
+    ["#resume-command-bar", resumeCommandBar],
+    ["#resume-command-label", resumeCommandLabel],
+    ["#resume-command-text", resumeCommandText],
+    ["#copy-resume-command", copyResumeCommand],
     ["#settings-secret-grid", element()],
     ["#settings-agent-status", element()],
   ].forEach(([selector, value]) => elements.set(selector, value));
@@ -350,6 +358,7 @@ function loadAppContext() {
       globalThis.__lastRenderedMessages = globalThis.__messages();
     };
     globalThis.__renderStageImpl = renderStage;
+    globalThis.__renderResumeCommandBarImpl = renderResumeCommandBar;
     scheduleOverviewPoll = () => {};
     renderChatState = () => {};
     renderSession = () => {};
@@ -2046,12 +2055,35 @@ function testProviderSpecificResumeCommand() {
   assert.equal(codex.includes("-C '/tmp/project root'"), true, "Codex resume command should include cwd");
 
   const claude = app.run(`
+    applySessionSettings({ backend: "claude", model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 }, true);
     __setSession({ session_id: "00000000-0000-0000-0000-000000000002", backend: "claude", settings: { backend: "claude" } });
     agentResumeCommand();
   `);
   assert.equal(claude.includes("claude --resume"), true, "Claude resume command should use Claude Code CLI");
   assert.equal(claude.includes("--add-dir '/tmp/project root'"), true, "Claude resume command should include allowed project dir");
   assert.equal(claude.includes("codex"), false, "Claude resume command should not use Codex");
+
+  const switched = app.run(`
+    __setSession({ session_id: "00000000-0000-0000-0000-000000000003", backend: "codex", settings: { backend: "codex" }, status: "completed" });
+    applySessionSettings({ backend: "claude", model: "sonnet", reasoningEffort: "medium", permissionPreset: "auto-review", webSearch: true, reviewCheckpointInterval: 100 }, true);
+    __renderResumeCommandBarImpl();
+    ({
+      command: agentResumeCommand(),
+      label: document.querySelector("#resume-command-label")?.textContent || "",
+      text: document.querySelector("#resume-command-text")?.textContent || "",
+      copyHidden: document.querySelector("#copy-resume-command")?.hidden || false,
+      barHidden: document.querySelector("#resume-command-bar")?.hidden || false,
+      selected: selectedRunBackend(),
+      sessionBackend: sessionBackend(),
+      sessionId: sessionState().session_id || "",
+      running: isSessionRunning()
+    });
+  `);
+  assert.equal(switched.command, "", "backend switch must not build a cross-provider resume command");
+  assert.equal(switched.label, "Next run uses Claude Code CLI", `resume bar should reflect the selected backend after settings change: ${JSON.stringify(switched)}`);
+  assert.equal(switched.text, "new session", "backend switch should explain that the next run starts fresh");
+  assert.equal(switched.copyHidden, true, "copy button should be hidden when there is no valid resume command");
+  assert.equal(switched.barHidden, false, "resume bar should stay visible with the selected backend state");
 }
 
 async function testSettingsModalSaveSyncsScopedSessionSettings() {

@@ -8042,7 +8042,7 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; continuing from the last closed trial boundary."
     )
     next_iteration = next_active_trial_iteration()
-    resume_same_session = should_resume_research_session()
+    resume_same_session = should_resume_research_session(settings)
     start_research_run(
         continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode")), goal_instruction),
         "goal",
@@ -8109,11 +8109,19 @@ def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str
     return agent_command_for_prompt(resume, codex_settings)
 
 
-def should_resume_research_session() -> bool:
+def should_resume_research_session(settings_payload: Any | None = None) -> bool:
     status = str(RESEARCH_SESSION.get("status") or "").strip().lower()
     if status in {"interrupted", "failed"}:
         return False
-    return bool(str(RESEARCH_SESSION.get("session_id") or "").strip())
+    if not str(RESEARCH_SESSION.get("session_id") or "").strip():
+        return False
+    if settings_payload is not None:
+        target_backend = normalize_agent_backend(normalize_research_settings(settings_payload).get("backend"))
+        session_settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
+        current_backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or session_settings.get("backend"))
+        if current_backend and target_backend != current_backend:
+            return False
+    return True
 
 
 def start_research_run(
@@ -8846,13 +8854,14 @@ def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
         "metadata_files": write_ui_metadata(payload, saved_files, linked_resources),
         "file_edits": [item["path"] for item in saved_edits],
     }
+    settings = normalize_research_settings(payload.get("settings"))
     with RESEARCH_LOCK:
-        resume = should_resume_research_session()
+        resume = should_resume_research_session(settings)
     session = start_research_run(
         framing_prompt(payload),
         "framing",
         resume=resume,
-        settings_payload=payload.get("settings"),
+        settings_payload=settings,
         display_prompt=str(payload.get("brief", "")).strip() or None,
     )
     return {"files": result, "session": session}
@@ -8884,15 +8893,15 @@ def start_research_cold_start(payload: dict[str, Any]) -> dict[str, Any]:
         }
     else:
         result = write_cold_start(payload)
+    settings = normalize_research_settings(payload.get("settings"))
     with RESEARCH_LOCK:
-        resume = should_resume_research_session()
+        resume = should_resume_research_session(settings)
         RESEARCH_SESSION["loop_iteration"] = 0
         RESEARCH_SESSION["loop_max_iterations"] = AUTORESEARCH_MAX_ITERATIONS
         RESEARCH_SESSION["loop_review_checkpoint_iteration"] = 0
         RESEARCH_SESSION["loop_stop_reason"] = ""
         RESEARCH_SESSION["loop_instruction"] = ""
     ensure_autoresearch_gate_for_loop()
-    settings = normalize_research_settings(payload.get("settings"))
     session = start_research_run(
         autoresearch_goal_prompt(str(payload.get("launchInstruction", ""))[:4000], bool(settings.get("fastMode"))),
         "goal",
@@ -8909,12 +8918,13 @@ def start_research_go(payload: dict[str, Any]) -> dict[str, Any]:
     payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload))
     message = str(payload.get("message", "")).strip()
     display = message or "Continue autoresearch."
+    settings = normalize_research_settings(payload.get("settings"))
     return {
         "session": start_research_run(
             continue_research_prompt(message),
             "research",
-            resume=True,
-            settings_payload=payload.get("settings"),
+            resume=should_resume_research_session(settings),
+            settings_payload=settings,
             display_prompt=display,
         )
     }
@@ -8974,7 +8984,7 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
         "session": start_research_run(
             chat_research_prompt(message),
             "chat",
-            resume=True,
+            resume=should_resume_research_session(payload.get("settings")),
             settings_payload=payload.get("settings"),
             display_prompt=display_message,
         ),
@@ -9024,7 +9034,7 @@ def start_chat_intervention(
     session = start_research_run(
         intervention_goal_prompt(intervention_path, prepared_message or display_message, bool(settings.get("fastMode"))),
         "goal",
-        resume=should_resume_research_session(),
+        resume=should_resume_research_session(settings),
         settings_payload=settings,
         display_prompt=display_message or "Human intervention.",
         loop_active=True,
@@ -9299,7 +9309,7 @@ def start_custom_goal_instruction(command: str, goal_instruction: str, settings_
             "Archived interrupted trial tail before starting from the last closed trial: "
             + ", ".join(item["from"] for item in archived),
         )
-    resume_same_session = should_resume_research_session()
+    resume_same_session = should_resume_research_session(settings)
     return {
         "local": True,
         "session": start_research_run(
@@ -9416,7 +9426,7 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
                 "Archived interrupted trial tail before resuming from the last closed trial: "
                 + ", ".join(item["from"] for item in archived),
             )
-        resume_same_session = should_resume_research_session()
+        resume_same_session = should_resume_research_session(settings)
         return {
             "local": True,
             "session": start_research_run(
@@ -9447,7 +9457,7 @@ def start_research_command(payload: dict[str, Any]) -> dict[str, Any]:
     local = handle_local_slash_command(command, normalized, settings_payload)
     if local is not None:
         return local
-    return {"session": start_research_run(command, "command", resume=True, settings_payload=settings_payload)}
+    return {"session": start_research_run(command, "command", resume=should_resume_research_session(settings_payload), settings_payload=settings_payload)}
 
 
 def stop_research_session() -> dict[str, Any]:

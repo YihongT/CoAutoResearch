@@ -2157,6 +2157,10 @@ function sessionBackend() {
   return normalizeAgentBackend(session.backend || session.settings?.backend || activeSettingsBackend());
 }
 
+function selectedRunBackend() {
+  return isSessionRunning() ? sessionBackend() : effectiveBackend(currentLaunchBackend());
+}
+
 function sessionGoalResumeCommand() {
   return "/goal resume";
 }
@@ -2169,7 +2173,8 @@ function agentResumeCommand() {
   const sessionId = String(sessionState().session_id || "").trim();
   if (!sessionId) return "";
   const repoRoot = String(appState?.repo_root || "").trim();
-  const backend = sessionBackend();
+  const backend = selectedRunBackend();
+  if (backend !== sessionBackend()) return "";
   const parts = backend === "claude" ? ["claude", "--resume"] : ["codex", "resume", "--include-non-interactive"];
   if (repoRoot && backend === "codex") parts.push("-C", shellQuote(repoRoot));
   if (repoRoot && backend === "claude") parts.push("--add-dir", shellQuote(repoRoot));
@@ -2185,14 +2190,26 @@ function renderResumeCommandBar() {
   const bar = $("#resume-command-bar");
   const text = $("#resume-command-text");
   if (!bar || !text) return;
-  const command = agentResumeCommand();
   const sessionId = String(sessionState().session_id || "").trim();
-  bar.hidden = !command;
+  const backend = selectedRunBackend();
+  const copyButton = $("#copy-resume-command");
   const label = $("#resume-command-label");
-  if (label) label.textContent = `Resume in ${agentLabel(sessionBackend())} CLI`;
+  if (sessionId && backend !== sessionBackend() && !isSessionRunning()) {
+    bar.hidden = false;
+    if (label) label.textContent = `Next run uses ${agentLabel(backend)} CLI`;
+    text.textContent = "new session";
+    text.title = "";
+    bar.dataset.command = "";
+    if (copyButton) copyButton.hidden = true;
+    return;
+  }
+  const command = agentResumeCommand();
+  bar.hidden = !command;
+  if (label) label.textContent = `Resume in ${agentLabel(backend)} CLI`;
   text.textContent = sessionId ? `session ${sessionId.slice(0, 8)}` : "";
   text.title = command;
   bar.dataset.command = command;
+  if (copyButton) copyButton.hidden = false;
 }
 
 async function copyResumeCommand() {
@@ -3538,6 +3555,7 @@ function settingsFromForm() {
   renderSettingsSummary(settings);
   syncComposerSettings(settings);
   renderAllAgentStatusNotes();
+  renderResumeCommandBar();
   return settings;
 }
 
@@ -3642,6 +3660,7 @@ function applySessionSettings(settings, persist = false) {
   renderSettingsSummary(merged);
   syncComposerSettings(merged);
   renderAllAgentStatusNotes();
+  renderResumeCommandBar();
 }
 
 function switchSessionBackend(backend) {
