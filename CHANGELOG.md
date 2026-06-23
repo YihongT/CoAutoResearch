@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2
+
+- Fixed Claude Code `/goal` handling so Claude backend commands follow Claude
+  Code native goal semantics.
+- Passed Claude `/goal` clear aliases through correctly: `clear`, `stop`,
+  `off`, `reset`, `none`, and `cancel`.
+- Kept Codex autoresearch loop controls separate from Claude Code native goal
+  commands.
+
 ## 0.1.1
 
 - Changed the default dashboard project folder from `local-projects/` to

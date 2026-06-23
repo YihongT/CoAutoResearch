@@ -1,6 +1,6 @@
 {
   "name": "co-auto-research",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Human-centered AI research scaffolding with traceable evidence and steerable progress.",
   "license": "Apache-2.0",
   "type": "module",
