@@ -16,6 +16,12 @@ list; the manuscript reviewer only covers reference *posture*.
 - `manuscript/BLUEPRINT.md` — both `Reference / Literature Grounding Plan` and
   the canonical `References` section, plus every inline citation in
   `Manuscript Architecture`
+- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when present
+- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
+- specialized review outputs named by the reviewer spawn decision, when they
+  affect source, citation, provenance, venue, or reference quality
+- `resources/user_input/RESOURCE_MANIFEST.md`, when scout-discovered resources
+  are cited, linked, or downloaded
 - any `references.bib` or integrated source files under `workspace/` when present
   as secondary caches
 
@@ -42,6 +48,12 @@ Write the canonical current-trial reference review to:
 - Are all locators resolvable, with no placeholder, fabricated, or dead links?
 - Is the `References` section mutually consistent with the
   `Reference / Literature Grounding Plan` posture?
+- For scout-discovered sources, does the scout report or manifest contain
+  citation-ready metadata, provenance `autoresearch_discovered`, access/license
+  notes when relevant, and a stable local path or link?
+- If a specialized review affects source quality, provenance, citation
+  readiness, or venue-source fit, are its source requirements reflected in the
+  reference list and citation plan?
 
 **Layer 2 — presentation (venue-bound):**
 

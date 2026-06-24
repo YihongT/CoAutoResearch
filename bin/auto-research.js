@@ -28,7 +28,14 @@ const CORE_REVIEWER_FILES = [
   "VENUE_FIT_REVIEWER.md",
   "MANUSCRIPT_REVIEWER.md",
   "FIGURE_TABLE_REVIEWER.md",
+  "REFERENCE_REVIEWER.md",
   "REVIEWER_SPAWNING.md"
+];
+const CORE_PROTOCOL_FILES = [
+  "EXECUTION_AGENT.md",
+  "RESOURCE_INTAKE.md",
+  "RESOURCE_SCOUT.md",
+  "REVIEWER_SCOPE_ANALYST.md"
 ];
 const REVIEWER_BASELINE_PATH = path.join("instructions", ".co-auto-research-instructions.json");
 const REVIEW_STORAGE_VERSION = "per-reviewer-files-v1";
@@ -135,10 +142,23 @@ function reviewerTemplateDir() {
   return path.join(TEMPLATE_ROOT, "instructions", "reviewers");
 }
 
+function instructionTemplateDir() {
+  return path.join(TEMPLATE_ROOT, "instructions");
+}
+
 function reviewerTemplateHashesSync() {
   const hashes = {};
   for (const name of CORE_REVIEWER_FILES) {
     const target = path.join(reviewerTemplateDir(), name);
+    if (fs.existsSync(target)) hashes[name] = sha256FileSync(target);
+  }
+  return hashes;
+}
+
+function protocolTemplateHashesSync() {
+  const hashes = {};
+  for (const name of CORE_PROTOCOL_FILES) {
+    const target = path.join(instructionTemplateDir(), name);
     if (fs.existsSync(target)) hashes[name] = sha256FileSync(target);
   }
   return hashes;
@@ -151,7 +171,8 @@ function writeReviewerBaselineMetadataSync(projectRoot) {
     reviewerBaselineVersion: REVIEWER_BASELINE_VERSION,
     reviewStorageVersion: REVIEW_STORAGE_VERSION,
     syncedAt: new Date().toISOString(),
-    coreReviewerFiles: reviewerTemplateHashesSync()
+    coreReviewerFiles: reviewerTemplateHashesSync(),
+    coreProtocolFiles: protocolTemplateHashesSync()
   };
   fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
   fs.writeFileSync(metadataPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -391,7 +412,7 @@ function normalizeStateGateReferencesSync(projectRoot, latestTrial, migrationDir
   if (!fs.existsSync(statePath)) return "";
   const text = fs.readFileSync(statePath, "utf8");
   let changed = false;
-  let updated = text.replace(/^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure\/table reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$/gm, (line, label, status) => {
+  let updated = text.replace(/^\s*[-*]\s*(Plan reviewer|Process reviewer|Evidence reviewer|Venue fit reviewer|Manuscript reviewer|Figure\/table reviewer|Reference reviewer|Final gate reviewer)\s*:\s*(.+?)\s*$/gm, (line, label, status) => {
     const key = reviewerKeyForLabel(label);
     if (!key) return line;
     const reviewPath = reviewerOutputPath(latestTrial, key);
@@ -405,7 +426,7 @@ function normalizeStateGateReferencesSync(projectRoot, latestTrial, migrationDir
     return desired;
   });
   const cleaned = updated
-    .replace(/^\s*[-*]\s*Reviewer instructions are outdated \(baseline is outdated\)\.\s*$/gmi, "")
+    .replace(/^\s*[-*]\s*(?:Reviewer|Core) instructions are outdated \(baseline is outdated\)\.\s*$/gmi, "")
     .replace(/\nConsistency blockers:\s*\n(?=\s*Next action:)/g, "\n");
   if (cleaned !== updated) {
     updated = cleaned;
@@ -540,8 +561,8 @@ function projectReviewStorageStatusSync(projectRoot) {
   const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
   const stateText = fs.existsSync(statePath) ? fs.readFileSync(statePath, "utf8") : "";
   if (latestTrial && stateText) {
-    if (/Reviewer instructions are outdated \(baseline is outdated\)\./i.test(stateText)) {
-      stateStaleConsistencyBlockers.push("Reviewer instructions are outdated (baseline is outdated).");
+    if (/(?:Reviewer|Core) instructions are outdated \(baseline is outdated\)\./i.test(stateText)) {
+      stateStaleConsistencyBlockers.push("Core instructions are outdated (baseline is outdated).");
     }
     for (const [key, config] of Object.entries(REQUIRED_REVIEWER_OUTPUTS)) {
       const reviewPath = reviewerOutputPath(latestTrial, key);
@@ -584,6 +605,8 @@ function projectReviewStorageStatusSync(projectRoot) {
 function projectReviewerStatusSync(projectRoot) {
   const templateHashes = reviewerTemplateHashesSync();
   const reviewerDir = path.join(projectRoot, "instructions", "reviewers");
+  const protocolTemplateHashes = protocolTemplateHashesSync();
+  const instructionDir = path.join(projectRoot, "instructions");
   const metadataPath = path.join(projectRoot, REVIEWER_BASELINE_PATH);
   const missing = [];
   const changed = [];
@@ -598,6 +621,19 @@ function projectReviewerStatusSync(projectRoot) {
     hashes[name] = hash;
     if (templateHashes[name] && hash !== templateHashes[name]) changed.push(name);
   }
+  const protocolMissing = [];
+  const protocolChanged = [];
+  const protocolHashes = {};
+  for (const name of CORE_PROTOCOL_FILES) {
+    const projectPath = path.join(instructionDir, name);
+    if (!fs.existsSync(projectPath)) {
+      protocolMissing.push(name);
+      continue;
+    }
+    const hash = sha256FileSync(projectPath);
+    protocolHashes[name] = hash;
+    if (protocolTemplateHashes[name] && hash !== protocolTemplateHashes[name]) protocolChanged.push(name);
+  }
   let metadata = {};
   if (fs.existsSync(metadataPath)) {
     try {
@@ -608,17 +644,32 @@ function projectReviewerStatusSync(projectRoot) {
   }
   const metadataHashes = metadata && typeof metadata.coreReviewerFiles === "object" ? metadata.coreReviewerFiles : {};
   const metadataMissing = CORE_REVIEWER_FILES.filter((name) => metadataHashes[name] !== templateHashes[name]);
+  const protocolMetadataHashes = metadata && typeof metadata.coreProtocolFiles === "object" ? metadata.coreProtocolFiles : {};
+  const protocolMetadataMissing = CORE_PROTOCOL_FILES.filter((name) => protocolMetadataHashes[name] !== protocolTemplateHashes[name]);
   const baselineVersion = String(metadata.reviewerBaselineVersion || "");
   const reviewStorage = projectReviewStorageStatusSync(projectRoot);
   return {
     baselineVersion,
     latestBaselineVersion: REVIEWER_BASELINE_VERSION,
-    outdated: Boolean(missing.length || changed.length || metadataMissing.length || baselineVersion !== REVIEWER_BASELINE_VERSION || reviewStorage.outdated),
+    outdated: Boolean(
+      missing.length ||
+      changed.length ||
+      metadataMissing.length ||
+      protocolMissing.length ||
+      protocolChanged.length ||
+      protocolMetadataMissing.length ||
+      baselineVersion !== REVIEWER_BASELINE_VERSION ||
+      reviewStorage.outdated
+    ),
     missing,
     changed,
     metadataMissing,
+    protocolMissing,
+    protocolChanged,
+    protocolMetadataMissing,
     metadataPath: REVIEWER_BASELINE_PATH,
     hashes,
+    protocolHashes,
     reviewStorage
   };
 }
@@ -627,7 +678,9 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
   const status = projectReviewerStatusSync(projectRoot);
   const migrationId = `${new Date().toISOString().replace(/[-:.]/g, "").replace("T", "T").replace("Z", "Z")}_${randomUUID().slice(0, 8)}`;
   const reviewerDir = path.join(projectRoot, "instructions", "reviewers");
+  const instructionDir = path.join(projectRoot, "instructions");
   const backupRoot = path.join(projectRoot, "archive", "template_migrations", migrationId, "instructions", "reviewers");
+  const protocolBackupRoot = path.join(projectRoot, "archive", "template_migrations", migrationId, "instructions");
   if (dryRun) {
     const dryRunMigrationDir = path.join(projectRoot, "archive", "template_migrations", "DRY_RUN");
     return {
@@ -638,11 +691,14 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
       after: status,
       copied: [],
       backedUp: [],
+      protocolCopied: [],
+      protocolBackedUp: [],
       backupPath: "",
       reviewStorage: migrateActiveReviewStorageSync(projectRoot, dryRunMigrationDir, { dryRun: true })
     };
   }
   fs.mkdirSync(reviewerDir, { recursive: true });
+  fs.mkdirSync(instructionDir, { recursive: true });
   const copied = [];
   const backedUp = [];
   for (const name of CORE_REVIEWER_FILES) {
@@ -657,6 +713,20 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
     fs.copyFileSync(source, target);
     copied.push(name);
   }
+  const protocolCopied = [];
+  const protocolBackedUp = [];
+  for (const name of CORE_PROTOCOL_FILES) {
+    const source = path.join(instructionTemplateDir(), name);
+    if (!fs.existsSync(source)) throw new Error(`Package instruction file is missing: ${name}`);
+    const target = path.join(instructionDir, name);
+    if (fs.existsSync(target)) {
+      fs.mkdirSync(protocolBackupRoot, { recursive: true });
+      fs.copyFileSync(target, path.join(protocolBackupRoot, name));
+      protocolBackedUp.push(name);
+    }
+    fs.copyFileSync(source, target);
+    protocolCopied.push(name);
+  }
   const metadata = writeReviewerBaselineMetadataSync(projectRoot);
   const migrationDir = path.join(projectRoot, "archive", "template_migrations", migrationId);
   fs.mkdirSync(migrationDir, { recursive: true });
@@ -670,6 +740,8 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
       `- Reviewer baseline: \`${REVIEWER_BASELINE_VERSION}\``,
       `- Copied core reviewers: ${copied.length}`,
       `- Backed up previous core reviewers: ${backedUp.length}`,
+      `- Copied core protocol instructions: ${protocolCopied.length}`,
+      `- Backed up previous core protocol instructions: ${protocolBackedUp.length}`,
       `- Metadata: \`${REVIEWER_BASELINE_PATH}\``,
       `- Review storage version: \`${REVIEW_STORAGE_VERSION}\``,
       `- Created per-reviewer files: ${reviewStorage.created.length}`,
@@ -678,6 +750,7 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
       `- Normalized manuscript reviews: ${reviewStorage.normalizedManuscriptReviews.length}`,
       "",
       "Custom reviewer files outside the core reviewer set were preserved.",
+      "Custom instruction files outside the core protocol set were preserved.",
       "Archived restart/resume history was not rewritten.",
       ""
     ].join("\n"),
@@ -690,6 +763,8 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
     backupPath: path.relative(projectRoot, migrationDir),
     copied,
     backedUp,
+    protocolCopied,
+    protocolBackedUp,
     reviewStorage,
     before: status,
     after: projectReviewerStatusSync(projectRoot),
@@ -1225,10 +1300,13 @@ async function commandDoctor(args) {
           reviewerStatus.missing.length ? `missing ${reviewerStatus.missing.join(", ")}` : "",
           reviewerStatus.changed.length ? `changed ${reviewerStatus.changed.join(", ")}` : "",
           reviewerStatus.metadataMissing.length ? "metadata stale" : "",
+          reviewerStatus.protocolMissing.length ? `protocol missing ${reviewerStatus.protocolMissing.join(", ")}` : "",
+          reviewerStatus.protocolChanged.length ? `protocol changed ${reviewerStatus.protocolChanged.join(", ")}` : "",
+          reviewerStatus.protocolMetadataMissing.length ? "protocol metadata stale" : "",
           storage.outdated ? "review storage migration required" : ""
         ].filter(Boolean).join("; ")
       : `baseline ${REVIEWER_BASELINE_VERSION}`;
-    console.log(`${reviewerStatus.outdated ? "warn" : "ok"}      reviewers${reviewerStatus.outdated ? ` outdated - ${detail || "sync required"}` : ` current - ${detail}`}`);
+    console.log(`${reviewerStatus.outdated ? "warn" : "ok"}      core instructions${reviewerStatus.outdated ? ` outdated - ${detail || "sync required"}` : ` current - ${detail}`}`);
     if (reviewerStatus.outdated) console.log("        run: co-auto-research upgrade-project");
   }
   const projectUi = path.join(process.cwd(), "ui", "server.py");
@@ -1360,22 +1438,23 @@ async function commandUpgradeProject(args) {
   for (const project of projects) {
     const before = projectReviewerStatusSync(project.path);
     const marker = before.outdated ? "outdated" : "current";
-    console.log(`${project.name} (${project.relativePath}): reviewers ${marker}`);
+    console.log(`${project.name} (${project.relativePath}): core instructions ${marker}`);
     if (!before.outdated) continue;
     const result = syncProjectReviewersSync(project.path, { dryRun });
     changedCount += 1;
     if (dryRun) {
-      console.log("  dry run: would sync core reviewers and write baseline metadata");
+      console.log("  dry run: would sync core reviewers, core protocol instructions, and write baseline metadata");
       console.log(`  dry run: would create ${result.reviewStorage.created.length} per-reviewer files, backfill ${result.reviewStorage.backfilled.length}, and normalize ${result.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews`);
     } else {
       console.log(`  synced ${result.copied.length} core reviewers`);
+      console.log(`  synced ${result.protocolCopied.length} core protocol instructions`);
       console.log(`  review files: ${result.reviewStorage.created.length} created, ${result.reviewStorage.backfilled.length} backfilled, ${result.reviewStorage.placeholders.length} missing-review placeholders, ${result.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews normalized`);
       console.log(`  backup: ${result.backupPath || "none"}`);
     }
   }
-  if (!changedCount) console.log("All project reviewers are current.");
+  if (!changedCount) console.log("All project core instructions are current.");
   else if (dryRun) console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} would be updated.`);
-  else console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} updated to reviewer baseline ${REVIEWER_BASELINE_VERSION}.`);
+  else console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} updated to instruction baseline ${REVIEWER_BASELINE_VERSION}.`);
 }
 
 function commandVersion() {

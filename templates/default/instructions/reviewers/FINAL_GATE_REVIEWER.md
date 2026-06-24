@@ -13,11 +13,17 @@ domain, evidence, venue, manuscript, figure/table, process, or plan review.
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
 - current trial `PLAN.md`, `REPORT.md`, `reviews/`, and artifacts
+- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when
+  `PLAN.md` says `Scout: required`
+- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
+- specialized review outputs named by the reviewer spawn decision, when present
+- `resources/user_input/RESOURCE_MANIFEST.md`, when the current trial discovered
+  or used external resources
 - `manuscript/BLUEPRINT.md` and `manuscript/reviews/` when manuscript-facing
 - `manuscript/figures/FIGURE_SPECS.md` when any figure/table/display is active
 - `resources/target_venue/SEED_PAPERS.md`, `STYLE_NOTES.md`, and
   `FIGURE_TABLE_NOTES.md` when a target venue is declared
-- all seven other current-trial reviewer files under
+- all non-final current-trial reviewer files under
   `research_trajectory/trials/<trial_id>/reviews/`
 
 ## Output Location
@@ -38,6 +44,18 @@ Check:
   and `Gate impact: pass`;
 - reviewer instructions are current for this project; an outdated or missing
   core reviewer file is a blocker;
+- if the current trial required Resource Scout, the scout report exists, the
+  manifest records scout-discovered resources as `autoresearch_discovered`, and
+  the report is consistent with the trial's evidence and reference claims;
+- if Resource Scout was skipped, `PLAN.md` contains a valid skip reason for the
+  declared objective;
+- `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` exists for the current
+  substantive trial;
+- if the reviewer spawn decision says `Spawn needed: yes`, the named specialized
+  reviewer instruction and specialized review output both exist;
+- any specialized review output has no unresolved blocking issue, required
+  action, unresolved qualification, or critical unassessed area that conflicts
+  with pass;
 - there are no unresolved blocking issues, required actions, unresolved
   qualifications, or critical unassessed areas;
 - `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/BLUEPRINT.md`, recent trial
@@ -91,7 +109,7 @@ Check:
 
 Before deciding `pass`, write an artifact consistency audit. It must state:
 
-- reviewer baseline status: current or outdated;
+- core instruction baseline status: current or outdated;
 - final blueprint section completeness;
 - target manual section title/order fidelity;
 - architecture overview / table of contents completeness;
@@ -103,6 +121,10 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - inline publication-ready table block or no-table rationale completeness;
 - inline algorithm/method/dataset/benchmark/result block completeness;
 - reference/literature grounding completeness;
+- Resource Scout status: required and completed, skipped with valid reason, or
+  blocking because missing/undocumented/inconsistent;
+- Reviewer Scope Analyst status: decision present, no specialized review needed,
+  or specialized review completed without pass-blocking issues;
 - reference list integrity: a canonical `References` section exists, the
   Reference reviewer passed, and inline citations and list entries are
   bidirectionally complete with no orphan citations, uncited entries, missing

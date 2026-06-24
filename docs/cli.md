@@ -32,7 +32,7 @@ Source-checkout development commands are covered in the contributor guide.
 | `ui --projects-dir <dir>` | Start a dashboard over several generated projects. |
 | `doctor` | Check local prerequisites and port availability. |
 | `upgrade` | Print installed version, detected project template version, and npm update command. |
-| `upgrade-project` | Sync core reviewer instructions in an existing project, with backup. |
+| `upgrade-project` | Sync core reviewer and trial-protocol instructions in an existing project, with backup. |
 | `version` | Print the installed CLI package version. |
 
 ## Start the UI
@@ -102,11 +102,12 @@ The dashboard ships with Ivory and Nocturne themes.
 The setting is local to the browser and does not clear composer text,
 attachments, or context chips.
 
-## Update Project Reviewers
+## Update Project Instructions
 
 The npm package updates the CLI and UI runtime. Existing project research files
-are not rewritten automatically, but core reviewer instructions can be synced
-when `doctor` or the UI reports an outdated reviewer baseline:
+are not rewritten automatically, but core reviewer and trial-protocol
+instructions can be synced when `doctor` or the UI reports an outdated
+instruction baseline:
 
 ```bash
 co-auto-research upgrade-project
@@ -118,8 +119,9 @@ For a dashboard folder:
 co-auto-research upgrade-project --all --projects-dir co-autoresearch-projects
 ```
 
-The command backs up previous core reviewer files under
-`archive/template_migrations/` and preserves custom extra reviewer files.
+The command backs up previous core reviewer and protocol files under
+`archive/template_migrations/` and preserves custom extra reviewer or
+instruction files outside the managed core set.
 
 ## Port and Browser Options
 

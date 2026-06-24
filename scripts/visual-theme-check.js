@@ -307,7 +307,7 @@ function railHtml() {
 function composerHtml() {
   return `<section class="brief-editor-shell is-framing-dock" aria-label="Composer">
     <div class="brief-composer-row">
-      <button class="composer-attach-button" type="button" aria-label="Attach file">+</button>
+      <button class="composer-attach-button" type="button" aria-label="Attach resources" aria-haspopup="menu" aria-expanded="false">+</button>
       <textarea aria-label="Message" placeholder="Message Codex about the current research, ask for status, attach resources, or steer the next step..."></textarea>
       <div class="brief-run-controls">
         <label><select><option>GPT-5.5</option></select></label>
@@ -517,10 +517,8 @@ function shellHtml(theme, label) {
                   <div class="compact-fields brief-context-fields">
                     <label class="field"><span>Target venue / audience</span><input type="text" placeholder="Venue: Nature, NeurIPS, CHI, ICLR, policy memo; audience optional..." /></label>
                   </div>
-                  <div class="material-quick-actions" aria-label="Browse or drop resources">
-                    <span class="material-actions-label">Browse or drop resources</span>
-                    <button class="material-action-chip" type="button"><span class="material-action-icon"><svg viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4.1c.7 0 1.3.3 1.8.8l1.1 1.2h4A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/></svg></span><span>Ongoing work</span></button>
-                    <button class="material-action-chip" type="button"><span class="material-action-icon"><svg viewBox="0 0 24 24"><path d="M6 4.8A2.8 2.8 0 0 1 8.8 2h8.7v20H8.8A2.8 2.8 0 0 1 6 19.2V4.8Zm3 1.7h5.8M9 10h5.8M9 13.5h4"/></svg></span><span>Papers</span></button>
+                  <div class="material-quick-actions" aria-label="Attachment hint">
+                    <span class="material-actions-label">Drag files here, or use + to upload files/link folders</span>
                   </div>
                 </section>
               </section>

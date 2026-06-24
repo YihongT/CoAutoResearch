@@ -49,6 +49,11 @@ If reviewing, use the relevant file under:
 
 - `instructions/reviewers/`
 
+If planning or running a substantive trial, also read:
+
+- `instructions/RESOURCE_SCOUT.md`
+- `instructions/REVIEWER_SCOPE_ANALYST.md`
+
 ---
 
 ## Repository Map
@@ -83,14 +88,15 @@ Research proceeds as a loop:
 3. check pending formal human interventions;
 4. choose one coherent next research objective;
 5. create a trial under `research_trajectory/trials/<trial_id>/`;
-6. write `PLAN.md` before execution;
-7. review the plan in `REVIEW.md` when appropriate;
-8. execute mainly in `workspace/`;
-9. record outputs in or from the trial `artifacts/`;
-10. write `REPORT.md` after execution;
-11. update only the global files whose current state genuinely changed;
-12. commit changes to git;
-13. push if a remote exists and the progress is meaningful.
+6. write `PLAN.md` with a `Resource Scout Brief`;
+7. write `reviews/PLAN_REVIEW.md`;
+8. if required, spawn a Resource Scout subagent to search, file, and report external resources for this trial;
+9. execute mainly in `workspace/`;
+10. record outputs in or from the trial `artifacts/`;
+11. write `REPORT.md` after execution;
+12. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
+13. write any required specialized review, then all eight core files under `reviews/`;
+14. update only the global files whose current state genuinely changed.
 
 Process review is also a trial. If progress is stuck, create a trial such as `000024_process_review/` and review recent work there.
 
@@ -104,11 +110,10 @@ When sources conflict, use this priority order:
 2. `research_trajectory/STATE.md`;
 3. `PROJECT.md`;
 4. `research_trajectory/CURRENT_FINDINGS.md`;
-5. current trial `PLAN.md` and `REVIEW.md`;
-6. trial `REPORT.md` and `artifacts/`;
-7. `research_trajectory/notes/index.md` and topic notes;
-8. `resources/`;
-9. `archive/`.
+5. current trial `PLAN.md`, `REPORT.md`, `reviews/`, and artifacts;
+6. `research_trajectory/notes/index.md` and topic notes;
+7. `resources/`;
+8. `archive/`.
 
 `workspace/` may contain the latest implementation, but it is not automatically accepted research truth. A method or result becomes current only when reflected in `STATE.md`, `CURRENT_FINDINGS.md`, and/or a trial report.
 

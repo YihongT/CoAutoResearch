@@ -41,7 +41,16 @@ Do not create `research_trajectory/process_reviews/`.
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
+- `instructions/RESOURCE_SCOUT.md`
+- `instructions/REVIEWER_SCOPE_ANALYST.md`
 - recent trial `PLAN.md`, `REPORT.md`, and `reviews/` files
+- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when
+  `PLAN.md` says `Scout: required`
+- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
+- specialized review output under current trial `reviews/`, when the reviewer
+  spawn decision says `Spawn needed: yes`
+- `resources/user_input/RESOURCE_MANIFEST.md`, when scout-discovered resources
+  were saved or linked
 - `research_trajectory/notes/index.md` and relevant topic notes
 - relevant formal human interventions
 
@@ -57,11 +66,26 @@ Ask:
 - Are current claims supported by evidence?
 - Is reusable knowledge buried in reports, duplicated across canonical files,
   or missing from the topic-based notes index?
+- If the plan required Resource Scout, did it run before main execution and
+  write `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`?
+- Were scout-discovered resources recorded in
+  `resources/user_input/RESOURCE_MANIFEST.md` as `autoresearch_discovered`?
+- If Resource Scout was skipped, was the skip reason valid for the current
+  objective rather than a convenience omission?
+- Does `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` exist for the
+  current substantive trial?
+- If the reviewer spawn decision says `Spawn needed: yes`, does the named
+  specialized reviewer instruction exist under `instructions/reviewers/`, and
+  does the named specialized review output exist under current trial `reviews/`?
+- If the reviewer spawn decision says `Spawn needed: no`, is the coverage reason
+  specific enough to justify relying on the eight core reviewers?
 
 ## Expected Output
 
 - diagnosis of progress;
 - local-minimum risks;
+- Resource Scout process status for the current trial;
+- Reviewer Scope Analyst decision status for the current trial;
 - recommended next trial;
 - any required updates to `STATE.md`, `CURRENT_FINDINGS.md`, or topic-based
   knowledge notes.

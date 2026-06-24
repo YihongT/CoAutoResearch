@@ -24,6 +24,10 @@ If starting from an empty or newly initialized project, read `instructions/COLD_
 
 If acquiring, filing, resolving, or interpreting user-provided resources, read `instructions/RESOURCE_INTAKE.md`.
 
+If planning or running agent-initiated resource search for a trial, read `instructions/RESOURCE_SCOUT.md`.
+
+If preparing to refresh trial reviewers, read `instructions/REVIEWER_SCOPE_ANALYST.md`.
+
 If converting prior work, raw user input, old repos, previous experiments, or proposals, read `instructions/CONVERSION.md`.
 
 If updating manuscript-facing files, read `instructions/MANUSCRIPT.md`.
@@ -157,12 +161,16 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 3. If a pending item is a formal human intervention, follow `instructions/INTERVENTION_PROTOCOL.md` before continuing.
 4. Identify the next coherent objective.
 5. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
-6. Write `PLAN.md` before execution.
+6. Write `PLAN.md` before execution, including the required `Resource Scout Brief`.
 7. Create `reviews/` and run the Plan reviewer into `reviews/PLAN_REVIEW.md`; revise `PLAN.md` if the review requires it.
-8. Execute mainly in `workspace/` or another clearly justified location.
-9. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
-10. Write `REPORT.md` after execution.
-11. Run or refresh all eight core reviewers for this trial and write their canonical files:
+8. If the plan says `Scout: required`, spawn a Resource Scout subagent to search, file, and report external resources for this trial after `PLAN_REVIEW.md` and before main execution. Save its report to `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and file small public artifacts under `resources/`.
+9. If the Resource Scout changes assumptions, required resources, risks, or success criteria, revise `PLAN.md` and rerun the Plan reviewer before execution. If the plan says `Scout: skipped`, the skip reason must be concrete.
+10. Execute mainly in `workspace/` or another clearly justified location.
+11. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
+12. Write `REPORT.md` after execution.
+13. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks. Write its decision to `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`.
+14. If the Reviewer Scope Analyst decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, run the specialized review, and write its output under the current trial `reviews/` directory before core reviewer refresh.
+15. Run or refresh all eight core reviewers for this trial and write their canonical files:
     - `reviews/PLAN_REVIEW.md`
     - `reviews/PROCESS_REVIEW.md`
     - `reviews/EVIDENCE_REVIEW.md`
@@ -171,16 +179,16 @@ Do not write trial plans in the root directory. Do not write trial reports only 
     - `reviews/FIGURE_TABLE_REVIEW.md`
     - `reviews/REFERENCE_REVIEW.md`
     - `reviews/FINAL_GATE_REVIEW.md`
-12. A reviewer with little to assess still writes its file with a scoped judgment and explicit unassessed areas.
-13. Update only global files that genuinely changed:
+16. A reviewer with little to assess still writes its file with a scoped judgment and explicit unassessed areas.
+17. Update only global files that genuinely changed:
     - `research_trajectory/STATE.md`
     - `research_trajectory/CURRENT_FINDINGS.md`
     - `research_trajectory/notes/index.md` and topic notes when knowledge capture changes
     - `manuscript/BLUEPRINT.md`
     - `manuscript/figures/FIGURE_SPECS.md`
-14. Update the `Autoresearch Goal Gate` in `STATE.md` so each reviewer line references the current trial's reviewer file path.
-15. Commit changes to git.
-16. Push if a remote exists and progress is meaningful.
+18. Update the `Autoresearch Goal Gate` in `STATE.md` so each reviewer line references the current trial's reviewer file path.
+19. Commit changes to git.
+20. Push if a remote exists and progress is meaningful.
 
 ---
 
@@ -191,6 +199,20 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 - objective;
 - rationale;
 - required reading/resources;
+- required `Resource Scout Brief`:
+
+```markdown
+## Resource Scout Brief
+Scout: required | skipped
+Skip reason:
+Search scope:
+Resource types:
+Disciplines/domains:
+Download policy:
+Expected destinations:
+Stop criteria:
+```
+
 - planned actions;
 - expected outputs;
 - compute/resource needs;
@@ -217,6 +239,13 @@ and include provenance:
 - deviations from plan;
 - commands, scripts, notebooks, or procedures used;
 - outputs and artifact paths;
+- Resource Scout outcome:
+  - `Scout report: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`;
+  - or `Scout skipped: <specific reason from PLAN.md>`;
+  - manifest update status for scout-discovered resources;
+- Reviewer Scope Analyst outcome:
+  - `Reviewer spawn decision: research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`;
+  - `Specialized reviewer: <instruction path and review path, or none>`;
 - result interpretation;
 - whether findings should update `CURRENT_FINDINGS.md`;
 - whether method status should update `STATE.md`;
@@ -239,6 +268,7 @@ Canonical review outputs for trial-level work belong in the relevant trial's
 - `VENUE_FIT_REVIEW.md`
 - `MANUSCRIPT_REVIEW.md`
 - `FIGURE_TABLE_REVIEW.md`
+- `REFERENCE_REVIEW.md`
 - `FINAL_GATE_REVIEW.md`
 
 Legacy `REVIEW.md` may exist only as a human-readable summary or compatibility
@@ -249,6 +279,19 @@ may silently carry forward from an earlier trial. If a reviewer cannot assess
 much in the current trial, it must still write the current trial file with
 `Decision: continue`, `blocked`, or `needs_human` as appropriate and list what
 was unassessed.
+
+The Resource Scout is not a ninth core reviewer. It is a trial preparation
+step checked by existing reviewers: Plan checks the brief and skip reason,
+Process checks whether required scout outputs exist, Evidence checks whether
+scout outputs expose missing evidence or overclaiming, Reference checks source
+metadata and citation readiness, and Final gate blocks pass when a required
+scout step is missing, undocumented, or inconsistent with evidence claims.
+
+The Reviewer Scope Analyst is also not a ninth core reviewer. It is a required
+pre-review coverage subagent. Its decision artifact must exist for every
+substantive trial before the eight core reviewers are refreshed. If it says
+`Spawn needed: yes`, the specialized reviewer instruction and specialized
+review output must exist before the core reviewer decisions can pass.
 
 Review outputs for manuscript-facing deliverables may also be mirrored or
 summarized in:
@@ -280,7 +323,7 @@ Maintain a section inside `research_trajectory/STATE.md`:
 Use this section to decide whether the autoresearch loop should continue or stop. It must include:
 
 - `Status: pass`, `continue`, `blocked`, or `needs_human`;
-- reviewer gate lines for Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, and Final gate;
+- reviewer gate lines for Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, and Final gate;
 - the current trial reviewer file path on each reviewer gate line;
 - the next action when any gate is not `pass`.
 
@@ -329,7 +372,7 @@ completed" after evidence/final gates are claimed as pass.
 Before marking any gate as `pass`, read `instructions/reviewers/REVIEW_TAXONOMY.md`. Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results and require `continue` unless the relevant reviewer standard is fully satisfied.
 
 The Final gate reviewer is required before the loop can stop. It must confirm
-that all seven other current-trial reviewer files exist and pass under the shared
+that all non-final current-trial reviewer files exist and pass under the shared
 output schema, and that no blocking issues, required actions, unresolved
 qualifications, active revision constraints, critical unassessed areas,
 outdated reviewer instructions, incomplete final blueprint sections, or stale
@@ -341,7 +384,13 @@ If a reviewer cannot yet pass because prerequisites are missing, mark that revie
 
 ## Reviewer Spawning
 
-If the current task requires a specialized review perspective not covered by existing reviewers, follow:
+Before refreshing core reviewers, follow:
+
+`instructions/REVIEWER_SCOPE_ANALYST.md`
+
+The main execution agent must spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks.
+
+If that decision says a specialized review is needed, follow:
 
 `instructions/reviewers/REVIEWER_SPAWNING.md`
 
@@ -349,7 +398,8 @@ Spawned reviewers are instruction files, not review outputs. Their review
 results go into the relevant trial `reviews/` directory or `manuscript/reviews/`
 when manuscript-facing.
 
-Create a new reviewer only when it addresses a clear quality risk.
+Create a new reviewer only when the Reviewer Scope Analyst identifies a clear
+quality risk that existing reviewer instructions do not cover.
 
 ---
 
@@ -434,6 +484,11 @@ If a project has a target venue but no seed papers, create an early trial to col
 ## Resource Acquisition Policy
 
 For user-provided or inferred resources, follow `instructions/RESOURCE_INTAKE.md` first. This policy covers agent-initiated acquisition during research after intake routing is complete.
+
+For planned trial-level resource search, follow `instructions/RESOURCE_SCOUT.md`.
+Scout-discovered resources are recorded as `autoresearch_discovered`, not as
+current project truth, until the main execution agent promotes them through a
+trial report or canonical state/findings/manuscript update.
 
 The agent may search for or download relevant resources when useful for the research objective, including:
 

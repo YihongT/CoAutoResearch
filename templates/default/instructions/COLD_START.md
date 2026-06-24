@@ -51,7 +51,7 @@ This trial records how raw inputs were converted or initialized into the current
 Use:
 
 - `PLAN.md` for what will be inspected and initialized;
-- `reviews/` for the seven canonical reviewer files if this trial is active;
+- `reviews/` for the eight canonical reviewer files if this trial is active;
 - `REVIEW.md` only as an optional legacy compatibility summary;
 - `REPORT.md` for what was created, what remains uncertain, and what should happen next;
 - `artifacts/` only for small supporting files produced during conversion.

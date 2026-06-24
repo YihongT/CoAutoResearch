@@ -8,7 +8,8 @@ A spawned reviewer is an instruction file, not a review output.
 
 ## When to Spawn
 
-Spawn a reviewer only when it addresses a clear quality risk, such as:
+Spawn a reviewer only when the Reviewer Scope Analyst decision says
+`Spawn needed: yes` and identifies a clear quality risk, such as:
 
 - domain-specific judgment not covered by existing reviewers;
 - statistics or causal inference risk;
@@ -68,4 +69,7 @@ reviewer files required for the autoresearch gate.
 ## Record the Spawn
 
 When spawning a reviewer, record why in the active trial `REPORT.md` or in the
-spawned review file's context summary.
+spawned review file's context summary. Also record the instruction path and
+specialized review output path in:
+
+`research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`

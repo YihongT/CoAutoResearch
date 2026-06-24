@@ -26,11 +26,11 @@ Updating the npm package updates the CLI, dashboard, and default UI runtime used
 by `co-auto-research ui` and `co-auto-research attach`. Existing project
 research files are not rewritten automatically.
 
-## Update Project Reviewers
+## Update Project Instructions
 
-Reviewer instructions are part of the quality gate. If the UI or `doctor`
-reports that an older project has outdated reviewers, update only the core
-reviewer files:
+Reviewer and trial-protocol instructions are part of the quality gate. If the UI
+or `doctor` reports that an older project has outdated core instructions, update
+only the managed core instruction files:
 
 ```bash
 co-auto-research upgrade-project
@@ -43,5 +43,5 @@ co-auto-research upgrade-project --all --projects-dir co-autoresearch-projects
 ```
 
 The command writes a backup under `archive/template_migrations/`, installs the
-latest core reviewer files, and leaves research content plus custom extra
-reviewers alone.
+latest core reviewer and protocol files, and leaves research content plus custom
+extra reviewers or other instruction files alone.

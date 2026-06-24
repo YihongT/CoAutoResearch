@@ -67,10 +67,11 @@ const baseScenarios = [
     action: "document.querySelector('#launch-dialog')?.showModal();",
   },
   {
-    name: "material-type-dialog",
-    path: "/?view=resources",
-    kind: "dialog",
-    action: "document.querySelector('#material-type-dialog')?.showModal();",
+    name: "attachment-menu",
+    path: "/?view=chat",
+    kind: "popover",
+    action: "document.querySelector('#composer-attach-button')?.click();",
+    requireAttachmentMenu: true,
   },
   {
     name: "resource-browser",
@@ -871,7 +872,7 @@ async function evaluate(client, sessionId, expression, options = {}) {
   return result.result?.value;
 }
 
-function browserAuditExpression({ desktop, requireManuscriptCentering, emptyMode }) {
+function browserAuditExpression({ desktop, requireManuscriptCentering, requireAttachmentMenu, emptyMode }) {
   return `(() => {
     const issues = [];
     const viewport = { width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth };
@@ -928,6 +929,23 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, emptyMode
         }
       }
     }
+    if (${requireAttachmentMenu ? "true" : "false"}) {
+      const menu = document.querySelector('#attachment-menu');
+      const upload = document.querySelector('[data-attachment-action="upload-files"]');
+      const link = document.querySelector('[data-attachment-action="link-folders"]');
+      const menuRect = rectFor(menu);
+      const buttonRect = rectFor(document.querySelector('#composer-attach-button'));
+      if (!visible(menu) || menu.hidden) {
+        issues.push({ type: 'attachment-menu-hidden', message: 'composer plus did not open a visible attachment menu', rect: menuRect, button: buttonRect });
+      } else {
+        if (!visible(upload) || !visible(link)) {
+          issues.push({ type: 'attachment-menu-items', message: 'attachment menu is missing visible upload/link actions', upload: rectFor(upload), link: rectFor(link) });
+        }
+        if (!inViewport(menuRect)) {
+          issues.push({ type: 'attachment-menu-viewport', message: 'attachment menu opens outside the viewport', rect: menuRect, viewport });
+        }
+      }
+    }
     const openDialogs = [...document.querySelectorAll('dialog[open]')].filter(visible);
     for (const dialog of openDialogs) {
       if (!visible(dialog)) continue;
@@ -938,7 +956,7 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, emptyMode
     }
     const topDialog = openDialogs.at(-1) || null;
     const controlRoot = topDialog || document;
-    const overlapSkipSelectors = ['.trial-strip', '.review-trial-strip', '.markdown-preview', '.paper-linked-block', '.story-map-hero', '.browser-pathbar'];
+    const overlapSkipSelectors = ['.attachment-menu', '.trial-strip', '.review-trial-strip', '.markdown-preview', '.paper-linked-block', '.story-map-hero', '.browser-pathbar'];
     const controls = [...controlRoot.querySelectorAll('button, input, select, textarea, [role="button"]')]
       .filter(visible)
       .map((el, index) => ({ el, index, tag: el.tagName.toLowerCase(), text: (el.textContent || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 80), rect: rectFor(el) }))
@@ -1050,6 +1068,7 @@ async function runScenario({ client, server, mode, scenario, theme, viewport, ch
       browserAuditExpression({
         desktop: viewport.width > 820,
         requireManuscriptCentering: Boolean(scenario.requireManuscriptCentering),
+        requireAttachmentMenu: Boolean(scenario.requireAttachmentMenu),
         emptyMode: mode === "empty",
       })
     );

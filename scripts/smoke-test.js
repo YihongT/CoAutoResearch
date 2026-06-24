@@ -343,6 +343,13 @@ try {
   if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-publication-ready-tables") {
     throw new Error("new projects should record the reviewer baseline");
   }
+  if (
+    !reviewerMetadata.coreReviewerFiles?.["REFERENCE_REVIEWER.md"] ||
+    !reviewerMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
+    !reviewerMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
+  ) {
+    throw new Error("new projects should record reference reviewer and core protocol baselines");
+  }
   const staleReviewerFixtureRoot = path.join(tempRoot, "upgrade-fixtures");
   await fsp.mkdir(staleReviewerFixtureRoot, { recursive: true });
   const staleReviewerProject = path.join(staleReviewerFixtureRoot, "stale-reviewers");
@@ -402,25 +409,44 @@ Confidence: medium
 - source-level provenance
 `, "utf8");
   const customReviewer = path.join(staleReviewerProject, "instructions", "reviewers", "CUSTOM_REVIEWER.md");
+  const customInstruction = path.join(staleReviewerProject, "instructions", "CUSTOM_PROTOCOL.md");
   await fsp.writeFile(customReviewer, "# Custom Reviewer\n", "utf8");
+  await fsp.writeFile(customInstruction, "# Custom Protocol\n", "utf8");
   await fsp.rm(path.join(staleReviewerProject, "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"));
+  await fsp.rm(path.join(staleReviewerProject, "instructions", "RESOURCE_SCOUT.md"));
+  await fsp.rm(path.join(staleReviewerProject, "instructions", "REVIEWER_SCOPE_ANALYST.md"));
   await fsp.rm(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"));
   const dryRunUpgrade = execFileSync("node", [cli, "upgrade-project", staleReviewerProject, "--dry-run"], { cwd: root, encoding: "utf8" });
-  if (!dryRunUpgrade.includes("would sync core reviewers")) {
+  if (!dryRunUpgrade.includes("would sync core reviewers, core protocol instructions")) {
     throw new Error(`upgrade-project --dry-run should report planned reviewer sync:\n${dryRunUpgrade}`);
   }
   const reviewerUpgradeOutput = execFileSync("node", [cli, "upgrade-project", staleReviewerProject], { cwd: root, encoding: "utf8" });
-  if (!reviewerUpgradeOutput.includes("synced 9 core reviewers")) {
+  if (!reviewerUpgradeOutput.includes("synced 10 core reviewers") || !reviewerUpgradeOutput.includes("synced 4 core protocol instructions")) {
     throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
   }
   const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
   if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-publication-ready-tables" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
     throw new Error("upgrade-project should write reviewer baseline metadata");
   }
+  if (
+    !upgradedMetadata.coreReviewerFiles?.["REFERENCE_REVIEWER.md"] ||
+    !upgradedMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
+    !upgradedMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
+  ) {
+    throw new Error("upgrade-project should write core reviewer and protocol baseline hashes");
+  }
   try {
     await fsp.access(customReviewer);
+    await fsp.access(customInstruction);
   } catch {
-    throw new Error("upgrade-project should preserve custom extra reviewers");
+    throw new Error("upgrade-project should preserve custom extra reviewer and instruction files");
+  }
+  try {
+    await fsp.access(path.join(staleReviewerProject, "instructions", "reviewers", "REFERENCE_REVIEWER.md"));
+    await fsp.access(path.join(staleReviewerProject, "instructions", "RESOURCE_SCOUT.md"));
+    await fsp.access(path.join(staleReviewerProject, "instructions", "REVIEWER_SCOPE_ANALYST.md"));
+  } catch {
+    throw new Error("upgrade-project should install reference reviewer and core protocol files");
   }
   const migrationDirs = await fsp.readdir(path.join(staleReviewerProject, "archive", "template_migrations"));
   if (!migrationDirs.length) {
@@ -440,8 +466,13 @@ Confidence: medium
   const resourceIntakeInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "RESOURCE_INTAKE.md"), "utf8");
   const conversionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "CONVERSION.md"), "utf8");
   const executionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "EXECUTION_AGENT.md"), "utf8");
+  const resourceScoutInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "RESOURCE_SCOUT.md"), "utf8");
+  const reviewerScopeInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "REVIEWER_SCOPE_ANALYST.md"), "utf8");
   const planReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "PLAN_REVIEWER.md"), "utf8");
   const processReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "PROCESS_REVIEWER.md"), "utf8");
+  const evidenceReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "EVIDENCE_REVIEWER.md"), "utf8");
+  const referenceReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "REFERENCE_REVIEWER.md"), "utf8");
+  const finalGateReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
   const notesEntrypointTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "NOTES.md"), "utf8");
   const notesIndexTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "index.md"), "utf8");
   const resourceManifestTemplate = await fsp.readFile(path.join(root, "templates", "default", "resources", "user_input", "RESOURCE_MANIFEST.md"), "utf8");
@@ -456,6 +487,36 @@ Confidence: medium
     !literatureReadme.includes("surface them here")
   ) {
     throw new Error("resource intake must surface embedded ongoing-work bibliographies without confusing them with target-venue seed papers");
+  }
+  if (
+    !resourceScoutInstructions.includes("## Resource Scout Brief") ||
+    !resourceScoutInstructions.includes("Scout: required | skipped") ||
+    !resourceScoutInstructions.includes("spawn a Resource Scout subagent to search, file, and report external resources for this trial") ||
+    !resourceScoutInstructions.includes("research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md") ||
+    !resourceScoutInstructions.includes("resources/user_input/RESOURCE_MANIFEST.md") ||
+    !resourceScoutInstructions.includes("autoresearch_discovered") ||
+    resourceScoutInstructions.includes("spawn or run the Resource Scout") ||
+    !executionInstructions.includes("including the required `Resource Scout Brief`") ||
+    !executionInstructions.includes("RESOURCE_SCOUT_REPORT.md") ||
+    !executionInstructions.includes("REVIEWER_SPAWN_DECISION.md") ||
+    !executionInstructions.includes("spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks") ||
+    !executionInstructions.includes("not a ninth core reviewer") ||
+    !reviewerScopeInstructions.includes("spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks") ||
+    !reviewerScopeInstructions.includes("research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md") ||
+    !reviewerScopeInstructions.includes("Spawn needed: yes | no") ||
+    !resourceIntakeInstructions.includes("## Resource Scout Discoveries") ||
+    !resourceIntakeInstructions.includes("Scout-discovered materials remain raw inputs") ||
+    !planReviewerInstructions.includes("includes the required `Resource Scout Brief`") ||
+    !planReviewerInstructions.includes("gives a concrete `Skip reason:`") ||
+    !processReviewerInstructions.includes("Resource Scout process status") ||
+    !processReviewerInstructions.includes("Reviewer Scope Analyst decision status") ||
+    !evidenceReviewerInstructions.includes("scout-discovered resources treated as raw inputs") ||
+    !evidenceReviewerInstructions.includes("reviewer spawn decision") ||
+    !referenceReviewerInstructions.includes("citation-ready metadata") ||
+    !finalGateReviewerInstructions.includes("Resource Scout status") ||
+    !finalGateReviewerInstructions.includes("Reviewer Scope Analyst status")
+  ) {
+    throw new Error("resource scout and reviewer-scope protocols must be wired into execution, intake, and relevant reviewers");
   }
   if (
     executionInstructions.includes("Mandatory note triggers") ||
@@ -604,6 +665,14 @@ Confidence: medium
     throw new Error("framing composer and CoAutoResearch returns must share a centered column");
   }
   if (
+    !stylesCss.includes("Final empty-framing bottom guard") ||
+    !stylesCss.includes("#cold-start-workspace:not(.has-framing-thread)") ||
+    !stylesCss.includes("min-height: calc(100dvh - 36px)") ||
+    !stylesCss.includes("margin: clamp(24px, 8vh, 92px) auto auto !important;")
+  ) {
+    throw new Error("empty framing page must keep target/composer bottom-aligned even on short CSS viewports");
+  }
+  if (
     !appVersion ||
     !stylesCss.includes("Reader typography: match the composer text across content surfaces.") ||
     !stylesCss.includes(".framing-message .transcript-body") ||
@@ -681,20 +750,44 @@ Confidence: medium
     !indexHtml.includes('id="composer-attach-button"') ||
     !indexHtml.includes('id="composer-file-input"') ||
     !indexHtml.includes('type="file" multiple hidden') ||
-    !indexHtml.includes("Browse or drop resources") ||
-    !appJs.includes('$("#composer-attach-button")?.addEventListener("click"') ||
+    !indexHtml.includes('/styles.css?v=20260624-framing-bottom-1') ||
+    !indexHtml.includes('/app.js?v=20260624-framing-bottom-1') ||
+    indexHtml.includes("Claude Fable") ||
+    !indexHtml.includes('id="attachment-menu"') ||
+    !indexHtml.includes('data-attachment-action="upload-files"') ||
+    !indexHtml.includes('data-attachment-action="link-folders"') ||
+    !indexHtml.includes("Drag files here, or use + to upload files/link folders") ||
+    indexHtml.includes("material-action-chip") ||
+    indexHtml.includes("material-type-dialog") ||
+    !appJs.includes('event.target.closest("#composer-attach-button")') ||
     !appJs.includes('$("#composer-file-input")?.addEventListener("change"') ||
     !appJs.includes("function openComposerFilePicker") ||
+    !appJs.includes("function ensureAttachmentMenu") ||
+    !appJs.includes("document.body.appendChild(menu)") ||
+    !appJs.includes("function positionAttachmentMenu") ||
+    !appJs.includes("function fitComposerSelectWidths") ||
+    !appJs.includes("function reasoningOptionsForBackendModel") ||
+    !appJs.includes("function syncPermissionSelectOptions") ||
+    !appJs.includes("bypassPermissions") ||
+    appJs.includes("Claude Fable") ||
+    !appJs.includes("function toggleAttachmentMenu") ||
+    !appJs.includes("function handleAttachmentMenuAction") ||
+    !appJs.includes("function resolveProjectIdAlias") ||
+    !appJs.includes("const resolvedProjectId = resolveProjectIdAlias(projects, activeProjectId)") ||
+    appJs.includes("function chooseMaterialType") ||
+    appJs.includes("function showMaterialTypeDialog") ||
     !appJs.includes("const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024") ||
     !appJs.includes("size > MAX_BROWSER_UPLOAD_BYTES") ||
     !appJs.includes("Copy it into project resources before sending.") ||
-    !appJs.includes("function chooseMaterialType") ||
     !appJs.includes("showResourceBrowser();") ||
     !appJs.includes('addFilesFromList(event.target.files, "file picker", { category })') ||
     !appJs.includes('user_input: "User input"') ||
     !serverPy.includes('"user_input": "resources/user_input/attachments"') ||
     !stylesCss.includes(".composer-attach-button") ||
     !stylesCss.includes(".composer-file-input") ||
+    !stylesCss.includes(".attachment-menu") ||
+    !stylesCss.includes("position: fixed;") ||
+    !stylesCss.includes("z-index: 1400;") ||
     !readme.includes("composer `+` button") ||
     !readme.includes("resources/user_input/attachments/") ||
     !gettingStartedDocs.includes("resources/user_input/attachments/") ||
@@ -1352,7 +1445,9 @@ Confidence: medium
       "no_auto = module.claude_permission_mode_status({'permissionPreset': 'auto-review'}, no_auto_env)",
       "assert no_auto['blocking'] and no_auto['mode'] == 'auto', no_auto",
       "default_mode = module.claude_permission_mode_status({'permissionPreset': 'default'}, no_auto_env)",
-      "assert default_mode['ok'] and not default_mode['blocking'], default_mode",
+      "assert default_mode['ok'] and not default_mode['blocking'] and default_mode['mode'] == 'default', default_mode",
+      "plan_mode = module.claude_permission_mode_status({'permissionPreset': 'plan'}, no_auto_env)",
+      "assert plan_mode['ok'] and not plan_mode['blocking'] and plan_mode['mode'] == 'plan', plan_mode",
       "try:",
       "    module.ensure_agent_ready('claude', no_auto_env, {'permissionPreset': 'auto-review'})",
       "    raise AssertionError('unsupported Claude auto permission mode should block readiness')",
@@ -1417,7 +1512,7 @@ Confidence: medium
       "assert pathlib.Path(codex_new_cmd[0]).name.startswith('codex'), codex_new_cmd",
       "assert codex_new_cmd[1] == 'exec' and '--json' in codex_new_cmd and codex_new_cmd[-1] == '-', codex_new_cmd",
       "assert codex_resume_cmd[1:3] == ['exec', 'resume'] and '00000000-0000-0000-0000-000000000111' in codex_resume_cmd and codex_resume_cmd[-1] == '-', codex_resume_cmd",
-      "settings = module.normalize_research_settings({'backend': 'claude', 'model': 'sonnet', 'reasoningEffort': 'high', 'permissionPreset': 'full-access', 'webSearch': False, 'reviewCheckpointInterval': '25'})",
+      "settings = module.normalize_research_settings({'backend': 'claude', 'model': 'sonnet', 'reasoningEffort': 'high', 'permissionPreset': 'bypassPermissions', 'webSearch': False, 'reviewCheckpointInterval': '25'})",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000123', 'backend': 'claude', 'settings': settings, 'logs': [], 'raw_logs': [], 'transcript': []})",
       "new_cmd = module.agent_command_for_prompt(False, settings)",
       "resume_cmd = module.agent_command_for_prompt(True, settings)",
@@ -1426,6 +1521,30 @@ Confidence: medium
       "assert '--permission-mode' in new_cmd and 'bypassPermissions' in new_cmd, new_cmd",
       "assert '--disallowedTools' in new_cmd and 'WebSearch,WebFetch' in new_cmd, new_cmd",
       "assert '--resume' in resume_cmd and '00000000-0000-0000-0000-000000000123' in resume_cmd, resume_cmd",
+      "sonnet_max = module.normalize_research_settings({'backend': 'claude', 'model': 'sonnet', 'reasoningEffort': 'max'})",
+      "assert sonnet_max['reasoningEffort'] == 'max', sonnet_max",
+      "assert '--effort' in module.settings_to_claude_args(sonnet_max, False) and 'max' in module.settings_to_claude_args(sonnet_max, False), module.settings_to_claude_args(sonnet_max, False)",
+      "sonnet_xhigh = module.normalize_research_settings({'backend': 'claude', 'model': 'sonnet', 'reasoningEffort': 'xhigh'})",
+      "assert sonnet_xhigh['reasoningEffort'] == 'high', sonnet_xhigh",
+      "opus_xhigh = module.normalize_research_settings({'backend': 'claude', 'model': 'opus', 'reasoningEffort': 'xhigh'})",
+      "assert opus_xhigh['reasoningEffort'] == 'xhigh', opus_xhigh",
+      "opus46_xhigh = module.normalize_research_settings({'backend': 'claude', 'model': 'claude-opus-4-6', 'reasoningEffort': 'xhigh'})",
+      "assert opus46_xhigh['reasoningEffort'] == 'high', opus46_xhigh",
+      "default_effort = module.normalize_research_settings({'backend': 'claude', 'model': 'default', 'reasoningEffort': 'high'})",
+      "assert default_effort['reasoningEffort'] == '', default_effort",
+      "disabled_fable = module.normalize_research_settings({'backend': 'claude', 'model': 'fable', 'reasoningEffort': 'max'})",
+      "assert disabled_fable['model'] == 'sonnet' and disabled_fable['reasoningEffort'] == 'max', disabled_fable",
+      "assert 'fable' not in module.settings_to_claude_args(disabled_fable, False), module.settings_to_claude_args(disabled_fable, False)",
+      "haiku_effort = module.normalize_research_settings({'backend': 'claude', 'model': 'haiku', 'reasoningEffort': 'high'})",
+      "haiku_cmd = module.settings_to_claude_args(haiku_effort, False)",
+      "assert haiku_effort['reasoningEffort'] == '', haiku_effort",
+      "assert '--effort' not in haiku_cmd, haiku_cmd",
+      "legacy_auto = module.normalize_research_settings({'backend': 'claude', 'permissionPreset': 'auto-review'})",
+      "assert legacy_auto['permissionPreset'] == 'auto' and legacy_auto['permissionMode'] == 'auto', legacy_auto",
+      "legacy_full = module.normalize_research_settings({'backend': 'claude', 'permissionPreset': 'full-access'})",
+      "assert legacy_full['permissionPreset'] == 'bypassPermissions' and legacy_full['permissionMode'] == 'bypassPermissions', legacy_full",
+      "official_default = module.settings_to_claude_args(module.normalize_research_settings({'backend': 'claude', 'permissionPreset': 'default'}), False)",
+      "assert '--permission-mode' in official_default and 'default' in official_default, official_default",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000111', 'backend': 'codex', 'settings': codex_settings, 'status': 'completed'})",
       "assert module.should_resume_research_session(codex_settings) is True",
       "assert module.should_resume_research_session(settings) is False",
@@ -1559,6 +1678,8 @@ Confidence: medium
       "spec.loader.exec_module(module)",
       "base = module.autoresearch_goal_prompt()",
       "custom = module.autoresearch_goal_prompt('Prioritize source-level evidence.')",
+      "continue_prompt = module.continue_autoresearch_loop_prompt({'status': 'continue', 'summary': 'still open'}, 2)",
+      "intervention_prompt = module.intervention_goal_prompt('research_trajectory/human_interventions/pending/I0001.md', 'change scope')",
       "assert not base.lstrip().startswith('/goal'), base.splitlines()[0]",
       "assert base.startswith('Start the CoAutoResearch autoresearch process from PROJECT.md.'), base.splitlines()[0]",
       "assert not custom.lstrip().startswith('/goal'), custom.splitlines()[0]",
@@ -1572,6 +1693,21 @@ Confidence: medium
       "restart = module.restart_autoresearch_prompt('restart_1', 'archive/restarts/restart_1/restart_manifest.json', '')",
       "assert not restart.lstrip().startswith('/goal'), restart.splitlines()[0]",
       "assert restart.startswith('Restart the CoAutoResearch autoresearch process from a clean active trajectory.'), restart.splitlines()[0]",
+      "prompts = {'base': base, 'custom': custom, 'continue': continue_prompt, 'intervention': intervention_prompt, 'resume': resume, 'restart': restart}",
+      "review_files = ['PLAN_REVIEW.md', 'PROCESS_REVIEW.md', 'EVIDENCE_REVIEW.md', 'VENUE_FIT_REVIEW.md', 'MANUSCRIPT_REVIEW.md', 'FIGURE_TABLE_REVIEW.md', 'REFERENCE_REVIEW.md', 'FINAL_GATE_REVIEW.md']",
+      "assert all('## Resource Scout Brief' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Scout: required | skipped' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Skip reason:' in prompt for prompt in prompts.values()), prompts",
+      "assert all('RESOURCE_SCOUT_REPORT.md' in prompt for prompt in prompts.values()), prompts",
+      "assert all('instructions/RESOURCE_SCOUT.md' in prompt for prompt in prompts.values()), prompts",
+      "assert all('spawn a Resource Scout subagent to search, file, and report external resources for this trial' in prompt for prompt in prompts.values()), prompts",
+      "assert all('spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial\\'s review risks' in prompt for prompt in prompts.values()), prompts",
+      "assert all('REVIEWER_SPAWN_DECISION.md' in prompt for prompt in prompts.values()), prompts",
+      "assert all('instructions/REVIEWER_SCOPE_ANALYST.md' in prompt for prompt in prompts.values()), prompts",
+      "assert all('spawn or run the Resource Scout' not in prompt for prompt in prompts.values()), prompts",
+      "assert all('autoresearch_discovered' in prompt and 'not current truth' in prompt for prompt in prompts.values()), prompts",
+      "assert all(all(name in prompt for name in review_files) for prompt in prompts.values()), prompts",
+      "assert all('Reference' in prompt and 'Final gate' in prompt for prompt in prompts.values()), prompts",
       "assert module.infer_trial_status('Resource intake is no longer blocked by stale clues.', '', '# Report\\n\\nReplaced scaffold placeholders.') == 'reported'",
       "assert module.infer_trial_status('Status: blocked', '', '') == 'blocked'",
       "print('launch-prompt-ok')",
@@ -1660,6 +1796,54 @@ Confidence: medium
     throw new Error(`resource import smoke returned ${resourceImportOutput}`);
   }
 
+  const localBrowserPathScript = [
+    "import importlib.util, json, os, pathlib",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "root = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT'])",
+    "module._CONTEXT.project = module.ProjectContext(root)",
+    "fixture = root / 'workspace' / 'path fixture'",
+    "fixture.mkdir(parents=True, exist_ok=True)",
+    "source_file = fixture / 'source note.txt'",
+    "source_file.write_text('local browser path fixture\\n', encoding='utf-8')",
+    "quoted = module.clean_local_path_input(f'\"{fixture}\"')",
+    "assert pathlib.Path(quoted).resolve() == fixture.resolve(), quoted",
+    "os.environ['COAUTO_PATH_FIXTURE'] = str(fixture)",
+    "expanded = module.clean_local_path_input('%COAUTO_PATH_FIXTURE%')",
+    "assert pathlib.Path(expanded).resolve() == fixture.resolve(), expanded",
+    "assert module.clean_local_path_input(r'\\\\?\\E:\\Github\\Repo') == r'E:\\Github\\Repo'",
+    "unc = module.clean_local_path_input(r'\\\\?\\UNC\\server\\share')",
+    "assert unc.startswith(('\\\\\\\\server', '//server')), unc",
+    "directory = module.browse_local_path(fixture.as_uri())",
+    "assert directory['ok'] is True and pathlib.Path(directory['path']).resolve() == fixture.resolve(), directory",
+    "selected = module.browse_local_path(source_file.as_uri())",
+    "assert selected['ok'] is True and pathlib.Path(selected['path']).resolve() == fixture.resolve(), selected",
+    "assert selected['selected_type'] == 'file' and pathlib.Path(selected['selected_path']).resolve() == source_file.resolve(), selected",
+    "missing = module.browse_local_path(str(fixture / 'missing folder'))",
+    "assert missing['ok'] is False and missing['error'].startswith('Path does not exist or cannot be opened:'), missing",
+    "saved = module.save_resource_links({'resourceLinks': [{'path': source_file.as_uri(), 'category': 'user_input'}]})",
+    "assert saved and pathlib.Path(saved[0]['source']).resolve() == source_file.resolve(), saved",
+    "print(json.dumps({'directory': directory['path'], 'selected': selected['selected_type'], 'saved': saved[0]['path']}))"
+  ].join("\n");
+  const localBrowserPathOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    localBrowserPathScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!localBrowserPathOutput.includes('"selected": "file"')) {
+    throw new Error(`local browser path smoke returned ${localBrowserPathOutput}`);
+  }
+
   const externalRepo = path.join(tempRoot, "LLMShopper-TBS-Test");
   await fsp.mkdir(externalRepo, { recursive: true });
   await fsp.writeFile(path.join(externalRepo, "README.md"), "external repo material\n", "utf8");
@@ -1744,7 +1928,7 @@ Confidence: medium
     "        if key == 'final_gate':",
     "            continue",
     "        (review_dir / config['file']).write_text(review_template.format(reviewer=config['label'], scope=config['scope'], instruction=config['instruction']), encoding='utf-8')",
-    "    (review_dir / 'FINAL_GATE_REVIEW.md').write_text(\"\"\"Reviewer: Final gate reviewer\nScope: final-gate\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `instructions/reviewers/FINAL_GATE_REVIEWER.md`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/REFERENCE_REVIEW.md`\n\n## Context Summary\n\nSmoke test final gate fixture.\n\n## Artifact Consistency Audit\n\n- reviewer baseline status: current\n- final blueprint section completeness: complete\n- target manual section title/order fidelity: complete\n- paragraph plan completeness: complete\n- accepted claims vs candidate claims status: accepted\n- blocking missing evidence status: none\n- figure plan completeness: complete\n- figure paragraph placement completeness: complete\n- table plan or no-table rationale completeness: complete\n- table paragraph placement and source/result completeness: complete\n- reference/literature grounding completeness: complete\n- appendix/supplement plan completeness: complete\n- stale contradiction scan result: none\n- exact reason the gate can pass: all required checks passed\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\", encoding='utf-8')",
+    "    (review_dir / 'FINAL_GATE_REVIEW.md').write_text(\"\"\"Reviewer: Final gate reviewer\nScope: final-gate\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `instructions/reviewers/FINAL_GATE_REVIEWER.md`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `research_trajectory/trials/000001_final_smoke/reviews/PLAN_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/PROCESS_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/EVIDENCE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/VENUE_FIT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/MANUSCRIPT_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/FIGURE_TABLE_REVIEW.md`\n- `research_trajectory/trials/000001_final_smoke/reviews/REFERENCE_REVIEW.md`\n\n## Context Summary\n\nSmoke test final gate fixture.\n\n## Artifact Consistency Audit\n\n- core instruction baseline status: current\n- final blueprint section completeness: complete\n- target manual section title/order fidelity: complete\n- paragraph plan completeness: complete\n- accepted claims vs candidate claims status: accepted\n- blocking missing evidence status: none\n- figure plan completeness: complete\n- figure paragraph placement completeness: complete\n- table plan or no-table rationale completeness: complete\n- table paragraph placement and source/result completeness: complete\n- reference/literature grounding completeness: complete\n- Resource Scout status: skipped with valid reason\n- Reviewer Scope Analyst status: decision present; no specialized review needed\n- appendix/supplement plan completeness: complete\n- stale contradiction scan result: none\n- exact reason the gate can pass: all required checks passed\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\", encoding='utf-8')",
     "    module.write_reviewer_baseline_metadata(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
     "assert module.normalize_gate_status('ready for targeted revision') == 'continue'",
     "assert module.normalize_gate_status('completed') == 'continue'",
@@ -2169,6 +2353,20 @@ Confidence: medium
       "dashboard = module.ProjectRegistry(temp_root, temp_root)",
       "names = sorted(item['display_name'] for item in dashboard.summaries())",
       "assert names == ['project', 'project-two', 'sibling project'], names",
+      "project_ctx = dashboard.context_for('project')",
+      "assert project_ctx.root.resolve() == project_dir.resolve(), project_ctx.root",
+      "assert dashboard.context_for(project_ctx.id).root.resolve() == project_dir.resolve()",
+      "assert dashboard.context_for(project_dir.name).root.resolve() == project_dir.resolve()",
+      "assert dashboard.context_for(project_dir.relative_to(temp_root).as_posix()).root.resolve() == project_dir.resolve()",
+      "assert dashboard.context_for(str(project_dir)).root.resolve() == project_dir.resolve()",
+      "assert dashboard.context_for('project-two').root.name == 'project-two'",
+      "stub_dir = temp_root / 'stub_project'",
+      "(stub_dir / 'research_trajectory').mkdir(parents=True)",
+      "(stub_dir / 'research_trajectory' / 'TRAJECTORY.json').write_text('{}\\n', encoding='utf-8')",
+      "stub_created = dashboard.create_project({'name': 'stub project'})",
+      "assert stub_created['display_name'] == 'stub project', stub_created",
+      "assert (stub_dir / 'PROJECT.md').exists() and (stub_dir / 'ui' / 'server.py').exists()",
+      "dashboard.delete_project({'project': stub_created['id'], 'confirm': 'stub project'})",
       "created = dashboard.create_project({'name': 'ui project'})",
       "assert created['display_name'] == 'ui project', created",
       "assert (temp_root / 'ui_project' / '.co-auto-research' / 'project.json').exists()",

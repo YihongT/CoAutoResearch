@@ -10,6 +10,7 @@ Review a trial `PLAN.md` before execution.
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
+- `instructions/RESOURCE_SCOUT.md`
 - current trial `PLAN.md`
 - recent relevant trial `REPORT.md` files if needed
 
@@ -31,6 +32,12 @@ Check whether the plan:
 - needs method grounding or literature grounding;
 - has interpretable success criteria;
 - records what outputs should update `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/`, or knowledge notes;
+- includes the required `Resource Scout Brief`;
+- uses `Scout: required` by default for substantive trials;
+- gives a concrete `Skip reason:` if `Scout: skipped`;
+- gives enough search scope, resource types, disciplines/domains, download
+  policy, expected destinations, and stop criteria for the scout step to be
+  auditable;
 - declares possible knowledge-capture outputs when the plan may produce reusable
   resource, method, negative-result, manuscript, process, or preference lessons.
 

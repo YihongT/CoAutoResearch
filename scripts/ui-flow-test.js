@@ -20,6 +20,7 @@ function loadAppContext() {
   const clipboardWrites = [];
   const element = (extra = {}) => {
     const classes = new Set(extra.classNames || []);
+    const listeners = new Map();
     return {
       value: "",
       hidden: false,
@@ -42,14 +43,27 @@ function loadAppContext() {
         contains(name) { return classes.has(name); },
         toString() { return Array.from(classes).join(" "); },
       },
-      addEventListener() {},
-      dispatchEvent() {},
-      appendChild() {},
-      insertAdjacentElement() {},
+      addEventListener(type, callback) {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(callback);
+      },
+      dispatchEvent(event) {
+        const callbacks = listeners.get(event?.type) || [];
+        callbacks.forEach((callback) => callback(event));
+      },
+      appendChild(child) {
+        if (child && typeof child === "object") child.parentElement = this;
+        return child;
+      },
+      insertAdjacentElement(_position, child) {
+        if (child && typeof child === "object") child.parentElement = this.parentElement || this;
+        return child;
+      },
       remove() {},
       select() {},
       focus() {},
       setAttribute(name, value) { this[name] = String(value); },
+      getAttribute(name) { return this[name]; },
       removeAttribute(name) { delete this[name]; },
       setSelectionRange() {},
       toggleAttribute(name, force) { this[name] = Boolean(force); },
@@ -74,6 +88,15 @@ function loadAppContext() {
       this.clickCount += 1;
     },
   });
+  const composerAttachButton = element({
+    getBoundingClientRect() {
+      return { left: 350, top: 720, right: 390, bottom: 760, width: 40, height: 40 };
+    },
+    closest(selector) {
+      return selector === "#composer-attach-button" ? this : null;
+    },
+  });
+  const attachmentMenu = element({ hidden: true, offsetHeight: 114 });
   const resumeCommandBar = element({ hidden: true });
   const resumeCommandLabel = element();
   const resumeCommandText = element();
@@ -193,6 +216,8 @@ function loadAppContext() {
     ["#brief-attachment-tray", element()],
     ["#chat-attachment-tray", element()],
     ["#composer-file-input", composerFileInput],
+    ["#composer-attach-button", composerAttachButton],
+    ["#attachment-menu", attachmentMenu],
     [".trial-strip-scroll", trialStripScroll],
     ["#project-draft-editor", projectEditor],
     ["#target-venue", element()],
@@ -241,6 +266,14 @@ function loadAppContext() {
     ["#resume-command-label", resumeCommandLabel],
     ["#resume-command-text", resumeCommandText],
     ["#copy-resume-command", copyResumeCommand],
+    ["#browser-roots", element()],
+    ["#browser-current-path", element()],
+    ["#browser-up", element()],
+    ["#browser-add-current", element()],
+    ["#browser-search", element()],
+    ["#browser-jump", element()],
+    ["#browser-note", element()],
+    ["#browser-entries", element()],
     ["#settings-secret-grid", element()],
     ["#settings-agent-status", element()],
   ].forEach(([selector, value]) => elements.set(selector, value));
@@ -541,17 +574,98 @@ function loadAppContext() {
         clicks: input?.clickCount || 0,
       };
     };
-    globalThis.__chooseMaterialTypeProbe = (category) => {
-      chooseMaterialType(category);
+    globalThis.__attachmentMenuState = () => {
+      const menu = document.querySelector("#attachment-menu");
+      const button = document.querySelector("#composer-attach-button");
       return {
         ...globalThis.__filePickerState(),
+        hidden: menu?.hidden ?? true,
+        parentIsBody: menu?.parentElement === document.body,
+        left: menu?.style?.left || "",
+        top: menu?.style?.top || "",
+        bottom: menu?.style?.bottom || "",
+        width: menu?.style?.width || "",
+        expanded: button?.getAttribute?.("aria-expanded") || button?.["aria-expanded"] || "",
         browserOpenCount: globalThis.__browserOpenCount,
         browserOpenCategory: globalThis.__browserOpenCategory,
       };
     };
-    globalThis.__openFilePickerProbe = (category) => {
-      openComposerFilePicker(category);
-      return globalThis.__filePickerState();
+    globalThis.__toggleAttachmentMenuProbe = () => {
+      toggleAttachmentMenu();
+      return globalThis.__attachmentMenuState();
+    };
+    globalThis.__bodyClickAttachmentButtonProbe = () => {
+      const event = {
+        type: "click",
+        target: document.querySelector("#composer-attach-button"),
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+      };
+      document.body.dispatchEvent(event);
+      return { ...globalThis.__attachmentMenuState(), defaultPrevented: event.defaultPrevented };
+    };
+    globalThis.__attachmentActionProbe = (action) => {
+      handleAttachmentMenuAction(action);
+      return globalThis.__attachmentMenuState();
+    };
+    globalThis.__closeAttachmentMenuProbe = () => {
+      setAttachmentMenuOpen(false);
+      return globalThis.__attachmentMenuState();
+    };
+    globalThis.__browserPathClassificationProbe = (values) => values.map((value) => [value, isBrowserPathInput(value)]);
+    globalThis.__browserInputProbe = async (value) => {
+      globalThis.__apiCalls = [];
+      globalThis.__apiHandler = async (endpoint) => ({
+        ok: true,
+        path: "/current",
+        parent: "/",
+        roots: [],
+        entries: [{ name: "paper.pdf", path: "/current/paper.pdf", type: "file" }],
+      });
+      localBrowserPath = "/current";
+      document.querySelector("#browser-search").value = value;
+      handleBrowserSearchInput(value);
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      clearTimeout(browserSearchTimer);
+      const calls = globalThis.__apiCalls.map((call) => call.endpoint);
+      globalThis.__apiHandler = null;
+      return {
+        calls,
+        query: browserSearchQuery,
+        searchValue: document.querySelector("#browser-search")?.value || "",
+        entriesHtml: document.querySelector("#browser-entries")?.innerHTML || "",
+      };
+    };
+    globalThis.__browserJumpProbe = async (value, responsePath = "/jumped", failMessage = "") => {
+      globalThis.__apiCalls = [];
+      globalThis.__toastMessages = [];
+      globalThis.__apiHandler = async (endpoint) => {
+        if (failMessage) throw new Error(failMessage);
+        return {
+          ok: true,
+          path: responsePath,
+          parent: "/",
+          roots: [],
+          entries: [{ name: "selected", path: responsePath + "/selected", type: "directory" }],
+          selected_path: "",
+          selected_type: "",
+        };
+      };
+      localBrowserPath = "/current";
+      document.querySelector("#browser-search").value = value;
+      browserSearchQuery = value;
+      await jumpLocalBrowserInput();
+      clearTimeout(browserSearchTimer);
+      const calls = globalThis.__apiCalls.map((call) => call.endpoint);
+      globalThis.__apiHandler = null;
+      return {
+        calls,
+        path: localBrowserPath,
+        query: browserSearchQuery,
+        searchValue: document.querySelector("#browser-search")?.value || "",
+        entriesHtml: document.querySelector("#browser-entries")?.innerHTML || "",
+        toasts: globalThis.__toastMessages,
+      };
     };
     globalThis.__addUploadProbe = (file, options = {}) => {
       const before = selectedUploadItems.length;
@@ -1594,16 +1708,16 @@ function testRunningTrialUsesProgressFallback() {
         stage_label: "Reviewing",
         stage_index: 5,
         total_stages: 6,
-        summary: "Reviewing · 5/7 reviewer files",
-        detail: "3/7 reviewer gates are pass.",
+        summary: "Reviewing · 5/8 reviewer files",
+        detail: "3/8 reviewer gates are pass.",
         reviewer_count: 5,
-        reviewer_total: 7,
+        reviewer_total: 8,
         artifacts_count: 3
       }
     },
     transcript: []
   })`);
-  assert.equal(html.includes("Reviewing · 5/7 reviewer files"), true, "running trial without transcript events should show file-backed progress");
+  assert.equal(html.includes("Reviewing · 5/8 reviewer files"), true, "running trial without transcript events should show file-backed progress");
   assert.equal(html.includes("trial-progress-stepper"), true, "running trial should render the compact progress stepper");
   assert.equal(html.includes("Waiting for agent events"), false, "progress fallback should replace the weak waiting placeholder");
 }
@@ -1658,6 +1772,19 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
     }
   })`);
   assert.equal(changedTemplate, true, "actual reviewer template drift should still be detected for the project menu maintenance action");
+  const missingProtocol = app.run(`projectReviewerInstructionsOutdated({
+    reviewer_status: {
+      baseline_version: "2026-06-publication-ready-tables",
+      latest_baseline_version: "2026-06-publication-ready-tables",
+      missing: [],
+      changed: [],
+      metadata_missing: [],
+      protocol_missing: ["RESOURCE_SCOUT.md"],
+      protocol_changed: [],
+      protocol_metadata_missing: []
+    }
+  })`);
+  assert.equal(missingProtocol, true, "missing core protocol instructions should show the project maintenance action");
   const html = app.run(`__renderProjectListProbe({
     active_project_id: "project-1",
     open_project_menu: "project-1",
@@ -1915,6 +2042,86 @@ function testAgentBackendSelectorPersistsProviderSettings() {
   assert.equal(stored.agent.backend, "codex");
 }
 
+function testReasoningOptionsFollowBackendModel() {
+  const app = loadAppContext();
+  const state = app.run(`(() => {
+    const values = (backend, model) => reasoningOptionsForBackendModel(backend, model).map(([value]) => value);
+    const labels = (backend, model) => reasoningOptionsForBackendModel(backend, model).map(([, label]) => label);
+    const select = document.querySelector("#composer-reasoning");
+    syncReasoningSelectOptions(select, "claude", "sonnet", "xhigh");
+    const sonnetHtml = select.innerHTML;
+    const sonnetValue = select.value;
+    syncReasoningSelectOptions(select, "claude", "opus", "xhigh");
+    const opusHtml = select.innerHTML;
+    const opusValue = select.value;
+    syncReasoningSelectOptions(select, "claude", "claude-opus-4-6", "xhigh");
+    const opus46Value = select.value;
+    syncReasoningSelectOptions(select, "claude", "haiku", "high");
+    const permissionSelect = document.querySelector("#session-settings-form").elements.permissionPreset;
+    const optionValuesFromHtml = (html) => Array.from(String(html || "").matchAll(/<option value="([^"]*)"/g)).map((match) => match[1]);
+    const optionLabelsFromHtml = (html) => Array.from(String(html || "").matchAll(/<option value="[^"]*">([^<]*)<\\/option>/g)).map((match) => match[1]);
+    syncPermissionSelectOptions(permissionSelect, "claude", "auto-review");
+    const claudePermissions = optionValuesFromHtml(permissionSelect.innerHTML);
+    const claudePermissionLabels = optionLabelsFromHtml(permissionSelect.innerHTML);
+    const legacyAutoValue = permissionSelect.value;
+    syncPermissionSelectOptions(permissionSelect, "codex", "full-access");
+    const codexPermissions = optionValuesFromHtml(permissionSelect.innerHTML);
+      return {
+      codex: values("codex", "gpt-5.5"),
+      claudeDefault: values("claude", "default"),
+      best: values("claude", "best"),
+      sonnet: values("claude", "sonnet"),
+      opus: values("claude", "opus"),
+      opus1m: values("claude", "opus[1m]"),
+      opus46: values("claude", "claude-opus-4-6"),
+      fable: modelOptionsForBackend("claude").some(([value, label]) => String(value + " " + label).toLowerCase().includes("fable")),
+      haiku: values("claude", "haiku"),
+      haikuLabels: labels("claude", "haiku"),
+      normalizedSonnetXhigh: normalizeReasoningEffort("xhigh", "claude", "sonnet"),
+      normalizedSonnetMax: normalizeReasoningEffort("max", "claude", "sonnet"),
+      normalizedOpusXhigh: normalizeReasoningEffort("xhigh", "claude", "opus"),
+      normalizedHaikuHigh: normalizeReasoningEffort("high", "claude", "haiku"),
+      labelHaiku: labelForReasoning("", "claude", "haiku"),
+      sonnetHtml,
+      sonnetValue,
+      opusHtml,
+      opusValue,
+      opus46Value,
+      haikuValue: select.value,
+      claudePermissions,
+      claudePermissionLabels,
+      legacyAutoValue,
+      codexPermissions,
+    };
+  })()`);
+  assertJsonEqual(state.codex, ["low", "medium", "high", "xhigh"], "Codex should keep its own four effort levels");
+  assertJsonEqual(state.claudeDefault, [""], "Claude default model should omit explicit effort because it resolves by account/provider");
+  assertJsonEqual(state.best, ["low", "medium", "high", "xhigh", "max"], "Claude best should use the Opus effort family while Fable is unavailable");
+  assertJsonEqual(state.sonnet, ["low", "medium", "high", "max"], "Claude Sonnet should not expose xhigh");
+  assertJsonEqual(state.opus, ["low", "medium", "high", "xhigh", "max"], "Claude Opus should expose xhigh and max");
+  assertJsonEqual(state.opus1m, ["low", "medium", "high", "xhigh", "max"], "Claude Opus 1M should expose xhigh and max");
+  assertJsonEqual(state.opus46, ["low", "medium", "high", "max"], "Claude Opus 4.6 should not expose xhigh");
+  assert.equal(state.fable, false, "Claude Fable should not be exposed while unavailable");
+  assertJsonEqual(state.haiku, [""], "Claude Haiku should use CLI default and omit --effort");
+  assertJsonEqual(state.haikuLabels, ["Default"], "Claude Haiku select should render a Default option");
+  assert.equal(state.normalizedSonnetXhigh, "high", "Sonnet xhigh should normalize down to high");
+  assert.equal(state.normalizedSonnetMax, "max", "Sonnet max should be accepted");
+  assert.equal(state.normalizedOpusXhigh, "xhigh", "Opus xhigh should be accepted");
+  assert.equal(state.normalizedHaikuHigh, "", "Haiku should not keep an explicit effort");
+  assert.equal(state.labelHaiku, "Default effort");
+  assert.equal(state.sonnetHtml.includes("Extra high"), false, "Sonnet select should not render Extra high");
+  assert.equal(state.sonnetHtml.includes("Max"), true, "Sonnet select should render Max");
+  assert.equal(state.sonnetValue, "high");
+  assert.equal(state.opusHtml.includes("Extra high"), true, "Opus select should render Extra high");
+  assert.equal(state.opusValue, "xhigh");
+  assert.equal(state.opus46Value, "high", "Opus 4.6 xhigh should normalize down to high");
+  assert.equal(state.haikuValue, "");
+  assertJsonEqual(state.claudePermissions, ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], "Claude permission modes must match official Claude Code modes");
+  assert.equal(state.claudePermissionLabels.includes("Auto-review"), false, "Claude permissions should not show the old CoAutoResearch Auto-review label");
+  assert.equal(state.legacyAutoValue, "auto", "Legacy Claude auto-review preset should migrate to official auto mode");
+  assertJsonEqual(state.codexPermissions, ["default", "auto-review", "full-access"], "Codex should keep its own permission presets");
+}
+
 async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
   const app = loadAppContext();
   const result = await app.run(`
@@ -1962,6 +2169,45 @@ async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
   assert.equal(result.activeProjectId, "p2");
   assert.equal(result.state.formBackend, "claude", "new project should load with its seeded backend default");
   assert.equal(result.state.composerModel, "sonnet");
+}
+
+async function testProjectAliasCanonicalizesBeforeAvailability() {
+  const app = loadAppContext();
+  const result = await app.run(`
+    (async () => {
+      activeProjectId = "abc";
+      localStorage.setItem("coAutoResearchActiveProject", "abc");
+      api = async (endpoint) => {
+        if (endpoint === "/api/projects") {
+          return {
+            ok: true,
+            active_project_id: "0dc5adcb-54e6-4b5c-abfa-37858f8a1736",
+            projects: [{
+              id: "0dc5adcb-54e6-4b5c-abfa-37858f8a1736",
+              display_name: "abc",
+              title: "Project Definition",
+              root: "/Users/example/co-autoresearch-projects/abc"
+            }],
+            multi_project: true
+          };
+        }
+        return { ok: true };
+      };
+      await loadProjects();
+      return {
+        activeProjectId,
+        stored: localStorage.getItem("coAutoResearchActiveProject"),
+        noProject: hasNoProject(),
+        attachDisabled: Boolean(document.querySelector("#composer-attach-button")?.disabled),
+        menuActionDisabled: Boolean(document.querySelector("[data-attachment-action]")?.disabled)
+      };
+    })()
+  `);
+  assert.equal(result.activeProjectId, "0dc5adcb-54e6-4b5c-abfa-37858f8a1736", "project display-name aliases should canonicalize to UUIDs");
+  assert.equal(result.stored, "0dc5adcb-54e6-4b5c-abfa-37858f8a1736", "canonical UUID should replace the project alias in localStorage");
+  assert.equal(result.noProject, false, "resolved project aliases must not trigger no-project mode");
+  assert.equal(result.attachDisabled, false, "composer attach button should stay enabled after alias resolution");
+  assert.equal(result.menuActionDisabled, false, "attachment menu actions should stay enabled after alias resolution");
 }
 
 function testAgentReadinessStatusBlocksLaunchUi() {
@@ -2241,18 +2487,97 @@ function testTargetVenueUsesOnlyProjectScopedDraft() {
   assert.equal(state.value, "Audience: methods reviewers", "forced project hydration should keep the project-scoped target venue draft");
 }
 
-function testMaterialTypeChipsUseLocalBrowserAndPlusUsesFilePicker() {
+function testAttachmentMenuRoutesUploadAndLinkActions() {
   const app = loadAppContext();
-  let state = app.run('__chooseMaterialTypeProbe("literature")');
-  assert.equal(state.activeCategory, "literature", "material chips should still set the selected resource type");
-  assert.equal(state.browserOpenCategory, "literature", "material chips should open the local browser with the selected type");
-  assert.equal(state.browserOpenCount, 1, "material chips should use the server local browser for copy/symlink resources");
-  assert.equal(state.clicks, 0, "material chips must not use browser File upload for resource folders or large zip files");
+  let state = app.run("__toggleAttachmentMenuProbe()");
+  assert.equal(state.hidden, false, "composer plus should open the attachment menu");
+  assert.equal(state.expanded, "true", "composer plus should expose menu expanded state");
+  assert.equal(state.parentIsBody, true, "attachment menu should be portaled to body so the composer cannot clip it");
+  assert.equal(state.left, "350px", "attachment menu should be positioned from the attach button");
+  assert.equal(state.top, "596px", "attachment menu should sit above the attach button when there is room");
+  assert.equal(state.bottom, "auto", "attachment menu should not keep bottom positioning after viewport placement");
+  assert.equal(state.width, "260px", "attachment menu should receive a stable viewport width");
 
-  state = app.run('__openFilePickerProbe("user_input")');
-  assert.equal(state.activeCategory, "literature", "generic plus browsing should not change the active material type");
-  assert.equal(state.pendingCategory, "user_input", "generic plus browsing should keep the default user-input category");
-  assert.equal(state.clicks, 1);
+  state = app.run('__attachmentActionProbe("upload-files")');
+  assert.equal(state.hidden, true, "upload action should close the attachment menu");
+  assert.equal(state.expanded, "false", "upload action should collapse menu state");
+  assert.equal(state.pendingCategory, "user_input", "upload files should use the default user-input category");
+  assert.equal(state.browserOpenCount, 0, "upload files must not open the server local browser");
+  assert.equal(state.clicks, 1, "upload files should use the browser native file input");
+
+  state = app.run("__toggleAttachmentMenuProbe()");
+  assert.equal(state.hidden, false, "composer plus should reopen the attachment menu");
+  state = app.run('__attachmentActionProbe("link-folders")');
+  assert.equal(state.hidden, true, "link action should close the attachment menu");
+  assert.equal(state.expanded, "false", "link action should collapse menu state");
+  assert.equal(state.activeCategory, "ongoing_work", "linked folders/files should default to ongoing work");
+  assert.equal(state.browserOpenCount, 1, "link folders/files should open the server local browser");
+  assert.equal(state.browserOpenCategory, "ongoing_work", "local browser should inherit the linked-resource category");
+  assert.equal(state.clicks, 1, "link folders/files should not trigger the native file picker");
+
+  state = app.run("__toggleAttachmentMenuProbe(); __closeAttachmentMenuProbe();");
+  assert.equal(state.hidden, true, "attachment menu should support explicit close");
+  assert.equal(state.expanded, "false", "explicit close should collapse menu state");
+}
+
+async function testLocalBrowserSearchAcceptsPaths() {
+  const app = loadAppContext();
+  const classified = app.run(`__browserPathClassificationProbe([
+    "E:\\\\Github\\\\Repo",
+    "E:/Github/Repo",
+    "C:",
+    "\\\\\\\\server\\\\share\\\\folder",
+    "\\\\\\\\?\\\\E:\\\\Github\\\\Repo",
+    "file:///E:/Github/Repo",
+    "file:///Users/example/Repo",
+    "~/Repo",
+    "./Repo",
+    "../Repo",
+    "/Users/example/Repo",
+    "paper title"
+  ])`);
+  const actual = Object.fromEntries(classified);
+  assert.equal(actual["E:\\Github\\Repo"], true, "Windows drive paths should be treated as paths");
+  assert.equal(actual["E:/Github/Repo"], true, "Windows slash paths should be treated as paths");
+  assert.equal(actual["C:"], true, "drive roots should be treated as paths");
+  assert.equal(actual["\\\\server\\share\\folder"], true, "UNC paths should be treated as paths");
+  assert.equal(actual["\\\\?\\E:\\Github\\Repo"], true, "Windows long paths should be treated as paths");
+  assert.equal(actual["file:///E:/Github/Repo"], true, "Windows file URLs should be treated as paths");
+  assert.equal(actual["file:///Users/example/Repo"], true, "Unix file URLs should be treated as paths");
+  assert.equal(actual["~/Repo"], true, "home-relative paths should be treated as paths");
+  assert.equal(actual["./Repo"], true, "relative dot paths should be treated as paths");
+  assert.equal(actual["../Repo"], true, "parent-relative paths should be treated as paths");
+  assert.equal(actual["/Users/example/Repo"], true, "absolute Unix paths should be treated as paths");
+  assert.equal(actual["paper title"], false, "ordinary search text should stay a search");
+
+  let state = await app.context.__browserInputProbe("E:\\Github\\Repo");
+  assert.equal(state.calls.length, 0, "typing a path should not issue a current-folder search");
+
+  state = await app.context.__browserInputProbe("paper");
+  assert.equal(state.calls.length, 1, "typing ordinary search text should search current folder");
+  let url = new URL(state.calls[0], "http://local");
+  assert.equal(url.pathname, "/api/local/browse");
+  assert.equal(url.searchParams.get("path"), "/current");
+  assert.equal(url.searchParams.get("q"), "paper");
+
+  state = await app.context.__browserJumpProbe("E:\\Github\\Repo", "E:\\Github\\Repo");
+  assert.equal(state.calls.length, 1, "Go should browse pasted paths");
+  url = new URL(state.calls[0], "http://local");
+  assert.equal(url.searchParams.get("path"), "E:\\Github\\Repo");
+  assert.equal(url.searchParams.has("q"), false);
+  assert.equal(state.path, "E:\\Github\\Repo");
+  assert.equal(state.searchValue, "", "successful path jumps should clear the search box");
+
+  state = await app.context.__browserJumpProbe("paper", "/current");
+  url = new URL(state.calls[0], "http://local");
+  assert.equal(url.searchParams.get("path"), "/current");
+  assert.equal(url.searchParams.get("q"), "paper");
+  assert.equal(state.searchValue, "paper", "ordinary Go searches should preserve the search text");
+
+  state = await app.context.__browserJumpProbe("Z:\\missing", "/current", "Path does not exist or cannot be opened: Z:\\missing");
+  assert.equal(state.entriesHtml.includes("Path does not exist or cannot be opened"), true, "path failures should show backend path errors");
+  assert.equal(state.toasts.some((toast) => toast.error && toast.message.includes("Path does not exist")), true);
+  assert.equal(state.searchValue, "Z:\\missing", "failed path jumps should leave the typed path available");
 }
 
 async function testLargeBrowserUploadsUseResourceCopyFlow() {
@@ -2953,7 +3278,9 @@ testSettingsRenderPreservesComposerDraft();
 testProjectScopedSessionSettingsOverrideServerDefaults();
 testComposerModelReasoningChangesPersistProjectScoped();
 testAgentBackendSelectorPersistsProviderSettings();
+testReasoningOptionsFollowBackendModel();
 await testProjectCreateSendsBackendAndLoadsProjectDefault();
+await testProjectAliasCanonicalizesBeforeAvailability();
 testAgentReadinessStatusBlocksLaunchUi();
 testEnvForcedBackendStatusMessage();
 testInvalidEnvBackendStatusWarning();
@@ -2962,7 +3289,8 @@ await testSettingsModalSaveSyncsScopedSessionSettings();
 testProjectScopedComposerDraftAndTargetVenueRestore();
 testThemeModePersistsAndApplies();
 testTargetVenueUsesOnlyProjectScopedDraft();
-testMaterialTypeChipsUseLocalBrowserAndPlusUsesFilePicker();
+testAttachmentMenuRoutesUploadAndLinkActions();
+await testLocalBrowserSearchAcceptsPaths();
 await testLargeBrowserUploadsUseResourceCopyFlow();
 testCompactComposerAutosizesFromCenteredBase();
 testComposerPromptInsertionIsIdempotent();

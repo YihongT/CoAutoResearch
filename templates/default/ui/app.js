@@ -142,8 +142,8 @@ const defaultCodexSessionSettings = {
 };
 const defaultClaudeSessionSettings = {
   model: "sonnet",
-  reasoningEffort: "medium",
-  permissionPreset: "auto-review",
+  reasoningEffort: "high",
+  permissionPreset: "auto",
   permissionMode: "auto",
   webSearch: true,
   fastMode: false,
@@ -165,8 +165,14 @@ const modelOptionsByBackend = {
     ["gpt-5.2", "GPT-5.2"],
   ],
   claude: [
+    ["default", "Claude Default"],
+    ["best", "Claude Best"],
     ["opus", "Claude Opus 4.8"],
+    ["opus[1m]", "Claude Opus 4.8 1M"],
+    ["opusplan", "Claude Opus Plan"],
+    ["opusplan[1m]", "Claude Opus Plan 1M"],
     ["sonnet", "Claude Sonnet 4.6"],
+    ["sonnet[1m]", "Claude Sonnet 4.6 1M"],
     ["haiku", "Claude Haiku 4.5"],
   ],
 };
@@ -218,7 +224,7 @@ const sentFramingResourceItems = [];
 const sentFramingUploadItems = [];
 
 const allowedApprovalPolicies = new Set(["on-request", "untrusted", "never"]);
-const permissionPresets = {
+const codexPermissionPresets = {
   default: {
     label: "Default permissions",
     sandbox: "workspace-write",
@@ -235,8 +241,78 @@ const permissionPresets = {
     approvalPolicy: "never",
   },
 };
-const allowedPermissionPresets = new Set(Object.keys(permissionPresets));
-const allowedReasoningEfforts = new Set(["low", "medium", "high", "xhigh"]);
+const claudePermissionPresets = {
+  default: {
+    label: "Default (ask before edits)",
+    permissionMode: "default",
+  },
+  acceptEdits: {
+    label: "Accept edits",
+    permissionMode: "acceptEdits",
+  },
+  plan: {
+    label: "Plan mode",
+    permissionMode: "plan",
+  },
+  auto: {
+    label: "Auto mode",
+    permissionMode: "auto",
+  },
+  dontAsk: {
+    label: "Don't ask",
+    permissionMode: "dontAsk",
+  },
+  bypassPermissions: {
+    label: "Bypass permissions",
+    permissionMode: "bypassPermissions",
+  },
+};
+const permissionPresetsByBackend = {
+  codex: codexPermissionPresets,
+  claude: claudePermissionPresets,
+};
+const legacyClaudePermissionPresets = {
+  "auto-review": "auto",
+  "full-access": "bypassPermissions",
+  "accept-edits": "acceptEdits",
+  "dont-ask": "dontAsk",
+  "bypass-permissions": "bypassPermissions",
+};
+const codexReasoningOptions = [
+  ["low", "Low"],
+  ["medium", "Medium"],
+  ["high", "High"],
+  ["xhigh", "Extra high"],
+];
+const claudeReasoningOptionsByFamily = {
+  opusRecent: [
+    ["low", "Low"],
+    ["medium", "Medium"],
+    ["high", "High"],
+    ["xhigh", "Extra high"],
+    ["max", "Max"],
+  ],
+  opus46: [
+    ["low", "Low"],
+    ["medium", "Medium"],
+    ["high", "High"],
+    ["max", "Max"],
+  ],
+  opus: [
+    ["low", "Low"],
+    ["medium", "Medium"],
+    ["high", "High"],
+    ["xhigh", "Extra high"],
+    ["max", "Max"],
+  ],
+  sonnet: [
+    ["low", "Low"],
+    ["medium", "Medium"],
+    ["high", "High"],
+    ["max", "Max"],
+  ],
+  defaultOnly: [["", "Default"]],
+};
 
 const secretKeyLabels = {
   GITHUB_TOKEN: "GitHub token",
@@ -895,6 +971,42 @@ function normalizeAgentBackend(value) {
   return allowedAgentBackends.has(backend) ? backend : defaultAgentSettings.backend;
 }
 
+function claudeModelFamily(model) {
+  const value = String(model || "").trim().toLowerCase();
+  if (value === "best") return "opusRecent";
+  if (value.includes("fable")) return "defaultOnly";
+  if (value.includes("opus")) {
+    if (/\bopus[-_]?4[-_]?6\b/.test(value)) return "opus46";
+    return "opusRecent";
+  }
+  if (value.includes("sonnet")) return "sonnet";
+  if (value.includes("haiku")) return "defaultOnly";
+  return "defaultOnly";
+}
+
+function reasoningOptionsForBackendModel(backend, model = "") {
+  const normalized = normalizeAgentBackend(backend);
+  if (normalized === "codex") return codexReasoningOptions;
+  return claudeReasoningOptionsByFamily[claudeModelFamily(model)] || claudeReasoningOptionsByFamily.defaultOnly;
+}
+
+function permissionPresetsForBackend(backend) {
+  return permissionPresetsByBackend[normalizeAgentBackend(backend)] || codexPermissionPresets;
+}
+
+function permissionPresetForBackend(backend, preset) {
+  const presets = permissionPresetsForBackend(backend);
+  return presets[preset] || presets[defaultSettingsForBackend(backend).permissionPreset] || Object.values(presets)[0] || {};
+}
+
+function defaultReasoningEffortForBackendModel(backend, model = "") {
+  const normalized = normalizeAgentBackend(backend);
+  if (normalized === "codex") return defaultCodexSessionSettings.reasoningEffort;
+  const options = reasoningOptionsForBackendModel(normalized, model);
+  if (options.some(([value]) => value === "high")) return "high";
+  return options[0]?.[0] || "";
+}
+
 function agentLabel(backend) {
   return agentBackends[normalizeAgentBackend(backend)] || agentBackends.codex;
 }
@@ -1474,6 +1586,9 @@ function projectReviewerInstructionsOutdated(project) {
     hasStatusItems(status.missing) ||
     hasStatusItems(status.changed) ||
     hasStatusItems(status.metadata_missing) ||
+    hasStatusItems(status.protocol_missing) ||
+    hasStatusItems(status.protocol_changed) ||
+    hasStatusItems(status.protocol_metadata_missing) ||
     (latest && baseline !== latest)
   );
 }
@@ -1492,6 +1607,38 @@ function projectById(projectId) {
   const id = String(projectId || "");
   const projects = Array.isArray(appState?.projects) ? appState.projects : [];
   return projects.find((project) => String(project.id || "") === id) || null;
+}
+
+function normalizeProjectAlias(value) {
+  return String(value || "").trim().replaceAll("\\", "/").replaceAll(/^\/+|\/+$/g, "").toLowerCase();
+}
+
+function projectDirectorySlug(value) {
+  return String(value || "").trim().replaceAll(/[^A-Za-z0-9._-]+/g, "_").replaceAll(/^[ ._-]+|[ ._-]+$/g, "").slice(0, 80) || "project";
+}
+
+function resolveProjectIdAlias(projects, value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const exact = projects.find((project) => String(project.id || "") === text);
+  if (exact?.id) return String(exact.id);
+  const alias = normalizeProjectAlias(text);
+  if (!alias) return "";
+  const match = projects.find((project) => {
+    const root = String(project.root || "");
+    const displayName = String(project.display_name || "").trim();
+    const title = String(project.title || "").trim();
+    const candidates = [
+      displayName,
+      title,
+      root,
+      basename(root),
+      projectDirectorySlug(displayName),
+      projectDirectorySlug(title),
+    ];
+    return candidates.some((candidate) => normalizeProjectAlias(candidate) === alias);
+  });
+  return match?.id ? String(match.id) : "";
 }
 
 function hasActiveProject() {
@@ -1517,7 +1664,7 @@ function renderProjectAvailability() {
     const element = $(selector);
     if (element) element.disabled = noProject;
   });
-  $$(".material-action-chip, .composer-suggestion-chip").forEach((button) => {
+  $$(".composer-attach-button, [data-attachment-action], .composer-suggestion-chip").forEach((button) => {
     button.disabled = noProject;
     button.setAttribute("aria-disabled", noProject ? "true" : "false");
   });
@@ -1593,7 +1740,7 @@ function renderProjectList() {
             ${reviewerOutdated ? `
               <button type="button" role="menuitem" data-project-upgrade-reviewers="${escapeHtml(project.id)}">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
-                <span>Update reviewers</span>
+                <span>Update instructions</span>
               </button>
             ` : ""}
             <button type="button" role="menuitem" data-project-rename="${escapeHtml(project.id)}">
@@ -1673,8 +1820,13 @@ async function loadProjects() {
   const payload = await api("/api/projects");
   const projects = Array.isArray(payload.projects) ? payload.projects : [];
   const known = new Set(projects.map((project) => String(project.id || "")));
+  const resolvedProjectId = resolveProjectIdAlias(projects, activeProjectId);
+  if (resolvedProjectId && resolvedProjectId !== activeProjectId) {
+    activeProjectId = resolvedProjectId;
+    localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+  }
   if (!activeProjectId || !known.has(activeProjectId)) {
-    activeProjectId = String(payload.active_project_id || projects[0]?.id || "");
+    activeProjectId = String(resolveProjectIdAlias(projects, payload.active_project_id) || projects[0]?.id || "");
     if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
     else localStorage.removeItem("coAutoResearchActiveProject");
   }
@@ -3324,8 +3476,8 @@ function updateBriefDockGeometry() {
   const main = $(".main-stage");
   if (!shell || !main || !shell.classList.contains("is-framing-dock")) return;
   const rect = main.getBoundingClientRect();
-  const available = Math.max(320, rect.width - 96);
-  const width = Math.min(860, available);
+  const available = Math.max(320, rect.width - 56);
+  const width = Math.min(980, available);
   const left = rect.left + rect.width / 2;
   const height = Math.max(88, shell.getBoundingClientRect().height || 0);
   shell.style.setProperty("--brief-dock-left", `${left}px`);
@@ -3424,10 +3576,12 @@ function modelOptionsForBackend(backend) {
   const normalized = normalizeAgentBackend(backend);
   const base = modelOptionsByBackend[normalized] || modelOptionsByBackend.codex;
   const discovered = discoveredModelsByBackend[normalized];
-  if (Array.isArray(discovered) && discovered.length) {
-    return mergeModelOptionsLists(base, discovered);
-  }
-  return base;
+  const merged = Array.isArray(discovered) && discovered.length ? mergeModelOptionsLists(base, discovered) : base;
+  if (normalized !== "claude") return merged;
+  return merged.filter(([value, label]) => {
+    const text = `${value} ${label}`.toLowerCase();
+    return !text.includes("fable");
+  });
 }
 
 async function discoverModelsForBackend(backend) {
@@ -3488,6 +3642,38 @@ function resyncAllModelSelects() {
     if (select === document.activeElement) continue; // don't fold an open dropdown
     syncModelSelectOptions(select, backend, select.value || "");
   }
+  fitComposerSelectWidths();
+}
+
+let composerSelectMeasureContext = null;
+
+function measureSelectOptionLabel(select, label) {
+  if (!select || !label || typeof document === "undefined") return 0;
+  if (!composerSelectMeasureContext) {
+    const canvas = document.createElement?.("canvas");
+    composerSelectMeasureContext = canvas?.getContext?.("2d") || null;
+  }
+  if (!composerSelectMeasureContext) return 0;
+  const style = window.getComputedStyle?.(select);
+  composerSelectMeasureContext.font = `${style?.fontWeight || "500"} ${style?.fontSize || "12px"} ${style?.fontFamily || "monospace"}`;
+  return composerSelectMeasureContext.measureText(String(label)).width;
+}
+
+function fitComposerSelectWidth(select) {
+  if (!select?.options?.length || !select.style?.setProperty) return;
+  const maxTextWidth = Array.from(select.options).reduce((maxWidth, option) => {
+    const label = option.textContent || option.label || option.value || "";
+    return Math.max(maxWidth, measureSelectOptionLabel(select, label));
+  }, 0);
+  if (!maxTextWidth) return;
+  const arrowAndPadding = 28;
+  const width = Math.ceil(Math.max(48, Math.min(190, maxTextWidth + arrowAndPadding)));
+  select.style.setProperty("--select-fit-width", `${width}px`);
+}
+
+function fitComposerSelectWidths() {
+  fitComposerSelectWidth($("#composer-model"));
+  fitComposerSelectWidth($("#composer-reasoning"));
 }
 
 function syncModelSelectOptions(select, backend, selected = "") {
@@ -3513,6 +3699,7 @@ function syncModelSelectOptions(select, backend, selected = "") {
   if (optionsUnchanged) {
     if (!valueUnchanged && !isActive) select.value = resolvedValue;
     syncBackendDocLinks(backend);
+    fitComposerSelectWidth(select);
     return;
   }
   if (isActive) {
@@ -3524,6 +3711,50 @@ function syncModelSelectOptions(select, backend, selected = "") {
   select.innerHTML = options.map(([optionValue, label]) => `<option value="${escapeHtml(optionValue)}">${escapeHtml(label)}</option>`).join("");
   select.value = resolvedValue;
   syncBackendDocLinks(backend);
+  fitComposerSelectWidth(select);
+}
+
+function syncReasoningSelectOptions(select, backend, model = "", selected = "") {
+  if (!select) return;
+  const options = reasoningOptionsForBackendModel(backend, model);
+  const allowed = new Set(options.map(([optionValue]) => optionValue));
+  const rawValue = String(selected ?? "").trim();
+  const resolvedValue = allowed.has(rawValue) ? rawValue : defaultReasoningEffortForBackendModel(backend, model);
+  const desiredSignature = options.map(([optionValue]) => optionValue).join("|");
+  const renderedOptions = select.options || select.querySelectorAll?.("option") || [];
+  const currentSignature = Array.from(renderedOptions).map((opt) => opt.value).join("|");
+  const isActive = select === document.activeElement;
+
+  if (desiredSignature === currentSignature) {
+    if (select.value !== resolvedValue && !isActive) select.value = resolvedValue;
+    fitComposerSelectWidth(select);
+    return;
+  }
+  if (isActive) return;
+  select.innerHTML = options
+    .map(([optionValue, label]) => `<option value="${escapeHtml(optionValue)}">${escapeHtml(label)}</option>`)
+    .join("");
+  select.value = resolvedValue;
+  fitComposerSelectWidth(select);
+}
+
+function syncPermissionSelectOptions(select, backend, selected = "") {
+  if (!select) return;
+  const presets = permissionPresetsForBackend(backend);
+  const selectedValue = normalizePermissionPreset(selected, { backend });
+  const desiredSignature = Object.keys(presets).join("|");
+  const renderedOptions = select.options || select.querySelectorAll?.("option") || [];
+  const currentSignature = Array.from(renderedOptions).map((opt) => opt.value).join("|");
+  const isActive = select === document.activeElement;
+  if (desiredSignature === currentSignature) {
+    if (select.value !== selectedValue && !isActive) select.value = selectedValue;
+    return;
+  }
+  if (isActive) return;
+  select.innerHTML = Object.entries(presets)
+    .map(([value, config]) => `<option value="${escapeHtml(value)}">${escapeHtml(config.label || value)}</option>`)
+    .join("");
+  select.value = selectedValue;
 }
 
 function syncBackendDocLinks(backend) {
@@ -3543,9 +3774,9 @@ function settingsFromForm() {
   const settings = normalizeSessionSettings({
     backend,
     model: String(data.get("model") || "").trim(),
-    reasoningEffort: normalizeReasoningEffort(data.get("reasoningEffort"), backend),
+    reasoningEffort: normalizeReasoningEffort(data.get("reasoningEffort"), backend, String(data.get("model") || "").trim()),
     permissionPreset,
-    ...permissionPresets[permissionPreset],
+    ...permissionPresetForBackend(backend, permissionPreset),
     webSearch: Boolean(data.get("webSearch")),
     fastMode: Boolean(data.get("fastMode")),
     extraConfig: String(data.get("extraConfig") || "").trim(),
@@ -3565,7 +3796,8 @@ function syncComposerSettings(settings) {
   const model = $("#composer-model");
   const reasoning = $("#composer-reasoning");
   syncModelSelectOptions(model, backend, merged.model);
-  if (reasoning) reasoning.value = merged.reasoningEffort || defaultSettingsForBackend(backend).reasoningEffort;
+  syncReasoningSelectOptions(reasoning, backend, merged.model, merged.reasoningEffort);
+  fitComposerSelectWidths();
 }
 
 function updateSessionSettingsFromComposer() {
@@ -3575,13 +3807,17 @@ function updateSessionSettingsFromComposer() {
   if (!form || !model || !reasoning) return;
   const backend = normalizeAgentBackend(form.elements.backend?.value || activeSettingsBackend());
   syncModelSelectOptions(form.elements.model, backend, model.value || defaultSettingsForBackend(backend).model);
-  form.elements.reasoningEffort.value = normalizeReasoningEffort(reasoning.value, backend);
+  syncReasoningSelectOptions(reasoning, backend, model.value, reasoning.value);
+  syncReasoningSelectOptions(form.elements.reasoningEffort, backend, model.value, reasoning.value);
+  form.elements.reasoningEffort.value = normalizeReasoningEffort(reasoning.value, backend, model.value);
   settingsFromForm();
 }
 
-function normalizeReasoningEffort(value, backend = "") {
+function normalizeReasoningEffort(value, backend = "", model = "") {
   const reasoning = String(value || "").trim();
-  return allowedReasoningEfforts.has(reasoning) ? reasoning : defaultSettingsForBackend(backend).reasoningEffort;
+  const options = reasoningOptionsForBackendModel(backend, model);
+  const allowed = new Set(options.map(([optionValue]) => optionValue));
+  return allowed.has(reasoning) ? reasoning : defaultReasoningEffortForBackendModel(backend, model);
 }
 
 function normalizeReviewCheckpointInterval(value) {
@@ -3592,11 +3828,12 @@ function normalizeReviewCheckpointInterval(value) {
 function inferPermissionPreset(settings = {}) {
   const backend = normalizeAgentBackend(settings.backend);
   const explicit = String(settings.permissionPreset || "").trim();
-  if (allowedPermissionPresets.has(explicit)) return explicit;
+  const presets = permissionPresetsForBackend(backend);
+  if (presets[explicit]) return explicit;
   if (backend === "claude") {
+    if (legacyClaudePermissionPresets[explicit]) return legacyClaudePermissionPresets[explicit];
     const mode = String(settings.permissionMode || "").trim();
-    if (mode === "bypassPermissions") return "full-access";
-    if (mode === "auto") return "auto-review";
+    if (presets[mode]) return mode;
     return defaultClaudeSessionSettings.permissionPreset;
   }
   const sandbox = String(settings.sandbox || "").trim();
@@ -3607,8 +3844,9 @@ function inferPermissionPreset(settings = {}) {
 }
 
 function normalizePermissionPreset(value, settings = {}) {
+  const backend = normalizeAgentBackend(settings.backend);
   const preset = String(value || "").trim();
-  return allowedPermissionPresets.has(preset) ? preset : inferPermissionPreset(settings);
+  return permissionPresetsForBackend(backend)[preset] ? preset : inferPermissionPreset({ ...settings, permissionPreset: preset });
 }
 
 function normalizeSessionSettings(settings = {}) {
@@ -3624,20 +3862,19 @@ function normalizeSessionSettings(settings = {}) {
     const validClaudeModel = Boolean(claudeModel) && (allowedModels.has(claudeModel) || /^claude-/i.test(claudeModel));
     if (!validClaudeModel) merged.model = defaults.model;
   }
-  merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend);
+  merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend, merged.model);
   merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
   merged.fastMode = Boolean(merged.fastMode);
   merged.permissionPreset = normalizePermissionPreset(merged.permissionPreset, merged);
   if (backend === "claude") {
-    const modeByPreset = { default: "acceptEdits", "auto-review": "auto", "full-access": "bypassPermissions" };
-    merged.permissionMode = modeByPreset[merged.permissionPreset] || defaultClaudeSessionSettings.permissionMode;
+    merged.permissionMode = permissionPresetForBackend(backend, merged.permissionPreset).permissionMode || defaultClaudeSessionSettings.permissionMode;
     delete merged.sandbox;
     delete merged.approvalPolicy;
   } else {
-    Object.assign(merged, permissionPresets[merged.permissionPreset]);
+    Object.assign(merged, permissionPresetForBackend(backend, merged.permissionPreset));
   }
   if (backend === "codex" && !allowedApprovalPolicies.has(merged.approvalPolicy)) {
-    Object.assign(merged, permissionPresets[defaultSessionSettings.permissionPreset]);
+    Object.assign(merged, permissionPresetForBackend(backend, defaultSessionSettings.permissionPreset));
     merged.permissionPreset = defaultSessionSettings.permissionPreset;
   }
   return merged;
@@ -3650,7 +3887,9 @@ function applySessionSettings(settings, persist = false) {
   if (form.elements.backend) form.elements.backend.value = backend;
   syncModelSelectOptions(form.elements.model, backend, merged.model);
   form.elements.model.value = merged.model || "";
+  syncReasoningSelectOptions(form.elements.reasoningEffort, backend, merged.model, merged.reasoningEffort);
   form.elements.reasoningEffort.value = merged.reasoningEffort;
+  syncPermissionSelectOptions(form.elements.permissionPreset, backend, merged.permissionPreset);
   form.elements.permissionPreset.value = merged.permissionPreset;
   form.elements.webSearch.checked = Boolean(merged.webSearch);
   if (form.elements.fastMode) form.elements.fastMode.checked = Boolean(merged.fastMode);
@@ -3682,17 +3921,18 @@ function settingsLabel(settings) {
   const parts = [];
   parts.push(agentLabel(normalized.backend));
   if (normalized.model) parts.push(normalized.model);
-  parts.push(labelForReasoning(normalized.reasoningEffort));
-  parts.push(permissionPresets[normalized.permissionPreset]?.label || "Default permissions");
+  parts.push(labelForReasoning(normalized.reasoningEffort, normalized.backend, normalized.model));
+  parts.push(permissionPresetForBackend(normalized.backend, normalized.permissionPreset)?.label || "Default permissions");
   if (normalized.fastMode) parts.push("fast");
   parts.push(`review ${normalized.reviewCheckpointInterval}`);
   if (normalized.webSearch) parts.push("web");
   return parts.join(" / ");
 }
 
-function labelForReasoning(value) {
-  const labels = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high" };
-  return labels[normalizeReasoningEffort(value)] || "Medium";
+function labelForReasoning(value, backend = "", model = "") {
+  const normalized = normalizeReasoningEffort(value, backend, model);
+  const labels = { "": "Default effort", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
+  return labels[normalized] || "Default effort";
 }
 
 function renderSettingsSummary(settings) {
@@ -3726,9 +3966,9 @@ function settingsProviderFromModal(backend) {
   return normalizeSessionSettings({
     backend: normalizedBackend,
     model: String(data.get("settingsModel") || "").trim(),
-    reasoningEffort: normalizeReasoningEffort(data.get("settingsReasoningEffort"), normalizedBackend),
+    reasoningEffort: normalizeReasoningEffort(data.get("settingsReasoningEffort"), normalizedBackend, String(data.get("settingsModel") || "").trim()),
     permissionPreset,
-    ...permissionPresets[permissionPreset],
+    ...permissionPresetForBackend(normalizedBackend, permissionPreset),
     webSearch: Boolean(data.get("settingsWebSearch")),
     extraConfig: String(data.get("settingsExtraConfig") || "").trim(),
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("settingsReviewCheckpointInterval")),
@@ -3759,7 +3999,9 @@ function hydrateSettingsDialog(settings) {
   hydrateThemeControls();
   if (form.elements.settingsBackend) form.elements.settingsBackend.value = backend;
   syncModelSelectOptions(form.elements.settingsModel, backend, provider.model);
+  syncReasoningSelectOptions(form.elements.settingsReasoningEffort, backend, provider.model, provider.reasoningEffort);
   form.elements.settingsReasoningEffort.value = provider.reasoningEffort;
+  syncPermissionSelectOptions(form.elements.settingsPermissionPreset, backend, provider.permissionPreset);
   form.elements.settingsPermissionPreset.value = provider.permissionPreset;
   form.elements.settingsWebSearch.checked = Boolean(provider.webSearch);
   form.elements.settingsExtraConfig.value = provider.extraConfig || "";
@@ -7844,31 +8086,92 @@ function setResourceCategory(category) {
   if (note) note.textContent = `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Folders are symlinked when possible; files are copied into this repo.`;
 }
 
-function showMaterialTypeDialog() {
-  const dialog = $("#material-type-dialog");
-  if (!dialog) return showResourceBrowser();
-  if (dialog.showModal) dialog.showModal();
-  else dialog.setAttribute("open", "");
-}
-
-function closeMaterialTypeDialog() {
-  const dialog = $("#material-type-dialog");
-  if (!dialog) return;
-  if (dialog.close) dialog.close();
-  else dialog.removeAttribute("open");
-}
-
-function chooseMaterialType(category) {
-  setResourceCategory(category);
-  closeMaterialTypeDialog();
-  showResourceBrowser();
-}
-
 function openComposerFilePicker(category = "user_input") {
   const input = $("#composer-file-input");
   if (!input) return;
   input.dataset.resourceCategory = resourceCategories[category] ? category : "user_input";
   input.click();
+}
+
+function ensureAttachmentMenu() {
+  let menu = $("#attachment-menu");
+  const button = $("#composer-attach-button");
+  if (menu) {
+    if (menu.parentElement !== document.body) document.body.appendChild(menu);
+    if (button) {
+      button.setAttribute("aria-haspopup", "menu");
+      button.setAttribute("aria-controls", "attachment-menu");
+    }
+    return menu;
+  }
+  if (!button) return null;
+  menu = document.createElement("div");
+  menu.className = "attachment-menu";
+  menu.id = "attachment-menu";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "Attach resources");
+  menu.hidden = true;
+  menu.innerHTML = `
+    <button type="button" role="menuitem" data-attachment-action="upload-files">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v10m0-10 4 4m-4-4-4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+      <span>Upload files</span>
+    </button>
+    <button type="button" role="menuitem" data-attachment-action="link-folders">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4.1c.7 0 1.3.3 1.8.8l1.1 1.2h4A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/></svg>
+      <span>Link folders/files</span>
+    </button>
+  `;
+  button.setAttribute("aria-haspopup", "menu");
+  button.setAttribute("aria-controls", "attachment-menu");
+  document.body.appendChild(menu);
+  return menu;
+}
+
+function positionAttachmentMenu(menu = $("#attachment-menu"), button = $("#composer-attach-button")) {
+  if (!menu || !button || menu.hidden) return;
+  const buttonRect = button.getBoundingClientRect();
+  const menuWidth = Math.min(260, Math.max(220, window.innerWidth - 40));
+  menu.style.width = `${menuWidth}px`;
+  const menuHeight = menu.offsetHeight || 114;
+  const left = Math.min(Math.max(20, buttonRect.left), Math.max(20, window.innerWidth - menuWidth - 20));
+  let top = buttonRect.top - menuHeight - 10;
+  if (top < 12) top = Math.min(window.innerHeight - menuHeight - 12, buttonRect.bottom + 10);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${Math.max(12, top)}px`;
+  menu.style.bottom = "auto";
+}
+
+function setAttachmentMenuOpen(open) {
+  const menu = ensureAttachmentMenu();
+  const button = $("#composer-attach-button");
+  if (!menu) return;
+  if (open) {
+    menu.hidden = false;
+    positionAttachmentMenu(menu, button);
+  } else {
+    menu.hidden = true;
+  }
+  if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function toggleAttachmentMenu() {
+  const menu = ensureAttachmentMenu();
+  setAttachmentMenuOpen(Boolean(menu?.hidden));
+}
+
+window.addEventListener("resize", () => positionAttachmentMenu());
+window.addEventListener("scroll", () => positionAttachmentMenu(), true);
+
+function handleAttachmentMenuAction(action) {
+  setAttachmentMenuOpen(false);
+  if (action === "upload-files") {
+    openComposerFilePicker("user_input");
+    return;
+  }
+  if (action === "link-folders") {
+    setResourceCategory("ongoing_work");
+    showResourceBrowser();
+  }
 }
 
 function updateSelectedResourceCategory(index, category) {
@@ -7942,24 +8245,81 @@ function renderBrowserEntries(payload) {
     .join("");
 }
 
+function cleanBrowserPathInput(value) {
+  let text = String(value || "").trim();
+  const pairs = {
+    "`": "`",
+    '"': '"',
+    "'": "'",
+    "“": "”",
+    "‘": "’",
+    "<": ">",
+  };
+  let changed = true;
+  while (changed && text.length >= 2) {
+    changed = false;
+    const first = text[0];
+    const last = text[text.length - 1];
+    if (pairs[first] === last) {
+      text = text.slice(1, -1).trim();
+      changed = true;
+    }
+  }
+  return text;
+}
+
+function isBrowserPathInput(value) {
+  const text = cleanBrowserPathInput(value);
+  if (!text) return false;
+  if (/^file:\/\//i.test(text)) return true;
+  if (/^[A-Za-z]:(?:[\\/].*)?$/.test(text)) return true;
+  if (/^[\\/]{2}\?[\\/]/.test(text)) return true;
+  if (/^\\\\[^\\]+\\[^\\]+/.test(text)) return true;
+  if (/^\/\/[^/?#]+\/[^/?#]+/.test(text)) return true;
+  if (/^(?:~|\.{1,2})(?:[\\/]|$)/.test(text)) return true;
+  if (/^\//.test(text)) return true;
+  return false;
+}
+
+function handleBrowserSearchInput(value) {
+  browserSearchQuery = value || "";
+  clearTimeout(browserSearchTimer);
+  if (isBrowserPathInput(browserSearchQuery)) return;
+  browserSearchTimer = setTimeout(() => loadLocalBrowser(localBrowserPath, { keepSearch: true }), 180);
+}
+
 async function loadLocalBrowser(path = "", options = {}) {
   const { keepSearch = false } = options;
   const entries = $("#browser-entries");
   entries.innerHTML = `<div class="tree-empty">Loading local files...</div>`;
-  if (!keepSearch) {
-    browserSearchQuery = "";
-    const search = $("#browser-search");
-    if (search) search.value = "";
-  }
   try {
     const params = new URLSearchParams({ path: path || "" });
-    if (browserSearchQuery.trim()) params.set("q", browserSearchQuery.trim());
+    if (keepSearch && browserSearchQuery.trim()) params.set("q", browserSearchQuery.trim());
     const payload = await api(`/api/local/browse?${params.toString()}`);
+    if (!keepSearch) {
+      browserSearchQuery = "";
+      const search = $("#browser-search");
+      if (search) search.value = "";
+    }
     renderBrowserEntries(payload);
   } catch (error) {
     entries.innerHTML = `<div class="tree-empty">${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
   }
+}
+
+async function jumpLocalBrowserInput() {
+  const search = $("#browser-search");
+  const value = cleanBrowserPathInput(search?.value || browserSearchQuery);
+  if (!value) return;
+  clearTimeout(browserSearchTimer);
+  if (isBrowserPathInput(value)) {
+    await loadLocalBrowser(value, { keepSearch: false });
+    return;
+  }
+  browserSearchQuery = value;
+  if (search) search.value = value;
+  await loadLocalBrowser(localBrowserPath, { keepSearch: true });
 }
 
 function defaultInlineMode(payload) {
@@ -9662,21 +10022,43 @@ function bindEvents() {
   $("#goal-form").addEventListener("submit", handleGoal);
   $("#session-settings-form").addEventListener("input", () => settingsFromForm());
   $("#session-settings-form")?.elements?.backend?.addEventListener("change", (event) => switchSessionBackend(event.target.value));
+  $("#session-settings-form")?.elements?.model?.addEventListener("change", () => {
+    const form = $("#session-settings-form");
+    const backend = normalizeAgentBackend(form?.elements?.backend?.value || activeSettingsBackend());
+    syncReasoningSelectOptions(form?.elements?.reasoningEffort, backend, form?.elements?.model?.value, form?.elements?.reasoningEffort?.value);
+    if (form?.elements?.reasoningEffort) {
+      form.elements.reasoningEffort.value = normalizeReasoningEffort(form.elements.reasoningEffort.value, backend, form?.elements?.model?.value);
+    }
+    settingsFromForm();
+  });
   $("#settings-form")?.elements?.settingsBackend?.addEventListener("change", (event) => switchSettingsBackend(event.target.value));
+  $("#settings-form")?.elements?.settingsModel?.addEventListener("change", () => {
+    const form = $("#settings-form");
+    const backend = normalizeAgentBackend(form?.elements?.settingsBackend?.value || activeSettingsBackend());
+    syncReasoningSelectOptions(form?.elements?.settingsReasoningEffort, backend, form?.elements?.settingsModel?.value, form?.elements?.settingsReasoningEffort?.value);
+    if (form?.elements?.settingsReasoningEffort) {
+      form.elements.settingsReasoningEffort.value = normalizeReasoningEffort(form.elements.settingsReasoningEffort.value, backend, form?.elements?.settingsModel?.value);
+    }
+  });
   $("#composer-model")?.addEventListener("change", updateSessionSettingsFromComposer);
   $("#composer-reasoning")?.addEventListener("change", updateSessionSettingsFromComposer);
   $("#framing-scroll-bottom")?.addEventListener("click", scrollFramingToBottom);
   $("#copy-resume-command")?.addEventListener("click", copyResumeCommand);
   $("#chat-form textarea").addEventListener("input", resizeComposer);
   $("#browser-search").addEventListener("input", (event) => {
-    browserSearchQuery = event.target.value || "";
-    clearTimeout(browserSearchTimer);
-    browserSearchTimer = setTimeout(() => loadLocalBrowser(localBrowserPath, { keepSearch: true }), 180);
+    handleBrowserSearchInput(event.target.value || "");
   });
+  $("#browser-search").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    jumpLocalBrowserInput();
+  });
+  $("#browser-jump")?.addEventListener("click", jumpLocalBrowserInput);
   window.addEventListener("resize", () => {
     resizeColdEditor();
     updateBriefDockGeometry();
     updateFramingScrollButton();
+    fitComposerSelectWidths();
   });
   window.addEventListener("scroll", () => {
     updateFramingScrollButton();
@@ -9700,8 +10082,8 @@ function bindEvents() {
   });
   $("#cold-file-editor").addEventListener("paste", handleAttachmentPaste);
   $("#chat-form textarea").addEventListener("paste", handleAttachmentPaste);
-  $("#composer-attach-button")?.addEventListener("click", () => {
-    openComposerFilePicker("user_input");
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setAttachmentMenuOpen(false);
   });
   $("#composer-file-input")?.addEventListener("change", (event) => {
     const category = resourceCategories[event.target.dataset.resourceCategory] ? event.target.dataset.resourceCategory : "user_input";
@@ -9766,6 +10148,20 @@ function bindEvents() {
       openProjectMenuId = "";
       renderProjectList();
     }
+    const attachmentButton = event.target.closest("#composer-attach-button");
+    if (attachmentButton) {
+      event.preventDefault();
+      toggleAttachmentMenu();
+      return;
+    }
+    const attachmentAction = event.target.closest("[data-attachment-action]");
+    if (attachmentAction) {
+      handleAttachmentMenuAction(attachmentAction.dataset.attachmentAction);
+      return;
+    }
+    if (!$("#attachment-menu")?.hidden && !event.target.closest("#attachment-menu") && !event.target.closest("#composer-attach-button")) {
+      setAttachmentMenuOpen(false);
+    }
     const projectSwitch = event.target.closest("[data-project-switch]");
     if (projectSwitch) {
       switchProject(projectSwitch.dataset.projectSwitch).catch((error) => showToast(error.message, true));
@@ -9779,16 +10175,6 @@ function bindEvents() {
     const browseResources = event.target.closest("#browse-resources");
     if (browseResources) {
       showResourceBrowser();
-      return;
-    }
-    const materialType = event.target.closest("[data-material-type]");
-    if (materialType) {
-      chooseMaterialType(materialType.dataset.materialType);
-      return;
-    }
-    const materialTypeClose = event.target.closest("[data-material-type-close]");
-    if (materialTypeClose) {
-      closeMaterialTypeDialog();
       return;
     }
     const clearSecret = event.target.closest("[data-clear-secret]");

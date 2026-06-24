@@ -95,10 +95,22 @@ for (const name of [
   "VENUE_FIT_REVIEWER.md",
   "MANUSCRIPT_REVIEWER.md",
   "FIGURE_TABLE_REVIEWER.md",
+  "REFERENCE_REVIEWER.md",
   "REVIEWER_SPAWNING.md"
 ]) {
   if (!coreReviewerFiles.includes(name)) {
     failures.push(`.co-auto-research-template/manifest.json: missing core reviewer ${name}`);
+  }
+}
+const coreProtocolFiles = Array.isArray(manifest.coreProtocolFiles) ? manifest.coreProtocolFiles : [];
+for (const name of [
+  "EXECUTION_AGENT.md",
+  "RESOURCE_INTAKE.md",
+  "RESOURCE_SCOUT.md",
+  "REVIEWER_SCOPE_ANALYST.md"
+]) {
+  if (!coreProtocolFiles.includes(name)) {
+    failures.push(`.co-auto-research-template/manifest.json: missing core protocol ${name}`);
   }
 }
 

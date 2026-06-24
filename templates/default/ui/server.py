@@ -152,6 +152,12 @@ CORE_REVIEWER_FILES = [
     "REFERENCE_REVIEWER.md",
     "REVIEWER_SPAWNING.md",
 ]
+CORE_PROTOCOL_FILES = [
+    "EXECUTION_AGENT.md",
+    "RESOURCE_INTAKE.md",
+    "RESOURCE_SCOUT.md",
+    "REVIEWER_SCOPE_ANALYST.md",
+]
 REVIEWER_BASELINE_RELATIVE_PATH = "instructions/.co-auto-research-instructions.json"
 REVIEW_STORAGE_VERSION = "per-reviewer-files-v1"
 REQUIRED_REVIEWER_OUTPUTS = {
@@ -352,6 +358,10 @@ def reviewer_template_dir(template_root: Path | None = None) -> Path:
     return (template_root or clean_template_root()).resolve() / "instructions" / "reviewers"
 
 
+def instruction_template_dir(template_root: Path | None = None) -> Path:
+    return (template_root or clean_template_root()).resolve() / "instructions"
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -370,14 +380,26 @@ def reviewer_template_hashes(template_root: Path | None = None) -> dict[str, str
     return hashes
 
 
+def protocol_template_hashes(template_root: Path | None = None) -> dict[str, str]:
+    root = instruction_template_dir(template_root)
+    hashes: dict[str, str] = {}
+    for name in CORE_PROTOCOL_FILES:
+        path = root / name
+        if path.exists() and path.is_file():
+            hashes[name] = file_sha256(path)
+    return hashes
+
+
 def write_reviewer_baseline_metadata(project_root: Path, template_root: Path | None = None) -> dict[str, Any]:
     hashes = reviewer_template_hashes(template_root)
+    protocol_hashes = protocol_template_hashes(template_root)
     payload = {
         "schemaVersion": 1,
         "reviewerBaselineVersion": REVIEWER_BASELINE_VERSION,
         "reviewStorageVersion": REVIEW_STORAGE_VERSION,
         "syncedAt": now_iso(),
         "coreReviewerFiles": hashes,
+        "coreProtocolFiles": protocol_hashes,
     }
     target = project_root / REVIEWER_BASELINE_RELATIVE_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -673,7 +695,7 @@ def normalize_state_gate_references(project_root: Path, latest_trial: Path | Non
         text,
         flags=re.MULTILINE,
     )
-    cleaned = re.sub(r"^\s*[-*]\s*Reviewer instructions are outdated \(baseline is outdated\)\.\s*$", "", updated, flags=re.IGNORECASE | re.MULTILINE)
+    cleaned = re.sub(r"^\s*[-*]\s*(?:Reviewer|Core) instructions are outdated \(baseline is outdated\)\.\s*$", "", updated, flags=re.IGNORECASE | re.MULTILINE)
     cleaned = re.sub(r"\nConsistency blockers:\s*\n(?=\s*Next action:)", "\n", cleaned)
     if cleaned != updated:
         updated = cleaned
@@ -840,8 +862,8 @@ def project_review_storage_status(project_root: Path) -> dict[str, Any]:
     state_path = project_root / "research_trajectory" / "STATE.md"
     state_text = state_path.read_text(encoding="utf-8", errors="replace") if state_path.exists() else ""
     if latest_trial and state_text:
-        if re.search(r"Reviewer instructions are outdated \(baseline is outdated\)\.", state_text, re.IGNORECASE):
-            state_stale_consistency_blockers.append("Reviewer instructions are outdated (baseline is outdated).")
+        if re.search(r"(?:Reviewer|Core) instructions are outdated \(baseline is outdated\)\.", state_text, re.IGNORECASE):
+            state_stale_consistency_blockers.append("Core instructions are outdated (baseline is outdated).")
         for key, config in REQUIRED_REVIEWER_OUTPUTS.items():
             review_path = reviewer_output_path(latest_trial, key)
             expected = project_relative_path(project_root, review_path)
@@ -879,6 +901,8 @@ def project_review_storage_status(project_root: Path) -> dict[str, Any]:
 def project_reviewer_baseline_status(project_root: Path) -> dict[str, Any]:
     template_hashes = reviewer_template_hashes()
     project_dir = project_root / "instructions" / "reviewers"
+    protocol_template_hash_map = protocol_template_hashes()
+    instruction_dir = project_root / "instructions"
     missing: list[str] = []
     changed: list[str] = []
     project_hashes: dict[str, str] = {}
@@ -892,6 +916,19 @@ def project_reviewer_baseline_status(project_root: Path) -> dict[str, Any]:
         project_hashes[name] = project_hash
         if template_hash and project_hash != template_hash:
             changed.append(name)
+    protocol_missing: list[str] = []
+    protocol_changed: list[str] = []
+    protocol_hashes: dict[str, str] = {}
+    for name in CORE_PROTOCOL_FILES:
+        template_hash = protocol_template_hash_map.get(name, "")
+        project_path = instruction_dir / name
+        if not project_path.exists() or not project_path.is_file():
+            protocol_missing.append(name)
+            continue
+        project_hash = file_sha256(project_path)
+        protocol_hashes[name] = project_hash
+        if template_hash and project_hash != template_hash:
+            protocol_changed.append(name)
     metadata_path = project_root / REVIEWER_BASELINE_RELATIVE_PATH
     metadata: dict[str, Any] = {}
     if metadata_path.exists():
@@ -902,9 +939,20 @@ def project_reviewer_baseline_status(project_root: Path) -> dict[str, Any]:
             metadata = {}
     metadata_hashes = metadata.get("coreReviewerFiles") if isinstance(metadata.get("coreReviewerFiles"), dict) else {}
     metadata_missing = [name for name in CORE_REVIEWER_FILES if metadata_hashes.get(name) != template_hashes.get(name)]
+    protocol_metadata_hashes = metadata.get("coreProtocolFiles") if isinstance(metadata.get("coreProtocolFiles"), dict) else {}
+    protocol_metadata_missing = [name for name in CORE_PROTOCOL_FILES if protocol_metadata_hashes.get(name) != protocol_template_hash_map.get(name)]
     baseline_version = str(metadata.get("reviewerBaselineVersion") or "")
     review_storage = project_review_storage_status(project_root)
-    outdated = bool(missing or changed or metadata_missing or baseline_version != REVIEWER_BASELINE_VERSION or review_storage.get("outdated"))
+    outdated = bool(
+        missing
+        or changed
+        or metadata_missing
+        or protocol_missing
+        or protocol_changed
+        or protocol_metadata_missing
+        or baseline_version != REVIEWER_BASELINE_VERSION
+        or review_storage.get("outdated")
+    )
     return {
         "schema_version": 1,
         "baseline_version": baseline_version,
@@ -913,22 +961,34 @@ def project_reviewer_baseline_status(project_root: Path) -> dict[str, Any]:
         "missing": missing,
         "changed": changed,
         "metadata_missing": metadata_missing,
+        "protocol_missing": protocol_missing,
+        "protocol_changed": protocol_changed,
+        "protocol_metadata_missing": protocol_metadata_missing,
         "metadata_path": REVIEWER_BASELINE_RELATIVE_PATH,
         "core_reviewer_files": CORE_REVIEWER_FILES,
+        "core_protocol_files": CORE_PROTOCOL_FILES,
         "hashes": project_hashes,
+        "protocol_hashes": protocol_hashes,
         "review_storage": review_storage,
     }
 
 
 def sync_project_reviewers(project_root: Path) -> dict[str, Any]:
     template_dir = reviewer_template_dir()
+    instruction_template = instruction_template_dir()
     project_dir = project_root / "instructions" / "reviewers"
+    instruction_dir = project_root / "instructions"
     if not template_dir.exists():
         raise ValueError("Package reviewer template directory is missing.")
+    if not instruction_template.exists():
+        raise ValueError("Package instruction template directory is missing.")
     project_dir.mkdir(parents=True, exist_ok=True)
+    instruction_dir.mkdir(parents=True, exist_ok=True)
     before = project_reviewer_baseline_status(project_root)
     migration_id = f"{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
-    backup_root = project_root / "archive" / "template_migrations" / migration_id / "instructions" / "reviewers"
+    migration_path = project_root / "archive" / "template_migrations" / migration_id
+    backup_root = migration_path / "instructions" / "reviewers"
+    protocol_backup_root = migration_path / "instructions"
     copied: list[str] = []
     backed_up: list[str] = []
     for name in CORE_REVIEWER_FILES:
@@ -942,8 +1002,21 @@ def sync_project_reviewers(project_root: Path) -> dict[str, Any]:
             backed_up.append(name)
         shutil.copy2(source, target)
         copied.append(name)
+    protocol_copied: list[str] = []
+    protocol_backed_up: list[str] = []
+    for name in CORE_PROTOCOL_FILES:
+        source = instruction_template / name
+        if not source.exists() or not source.is_file():
+            raise ValueError(f"Package instruction file is missing: {name}")
+        target = instruction_dir / name
+        if target.exists() and target.is_file():
+            protocol_backup_root.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, protocol_backup_root / name)
+            protocol_backed_up.append(name)
+        shutil.copy2(source, target)
+        protocol_copied.append(name)
     metadata = write_reviewer_baseline_metadata(project_root, clean_template_root())
-    manifest_path = project_root / "archive" / "template_migrations" / migration_id / "MIGRATION.md"
+    manifest_path = migration_path / "MIGRATION.md"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     review_storage = migrate_active_review_storage(project_root, manifest_path.parent)
     manifest_path.write_text(
@@ -955,6 +1028,8 @@ def sync_project_reviewers(project_root: Path) -> dict[str, Any]:
                 f"- Reviewer baseline: `{REVIEWER_BASELINE_VERSION}`",
                 f"- Copied core reviewers: {len(copied)}",
                 f"- Backed up previous core reviewers: {len(backed_up)}",
+                f"- Copied core protocol instructions: {len(protocol_copied)}",
+                f"- Backed up previous core protocol instructions: {len(protocol_backed_up)}",
                 f"- Metadata: `{REVIEWER_BASELINE_RELATIVE_PATH}`",
                 f"- Review storage version: `{REVIEW_STORAGE_VERSION}`",
                 f"- Created per-reviewer files: {len(review_storage['created'])}",
@@ -963,6 +1038,7 @@ def sync_project_reviewers(project_root: Path) -> dict[str, Any]:
                 f"- Normalized manuscript reviews: {len(review_storage['normalized_manuscript_reviews'])}",
                 "",
                 "Custom reviewer files outside the core reviewer set were preserved.",
+                "Custom instruction files outside the core protocol set were preserved.",
                 "Archived restart/resume history was not rewritten.",
                 "",
             ]
@@ -972,9 +1048,11 @@ def sync_project_reviewers(project_root: Path) -> dict[str, Any]:
     return {
         "ok": True,
         "migration_id": migration_id,
-        "backup_path": str((backup_root.parent.parent.parent).relative_to(project_root)) if backup_root.exists() else "",
+        "backup_path": str(migration_path.relative_to(project_root)) if migration_path.exists() else "",
         "copied": copied,
         "backed_up": backed_up,
+        "protocol_copied": protocol_copied,
+        "protocol_backed_up": protocol_backed_up,
         "review_storage": review_storage,
         "before": before,
         "after": project_reviewer_baseline_status(project_root),
@@ -1044,12 +1122,43 @@ def create_generated_project(projects_dir: Path, payload: dict[str, Any], templa
         except OSError as exc:
             raise ValueError(f"Cannot inspect project target: {exc}") from exc
         if has_entries:
-            raise ValueError(f"Project directory already exists: {directory_name}")
+            if is_recreatable_project_stub(target):
+                shutil.rmtree(target)
+            else:
+                raise ValueError(f"Project directory already exists: {directory_name}")
 
     target.mkdir(parents=True, exist_ok=True)
     shutil.copytree(template_root, target, ignore=template_copy_ignore(template_root), dirs_exist_ok=True)
     finalize_created_project(target, display_name or directory_name, template_root)
     return target
+
+
+def is_recreatable_project_stub(root: Path) -> bool:
+    """Return true for safe leftovers from a just-deleted project poll."""
+    if is_project_root(root):
+        return False
+    allowed_files = {
+        ".DS_Store",
+        "research_trajectory/TRAJECTORY.json",
+    }
+    allowed_dirs = {
+        "research_trajectory",
+    }
+    try:
+        entries = list(root.rglob("*"))
+    except OSError:
+        return False
+    for entry in entries:
+        try:
+            relative = entry.relative_to(root).as_posix()
+        except ValueError:
+            return False
+        if entry.is_dir():
+            if relative not in allowed_dirs:
+                return False
+        elif relative not in allowed_files:
+            return False
+    return True
 
 
 def is_project_root(root: Path) -> bool:
@@ -1218,14 +1327,55 @@ class ProjectRegistry:
             raise ValueError("No CoAutoResearch projects found.")
         return self.contexts[self.order[0]]
 
+    def context_for_alias(self, value: str) -> ProjectContext | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        text_lower = text.lower()
+        normalized_path = text.replace("\\", "/").strip("/")
+        normalized_path_lower = normalized_path.lower()
+        resolved_path = None
+        try:
+            path = Path(text).expanduser()
+            if path.is_absolute() or path.exists():
+                resolved_path = path.resolve()
+        except OSError:
+            resolved_path = None
+        for project_id in self.order:
+            context = self.contexts.get(project_id)
+            if not context:
+                continue
+            candidates = {
+                context.id,
+                context.display_name,
+                context.root.name,
+                project_directory_slug(context.display_name),
+                str(context.root),
+            }
+            if self.projects_dir:
+                try:
+                    candidates.add(context.root.relative_to(self.projects_dir).as_posix())
+                except ValueError:
+                    pass
+            lowered = {candidate.lower() for candidate in candidates if candidate}
+            path_like = {candidate.replace("\\", "/").strip("/").lower() for candidate in candidates if candidate}
+            if text_lower in lowered or normalized_path_lower in path_like:
+                return context
+            if resolved_path and resolved_path == context.root.resolve():
+                return context
+        return None
+
     def context_for(self, project_id: str = "") -> ProjectContext:
         if not project_id:
             return self.default_context()
         context = self.contexts.get(project_id)
-        if context:
+        if context and is_project_root(context.root):
             return context
         self.refresh()
         context = self.contexts.get(project_id)
+        if context and is_project_root(context.root):
+            return context
+        context = self.context_for_alias(project_id)
         if not context:
             raise ValueError(f"Unknown project: {project_id}")
         return context
@@ -1492,8 +1642,8 @@ DEFAULT_CODEX_SETTINGS = {
 }
 DEFAULT_CLAUDE_SETTINGS = {
     "model": "sonnet",
-    "reasoningEffort": "medium",
-    "permissionPreset": "auto-review",
+    "reasoningEffort": "high",
+    "permissionPreset": "auto",
     "permissionMode": "auto",
     "webSearch": True,
     "fastMode": False,
@@ -1503,7 +1653,8 @@ DEFAULT_CLAUDE_SETTINGS = {
 DEFAULT_AGENT_SETTINGS = {"backend": "codex"}
 ALLOWED_AGENT_BACKENDS = {"codex", "claude"}
 ALLOWED_CODEX_MODELS = {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"}
-ALLOWED_CLAUDE_MODEL_ALIASES = {"sonnet", "opus", "haiku"}
+ALLOWED_CLAUDE_MODEL_ALIASES = {"best", "default", "haiku", "opus", "opus[1m]", "opusplan", "opusplan[1m]", "sonnet", "sonnet[1m]"}
+DISABLED_CLAUDE_MODEL_MARKERS = {"fable"}
 SECRET_ENV_KEYS = [
     "GITHUB_TOKEN",
     "HF_TOKEN",
@@ -1511,7 +1662,14 @@ SECRET_ENV_KEYS = [
 
 ALLOWED_SANDBOXES = {"read-only", "workspace-write", "danger-full-access"}
 ALLOWED_APPROVAL_POLICIES = {"untrusted", "on-request", "never"}
-ALLOWED_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
+ALLOWED_CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
+CLAUDE_REASONING_EFFORTS_BY_FAMILY = {
+    "opusRecent": {"low", "medium", "high", "xhigh", "max"},
+    "opus46": {"low", "medium", "high", "max"},
+    "opus": {"low", "medium", "high", "xhigh", "max"},
+    "sonnet": {"low", "medium", "high", "max"},
+    "defaultOnly": {""},
+}
 AGENT_IDLE_NOTICE_SECONDS = 180
 # A rate-limit notice is dropped once events resume within this window — if the
 # agent is still producing events this recently, it is not actually rate limited.
@@ -1526,9 +1684,19 @@ PERMISSION_PRESETS = {
     "full-access": {"sandbox": "danger-full-access", "approvalPolicy": "never"},
 }
 CLAUDE_PERMISSION_PRESETS = {
-    "default": {"permissionMode": "acceptEdits"},
-    "auto-review": {"permissionMode": "auto"},
-    "full-access": {"permissionMode": "bypassPermissions"},
+    "default": {"permissionMode": "default"},
+    "acceptEdits": {"permissionMode": "acceptEdits"},
+    "plan": {"permissionMode": "plan"},
+    "auto": {"permissionMode": "auto"},
+    "dontAsk": {"permissionMode": "dontAsk"},
+    "bypassPermissions": {"permissionMode": "bypassPermissions"},
+}
+LEGACY_CLAUDE_PERMISSION_PRESETS = {
+    "auto-review": "auto",
+    "full-access": "bypassPermissions",
+    "accept-edits": "acceptEdits",
+    "dont-ask": "dontAsk",
+    "bypass-permissions": "bypassPermissions",
 }
 
 
@@ -1583,6 +1751,8 @@ def infer_claude_permission_preset(settings: dict[str, Any]) -> str:
     preset = str(settings.get("permissionPreset") or "").strip()
     if preset in CLAUDE_PERMISSION_PRESETS:
         return preset
+    if preset in LEGACY_CLAUDE_PERMISSION_PRESETS:
+        return LEGACY_CLAUDE_PERMISSION_PRESETS[preset]
     mode = str(settings.get("permissionMode") or "").strip()
     for candidate, config in CLAUDE_PERMISSION_PRESETS.items():
         if config["permissionMode"] == mode:
@@ -1603,11 +1773,56 @@ def normalize_claude_model(value: Any, fallback: str | None = None) -> str:
     default = fallback or DEFAULT_CLAUDE_SETTINGS["model"]
     if not model:
         return default
+    lowered = model.lower()
+    if any(marker in lowered for marker in DISABLED_CLAUDE_MODEL_MARKERS):
+        return default
     if model in ALLOWED_CLAUDE_MODEL_ALIASES:
         return model
-    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{1,120}", model):
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+\-\[\]]{1,140}", model):
         return model
     return default
+
+
+def claude_model_family(model: Any) -> str:
+    value = str(model or "").strip().lower()
+    if value == "best":
+        return "opusRecent"
+    if "fable" in value:
+        return "defaultOnly"
+    if "opus" in value:
+        if re.search(r"\bopus[-_]?4[-_]?6\b", value):
+            return "opus46"
+        return "opusRecent"
+    if "sonnet" in value:
+        if re.search(r"\bsonnet[-_]?4[-_]?5\b", value):
+            return "defaultOnly"
+        return "sonnet"
+    if "haiku" in value:
+        return "defaultOnly"
+    return "defaultOnly"
+
+
+def allowed_reasoning_efforts(backend: Any, model: Any = "") -> set[str]:
+    normalized = normalize_agent_backend(backend)
+    if normalized == "codex":
+        return set(ALLOWED_CODEX_REASONING_EFFORTS)
+    return set(CLAUDE_REASONING_EFFORTS_BY_FAMILY.get(claude_model_family(model), CLAUDE_REASONING_EFFORTS_BY_FAMILY["defaultOnly"]))
+
+
+def default_reasoning_effort(backend: Any, model: Any = "") -> str:
+    normalized = normalize_agent_backend(backend)
+    if normalized == "codex":
+        return DEFAULT_CODEX_SETTINGS["reasoningEffort"]
+    allowed = allowed_reasoning_efforts(normalized, model)
+    if "high" in allowed:
+        return "high"
+    return ""
+
+
+def normalize_reasoning_effort(value: Any, backend: Any = "codex", model: Any = "") -> str:
+    reasoning = str(value or "").strip()
+    allowed = allowed_reasoning_efforts(backend, model)
+    return reasoning if reasoning in allowed else default_reasoning_effort(backend, model)
 
 
 def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1628,8 +1843,7 @@ def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -
             preset = str(values[key]).strip()
             settings[key] = preset if preset in PERMISSION_PRESETS else infer_permission_preset(settings)
         elif key == "reasoningEffort":
-            reasoning = str(values[key]).strip()
-            settings[key] = reasoning if reasoning in ALLOWED_REASONING_EFFORTS else settings.get("reasoningEffort") or DEFAULT_CODEX_SETTINGS["reasoningEffort"]
+            settings[key] = normalize_reasoning_effort(values[key], "codex", settings.get("model"))
         elif key == "reviewCheckpointInterval":
             settings[key] = normalize_review_checkpoint_interval(values[key])
         elif key == "webSearch":
@@ -1644,11 +1858,7 @@ def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -
                 settings[key] = sandbox
         else:
             settings[key] = values[key]
-    settings["reasoningEffort"] = (
-        settings["reasoningEffort"]
-        if settings["reasoningEffort"] in ALLOWED_REASONING_EFFORTS
-        else DEFAULT_CODEX_SETTINGS["reasoningEffort"]
-    )
+    settings["reasoningEffort"] = normalize_reasoning_effort(settings.get("reasoningEffort"), "codex", settings.get("model"))
     settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
     return apply_permission_preset(settings)
 
@@ -1665,14 +1875,13 @@ def normalize_claude_settings(payload: Any, base: dict[str, Any] | None = None) 
             settings[key] = normalize_claude_model(values[key], settings.get("model"))
         elif key == "permissionPreset":
             preset = str(values[key]).strip()
-            settings[key] = preset if preset in CLAUDE_PERMISSION_PRESETS else infer_claude_permission_preset(settings)
+            settings[key] = preset if preset in CLAUDE_PERMISSION_PRESETS else infer_claude_permission_preset({**settings, "permissionPreset": preset})
         elif key == "permissionMode":
             mode = str(values[key]).strip()
             if mode in {item["permissionMode"] for item in CLAUDE_PERMISSION_PRESETS.values()}:
                 settings[key] = mode
         elif key == "reasoningEffort":
-            reasoning = str(values[key]).strip()
-            settings[key] = reasoning if reasoning in ALLOWED_REASONING_EFFORTS else settings.get("reasoningEffort") or DEFAULT_CLAUDE_SETTINGS["reasoningEffort"]
+            settings[key] = normalize_reasoning_effort(values[key], "claude", settings.get("model"))
         elif key == "reviewCheckpointInterval":
             settings[key] = normalize_review_checkpoint_interval(values[key])
         elif key == "webSearch":
@@ -1682,11 +1891,7 @@ def normalize_claude_settings(payload: Any, base: dict[str, Any] | None = None) 
         elif key == "extraConfig":
             settings[key] = str(values[key] or "").strip()[:4000]
     settings["model"] = normalize_claude_model(settings.get("model"))
-    settings["reasoningEffort"] = (
-        settings["reasoningEffort"]
-        if settings["reasoningEffort"] in ALLOWED_REASONING_EFFORTS
-        else DEFAULT_CLAUDE_SETTINGS["reasoningEffort"]
-    )
+    settings["reasoningEffort"] = normalize_reasoning_effort(settings.get("reasoningEffort"), "claude", settings.get("model"))
     settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
     return apply_claude_permission_preset(settings)
 
@@ -2408,14 +2613,14 @@ def _format_claude_model_label(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
-    full_match = re.match(r"^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?(?:-(\d{6,8}))?$", raw, re.IGNORECASE)
+    full_match = re.match(r"^claude-(opus|sonnet|haiku|mythos)-(\d+)(?:-(\d+))?(?:-(\d{6,8}))?$", raw, re.IGNORECASE)
     if full_match:
         tier = full_match.group(1).capitalize()
         major = full_match.group(2)
         minor = full_match.group(3)
         version = f"{major}.{minor}" if minor else major
         return f"Claude {tier} {version}"
-    if raw.lower() in {"opus", "sonnet", "haiku", "fable", "mythos"}:
+    if raw.lower() in {"opus", "sonnet", "haiku", "mythos"}:
         return f"Claude {raw.capitalize()}"
     return raw
 
@@ -2434,11 +2639,11 @@ def _parse_claude_models_from_help(help_text: str) -> list[tuple[str, str]]:
     text = str(help_text or "")
     found: dict[str, str] = {}
     # Full model IDs are the safest signal: claude-opus-4-8, claude-sonnet-4-6, etc.
-    for match in re.finditer(r"\bclaude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)?(?:-\d{6,8})?\b", text, re.IGNORECASE):
+    for match in re.finditer(r"\bclaude-(?:opus|sonnet|haiku|mythos)-\d+(?:-\d+)?(?:-\d{6,8})?\b", text, re.IGNORECASE):
         value = match.group(0).lower()
         found.setdefault(value, _format_claude_model_label(value))
     # Shortcuts (opus / sonnet / haiku) appear in the --model option help text quoted or after commas.
-    for match in re.finditer(r"[\"'`,\s\[\(](opus|sonnet|haiku|fable|mythos)[\"'`,\s\]\)]", text, re.IGNORECASE):
+    for match in re.finditer(r"[\"'`,\s\[\(](opus|sonnet|haiku|mythos)[\"'`,\s\]\)]", text, re.IGNORECASE):
         value = match.group(1).lower()
         found.setdefault(value, _format_claude_model_label(value))
     return [(value, label) for value, label in found.items()]
@@ -2455,8 +2660,8 @@ def _parse_codex_models_from_help(help_text: str) -> list[tuple[str, str]]:
 
 def _claude_model_sort_key(item: tuple[str, str]) -> tuple[int, int, int, str]:
     value, _ = item
-    tier_order = {"opus": 0, "sonnet": 1, "haiku": 2, "fable": -1, "mythos": -2}
-    full = re.match(r"^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?", value, re.IGNORECASE)
+    tier_order = {"opus": 0, "sonnet": 1, "haiku": 2, "mythos": -2}
+    full = re.match(r"^claude-(opus|sonnet|haiku|mythos)-(\d+)(?:-(\d+))?", value, re.IGNORECASE)
     if full:
         tier = tier_order.get(full.group(1).lower(), 99)
         # Newer versions first: negate major/minor for stable sort.
@@ -2575,7 +2780,7 @@ def claude_permission_modes_from_help(help_text: str) -> set[str]:
         return set()
     snippet = text[index:index + 800]
     modes = set(re.findall(r'"([^"]+)"', snippet))
-    known_modes = {"acceptEdits", "auto", "bypassPermissions", "default", "delegate", "dontAsk", "plan"}
+    known_modes = {"acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"}
     return modes & known_modes
 
 
@@ -6384,6 +6589,81 @@ def normalize_resource_reference(raw: str) -> str:
     return value.strip()
 
 
+def strip_local_path_wrappers(raw: str) -> str:
+    value = str(raw or "").strip()
+    pairs = {
+        "`": "`",
+        '"': '"',
+        "'": "'",
+        "“": "”",
+        "‘": "’",
+        "<": ">",
+    }
+    changed = True
+    while changed and len(value) >= 2:
+        changed = False
+        first = value[0]
+        last = value[-1]
+        if pairs.get(first) == last:
+            value = value[1:-1].strip()
+            changed = True
+    return value
+
+
+def expand_windows_percent_vars(value: str, env: dict[str, str] | None = None) -> str:
+    values = env or os.environ
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in values:
+            return values[name]
+        lower = name.lower()
+        for key, candidate in values.items():
+            if key.lower() == lower:
+                return candidate
+        return match.group(0)
+
+    return re.sub(r"%([^%]+)%", replace, value)
+
+
+def decode_file_url_path(value: str) -> str:
+    if not re.match(r"^file:", value, re.IGNORECASE):
+        return value
+    parsed = urlparse(value)
+    if parsed.scheme.lower() != "file":
+        return value
+    path_text = unquote(parsed.path or "")
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        prefix = "\\\\" if os.name == "nt" else "//"
+        return f"{prefix}{parsed.netloc}{path_text}"
+    if re.match(r"^/[A-Za-z]:[\\/]", path_text):
+        path_text = path_text[1:]
+    return path_text
+
+
+def normalize_windows_long_path_prefix(value: str) -> str:
+    if re.match(r"^[\\/]{2}\?[\\/]UNC[\\/]", value):
+        return ("\\\\" if os.name == "nt" else "//") + value[8:]
+    if re.match(r"^[\\/]{2}\?[\\/][A-Za-z]:", value):
+        return value[4:]
+    return value
+
+
+def clean_local_path_input(raw: str) -> str:
+    value = strip_local_path_wrappers(raw)
+    value = decode_file_url_path(value)
+    value = normalize_windows_long_path_prefix(value)
+    value = os.path.expanduser(os.path.expandvars(value))
+    value = expand_windows_percent_vars(value)
+    if os.name == "nt" and re.match(r"^[A-Za-z]:$", value):
+        value = f"{value}/"
+    return value
+
+
+def local_path_from_user_input(raw: str) -> Path:
+    return Path(clean_local_path_input(raw))
+
+
 def basename_hint(raw: str) -> str:
     value = normalize_resource_reference(raw).replace("\\", "/").rstrip("/")
     if not value:
@@ -6666,7 +6946,7 @@ def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
         if imported_record:
             saved.append(imported_record)
             continue
-        source = path_exists_resolved(Path(os.path.expandvars(os.path.expanduser(source_text))))
+        source = path_exists_resolved(local_path_from_user_input(source_text))
         if not source:
             raise ValueError(f"Resource path does not exist: {source_text}")
         category = str(item.get("category", "")).strip() or infer_resource_category(source)
@@ -6756,7 +7036,7 @@ def browse_local_path(raw_path: str = "", search_query: str = "") -> dict[str, A
         fallback = REPO_ROOT
 
     if raw_path:
-        candidate = Path(os.path.expanduser(raw_path))
+        candidate = local_path_from_user_input(raw_path)
         if not candidate.is_absolute():
             candidate = fallback / candidate
     else:
@@ -6767,19 +7047,25 @@ def browse_local_path(raw_path: str = "", search_query: str = "") -> dict[str, A
     except OSError:
         current = candidate.absolute()
 
+    selected_path = ""
+    selected_type = ""
     if current.is_file():
+        selected_path = str(current)
+        selected_type = "file"
         current = current.parent
 
     roots = local_browser_roots()
     if not current.exists() or not current.is_dir():
         return {
             "ok": False,
-            "error": f"Folder does not exist or cannot be opened: {raw_path or str(candidate)}",
+            "error": f"Path does not exist or cannot be opened: {raw_path or str(candidate)}",
             "path": str(fallback),
             "parent": str(fallback.parent) if fallback.parent != fallback else "",
             "roots": roots,
             "entries": [],
             "truncated": False,
+            "selected_path": "",
+            "selected_type": "",
         }
 
     try:
@@ -6793,6 +7079,8 @@ def browse_local_path(raw_path: str = "", search_query: str = "") -> dict[str, A
             "roots": roots,
             "entries": [],
             "truncated": False,
+            "selected_path": selected_path,
+            "selected_type": selected_type,
         }
 
     query = search_query.strip().lower()
@@ -6814,6 +7102,8 @@ def browse_local_path(raw_path: str = "", search_query: str = "") -> dict[str, A
         "truncated": False,
         "query": search_query,
         "separator": os.sep,
+        "selected_path": selected_path,
+        "selected_type": selected_type,
     }
 
 
@@ -7090,8 +7380,8 @@ def settings_to_claude_args(settings: dict[str, Any], resume: bool) -> list[str]
     model = normalize_claude_model(settings.get("model"))
     if model:
         args.extend(["--model", model])
-    reasoning = str(settings.get("reasoningEffort") or "").strip()
-    if reasoning in ALLOWED_REASONING_EFFORTS:
+    reasoning = normalize_reasoning_effort(settings.get("reasoningEffort"), "claude", model)
+    if reasoning:
         args.extend(["--effort", reasoning])
     preset = infer_claude_permission_preset(settings)
     permission_mode = CLAUDE_PERMISSION_PRESETS[preset]["permissionMode"]
@@ -7520,9 +7810,15 @@ def final_gate_consistency_blockers() -> list[str]:
         if reviewer_status.get("changed"):
             parts.append(f"changed {', '.join(reviewer_status['changed'])}")
         if reviewer_status.get("metadata_missing"):
-            parts.append("baseline metadata is missing or stale")
+            parts.append("reviewer baseline metadata is missing or stale")
+        if reviewer_status.get("protocol_missing"):
+            parts.append(f"protocol missing {', '.join(reviewer_status['protocol_missing'])}")
+        if reviewer_status.get("protocol_changed"):
+            parts.append(f"protocol changed {', '.join(reviewer_status['protocol_changed'])}")
+        if reviewer_status.get("protocol_metadata_missing"):
+            parts.append("protocol baseline metadata is missing or stale")
         detail = "; ".join(parts) or "baseline is outdated"
-        blockers.append(f"Reviewer instructions are outdated ({detail}).")
+        blockers.append(f"Core instructions are outdated ({detail}).")
     blockers.extend(final_gate_review_schema_blockers())
     blockers.extend(current_trial_reviewer_file_blockers())
     blockers.extend(final_blueprint_consistency_blockers())
@@ -7641,6 +7937,7 @@ Required reviewer gates:
 - Venue fit reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/VENUE_FIT_REVIEW.md`
 - Manuscript reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/MANUSCRIPT_REVIEW.md`
 - Figure/table reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FIGURE_TABLE_REVIEW.md`
+- Reference reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/REFERENCE_REVIEW.md`
 - Final gate reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`
 
 Next action: start or continue the next coherent autoresearch iteration.
@@ -7657,7 +7954,7 @@ def repair_autoresearch_gate_if_needed() -> dict[str, Any]:
         return gate
     raw_statuses = gate.get("reviewer_raw_statuses") if isinstance(gate.get("reviewer_raw_statuses"), dict) else {}
     repair_reason = (
-        "Server repair: top-level `Status: pass` was downgraded because final blueprint, reviewer baseline, or final-gate consistency checks did not pass."
+        "Server repair: top-level `Status: pass` was downgraded because final blueprint, instruction baseline, or final-gate consistency checks did not pass."
         if consistency_blockers
         else "Server repair: top-level `Status: pass` was downgraded because not every required reviewer gate was a strict `pass`."
     )
@@ -7921,6 +8218,31 @@ Additional CoAutoResearch goal instruction from the user:
 Apply this instruction when choosing and executing the next trial objective, but do not let it weaken reviewer standards, provenance requirements, or final-pass requirements."""
 
 
+def resource_scout_prompt_section() -> str:
+    return """
+Resource Scout requirement for every substantive trial:
+- read instructions/RESOURCE_SCOUT.md;
+- PLAN.md must include `## Resource Scout Brief` with `Scout: required | skipped`, `Skip reason:`, `Search scope:`, `Resource types:`, `Disciplines/domains:`, `Download policy:`, `Expected destinations:`, and `Stop criteria:`;
+- default to `Scout: required`; use `Scout: skipped` only for narrow local-only work, explicitly offline runs, or truly irrelevant external search, and write a concrete skip reason;
+- after PLAN.md and reviews/PLAN_REVIEW.md, before main execution, `spawn a Resource Scout subagent to search, file, and report external resources for this trial` when required;
+- write `research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and save small public artifacts under the appropriate `resources/` folder;
+- record scout-discovered materials as `autoresearch_discovered`; they are raw inputs, not current truth, until promoted by the main execution agent into REPORT.md, STATE.md, CURRENT_FINDINGS.md, PROJECT.md, or manuscript files;
+- if scout outputs change assumptions, resources, risks, or success criteria, revise PLAN.md and rerun PLAN_REVIEW.md before execution;
+- if the runtime cannot spawn this required subagent, record a blocker and set the gate to `blocked` or `needs_human`; do not silently run it inline;
+- the Resource Scout is not a ninth reviewer; keep the eight reviewer files exactly as Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, and Final gate."""
+
+
+def reviewer_scope_analyst_prompt_section() -> str:
+    return """
+Reviewer Scope Analyst requirement for every substantive trial:
+- read instructions/REVIEWER_SCOPE_ANALYST.md and instructions/reviewers/REVIEWER_SPAWNING.md;
+- after REPORT.md and before refreshing the eight core reviewers, `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks`;
+- write `research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`;
+- if the decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, then run the specialized review before the eight core reviewers and write it under the current trial `reviews/` directory;
+- if the runtime cannot spawn this required subagent, record a blocker and set the gate to `blocked` or `needs_human`; do not silently run it inline;
+- the Reviewer Scope Analyst and any specialized reviewer are not core reviewers and must not add a ninth Autoresearch Goal Gate line."""
+
+
 def continue_autoresearch_loop_prompt(
     gate: dict[str, Any],
     next_iteration: int | None = None,
@@ -7950,21 +8272,29 @@ Read:
 - research_trajectory/STATE.md
 - research_trajectory/CURRENT_FINDINGS.md
 - the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
+- instructions/RESOURCE_SCOUT.md
+- instructions/REVIEWER_SCOPE_ANALYST.md
 - instructions/reviewers/REVIEW_TAXONOMY.md
-- all seven core reviewer instructions under instructions/reviewers/
+- all eight core reviewer instructions under instructions/reviewers/
 - instructions/reviewers/FINAL_GATE_REVIEWER.md
+
+{resource_scout_prompt_section()}
+{reviewer_scope_analyst_prompt_section()}
 
 If the `Autoresearch Goal Gate` section in `research_trajectory/STATE.md` says `Status: pass` and every current-trial reviewer file is a strict pass, including the Final gate reviewer, do not create a new trial. Report that the autoresearch goal has passed all reviewer gates.
 
 Otherwise, run exactly the next coherent autoresearch iteration needed to move the gate toward pass:
 1. create the next trial under research_trajectory/trials/;
-2. write PLAN.md before execution;
-3. create `reviews/` and write all seven current-trial reviewer files: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, and FINAL_GATE_REVIEW.md;
-4. execute mainly in workspace/;
-5. write REPORT.md;
-6. refresh all seven current-trial reviewer files after REPORT.md;
-7. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
-8. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end, with each reviewer line pointing to the current trial's reviewer file path.
+2. write PLAN.md before execution, including `## Resource Scout Brief`;
+3. create `reviews/` and write PLAN_REVIEW.md before execution;
+4. spawn a Resource Scout subagent to search, file, and report external resources for this trial if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
+5. execute mainly in workspace/;
+6. write REPORT.md;
+7. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
+8. if the reviewer spawn decision says `Spawn needed: yes`, run the specialized reviewer before core reviewers;
+9. refresh all eight current-trial reviewer files after REPORT.md and reviewer-scope analysis: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md;
+10. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
+11. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end, with each reviewer line pointing to the current trial's reviewer file path.
 
 This invocation is complete after the Trial {expected} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start Trial {expected + 1} in this invocation.
 
@@ -7986,11 +8316,17 @@ Original user instruction:
 Before creating or continuing any trial:
 1. read AGENTS.md;
 2. read instructions/INTERVENTION_PROTOCOL.md;
-3. read the latest formal human intervention file above;
-4. apply the intervention to canonical project state;
-5. update research_trajectory/STATE.md, research_trajectory/CURRENT_FINDINGS.md, and manuscript-facing artifacts only where the intervention requires it.
+3. read instructions/EXECUTION_AGENT.md;
+4. read instructions/RESOURCE_SCOUT.md;
+5. read instructions/REVIEWER_SCOPE_ANALYST.md;
+6. read the latest formal human intervention file above;
+7. apply the intervention to canonical project state;
+8. update research_trajectory/STATE.md, research_trajectory/CURRENT_FINDINGS.md, and manuscript-facing artifacts only where the intervention requires it.
 
-Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md, REPORT.md, all seven reviewer files, and the updated `Autoresearch Goal Gate` section. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
+{resource_scout_prompt_section()}
+{reviewer_scope_analyst_prompt_section()}
+
+Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawning the Resource Scout subagent if required, REPORT.md, spawning the Reviewer Scope Analyst subagent, any required specialized review, all eight reviewer files (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and the updated `Autoresearch Goal Gate` section. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
 
 
 def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
@@ -8346,23 +8682,31 @@ Use the repository instructions:
 - read research_trajectory/STATE.md
 - read research_trajectory/CURRENT_FINDINGS.md
 - inspect resources only as needed for the next coherent research objective
+- read instructions/RESOURCE_SCOUT.md
+- read instructions/REVIEWER_SCOPE_ANALYST.md
 - read instructions/reviewers/REVIEW_TAXONOMY.md
-- read all seven core reviewer instructions under instructions/reviewers/
+- read all eight core reviewer instructions under instructions/reviewers/
 - read instructions/reviewers/FINAL_GATE_REVIEWER.md
 - create or update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
+
+{resource_scout_prompt_section()}
+{reviewer_scope_analyst_prompt_section()}
 
 Run exactly the next autoresearch iteration and maintain the reviewer gate:
 1. choose one coherent next research objective;
 2. create the next trial under research_trajectory/trials/;
-3. write PLAN.md before execution;
-4. create `reviews/` and write all seven current-trial reviewer files: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, and FINAL_GATE_REVIEW.md;
-5. execute primarily in workspace/;
-6. write REPORT.md after execution;
-7. refresh all seven current-trial reviewer files after REPORT.md;
-8. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, or notes only when their current state genuinely changes;
-9. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md with:
+3. write PLAN.md before execution, including `## Resource Scout Brief`;
+4. create `reviews/` and write PLAN_REVIEW.md before execution;
+5. spawn a Resource Scout subagent to search, file, and report external resources for this trial if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
+6. execute primarily in workspace/;
+7. write REPORT.md after execution;
+8. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
+9. if the reviewer spawn decision says `Spawn needed: yes`, run the specialized reviewer before core reviewers;
+10. refresh all eight current-trial reviewer files after REPORT.md and reviewer-scope analysis: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md;
+11. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, or notes only when their current state genuinely changes;
+12. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md with:
    - `Status: pass`, `continue`, `blocked`, or `needs_human`;
-   - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Final gate;
+   - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, Final gate;
    - the current trial reviewer file path on each reviewer gate line;
    - the next action if any gate is not pass.
 
@@ -8423,10 +8767,12 @@ User instruction:
 
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached.
 
+For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report external resources for this trial` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
+
 If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
     return """Continue the next coherent CoAutoResearch iteration in this same agent session.
 
-Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report external resources for this trial` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 
 
 def resume_from_trial_prompt(
@@ -8479,13 +8825,18 @@ Read:
 - research_trajectory/STATE.md
 - research_trajectory/CURRENT_FINDINGS.md
 - the base trial PLAN/REVIEW/REPORT files
+- instructions/RESOURCE_SCOUT.md
+- instructions/REVIEWER_SCOPE_ANALYST.md
 - instructions/reviewers/REVIEW_TAXONOMY.md
-- all seven core reviewer instructions under instructions/reviewers/
+- all eight core reviewer instructions under instructions/reviewers/
 - instructions/reviewers/FINAL_GATE_REVIEWER.md
+
+{resource_scout_prompt_section()}
+{reviewer_scope_analyst_prompt_section()}
 
 Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do.
 
-Write PLAN.md, REPORT.md, all seven reviewer files under the current trial `reviews/` directory, and update the autoresearch gate with those paths. This invocation is complete after the Trial {next_iteration} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
+Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. This invocation is complete after the Trial {next_iteration} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: dict[str, Any]) -> dict[str, Any]:
@@ -8737,11 +9088,16 @@ Read:
 - resources/user_input/RESOURCE_MANIFEST.md
 - instructions/EXECUTION_AGENT.md
 - instructions/RESOURCE_INTAKE.md
+- instructions/RESOURCE_SCOUT.md
+- instructions/REVIEWER_SCOPE_ANALYST.md
 - instructions/MANUSCRIPT.md
 - instructions/reviewers/REVIEW_TAXONOMY.md
-- all seven core reviewer instructions under instructions/reviewers/
+- all eight core reviewer instructions under instructions/reviewers/
 
-Create Trial 1 under `research_trajectory/trials/`. Write PLAN.md, REPORT.md, all seven reviewer files under the current trial `reviews/` directory, and update the autoresearch gate with those paths. This invocation is complete after the Trial 1 boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
+{resource_scout_prompt_section()}
+{reviewer_scope_analyst_prompt_section()}
+
+Create Trial 1 under `research_trajectory/trials/`. Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. This invocation is complete after the Trial 1 boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:

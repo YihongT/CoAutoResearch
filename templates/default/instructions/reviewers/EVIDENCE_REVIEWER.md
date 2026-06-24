@@ -11,6 +11,9 @@ Review whether claims are supported by evidence.
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
 - current trial `PLAN.md`, `REPORT.md`, `reviews/`, and artifacts
+- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when present
+- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
+- specialized review outputs named by the reviewer spawn decision, when present
 - `manuscript/BLUEPRINT.md` if claims are manuscript-facing
 
 ## Output Location
@@ -32,6 +35,13 @@ Check:
 - Are alternative explanations addressed?
 - Is there overclaiming?
 - Are raw artifacts traceable through trial reports?
+- Do Resource Scout outputs reveal missing evidence, counterevidence,
+  benchmark/data gaps, or source-quality issues that should prevent pass?
+- Are scout-discovered resources treated as raw inputs until promoted through
+  a trial report or canonical findings/state update?
+- Does the reviewer spawn decision or any specialized review identify evidence,
+  statistics, benchmark-validity, reproducibility, ethics, safety, privacy, or
+  domain-specific risks that should prevent pass?
 
 Apply evidence-certainty judgment to each central claim. Consider source
 quality, bias, indirectness, imprecision, inconsistency, missing counterevidence,

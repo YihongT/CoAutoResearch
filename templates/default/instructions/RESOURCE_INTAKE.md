@@ -94,6 +94,31 @@ If no relevant embedded resources are found, record that the embedded scan was p
 
 ---
 
+## Resource Scout Discoveries
+
+Resources discovered by `instructions/RESOURCE_SCOUT.md` are raw materials found
+by an autoresearch run, not user-provided truth.
+
+Record each scout-discovered material in
+`resources/user_input/RESOURCE_MANIFEST.md` with provenance
+`autoresearch_discovered`. Include:
+
+- source URL, DOI, repository, registry id, or other stable locator;
+- title/name, publisher or host, date/year, and access date when relevant;
+- trial id and scout report path;
+- local destination path, or link-only status with reason;
+- resource type and discipline/domain;
+- license or access constraints when known;
+- short reason the scout considered it relevant;
+- whether it is downloaded, link-only, restricted, large/deferred, or missing.
+
+Scout-discovered materials remain raw inputs until the main execution agent
+promotes them into `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, manuscript
+files, or the current trial `REPORT.md`. A scout report may describe candidate
+implications, but it must not convert those implications into accepted findings.
+
+---
+
 ## Copy And Symlink Rules
 
 - Small files should normally be copied.

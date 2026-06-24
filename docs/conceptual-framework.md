@@ -12,10 +12,12 @@ flowchart TD
   P --> S["STATE.md<br/>current objective"]
   S --> T["Trial<br/>one coherent work package"]
   T --> PL["PLAN.md"]
-  PL --> RV["reviews/*_REVIEW.md<br/>seven reviewer files"]
-  RV --> W["Execute in workspace/"]
+  PL --> PR["reviews/PLAN_REVIEW.md"]
+  PR --> RS["Resource Scout decision/report<br/>when required"]
+  RS --> W["Execute in workspace/"]
   W --> RP["REPORT.md"]
-  RP --> RV
+  RP --> RA["Reviewer Scope Analyst decision"]
+  RA --> RV["reviews/*_REVIEW.md<br/>eight core reviewer files"]
   RP --> F["CURRENT_FINDINGS.md<br/>claims and evidence"]
   F --> M["Manuscript / deliverable<br/>human can defend and revise"]
   M --> S
@@ -30,14 +32,15 @@ flowchart TD
 
   class H human;
   class P,S,F truth;
-  class T,PL,RV,W,RP trial;
+  class T,PL,PR,RS,RA,RV,W,RP trial;
   class M output;
 ```
 
 ## What the Diagram Means
 
 - The loop is linear enough for a human to follow.
-- Every substantive work package gets a plan and report.
+- Every substantive work package gets a plan, report, Resource Scout brief,
+  Reviewer Scope Analyst decision, and eight core review files.
 - Claims become current only when reflected in findings and evidence records.
 - Human intervention is not an afterthought; it is part of the control system.
 - The output should be something the human can understand, defend, and revise.
@@ -49,7 +52,7 @@ flowchart TD
 | `PROJECT.md` | Overall direction, scope, audience, and constraints. |
 | `STATE.md` | Current objective, active plan, blockers, and reviewer gate state. |
 | Human interventions | Explicit changes to scope, claim, venue, method, or priority. |
-| Reviewer gates | Plan, process, evidence, venue fit, manuscript, figure/table, and final-gate checks. |
+| Reviewer gates | Plan, process, evidence, venue fit, manuscript, figure/table, reference, and final-gate checks. |
 
 Autoresearch stops only after strict reviewer pass. A completed trial, approved
 plan, plausible venue fit, coherent manuscript architecture, or targeted

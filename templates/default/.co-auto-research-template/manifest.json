@@ -13,7 +13,14 @@
     "VENUE_FIT_REVIEWER.md",
     "MANUSCRIPT_REVIEWER.md",
     "FIGURE_TABLE_REVIEWER.md",
+    "REFERENCE_REVIEWER.md",
     "REVIEWER_SPAWNING.md"
+  ],
+  "coreProtocolFiles": [
+    "EXECUTION_AGENT.md",
+    "RESOURCE_INTAKE.md",
+    "RESOURCE_SCOUT.md",
+    "REVIEWER_SCOPE_ANALYST.md"
   ],
   "managedPaths": [
     "AGENTS.md",

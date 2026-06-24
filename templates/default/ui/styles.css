@@ -3974,9 +3974,9 @@ textarea:focus {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 42px;
-  min-width: 42px;
-  height: 42px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
   border: 1px solid rgba(32, 31, 27, 0.14);
   border-radius: 50%;
   background: rgba(255, 253, 248, 0.92);
@@ -4002,6 +4002,59 @@ textarea:focus {
 .composer-attach-button:focus-visible {
   outline: 2px solid rgba(82, 111, 92, 0.45);
   outline-offset: 3px;
+}
+
+.attachment-menu {
+  position: fixed;
+  left: 20px;
+  top: 20px;
+  bottom: auto;
+  z-index: 1400;
+  display: grid;
+  gap: 4px;
+  width: min(260px, calc(100vw - 40px));
+  padding: 8px;
+  border: 1px solid rgba(32, 31, 27, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.98);
+  box-shadow: 0 22px 70px rgba(31, 33, 28, 0.18);
+}
+
+.attachment-menu[hidden] {
+  display: none;
+}
+
+.attachment-menu button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 680;
+  text-align: left;
+}
+
+.attachment-menu button:hover,
+.attachment-menu button:focus-visible {
+  background: rgba(32, 31, 27, 0.06);
+  outline: none;
+}
+
+.attachment-menu svg {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .attachment-chip {
@@ -4274,8 +4327,9 @@ body.is-dragging-file .composer {
   border-bottom: 1px solid var(--line);
 }
 
-.browser-search-field span {
+.browser-search-icon {
   display: grid;
+  flex: 0 0 auto;
   place-items: center;
   width: 22px;
   height: 22px;
@@ -4294,11 +4348,18 @@ body.is-dragging-file .composer {
 
 .browser-search-field input {
   width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
   min-height: 40px;
   padding: 8px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--control-bg);
+}
+
+.browser-jump-button {
+  flex: 0 0 auto;
+  min-width: 48px;
 }
 
 .browser-note {
@@ -7772,75 +7833,9 @@ h1,
   min-height: clamp(150px, 20vh, 220px);
 }
 
-.material-type-dialog {
-  width: min(620px, calc(100vw - 36px));
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--panel-bg);
-  color: var(--ink);
-  box-shadow: 0 30px 90px rgba(31, 33, 28, 0.2);
-}
-
-.material-type-dialog::backdrop {
-  background: rgba(21, 25, 22, 0.32);
-  backdrop-filter: blur(4px);
-}
-
-.material-type-shell {
-  display: grid;
-  gap: 16px;
-  padding: 22px;
-}
-
-.material-type-shell h2 {
-  margin: 0;
-  font-family: var(--font);
-  font-size: 22px;
-}
-
-.material-type-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.material-type-grid button {
-  display: grid;
-  gap: 5px;
-  min-height: 92px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: #fbfaf4;
-  color: var(--ink);
-  text-align: left;
-}
-
-.material-type-grid button:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.material-type-grid strong {
-  font-size: 14px;
-}
-
-.material-type-grid span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 @media (max-width: 980px) {
   .stage-panel[data-stage-panel="1"] .cold-card > .card-head h2 {
     white-space: normal;
-  }
-}
-
-@media (max-width: 640px) {
-  .material-type-grid {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -8217,7 +8212,7 @@ h1,
 }
 
 .stage-panel[data-stage-panel="1"] .brief-attach-button::after {
-  content: "Browse or drop resources";
+  content: "Attach resources";
   position: absolute;
   left: 50%;
   bottom: calc(100% + 8px);
@@ -8244,14 +8239,14 @@ h1,
 }
 
 .stage-panel[data-stage-panel="1"] .brief-cold-start {
-  right: 20px;
-  bottom: 20px;
+  right: 12px;
+  bottom: 12px;
   display: grid;
   place-items: center;
-  width: 46px;
-  min-width: 46px;
-  height: 46px;
-  min-height: 46px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
   padding: 0;
   border-color: var(--primary-bg);
   border-radius: 50%;
@@ -8261,8 +8256,8 @@ h1,
 }
 
 .stage-panel[data-stage-panel="1"] .brief-cold-start svg {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.35;
@@ -8290,57 +8285,6 @@ h1,
   color: rgba(32, 31, 27, 0.48);
   font-size: 13px;
   font-weight: 720;
-}
-
-.material-action-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 8px 16px 8px 12px;
-  border: 1px solid rgba(32, 31, 27, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 253, 246, 0.68);
-  color: rgba(32, 31, 27, 0.66);
-  font-size: 14px;
-  font-weight: 650;
-  box-shadow: 0 10px 30px rgba(31, 33, 28, 0.04);
-  transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
-}
-
-.material-action-chip:hover,
-.material-action-chip:focus-visible {
-  border-color: rgba(79, 102, 91, 0.34);
-  background: rgba(255, 253, 246, 0.94);
-  color: var(--ink);
-  box-shadow: 0 14px 34px rgba(31, 33, 28, 0.08);
-  transform: translateY(-1px);
-  outline: none;
-}
-
-.material-action-icon {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid rgba(32, 31, 27, 0.14);
-  border-radius: 12px;
-  color: var(--accent);
-}
-
-.material-action-icon svg {
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 @media (max-height: 820px) {
@@ -8372,11 +8316,6 @@ h1,
     margin-bottom: 44px;
   }
 
-  .material-action-chip {
-    min-height: 40px;
-    padding: 7px 12px 7px 9px;
-    font-size: 13px;
-  }
 }
 
 /* Final browser clarity overrides */
@@ -8518,6 +8457,7 @@ h1,
 }
 
 .brief-composer-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -8571,16 +8511,16 @@ h1,
 #cold-start-workspace.has-framing-thread .brief-cold-start {
   position: static;
   flex: 0 0 auto;
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
   margin: 0;
 }
 
 @media (max-width: 720px) {
   .brief-composer-row {
-    padding: 0 14px 14px 20px;
+    padding: 10px 12px;
   }
 
   .brief-run-controls select {
@@ -8598,7 +8538,7 @@ h1,
   align-items: center;
   gap: 10px;
   min-height: 66px;
-  padding: 14px 18px 14px 30px;
+  padding: 10px 12px 10px 14px;
 }
 
 .stage-panel[data-stage-panel="1"] .brief-editor-shell #cold-file-editor,
@@ -8627,7 +8567,7 @@ h1,
 
 @media (max-width: 720px) {
   .brief-composer-row {
-    padding: 12px 14px 12px 20px;
+    padding: 10px 12px;
   }
 
   .brief-run-controls {
@@ -8845,7 +8785,7 @@ h1,
   right: auto;
   bottom: 22px !important;
   z-index: 60;
-  width: min(900px, calc(100vw - var(--rail-width, 224px) - 56px));
+  width: min(var(--framing-composer-width, 980px), calc(100vw - var(--rail-width, 224px) - 56px));
   margin: 0;
   transform: translateX(-50%);
 }
@@ -8858,7 +8798,7 @@ h1,
   #cold-start-workspace.has-framing-thread .brief-editor-shell {
     left: 50%;
     bottom: 18px !important;
-    width: min(900px, calc(100vw - 24px));
+    width: min(var(--framing-composer-width, 980px), calc(100vw - 24px));
   }
 }
 
@@ -8867,7 +8807,7 @@ h1,
   left: 50% !important;
   right: auto !important;
   bottom: 22px !important;
-  width: min(900px, calc(100vw - 48px)) !important;
+  width: min(var(--framing-composer-width, 980px), calc(100vw - 48px)) !important;
   max-width: calc(100vw - 48px);
   transform: translateX(-50%) !important;
 }
@@ -8892,7 +8832,7 @@ body.has-brief-dock {
   bottom: 22px !important;
   z-index: 1000 !important;
   display: block !important;
-  width: var(--brief-dock-width, min(900px, calc(100vw - 48px))) !important;
+  width: var(--brief-dock-width, min(var(--framing-composer-width, 980px), calc(100vw - 48px))) !important;
   max-width: calc(100vw - 48px) !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -8946,14 +8886,30 @@ body.has-brief-dock {
   display: flex !important;
   align-items: center !important;
   gap: 10px !important;
-  min-height: 78px !important;
-  padding: 14px 18px !important;
+  min-height: 62px !important;
+  padding: 10px 12px 10px 14px !important;
 }
 
 .brief-editor-shell.is-framing-dock .composer-attach-button {
-  width: 44px !important;
-  min-width: 44px !important;
-  height: 44px !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.brief-editor-shell.is-framing-dock .composer-attach-button:hover,
+.brief-editor-shell.is-framing-dock .composer-attach-button:focus-visible {
+  background: transparent !important;
+  color: var(--ink) !important;
+}
+
+.brief-editor-shell.is-framing-dock .composer-attach-button svg {
+  width: 19px !important;
+  height: 19px !important;
+  stroke-width: 2 !important;
 }
 
 .brief-editor-shell.is-framing-dock #cold-file-editor {
@@ -8978,7 +8934,7 @@ body.has-brief-dock {
 }
 
 .brief-editor-shell.is-framing-dock .brief-run-controls label {
-  min-height: 34px !important;
+  min-height: 32px !important;
   padding: 0 5px !important;
 }
 
@@ -8994,12 +8950,12 @@ body.has-brief-dock {
 
 .brief-editor-shell.is-framing-dock .brief-cold-start {
   position: static !important;
-  flex: 0 0 auto !important;
+  flex: 0 0 34px !important;
   display: grid !important;
-  width: 44px !important;
-  min-width: 44px !important;
-  height: 44px !important;
-  min-height: 44px !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
   margin: 0 !important;
   padding: 0 !important;
   place-items: center !important;
@@ -9012,8 +8968,8 @@ body.has-brief-dock {
 
 .brief-editor-shell.is-framing-dock .brief-cold-start svg {
   display: block !important;
-  width: 22px !important;
-  height: 22px !important;
+  width: 17px !important;
+  height: 17px !important;
   fill: none !important;
   stroke: currentColor !important;
   stroke-width: 2.35 !important;
@@ -10910,6 +10866,8 @@ body.is-resizing-file-viewer .file-viewer-body {
 :root {
   --framing-column-width: 860px;
   --framing-column-gutter: 96px;
+  --framing-composer-width: 980px;
+  --framing-composer-gutter: 56px;
 }
 
 .framing-thread,
@@ -10918,9 +10876,10 @@ body.is-resizing-file-viewer .file-viewer-body {
   margin-inline: auto !important;
 }
 
+.stage-panel[data-stage-panel="1"] .brief-context-fields,
 .stage-panel[data-stage-panel="1"] .brief-editor-shell,
 .brief-editor-shell + .resource-drawer {
-  width: min(var(--framing-column-width), calc(100% - var(--framing-column-gutter))) !important;
+  width: min(var(--framing-composer-width), calc(100% - var(--framing-composer-gutter))) !important;
 }
 
 .framing-message {
@@ -10957,13 +10916,14 @@ body.is-resizing-file-viewer .file-viewer-body {
 }
 
 .brief-editor-shell.is-framing-dock {
-  width: var(--brief-dock-width, min(var(--framing-column-width), calc(100vw - var(--framing-column-gutter)))) !important;
-  max-width: min(var(--framing-column-width), calc(100vw - var(--framing-column-gutter))) !important;
+  width: var(--brief-dock-width, min(var(--framing-composer-width), calc(100vw - var(--framing-composer-gutter)))) !important;
+  max-width: min(var(--framing-composer-width), calc(100vw - var(--framing-composer-gutter))) !important;
 }
 
 @media (max-width: 760px) {
   :root {
     --framing-column-gutter: 24px;
+    --framing-composer-gutter: 24px;
   }
 
   .framing-message.user {
@@ -11006,7 +10966,6 @@ select,
 .stage-pill,
 .brief-run-controls,
 .brief-run-controls select,
-.material-action-chip,
 .message-attachment-chip,
 .framing-actions,
 .project-card-actions,
@@ -11570,7 +11529,6 @@ body {
   .project-dialog-shell,
   .file-viewer-dialog,
   .file-viewer-shell,
-  .material-type-dialog,
   .trial-history-card,
   .trial-report-card,
   .trial-live-status,
@@ -11758,12 +11716,12 @@ textarea:focus {
 .trial-scroll-button,
 .trial-chip,
 .composer-suggestion-chip,
+.attachment-menu button,
 .brief-run-controls,
 .brief-run-controls label,
 .theme-mode-control,
 .view-switch button,
-.inline-view-switch button,
-.material-type-grid button {
+.inline-view-switch button {
   border-color: var(--control-border);
   background: var(--secondary-bg);
   color: var(--secondary-text);
@@ -11783,11 +11741,12 @@ textarea:focus {
 .trial-scroll-button:hover,
 .trial-chip:hover,
 .composer-suggestion-chip:hover,
+.attachment-menu button:hover,
+.attachment-menu button:focus-visible,
 .brief-run-controls label:hover,
 .brief-run-controls label:focus-within,
 .view-switch button:hover,
-.inline-view-switch button:hover,
-.material-type-grid button:hover {
+.inline-view-switch button:hover {
   border-color: color-mix(in srgb, var(--accent) 44%, var(--control-border));
   background: var(--secondary-bg-hover);
   color: var(--secondary-text);
@@ -11951,7 +11910,6 @@ html[data-theme] :is(
   .project-dialog-shell,
   .file-viewer-dialog,
   .file-viewer-shell,
-  .material-type-dialog,
   .trial-history-card,
   .trial-report-card,
   .trial-live-status,
@@ -12040,12 +11998,12 @@ html[data-theme] :is(
   .trial-scroll-button,
   .trial-chip,
   .composer-suggestion-chip,
+  .attachment-menu button,
   .brief-run-controls,
   .brief-run-controls label,
   .theme-mode-control,
   .view-switch button,
-  .inline-view-switch button,
-  .material-type-grid button
+  .inline-view-switch button
 ) {
   border-color: var(--control-border);
   background: var(--secondary-bg);
@@ -12118,8 +12076,8 @@ html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label {
   display: inline-flex !important;
   align-items: center !important;
   min-height: 32px !important;
-  padding: 0 26px 0 12px !important;
-  border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent) !important;
+  padding: 0 24px 0 10px !important;
+  border: 1px solid transparent !important;
   border-radius: 999px !important;
   background: transparent !important;
   color: var(--muted) !important;
@@ -12154,7 +12112,7 @@ html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label::
 html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label:hover,
 html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label:focus-within {
   border-color: color-mix(in srgb, var(--ink) 20%, transparent) !important;
-  background: color-mix(in srgb, var(--ink) 4%, transparent) !important;
+  background: color-mix(in srgb, var(--ink) 6%, transparent) !important;
   color: var(--ink) !important;
 }
 
@@ -12242,7 +12200,7 @@ html[data-theme] :is(.file-viewer-shell, .file-viewer-head, .file-viewer-header,
   color: var(--panel-ink) !important;
 }
 
-html[data-theme] :is(.context-card, .file-manager, .review-card, .local-browser, .local-browser-shell, .material-type-shell) {
+html[data-theme] :is(.context-card, .file-manager, .review-card, .local-browser, .local-browser-shell, .attachment-menu) {
   border-color: var(--panel-border) !important;
   background: var(--panel-bg-strong) !important;
   color: var(--panel-ink) !important;
@@ -12259,11 +12217,11 @@ html[data-theme] :is(.file-manager-body, .browser-roots, .browser-entries) {
   background: var(--panel-bg-soft) !important;
 }
 
-html[data-theme] :is(.file-manager-head h2, .context-card h3, .review-card h3, .paper-section-head h4, .paragraph-plan-block h5, .paper-linked-block h5, .table-empty-rationale h4, .figure-spec-head h4, .figure-spec-detail > strong, .browser-entry-main strong, .local-browser-head h2, .local-browser .selected-material-type, .material-type-shell h2, .material-type-shell h3) {
+html[data-theme] :is(.file-manager-head h2, .context-card h3, .review-card h3, .paper-section-head h4, .paragraph-plan-block h5, .paper-linked-block h5, .table-empty-rationale h4, .figure-spec-head h4, .figure-spec-detail > strong, .browser-entry-main strong, .local-browser-head h2, .local-browser .selected-material-type) {
   color: var(--panel-ink) !important;
 }
 
-html[data-theme] :is(.file-manager-head p, .file-manager-count span, .context-card .meta, .review-summary, .review-path, .paper-story, .paper-field-grid dt, .figure-spec-head p, .figure-type, .figure-source-path, .figure-spec-detail .markdown-preview :where(p, li), .traceability-details, .architecture-toc-row span, .browser-pathbar code, .browser-note, .browser-entry-main small, .tree-empty, .tree-file small, .tree-file-node > summary small, .tree-folder > summary small, .local-browser .browser-resource-tools p, .local-browser .resource-empty, .material-type-shell p, .material-type-grid button span) {
+html[data-theme] :is(.file-manager-head p, .file-manager-count span, .context-card .meta, .review-summary, .review-path, .paper-story, .paper-field-grid dt, .figure-spec-head p, .figure-type, .figure-source-path, .figure-spec-detail .markdown-preview :where(p, li), .traceability-details, .architecture-toc-row span, .browser-pathbar code, .browser-note, .browser-entry-main small, .tree-empty, .tree-file small, .tree-file-node > summary small, .tree-folder > summary small, .local-browser .browser-resource-tools p, .local-browser .resource-empty) {
   color: var(--panel-muted) !important;
 }
 
@@ -12655,26 +12613,26 @@ html[data-theme] .file-manager-head p {
   }
 
   html[data-theme] .brief-editor-shell.is-framing-dock .composer-attach-button {
-    flex: 0 0 44px !important;
+    flex: 0 0 28px !important;
     order: 1;
   }
 
   html[data-theme] .brief-editor-shell.is-framing-dock #cold-file-editor {
-    flex: 1 1 calc(100% - 112px) !important;
+    flex: 1 1 calc(100% - 104px) !important;
     width: auto !important;
     min-width: 0 !important;
     order: 2;
   }
 
   html[data-theme] .brief-editor-shell.is-framing-dock :is(.brief-cold-start, .brief-submit-button, .send-button) {
-    flex: 0 0 44px !important;
+    flex: 0 0 34px !important;
     order: 3;
   }
 
   html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls {
-    flex: 1 1 calc(100% - 58px) !important;
-    width: calc(100% - 58px) !important;
-    margin-left: 58px !important;
+    flex: 1 1 calc(100% - 52px) !important;
+    width: calc(100% - 52px) !important;
+    margin-left: 52px !important;
     justify-content: flex-start !important;
     overflow-x: auto;
     padding-bottom: 2px;
@@ -13050,7 +13008,7 @@ select,
 .danger-button, .danger-primary-button, .icon-button, .small-button,
 .settings-save-button, .settings-close, .dialog-close-button, .copy-command-button,
 .pill, .session-pill, .stage-pill, .command-chip, .context-chip,
-.material-action-chip, .material-actions-label, .selected-material-type,
+.material-actions-label, .selected-material-type, .attachment-menu button,
 .attachment-chip, .resource-chip, .resource-category-select,
 .trial-chip, .trial-scroll-button, .review-chip, .review-kicker,
 .file-tab, .file-name, .file-manager-count, .autosave-status, .source-path,
@@ -13156,7 +13114,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 
 /* pills & chips: hairline, pill radius (mono is set in Part A) */
 .pill, .session-pill, .command-chip, .context-chip,
-.material-action-chip, .attachment-chip, .resource-chip {
+.attachment-chip, .resource-chip {
   border-color: var(--line);
 }
 .pill { background: var(--surface); color: var(--muted); }
@@ -13225,6 +13183,78 @@ html[data-theme="atelier-nocturne"] .brief-editor-shell #cold-file-editor::place
   font-weight: 500;
 }
 
+/* The native select owns the whole visible control, including the arrow.
+   Width is fitted in JS from the longest option label. */
+.brief-run-controls label,
+html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label {
+  min-height: 28px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.brief-run-controls label::after,
+html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label::after {
+  content: none !important;
+  display: none !important;
+}
+
+.brief-run-controls label:hover,
+.brief-run-controls label:focus-within,
+html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label:hover,
+html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls label:focus-within {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.brief-run-controls select,
+html[data-theme] .brief-editor-shell.is-framing-dock .brief-run-controls select,
+html[data-theme] .brief-editor-shell.is-framing-dock :is(#composer-model, #composer-reasoning) {
+  width: var(--select-fit-width, auto) !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  height: 28px !important;
+  padding: 0 20px 0 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--control-ink) !important;
+  font-family: var(--mono) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.02em !important;
+  -webkit-appearance: auto !important;
+  -moz-appearance: auto !important;
+  appearance: auto !important;
+  cursor: pointer !important;
+}
+
+/* Final empty-framing bottom guard: before a thread exists, the target field
+   and composer still belong at the bottom of the first viewport. Earlier
+   short-height rules removed the auto spacer and left both controls mid-page. */
+html[data-theme] #cold-start-workspace:not(.has-framing-thread) .stage-panel[data-stage-panel="1"] .cold-card {
+  display: flex;
+  flex-direction: column;
+  height: auto !important;
+  min-height: calc(100vh - 36px) !important;
+  min-height: calc(100dvh - 36px) !important;
+  padding-bottom: clamp(16px, 3vh, 34px) !important;
+}
+
+html[data-theme] #cold-start-workspace:not(.has-framing-thread) .material-quick-actions {
+  flex: 0 0 auto;
+  margin: clamp(24px, 8vh, 92px) auto auto !important;
+}
+
+html[data-theme] #cold-start-workspace:not(.has-framing-thread) .brief-context-fields {
+  flex: 0 0 auto;
+  margin: 0 auto 12px !important;
+}
+
+html[data-theme] #cold-start-workspace:not(.has-framing-thread) .brief-editor-shell {
+  flex: 0 0 auto;
+  margin: 0 auto !important;
+}
+
 /* composer attach + suggestion chips */
 .composer-attach-button {
   border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
@@ -13237,6 +13267,46 @@ html[data-theme="atelier-nocturne"] .brief-editor-shell #cold-file-editor::place
   background: color-mix(in srgb, var(--ink) 4%, transparent);
   color: var(--ink);
 }
+
+/* Final compact composer buttons. */
+.brief-composer-row .composer-attach-button {
+  flex: 0 0 28px !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.brief-composer-row .composer-attach-button:hover,
+.brief-composer-row .composer-attach-button:focus-visible {
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--ink) !important;
+}
+
+.brief-composer-row .composer-attach-button svg {
+  width: 19px !important;
+  height: 19px !important;
+  stroke-width: 2 !important;
+}
+
+.brief-composer-row .brief-cold-start {
+  flex: 0 0 34px !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+.brief-composer-row .brief-cold-start svg {
+  width: 17px !important;
+  height: 17px !important;
+}
+
 .composer-suggestion-chip {
   border: 1px solid var(--line);
   background: var(--surface);
@@ -13278,13 +13348,6 @@ html[data-theme="atelier-nocturne"] .brief-editor-shell #cold-file-editor::place
    =================================================================== */
 .material-header { padding: 44px 0 20px; }
 .material-actions-label { color: var(--soft); }
-.material-action-chip {
-  border-color: var(--line);
-  background: var(--surface);
-  color: var(--muted);
-  box-shadow: none;
-}
-.material-action-chip:hover { border-color: var(--ink); background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
 #context-content { padding-bottom: 40px; }
 
 /* ===================================================================
@@ -13568,16 +13631,6 @@ html[data-theme="atelier-nocturne"] .brief-editor-shell #cold-file-editor::place
 }
 .root-chip:hover { border-color: var(--ink); background: var(--accent-soft); }
 .browser-entry-row { border-radius: var(--radius-md); }
-
-/* material-type picker */
-.material-type-dialog { border-color: var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.material-type-shell h2 { font-weight: 400; letter-spacing: -0.02em; }
-.material-type-grid button {
-  border-color: var(--line);
-  background: var(--surface);
-  border-radius: var(--radius-md);
-}
-.material-type-grid button:hover { border-color: var(--accent); background: var(--accent-soft); }
 
 /* warning / danger variants */
 .resume-trial-warning { border-color: var(--warning-ink); background: var(--warning-bg); color: var(--warning-ink); border-radius: var(--radius-md); }

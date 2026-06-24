@@ -58,9 +58,13 @@ Every substantive research work package belongs under:
 Each trial has:
 
 - `PLAN.md`
-- `REVIEW.md`
 - `REPORT.md`
+- `reviews/` with the eight canonical reviewer files
 - `artifacts/`
+
+Substantive trials also include a Resource Scout brief in `PLAN.md`, a Resource
+Scout report when required, and a Reviewer Scope Analyst decision before the
+core reviewers run.
 
 ## Design Principle
 
