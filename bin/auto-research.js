@@ -1238,6 +1238,47 @@ function remoteTunnelMockConfigured() {
   return Boolean(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL);
 }
 
+function spinnerEnabled(stream = process.stderr) {
+  return Boolean(stream.isTTY && !process.env.CI && !process.env.COAUTO_NO_SPINNER);
+}
+
+function startSpinner(message) {
+  const stream = process.stderr;
+  if (!spinnerEnabled(stream)) {
+    console.log(message);
+    return {
+      stop: () => {},
+      update: () => {}
+    };
+  }
+  const frames = ["-", "\\", "|", "/"];
+  let index = 0;
+  let current = message;
+  let active = true;
+  const clearLine = () => {
+    stream.write(`\r${" ".repeat(current.length + 4)}\r`);
+  };
+  const render = () => {
+    stream.write(`\r${frames[index % frames.length]} ${current}`);
+    index += 1;
+  };
+  render();
+  const timer = setInterval(render, 120);
+  timer.unref?.();
+  return {
+    update: (nextMessage) => {
+      current = nextMessage;
+      render();
+    },
+    stop: () => {
+      if (!active) return;
+      active = false;
+      clearInterval(timer);
+      clearLine();
+    }
+  };
+}
+
 function cloudflareTunnelUrlFromText(value) {
   const candidates = String(value || "").match(/https:\/\/[^\s"'<>`]+/g) || [];
   for (const candidate of candidates) {
@@ -1404,15 +1445,17 @@ async function commandInstallCloudflared(args) {
   if (process.env.COAUTO_CLOUDFLARED_INSTALL_MOCK) {
     await writeMockCloudflared(target);
   } else {
-    console.log(`Downloading ${url}`);
+    const spinner = startSpinner(`Downloading ${url}`);
     await fsp.rm(tempTarget, { force: true });
     try {
       await downloadCloudflared(tempTarget, url);
       await fsp.rename(tempTarget, target);
     } catch (error) {
+      spinner.stop();
       await fsp.rm(tempTarget, { force: true });
       throw error;
     }
+    spinner.stop();
   }
   await fsp.chmod(target, 0o755);
   const result = spawnSync(target, ["--version"], { encoding: "utf8" });
@@ -1515,15 +1558,31 @@ function printRemoteSshAccessHint(url, options) {
   }
 }
 
+function summarizeCloudflaredFailure(message) {
+  const text = String(message || "").trim();
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const quickTunnelTimeout = /api\.trycloudflare\.com\/tunnel/i.test(text) && /context deadline exceeded|Client\.Timeout|awaiting headers/i.test(text);
+  if (quickTunnelTimeout) {
+    const detail = lines.find((line) => /failed to request quick Tunnel/i.test(line)) || "";
+    return {
+      summary: "cloudflared could not reach Cloudflare Quick Tunnel before timing out.",
+      detail
+    };
+  }
+  const firstUseful = lines.find((line) => !/^20\d\d-\d\d-\d\dT/.test(line)) || lines[0] || "unknown cloudflared error";
+  return { summary: firstUseful, detail: "" };
+}
+
 async function printRemoteAccessHint(url, options) {
   if (remoteMode() === "ssh") {
     printRemoteSshAccessHint(url, options);
     return null;
   }
   console.log("");
-  console.log("Creating Cloudflare link...");
+  const spinner = startSpinner("Creating Cloudflare link...");
   try {
     const tunnel = await startRemoteTunnel(url);
+    spinner.stop();
     console.log("");
     console.log("Open:");
     console.log(`  ${tunnel.url}`);
@@ -1531,11 +1590,14 @@ async function printRemoteAccessHint(url, options) {
     console.log("Keep this terminal open. Press Ctrl+C to stop.");
     return tunnel;
   } catch (error) {
+    spinner.stop();
     console.log("");
     if (error.code === "cloudflared_missing") {
       printCloudflaredInstallInstructions();
     } else {
-      console.log(`Cloudflare link failed: ${error.message}`);
+      const failure = summarizeCloudflaredFailure(error.message);
+      console.log(`Cloudflare link failed: ${failure.summary}`);
+      if (failure.detail) console.log(`Details: ${failure.detail}`);
       console.log("");
       console.log("Check that cloudflared can reach Cloudflare, then rerun:");
       console.log(`  ${coAutoResearchCommand()} ui --remote`);

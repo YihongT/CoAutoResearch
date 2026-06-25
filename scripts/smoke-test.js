@@ -296,6 +296,37 @@ async function smokeRemoteCloudflareParserIgnoresApiUrl() {
   );
 }
 
+async function smokeRemoteCloudflareTimeoutSummary() {
+  if (process.platform === "win32") return;
+  const fakeCloudflared = path.join(tempRoot, "fake-cloudflared-timeout");
+  await fsp.writeFile(
+    fakeCloudflared,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"--version\" ]; then echo cloudflared fake timeout 0.0.0; exit 0; fi",
+      "printf '%s\\n' '2026-06-25T23:37:58Z INF Thank you for trying Cloudflare Tunnel.' >&2",
+      "printf '%s\\n' 'failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)' >&2",
+      "exit 1"
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.chmod(fakeCloudflared, 0o755);
+  await runRemoteCliSmoke(
+    { COAUTO_CLOUDFLARED: fakeCloudflared, npm_command: "exec", npm_lifecycle_event: "npx" },
+    {
+      waitFor: (output) => output.includes("Details: failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded"),
+      assert: (output) => {
+        if (!output.includes("Details: failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded")) {
+          throw new Error(`Cloudflare timeout should include the actionable failed request line:\n${output}`);
+        }
+        if (output.includes("Thank you for trying Cloudflare Tunnel")) {
+          throw new Error(`Cloudflare timeout should not print the long informational banner:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
 async function smokeRemoteCloudflaredMissing() {
   await runRemoteCliSmoke(
     { COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared"), npm_command: "exec", npm_lifecycle_event: "npx" },
@@ -1719,6 +1750,7 @@ Confidence: medium
   }
   await smokeRemoteCloudflareLink();
   await smokeRemoteCloudflareParserIgnoresApiUrl();
+  await smokeRemoteCloudflareTimeoutSummary();
   await smokeInstallCloudflaredCommand();
   await smokeInstallCloudflaredGlobalCommandHint();
   await smokeInstallCloudflaredUsesCurl();
