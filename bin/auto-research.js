@@ -1089,6 +1089,18 @@ function findAgentCommand(agent, env = process.env) {
   return findOnPath(agent, env) || agent;
 }
 
+function findCloudflaredCommand(env = process.env) {
+  const configured = (env.COAUTO_CLOUDFLARED || "").trim().replace(/^"|"$/g, "");
+  if (configured) {
+    const expanded = configured.replace(/^~(?=$|[\\/])/, process.env.HOME || process.env.USERPROFILE || "~");
+    if (fs.existsSync(expanded)) return expanded;
+    const configuredOnPath = findOnPath(expanded, env);
+    if (configuredOnPath) return configuredOnPath;
+    return expanded;
+  }
+  return findOnPath("cloudflared", env) || "cloudflared";
+}
+
 function codexAvailable() {
   return agentAvailable("codex");
 }
@@ -1106,6 +1118,19 @@ function agentAvailable(agent) {
     ok: result.status === 0,
     status: result.status,
     output: output.split(/\r?\n/)[0] || command
+  };
+}
+
+function cloudflaredAvailable(env = process.env) {
+  const command = findCloudflaredCommand(env);
+  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  const result = spawnSync(command, ["--version"], { encoding: "utf8", shell });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    command,
+    output: output.split(/\r?\n/)[0] || "required for best --remote experience"
   };
 }
 
@@ -1186,41 +1211,109 @@ function withRemoteAuthToken(url, token) {
   }
 }
 
-function remoteTunnelUrl(tunnel) {
-  if (typeof tunnel === "string") return tunnel;
-  for (const key of ["url", "publicUrl", "publicURL", "tunnelUrl", "tunnelURL"]) {
-    if (typeof tunnel?.[key] === "string") return tunnel[key];
-  }
-  if (typeof tunnel?.getURL === "function") return tunnel.getURL();
-  if (typeof tunnel?.getUrl === "function") return tunnel.getUrl();
-  return "";
+function cloudflareTunnelUrlFromText(value) {
+  const match = String(value || "").match(/https:\/\/[A-Za-z0-9.-]+\.trycloudflare\.com\b[^\s]*/);
+  return match ? match[0].replace(/[),.;]+$/, "") : "";
 }
 
-function remoteTunnelClose(tunnel) {
-  return async () => {
-    for (const key of ["close", "stop", "kill"]) {
-      if (typeof tunnel?.[key] === "function") {
-        await tunnel[key]();
-        return;
-      }
+function remoteSetupError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function closeChildProcess(child) {
+  return new Promise((resolve) => {
+    if (!child || child.exitCode !== null || child.signalCode) {
+      resolve();
+      return;
     }
-  };
+    const timeout = setTimeout(() => {
+      if (child.exitCode === null && !child.signalCode) child.kill("SIGKILL");
+      resolve();
+    }, 3000);
+    timeout.unref?.();
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.kill("SIGTERM");
+  });
+}
+
+function printCloudflaredInstallInstructions() {
+  console.log("");
+  console.log("Remote mode needs cloudflared to create a browser link.");
+  console.log("");
+  console.log("Install cloudflared:");
+  console.log("  macOS:   brew install cloudflared");
+  console.log("  Linux:   see https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+  console.log("  Windows: winget install --id Cloudflare.cloudflared");
+  console.log("");
+  console.log("Then rerun:");
+  console.log("  co-auto-research ui --remote");
+  console.log("");
+  console.log("Advanced SSH fallback:");
+  console.log("  COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote");
 }
 
 async function startRemoteTunnel(localUrl, token) {
   const mockUrl = String(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || "").trim();
   if (mockUrl) {
-    if (mockUrl === "__fail__") throw new Error("Mock remote tunnel failure.");
     return { url: withRemoteAuthToken(mockUrl, token), close: async () => {} };
   }
-  const { startTunnel } = await import("untun");
-  const tunnel = await startTunnel({
-    url: localUrl,
-    acceptCloudflareNotice: true
+  if (process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL) {
+    throw remoteSetupError("cloudflared_failed", "Mock cloudflared failure.");
+  }
+  const cloudflared = cloudflaredAvailable();
+  if (!cloudflared.ok) {
+    throw remoteSetupError("cloudflared_missing", `cloudflared was not found (${cloudflared.command}).`);
+  }
+  return new Promise((resolve, reject) => {
+    const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(cloudflared.command);
+    const child = spawn(cloudflared.command, ["tunnel", "--url", localUrl], {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell
+    });
+    let settled = false;
+    let output = "";
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void closeChildProcess(child);
+      reject(remoteSetupError("cloudflared_failed", `Timed out waiting for cloudflared URL.${output ? `\n${output}` : ""}`));
+    }, 60000);
+    timeout.unref?.();
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      void closeChildProcess(child);
+      reject(error);
+    };
+    const handleChunk = (chunk) => {
+      output += chunk.toString();
+      const url = cloudflareTunnelUrlFromText(output);
+      if (!url || settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        url: withRemoteAuthToken(url, token),
+        close: () => closeChildProcess(child)
+      });
+    };
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", handleChunk);
+    child.stderr.on("data", handleChunk);
+    child.once("error", (error) => {
+      fail(remoteSetupError("cloudflared_failed", error.message));
+    });
+    child.once("exit", (code, signal) => {
+      if (settled) return;
+      fail(remoteSetupError("cloudflared_failed", `cloudflared exited before creating a URL (code=${code}, signal=${signal}).${output ? `\n${output}` : ""}`));
+    });
   });
-  const url = remoteTunnelUrl(tunnel);
-  if (!url) throw new Error("Cloudflare tunnel started but did not return a public URL.");
-  return { url: withRemoteAuthToken(url, token), close: remoteTunnelClose(tunnel) };
 }
 
 function printRemoteSshAccessHint(url, options) {
@@ -1259,20 +1352,28 @@ async function printRemoteAccessHint(url, options) {
     return null;
   }
   console.log("");
-  console.log("Creating temporary Cloudflare link...");
+  console.log("Creating Cloudflare link...");
   try {
     const tunnel = await startRemoteTunnel(url, options.remoteAuthToken || "");
     console.log("");
-    console.log("Remote browser link:");
+    console.log("Open:");
     console.log(`  ${tunnel.url}`);
     console.log("");
-    console.log("Keep this terminal open. Press Ctrl+C to stop the UI and link.");
+    console.log("Keep this terminal open. Press Ctrl+C to stop.");
     return tunnel;
   } catch (error) {
     console.log("");
-    console.log(`Cloudflare link failed: ${error.message}`);
-    console.log("Falling back to SSH tunnel instructions.");
-    printRemoteSshAccessHint(url, options);
+    if (error.code === "cloudflared_missing") {
+      printCloudflaredInstallInstructions();
+    } else {
+      console.log(`Cloudflare link failed: ${error.message}`);
+      console.log("");
+      console.log("Check that cloudflared can reach Cloudflare, then rerun:");
+      console.log("  co-auto-research ui --remote");
+      console.log("");
+      console.log("Advanced SSH fallback:");
+      console.log("  COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote");
+    }
     return null;
   }
 }
@@ -1348,6 +1449,7 @@ async function commandDoctor(args) {
   const host = options.host || DEFAULT_HOST;
   const port = options.port || DEFAULT_PORT;
   const python = findPythonCommand();
+  const cloudflared = cloudflaredAvailable();
   const selectedBackend = selectedAgentBackend();
   const codex = codexAvailable();
   const claude = claudeAvailable();
@@ -1356,14 +1458,16 @@ async function commandDoctor(args) {
     ["node", { ok: Number(process.versions.node.split(".")[0]) >= 18, output: process.version }],
     ["python", { ok: python.ok, output: python.output || python.label }],
     ["git", commandAvailable("git")],
+    ["cloudflared", cloudflared],
     ["codex", codex],
     ["claude", claude]
   ];
 
   for (const [name, result] of checks) {
     const selectedMissing = name === selectedBackend && !result.ok;
+    const cloudflaredMissing = name === "cloudflared" && !result.ok;
     const agentMissing = (name === "codex" || name === "claude") && !result.ok;
-    const label = result.ok ? "ok" : selectedMissing || !anyAgent && agentMissing ? "warn" : agentMissing ? "optional" : "missing";
+    const label = result.ok ? "ok" : cloudflaredMissing || selectedMissing || !anyAgent && agentMissing ? "warn" : agentMissing ? "optional" : "missing";
     console.log(`${label.padEnd(7)} ${name}${result.output ? ` - ${result.output}` : ""}`);
   }
   const selectedAgent = selectedBackend === "claude" ? claude : codex;
@@ -1432,12 +1536,12 @@ async function commandUi(args) {
     console.log(`Using package UI runtime ${packageVersion()} for ${projectRoot}`);
   }
   if (options.remote) {
-    console.log("Remote mode enabled: CoAutoResearch will not try to open a browser on this server.");
+    console.log("Remote mode enabled.");
     if (localhostHost(host)) {
       if (useCloudflareRemote) {
-        console.log("The UI will stay bound to localhost; a temporary Cloudflare browser link will appear after startup.");
+        console.log("The UI stays on localhost; a Cloudflare browser link will appear after startup.");
       } else {
-        console.log("The UI will stay bound to localhost; SSH tunnel instructions will appear after startup.");
+        console.log("The UI stays on localhost; SSH tunnel instructions will appear after startup.");
       }
     } else {
       console.log(`The UI is configured with --host ${host}. Prefer --host 127.0.0.1 unless this server is protected by a VPN or firewall.`);

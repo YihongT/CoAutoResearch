@@ -2,9 +2,8 @@
 
 ## 0.1.2
 
-- Changed `co-auto-research ui --remote` to print a temporary Cloudflare
-  browser link with one-time token access, while keeping SSH tunnel
-  instructions as a fallback.
+- Changed `co-auto-research ui --remote` to use the official `cloudflared` CLI
+  for a temporary Cloudflare browser link with one-time token access.
 - Fixed Claude Code `/goal` handling so Claude backend commands follow Claude
   Code native goal semantics.
 - Passed Claude `/goal` clear aliases through correctly: `clear`, `stop`,

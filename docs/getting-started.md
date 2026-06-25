@@ -201,5 +201,6 @@ If you are SSH'd into a server:
 co-auto-research ui --remote
 ```
 
-The CLI prints a temporary Cloudflare browser link after the server starts.
-Keep the terminal open while you use the link.
+With `cloudflared` installed on the server, the CLI prints a temporary
+Cloudflare browser link after the server starts. Keep the terminal open while
+you use the link.

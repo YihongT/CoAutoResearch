@@ -8,16 +8,34 @@ co-auto-research ui --remote
 ```
 
 Remote mode keeps the UI bound to `127.0.0.1`, skips browser launch on the
-server, creates a temporary Cloudflare Quick Tunnel, and prints a browser URL
-you can open from your local machine:
+server, runs the official `cloudflared` CLI to create a temporary Cloudflare
+Quick Tunnel, and prints a browser URL you can open from your local machine:
 
 ```text
-Remote browser link:
+Open:
   https://example.trycloudflare.com/?coauto_token=...
 ```
 
 Keep the terminal running while you use the UI. Press `Ctrl+C` to stop both the
 UI and the temporary link.
+
+## Install cloudflared
+
+Install `cloudflared` once on the remote server for the best remote experience:
+
+```bash
+# macOS
+brew install cloudflared
+
+# Windows
+winget install --id Cloudflare.cloudflared
+```
+
+For Linux packages and other platforms, use the official downloads page:
+<https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>.
+
+If `cloudflared` is installed in a non-standard location, set
+`COAUTO_CLOUDFLARED=/path/to/cloudflared`.
 
 Equivalent explicit command:
 
@@ -46,8 +64,7 @@ Do not use it as a long-running public service.
 
 ## SSH Fallback
 
-If the server cannot reach Cloudflare, `--remote` falls back to SSH tunnel
-instructions. You can also force the SSH-only path:
+If the server cannot use Cloudflare, force the SSH-only advanced path:
 
 ```bash
 COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote

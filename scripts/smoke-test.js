@@ -191,6 +191,7 @@ async function writeFakeCodexBin(directory) {
   await fsp.mkdir(directory, { recursive: true });
   const cmdCodex = path.join(directory, "codex.cmd");
   const cmdClaude = path.join(directory, "claude.cmd");
+  const cmdCloudflared = path.join(directory, "cloudflared.cmd");
   await fsp.writeFile(
     cmdCodex,
     "@echo off\r\nif \"%1\"==\"login\" if \"%2\"==\"status\" (echo Logged in& exit /b 0)\r\necho codex fake 0.0.0\r\n",
@@ -201,9 +202,11 @@ async function writeFakeCodexBin(directory) {
     "@echo off\r\nif \"%1\"==\"auth\" if \"%2\"==\"status\" (echo Authenticated& exit /b 0)\r\necho claude fake 0.0.0\r\n",
     "utf8"
   );
+  await fsp.writeFile(cmdCloudflared, "@echo off\r\necho cloudflared fake 0.0.0\r\n", "utf8");
   if (process.platform !== "win32") {
     const shellCodex = path.join(directory, "codex");
     const shellClaude = path.join(directory, "claude");
+    const shellCloudflared = path.join(directory, "cloudflared");
     await fsp.writeFile(
       shellCodex,
       "#!/bin/sh\nif [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then echo Logged in; exit 0; fi\necho codex fake 0.0.0\n",
@@ -214,10 +217,13 @@ async function writeFakeCodexBin(directory) {
       "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then echo Authenticated; exit 0; fi\necho claude fake 0.0.0\n",
       "utf8"
     );
+    await fsp.writeFile(shellCloudflared, "#!/bin/sh\necho cloudflared fake 0.0.0\n", "utf8");
     await fsp.chmod(shellCodex, 0o755);
     await fsp.chmod(shellClaude, 0o755);
+    await fsp.chmod(shellCloudflared, 0o755);
     await fsp.chmod(cmdCodex, 0o755);
     await fsp.chmod(cmdClaude, 0o755);
+    await fsp.chmod(cmdCloudflared, 0o755);
   }
 }
 
@@ -242,14 +248,37 @@ async function smokeRemoteCloudflareLink() {
     {
       waitFor: (output) => output.includes("https://example.trycloudflare.com/?coauto_token=") && output.includes("Keep this terminal open."),
       assert: (output) => {
+        if (!output.includes("Open:")) {
+          throw new Error(`remote Cloudflare output should use compact Open heading:\n${output}`);
+        }
         if (!output.includes("https://example.trycloudflare.com/?coauto_token=")) {
           throw new Error(`remote Cloudflare mock URL should include access token:\n${output}`);
         }
-        if (!output.includes("Keep this terminal open. Press Ctrl+C to stop the UI and link.")) {
+        if (!output.includes("Keep this terminal open. Press Ctrl+C to stop.")) {
           throw new Error(`remote Cloudflare output should explain lifecycle:\n${output}`);
         }
         if (output.includes("ssh -N -L")) {
           throw new Error(`remote Cloudflare success should not show SSH tunnel as primary output:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
+async function smokeRemoteCloudflaredMissing() {
+  await runRemoteCliSmoke(
+    { COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared") },
+    {
+      waitFor: (output) => output.includes("Remote mode needs cloudflared to create a browser link.") && output.includes("winget install --id Cloudflare.cloudflared"),
+      assert: (output) => {
+        if (!output.includes("brew install cloudflared") || !output.includes("winget install --id Cloudflare.cloudflared")) {
+          throw new Error(`missing cloudflared output should include concise install commands:\n${output}`);
+        }
+        if (!output.includes("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")) {
+          throw new Error(`missing cloudflared output should include official downloads page:\n${output}`);
+        }
+        if (output.includes("ssh -N -L")) {
+          throw new Error(`missing cloudflared should not default to SSH tunnel instructions:\n${output}`);
         }
       }
     }
@@ -272,12 +301,15 @@ async function smokeRemoteSshMode() {
 
 async function smokeRemoteCloudflareFallback() {
   await runRemoteCliSmoke(
-    { COAUTO_REMOTE_TUNNEL_MOCK_URL: "__fail__" },
+    { COAUTO_REMOTE_TUNNEL_MOCK_FAIL: "1" },
     {
-      waitFor: (output) => output.includes("Falling back to SSH tunnel instructions.") && output.includes("coauto_token="),
+      waitFor: (output) => output.includes("Cloudflare link failed:") && output.includes("COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote"),
       assert: (output) => {
-        if (!output.includes("Cloudflare link failed") || !output.includes("ssh -N -L") || !output.includes("coauto_token=")) {
-          throw new Error(`Cloudflare failure should fall back to tokenized SSH instructions:\n${output}`);
+        if (!output.includes("Check that cloudflared can reach Cloudflare") || !output.includes("COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote")) {
+          throw new Error(`Cloudflare failure should point to troubleshooting and explicit SSH fallback:\n${output}`);
+        }
+        if (output.includes("ssh -N -L")) {
+          throw new Error(`Cloudflare failure should not print SSH tunnel command by default:\n${output}`);
         }
       }
     }
@@ -718,21 +750,29 @@ Confidence: medium
     !helpOutput.includes("[--remote]") ||
     !cliSource.includes("function printRemoteAccessHint") ||
     !cliSource.includes("async function startRemoteTunnel") ||
+    !cliSource.includes("function findCloudflaredCommand") ||
+    !cliSource.includes('["tunnel", "--url", localUrl]') ||
     !cliSource.includes("COAUTO_REMOTE_TUNNEL_MOCK_URL") ||
+    !cliSource.includes("COAUTO_REMOTE_TUNNEL_MOCK_FAIL") ||
     !cliSource.includes("COAUTO_REMOTE_AUTH_TOKEN") ||
+    !cliSource.includes("COAUTO_CLOUDFLARED") ||
     !cliSource.includes("ssh -N -L") ||
     !cliSource.includes("user}@<ssh-host>") ||
     cliSource.includes("os.hostname") ||
     !cliSource.includes("Remote mode enabled") ||
     !readme.includes("co-auto-research ui --remote") ||
     !readme.includes("Cloudflare browser link") ||
+    !readme.includes("cloudflared") ||
     !remoteDocs.includes("co-auto-research ui --remote") ||
     !remoteDocs.includes("Cloudflare Quick Tunnel") ||
+    !remoteDocs.includes("brew install cloudflared") ||
+    !remoteDocs.includes("winget install --id Cloudflare.cloudflared") ||
+    !remoteDocs.includes("COAUTO_CLOUDFLARED") ||
     !remoteDocs.includes("coauto_token") ||
     !remoteDocs.includes("COAUTO_REMOTE_MODE=ssh") ||
     !remoteDocs.includes("user@<ssh-host>") ||
     !remoteDocs.includes("COAUTO_REMOTE_TARGET=user@host") ||
-    !securityDocs.includes("temporary Cloudflare Quick Tunnel URL") ||
+    !securityDocs.includes("official `cloudflared` CLI") ||
     !docsIndex.includes("```{toctree}") ||
     !docsIndex.includes("Welcome to CoAutoResearch's documentation") ||
     !docsConfig.includes('html_theme = "sphinx_rtd_theme"') ||
@@ -754,7 +794,7 @@ Confidence: medium
     packageManifest.homepage !== "https://yihongt.github.io/CoAutoResearch/" ||
     packageManifest.publishConfig?.access !== "public" ||
     !packageManifest.packageManager?.startsWith("npm@") ||
-    !packageManifest.dependencies?.untun ||
+    packageManifest.dependencies?.untun ||
     !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
     !readme.includes("npm install -g co-auto-research") ||
     !docsIndex.includes("npm install -g co-auto-research") ||
@@ -776,7 +816,9 @@ Confidence: medium
     readme.includes("node bin/auto-research.js ui") ||
     gettingStartedDocs.includes("node bin/auto-research.js ui") ||
     !gettingStartedDocs.includes("Cloudflare browser link") ||
+    !gettingStartedDocs.includes("cloudflared") ||
     !gettingStartedDocs.includes("co-auto-research ui") ||
+    !cliDocs.includes("COAUTO_CLOUDFLARED") ||
     !cliDocs.includes("COAUTO_REMOTE_MODE") ||
     !cliDocs.includes("COAUTO_REMOTE_TARGET") ||
     !helpOutput.includes("co-auto-research attach") ||
@@ -1537,6 +1579,7 @@ Confidence: medium
     throw new Error("upgrade advisory output did not match expectation");
   }
   await smokeRemoteCloudflareLink();
+  await smokeRemoteCloudflaredMissing();
   await smokeRemoteSshMode();
   await smokeRemoteCloudflareFallback();
   await smokeRemoteAuth();
@@ -1554,8 +1597,19 @@ Confidence: medium
   if (!doctorOutput.includes("claude fake 0.0.0")) {
     throw new Error("doctor did not resolve fake Claude executable from PATH");
   }
+  if (!doctorOutput.includes("cloudflared fake 0.0.0")) {
+    throw new Error("doctor did not resolve fake cloudflared executable from PATH");
+  }
   if (!doctorOutput.includes("package-managed runtime") || !doctorOutput.includes("legacy project ui/server.py")) {
     throw new Error(`doctor should report package-managed UI runtime and legacy project UI fallback:\n${doctorOutput}`);
+  }
+  const missingCloudflaredDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
+    cwd: root,
+    env: { ...process.env, COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared"), PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    encoding: "utf8"
+  });
+  if (!missingCloudflaredDoctorOutput.includes("warn    cloudflared") || !missingCloudflaredDoctorOutput.includes("required for best --remote experience")) {
+    throw new Error(`doctor should warn when cloudflared is missing:\n${missingCloudflaredDoctorOutput}`);
   }
   const invalidBackendDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
     cwd: root,
@@ -1590,7 +1644,7 @@ Confidence: medium
     env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
     encoding: "utf8"
   });
-  if (!installedDoctorOutput.includes("package-managed runtime") || !installedDoctorOutput.includes("codex fake 0.0.0") || !installedDoctorOutput.includes("claude fake 0.0.0")) {
+  if (!installedDoctorOutput.includes("package-managed runtime") || !installedDoctorOutput.includes("codex fake 0.0.0") || !installedDoctorOutput.includes("claude fake 0.0.0") || !installedDoctorOutput.includes("cloudflared fake 0.0.0")) {
     throw new Error(`installed tarball CLI doctor output was not useful:\n${installedDoctorOutput}`);
   }
 
