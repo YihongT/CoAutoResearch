@@ -273,7 +273,10 @@ async function smokeRemoteCloudflaredMissing() {
       assert: (output) => {
         if (
           !output.includes("1. Install cloudflared") ||
-          !output.includes("sudo apt-get update && sudo apt-get install cloudflared") ||
+          !output.includes("Linux (no sudo):") ||
+          !output.includes("mkdir -p \"$HOME/.local/bin\"") ||
+          !output.includes("cloudflared-linux-${arch}") ||
+          output.includes("sudo apt-get install cloudflared") ||
           !output.includes("brew install cloudflared") ||
           !output.includes("winget install -e --id Cloudflare.cloudflared") ||
           !output.includes("2. Run") ||
@@ -778,7 +781,9 @@ Confidence: medium
     !remoteDocs.includes("co-auto-research ui --remote") ||
     !remoteDocs.includes("Cloudflare Quick Tunnel") ||
     !remoteDocs.includes("Cloudflare CLI setup") ||
-    !remoteDocs.includes("sudo apt-get update && sudo apt-get install cloudflared") ||
+    !remoteDocs.includes("Linux without sudo") ||
+    !remoteDocs.includes("cloudflared-linux-${arch}") ||
+    remoteDocs.includes("sudo apt-get install cloudflared") ||
     !remoteDocs.includes("brew install cloudflared") ||
     !remoteDocs.includes("winget install -e --id Cloudflare.cloudflared") ||
     !remoteDocs.includes("COAUTO_CLOUDFLARED") ||

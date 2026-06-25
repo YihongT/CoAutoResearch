@@ -1252,11 +1252,12 @@ function printCloudflaredInstallInstructions() {
   console.log("Cloudflare CLI setup");
   console.log("");
   console.log("1. Install cloudflared");
-  console.log("   Debian/Ubuntu:");
-  console.log("     sudo mkdir -p --mode=0755 /usr/share/keyrings");
-  console.log("     curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null");
-  console.log("     echo \"deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main\" | sudo tee /etc/apt/sources.list.d/cloudflared.list");
-  console.log("     sudo apt-get update && sudo apt-get install cloudflared");
+  console.log("   Linux (no sudo):");
+  console.log("     mkdir -p \"$HOME/.local/bin\"");
+  console.log("     arch=$(uname -m); case \"$arch\" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; i386|i686) arch=386 ;; armv7l|armv6l) arch=arm ;; *) echo \"Unsupported arch: $arch\"; exit 1 ;; esac");
+  console.log("     curl -L --fail -o \"$HOME/.local/bin/cloudflared\" \"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}\"");
+  console.log("     chmod +x \"$HOME/.local/bin/cloudflared\"");
+  console.log("     export PATH=\"$HOME/.local/bin:$PATH\"");
   console.log("");
   console.log("   macOS/Homebrew:");
   console.log("     brew install cloudflared");

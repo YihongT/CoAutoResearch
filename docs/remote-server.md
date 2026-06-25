@@ -25,13 +25,14 @@ Install `cloudflared` once on the remote server for the best remote experience.
 
 ### 1. Install cloudflared
 
-Debian/Ubuntu:
+Linux without sudo:
 
 ```bash
-sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
-sudo apt-get update && sudo apt-get install cloudflared
+mkdir -p "$HOME/.local/bin"
+arch=$(uname -m); case "$arch" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; i386|i686) arch=386 ;; armv7l|armv6l) arch=arm ;; *) echo "Unsupported arch: $arch"; exit 1 ;; esac
+curl -L --fail -o "$HOME/.local/bin/cloudflared" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}"
+chmod +x "$HOME/.local/bin/cloudflared"
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 macOS/Homebrew:
@@ -46,7 +47,7 @@ Windows/PowerShell:
 winget install -e --id Cloudflare.cloudflared
 ```
 
-Other platforms:
+System packages and other platforms:
 <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>.
 
 ### 2. Run
