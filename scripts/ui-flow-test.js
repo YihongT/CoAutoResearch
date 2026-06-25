@@ -128,6 +128,16 @@ function loadAppContext() {
     close() { this.closed = true; },
     showModal() { this.open = true; },
   });
+  const agentSetupDialog = element({
+    close() { this.closed = true; this.open = false; },
+    showModal() { this.open = true; this.closed = false; },
+  });
+  const agentSetupTitle = element();
+  const agentSetupIntro = element();
+  const agentSetupGrid = element();
+  const agentSetupCreateProject = element({ hidden: true });
+  const agentSetupSettings = element();
+  const agentSetupRecheck = element();
   const projectDialog = element({
     close() { this.closed = true; },
     showModal() { this.open = true; },
@@ -185,6 +195,13 @@ function loadAppContext() {
       settingsWebSearch: field("", { checked: true }),
       settingsExtraConfig: field(""),
       settingsReviewCheckpointInterval: field("100"),
+      settingsClaudeProvider: field("external"),
+      settingsClaudeBaseUrl: field(""),
+      settingsClaudeAuthMethod: field("ANTHROPIC_AUTH_TOKEN"),
+      settingsClaudeCredential: field(""),
+      settingsClaudeSonnetModel: field(""),
+      settingsClaudeOpusModel: field(""),
+      settingsClaudeHaikuModel: field(""),
     },
     querySelector() {
       return element();
@@ -206,6 +223,10 @@ function loadAppContext() {
   });
   const composerModel = sessionForm.elements.model;
   const composerReasoning = sessionForm.elements.reasoningEffort;
+  const claudeProviderField = element();
+  const claudeGatewaySettings = element({ hidden: true });
+  const claudeCredentialStatus = element();
+  const claudeCredentialClear = element({ hidden: true, dataset: {} });
   [
     ["#cold-file-editor", coldEditor],
     ["#launch-files", element()],
@@ -241,6 +262,13 @@ function loadAppContext() {
     ["#launch-autoresearch", element()],
     ["#launch-agent-status", element()],
     ["#launch-instruction", element()],
+    ["#agent-setup-dialog", agentSetupDialog],
+    ["#agent-setup-title", agentSetupTitle],
+    ["#agent-setup-intro", agentSetupIntro],
+    ["#agent-setup-grid", agentSetupGrid],
+    ["[data-agent-setup-create-project]", agentSetupCreateProject],
+    ["[data-agent-setup-settings]", agentSetupSettings],
+    ["[data-agent-setup-recheck]", agentSetupRecheck],
     ["#project-dialog", projectDialog],
     ["#project-create-form", projectCreateForm],
     ["#project-name", projectCreateForm.elements.projectName],
@@ -287,6 +315,9 @@ function loadAppContext() {
     ["#browser-entries", element()],
     ["#settings-secret-grid", element()],
     ["#settings-agent-status", element()],
+    ["#claude-gateway-settings", claudeGatewaySettings],
+    ["#settings-claude-credential-status", claudeCredentialStatus],
+    ["[data-clear-claude-secret]", claudeCredentialClear],
   ].forEach(([selector, value]) => elements.set(selector, value));
 
   const context = {
@@ -328,6 +359,8 @@ function loadAppContext() {
         return context.__confirmNext !== false;
       },
       addEventListener() {},
+      setTimeout,
+      clearTimeout,
       scrollTo() {},
     },
     document: {
@@ -341,6 +374,7 @@ function loadAppContext() {
       },
       querySelectorAll(selector) {
         if (selector === ".rail-action") return railActions;
+        if (selector === "[data-claude-provider-field]") return [claudeProviderField];
         return [];
       },
       createElement() {
@@ -355,6 +389,11 @@ function loadAppContext() {
       getItem(key) { return storage.has(key) ? storage.get(key) : null; },
       setItem(key, value) { storage.set(key, String(value)); },
       removeItem(key) { storage.delete(key); },
+    },
+    sessionStorage: {
+      getItem(key) { return storage.has(`session:${key}`) ? storage.get(`session:${key}`) : null; },
+      setItem(key, value) { storage.set(`session:${key}`, String(value)); },
+      removeItem(key) { storage.delete(`session:${key}`); },
     },
     navigator: { clipboard: { writeText: async (text) => { clipboardWrites.push(String(text)); } } },
     requestAnimationFrame(callback) {
@@ -2987,6 +3026,12 @@ function testReasoningOptionsFollowBackendModel() {
     syncReasoningSelectOptions(select, "claude", "claude-opus-4-6", "xhigh");
     const opus46Value = select.value;
     syncReasoningSelectOptions(select, "claude", "haiku", "high");
+    syncReasoningSelectOptions(select, "claude", "glm-5.2[1m]", "high");
+    const glmReasoningValue = select.value;
+    const modelSelect = document.querySelector("#composer-model");
+    syncModelSelectOptions(modelSelect, "claude", "z-ai/glm-4.7");
+    const customModelValue = modelSelect.value;
+    const customModelHtml = modelSelect.innerHTML;
     const permissionSelect = document.querySelector("#session-settings-form").elements.permissionPreset;
     const optionValuesFromHtml = (html) => Array.from(String(html || "").matchAll(/<option value="([^"]*)"/g)).map((match) => match[1]);
     const optionLabelsFromHtml = (html) => Array.from(String(html || "").matchAll(/<option value="[^"]*">([^<]*)<\\/option>/g)).map((match) => match[1]);
@@ -3007,6 +3052,11 @@ function testReasoningOptionsFollowBackendModel() {
       fable: modelOptionsForBackend("claude").some(([value, label]) => String(value + " " + label).toLowerCase().includes("fable")),
       haiku: values("claude", "haiku"),
       haikuLabels: labels("claude", "haiku"),
+      glm: values("claude", "glm-5.2[1m]"),
+      normalizedGlmHigh: normalizeReasoningEffort("high", "claude", "glm-5.2[1m]"),
+      glmOption: modelOptionsForBackend("claude").some(([value]) => value === "glm-5.2[1m]"),
+      customModelValue,
+      customModelHtml,
       normalizedSonnetXhigh: normalizeReasoningEffort("xhigh", "claude", "sonnet"),
       normalizedSonnetMax: normalizeReasoningEffort("max", "claude", "sonnet"),
       normalizedOpusXhigh: normalizeReasoningEffort("xhigh", "claude", "opus"),
@@ -3017,7 +3067,8 @@ function testReasoningOptionsFollowBackendModel() {
       opusHtml,
       opusValue,
       opus46Value,
-      haikuValue: select.value,
+      haikuValue: "",
+      glmReasoningValue,
       claudePermissions,
       claudePermissionLabels,
       legacyAutoValue,
@@ -3034,6 +3085,11 @@ function testReasoningOptionsFollowBackendModel() {
   assert.equal(state.fable, false, "Claude Fable should not be exposed while unavailable");
   assertJsonEqual(state.haiku, [""], "Claude Haiku should use CLI default and omit --effort");
   assertJsonEqual(state.haikuLabels, ["Default"], "Claude Haiku select should render a Default option");
+  assertJsonEqual(state.glm, [""], "Custom GLM models should use default Claude Code effort");
+  assert.equal(state.normalizedGlmHigh, "", "GLM should not keep an explicit effort by default");
+  assert.equal(state.glmOption, true, "Common GLM model should be present in Claude options");
+  assert.equal(state.customModelValue, "z-ai/glm-4.7", "custom Claude gateway model IDs should be preserved");
+  assert.equal(state.customModelHtml.includes("Custom: z-ai/glm-4.7"), true, "custom model option should be inserted dynamically");
   assert.equal(state.normalizedSonnetXhigh, "high", "Sonnet xhigh should normalize down to high");
   assert.equal(state.normalizedSonnetMax, "max", "Sonnet max should be accepted");
   assert.equal(state.normalizedOpusXhigh, "xhigh", "Opus xhigh should be accepted");
@@ -3046,6 +3102,7 @@ function testReasoningOptionsFollowBackendModel() {
   assert.equal(state.opusValue, "xhigh");
   assert.equal(state.opus46Value, "high", "Opus 4.6 xhigh should normalize down to high");
   assert.equal(state.haikuValue, "");
+  assert.equal(state.glmReasoningValue, "");
   assertJsonEqual(state.claudePermissions, ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], "Claude permission modes must match official Claude Code modes");
   assert.equal(state.claudePermissionLabels.includes("Auto-review"), false, "Claude permissions should not show the old CoAutoResearch Auto-review label");
   assert.equal(state.legacyAutoValue, "auto", "Legacy Claude auto-review preset should migrate to official auto mode");
@@ -3292,6 +3349,239 @@ async function testSettingsModalSaveSyncsScopedSessionSettings() {
   assert.equal(state.composerReasoning, "low", "Settings save should sync the composer reasoning");
   assert.equal(state.formPermission, "full-access", "Settings save should sync launch/session form values");
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/settings");
+}
+
+async function testClaudeGatewaySettingsPayload() {
+  const app = loadAppContext();
+  const state = await app.run(`
+    (async () => {
+      uiSettings = {
+        agent: { backend: "claude" },
+        codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+        claude: { model: "glm-5.2[1m]", reasoningEffort: "", permissionPreset: "auto", provider: "external", webSearch: true, reviewCheckpointInterval: 100 },
+        claude_env: { present: {}, values: {} },
+        agent_status: { selected: "claude", backends: {} }
+      };
+      const form = document.querySelector("#settings-form");
+      form.querySelector = () => null;
+      hydrateSettingsDialog(uiSettings);
+      form.elements.settingsBackend.value = "claude";
+      form.elements.settingsClaudeProvider.value = "zai_glm";
+      hydrateClaudeProviderSettings(uiSettings, "claude", "zai_glm");
+      form.elements.settingsModel.value = "glm-5.2[1m]";
+      form.elements.settingsReasoningEffort.value = "";
+      form.elements.settingsClaudeCredential.value = "secret-zai-key";
+      const responseSettings = {
+        agent: { backend: "claude" },
+        codex: uiSettings.codex,
+        claude: { ...uiSettings.claude, provider: "zai_glm" },
+        claude_env: {
+          present: { ANTHROPIC_AUTH_TOKEN: true },
+          values: {
+            ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
+            ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.2[1m]",
+            ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.2[1m]",
+            ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-4.5-air"
+          }
+        }
+      };
+      globalThis.__apiResponse = { settings: responseSettings, secret_keys: [] };
+      await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
+      return {
+        call: globalThis.__apiCalls[0],
+        credentialAfterHydrate: form.elements.settingsClaudeCredential.value,
+        credentialStatus: document.querySelector("#settings-claude-credential-status").textContent,
+        gatewayHidden: document.querySelector("#claude-gateway-settings").hidden,
+        composerModel: document.querySelector("#composer-model").value
+      };
+    })()
+  `);
+  assert.equal(state.call.endpoint, "/api/settings");
+  assert.equal(state.call.body.claude.provider, "zai_glm");
+  assert.equal(state.call.body.claude.model, "glm-5.2[1m]");
+  assert.equal(state.call.body.claude_env.ANTHROPIC_BASE_URL, "https://api.z.ai/api/anthropic");
+  assert.equal(state.call.body.claude_env.ANTHROPIC_AUTH_TOKEN, "secret-zai-key");
+  assert.equal(state.call.body.claude_env.ANTHROPIC_DEFAULT_SONNET_MODEL, "glm-5.2[1m]");
+  assert.equal(state.call.body.claude_env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "glm-4.5-air");
+  assert.equal(state.credentialAfterHydrate, "", "saved credentials must not be echoed into the input");
+  assert.equal(state.credentialStatus, "ANTHROPIC_AUTH_TOKEN saved");
+  assert.equal(state.gatewayHidden, false);
+  assert.equal(state.composerModel, "glm-5.2[1m]", "saved GLM model should sync into composer settings");
+}
+
+async function testInitialRuntimePreflightFlow() {
+  const app = loadAppContext();
+  const state = await app.run(`
+    (async () => {
+      const readyCodex = { backend: "codex", ok: true, blocking: false, installed: true, auth: "ok", version: "codex 1.0.0", message: "Codex CLI is installed and authenticated." };
+      const readyClaudeGateway = {
+        backend: "claude",
+        ok: true,
+        blocking: false,
+        installed: true,
+        auth: "gateway",
+        version: "claude 1.0.0",
+        message: "Claude Code CLI is installed and an Anthropic-compatible gateway is configured via ANTHROPIC_AUTH_TOKEN.",
+        gateway: { complete: true, base_url: "https://api.z.ai/api/anthropic", has_credential: true, credential_key: "ANTHROPIC_AUTH_TOKEN" }
+      };
+      const missingCodex = { backend: "codex", ok: false, blocking: true, installed: false, auth: "missing", message: "Install Codex CLI." };
+      const partialClaudeGateway = {
+        backend: "claude",
+        ok: false,
+        blocking: true,
+        installed: true,
+        auth: "missing",
+        version: "claude 1.0.0",
+        message: "Claude Code has an Anthropic-compatible gateway base URL configured, but no ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is available.",
+        gateway: { complete: false, base_url: "https://api.z.ai/api/anthropic", has_credential: false, credential_key: "" }
+      };
+      const resetNoProject = (settings) => {
+        uiSettings = settings;
+        activeProjectId = "";
+        appState = { projects: [], active_project_id: "", multi_project: true };
+        initialProjectDialogOpened = false;
+        sessionStorage.removeItem("coAutoResearchInitialPreflightDismissed");
+        document.querySelector("#project-dialog").open = false;
+        document.querySelector("#agent-setup-dialog").open = false;
+        globalThis.__projectOpenCount = 0;
+        openProjectCreateDialog = () => {
+          globalThis.__projectOpenCount += 1;
+          document.querySelector("#project-dialog").showModal();
+        };
+      };
+      const wait = () => new Promise((resolve) => setTimeout(resolve, 150));
+
+      resetNoProject({
+        agent: { backend: "codex" },
+        codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+        claude: { model: "sonnet", reasoningEffort: "high", permissionPreset: "auto", provider: "external", webSearch: true, reviewCheckpointInterval: 100 },
+        agent_status: { selected: "codex", backends: { codex: readyCodex, claude: partialClaudeGateway } }
+      });
+      runInitialPreflightFlow();
+      await wait();
+      const selectedReady = {
+        projectOpen: document.querySelector("#project-dialog").open,
+        setupOpen: document.querySelector("#agent-setup-dialog").open,
+        projectOpenCount: globalThis.__projectOpenCount,
+        dismissed: sessionStorage.getItem("coAutoResearchInitialPreflightDismissed")
+      };
+
+      resetNoProject({
+        agent: { backend: "claude" },
+        codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+        claude: { model: "sonnet", reasoningEffort: "high", permissionPreset: "auto", provider: "external", webSearch: true, reviewCheckpointInterval: 100 },
+        agent_status: { selected: "claude", backends: { codex: readyCodex, claude: partialClaudeGateway } }
+      });
+      runInitialPreflightFlow();
+      await wait();
+      const switchSetup = {
+        projectOpenCount: globalThis.__projectOpenCount,
+        setupOpen: document.querySelector("#agent-setup-dialog").open,
+        createHidden: document.querySelector("[data-agent-setup-create-project]").hidden,
+        hasUseCodex: document.querySelector("#agent-setup-grid").innerHTML.includes("Use Codex"),
+        hasGatewayMissing: document.querySelector("#agent-setup-grid").innerHTML.includes("Gateway missing credential")
+      };
+      globalThis.__apiCalls = [];
+      globalThis.__apiResponse = {
+        settings: {
+          ...uiSettings,
+          agent: { backend: "codex" },
+          agent_status: { selected: "codex", backends: { codex: readyCodex, claude: partialClaudeGateway } }
+        },
+        secret_keys: []
+      };
+      await useAgentSetupBackend("codex");
+      const settingsSaveCall = globalThis.__apiCalls.find((call) => call.endpoint === "/api/settings") || {};
+      const afterUseReadyBackend = {
+        savedBackend: settingsSaveCall.body?.agent?.backend || "",
+        projectOpenCount: globalThis.__projectOpenCount,
+        dismissed: sessionStorage.getItem("coAutoResearchInitialPreflightDismissed"),
+        setupOpen: document.querySelector("#agent-setup-dialog").open
+      };
+
+      resetNoProject({
+        agent: { backend: "claude" },
+        codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+        claude: { model: "sonnet", reasoningEffort: "high", permissionPreset: "auto", provider: "zai_glm", webSearch: true, reviewCheckpointInterval: 100 },
+        agent_status: { selected: "claude", backends: { codex: missingCodex, claude: partialClaudeGateway } }
+      });
+      runInitialPreflightFlow();
+      await wait();
+      const allBlocking = {
+        projectOpenCount: globalThis.__projectOpenCount,
+        setupOpen: document.querySelector("#agent-setup-dialog").open,
+        hasGatewayMissing: document.querySelector("#agent-setup-grid").innerHTML.includes("Gateway missing credential")
+      };
+      createProjectFromSetupDialog();
+      const afterCreateFirst = {
+        projectOpenCount: globalThis.__projectOpenCount,
+        setupOpen: document.querySelector("#agent-setup-dialog").open,
+        dismissed: sessionStorage.getItem("coAutoResearchInitialPreflightDismissed")
+      };
+      document.querySelector("#project-dialog").open = false;
+      globalThis.__projectOpenCount = 0;
+      initialProjectDialogOpened = false;
+      runInitialPreflightFlow();
+      await wait();
+      const afterDismissedRetry = {
+        projectOpenCount: globalThis.__projectOpenCount,
+        setupOpen: document.querySelector("#agent-setup-dialog").open
+      };
+
+      sessionStorage.removeItem("coAutoResearchInitialPreflightDismissed");
+      document.querySelector("#agent-setup-dialog").open = false;
+      maybeShowAgentSetupDialog({ force: true, initial: true });
+      const recheckLike = {
+        setupOpen: document.querySelector("#agent-setup-dialog").open,
+        dismissed: sessionStorage.getItem("coAutoResearchInitialPreflightDismissed")
+      };
+
+      activeProjectId = "p1";
+      appState = { projects: [{ id: "p1", display_name: "Existing" }], active_project_id: "p1", multi_project: true };
+      document.querySelector("#project-dialog").open = false;
+      document.querySelector("#agent-setup-dialog").open = false;
+      globalThis.__projectOpenCount = 0;
+      initialProjectDialogOpened = false;
+      runInitialPreflightFlow({ force: true });
+      await wait();
+      const existingProject = {
+        projectOpenCount: globalThis.__projectOpenCount,
+        setupOpen: document.querySelector("#agent-setup-dialog").open
+      };
+
+      uiSettings = { ...uiSettings, agent_status: { selected: "claude", backends: { codex: missingCodex, claude: readyClaudeGateway } } };
+      renderAgentSetupCards();
+      const gatewayReady = document.querySelector("#agent-setup-grid").innerHTML.includes("Gateway configured via ANTHROPIC_AUTH_TOKEN");
+
+      return { selectedReady, switchSetup, afterUseReadyBackend, allBlocking, afterCreateFirst, afterDismissedRetry, recheckLike, existingProject, gatewayReady };
+    })()
+  `);
+  assert.equal(state.selectedReady.projectOpen, true, "ready selected backend should open project creation");
+  assert.equal(state.selectedReady.setupOpen, false, "ready selected backend should not open setup");
+  assert.equal(state.selectedReady.projectOpenCount, 1);
+  assert.equal(state.selectedReady.dismissed, null, "automatic ready path should not mark preflight dismissed");
+  assert.equal(state.switchSetup.setupOpen, true, "blocking selected backend should open setup");
+  assert.equal(state.switchSetup.projectOpenCount, 0);
+  assert.equal(state.switchSetup.createHidden, false);
+  assert.equal(state.switchSetup.hasUseCodex, true, "ready alternate backend should render a switch action");
+  assert.equal(state.switchSetup.hasGatewayMissing, true, "partial Claude gateway should be visible");
+  assert.equal(state.afterUseReadyBackend.savedBackend, "codex", "Use Codex should persist Settings backend");
+  assert.equal(state.afterUseReadyBackend.projectOpenCount, 1, "Use ready backend should continue to project creation");
+  assert.equal(state.afterUseReadyBackend.dismissed, "1");
+  assert.equal(state.afterUseReadyBackend.setupOpen, false);
+  assert.equal(state.allBlocking.setupOpen, true);
+  assert.equal(state.allBlocking.projectOpenCount, 0);
+  assert.equal(state.allBlocking.hasGatewayMissing, true);
+  assert.equal(state.afterCreateFirst.projectOpenCount, 1);
+  assert.equal(state.afterCreateFirst.setupOpen, false);
+  assert.equal(state.afterCreateFirst.dismissed, "1");
+  assert.equal(state.afterDismissedRetry.projectOpenCount, 0, "dismissed preflight should not reopen project dialog in this tab");
+  assert.equal(state.afterDismissedRetry.setupOpen, false, "dismissed preflight should not reopen setup in this tab");
+  assert.equal(state.recheckLike.setupOpen, true, "forced re-check should render setup");
+  assert.equal(state.recheckLike.dismissed, null, "re-check should not mark preflight dismissed");
+  assert.equal(state.existingProject.projectOpenCount, 0, "existing projects should not trigger first-run create dialog");
+  assert.equal(state.existingProject.setupOpen, false);
+  assert.equal(state.gatewayReady, true, "Claude gateway-ready status should be rendered");
 }
 
 function testProjectScopedComposerDraftAndTargetVenueRestore() {
@@ -4263,6 +4553,8 @@ testEnvForcedBackendStatusMessage();
 testInvalidEnvBackendStatusWarning();
 testProviderSpecificResumeCommand();
 await testSettingsModalSaveSyncsScopedSessionSettings();
+await testClaudeGatewaySettingsPayload();
+await testInitialRuntimePreflightFlow();
 testProjectScopedComposerDraftAndTargetVenueRestore();
 testThemeModePersistsAndApplies();
 testTargetVenueUsesOnlyProjectScopedDraft();

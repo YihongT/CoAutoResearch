@@ -83,6 +83,10 @@ Starting framing, autoresearch, chat, resume, or restart checks the selected
 backend with the provider `--version` and auth status commands. Missing or
 unauthenticated selected backends block startup with Codex- or Claude-specific
 setup guidance; the UI does not silently fall back to the other backend.
+For Claude Code, readiness also recognizes Anthropic-compatible gateway
+credentials supplied through Settings, `~/.claude/settings.json`, or
+`.claude/settings.local.json`. Shell aliases/functions are not inherited; point
+`COAUTO_CLAUDE` at a wrapper script if a wrapper is required.
 
 ## File Writes
 

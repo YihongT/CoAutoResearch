@@ -14,6 +14,10 @@ This command downloads the CLI if needed, starts the local UI, and opens it in
 your browser. Create projects, attach files, revise framing, and start
 autoresearch from the UI.
 
+On first launch, the dashboard checks Codex and Claude Code readiness before it
+opens project creation. Projects can still be created before runtime setup is
+complete; starting an agent run requires a ready selected backend.
+
 ## Prerequisites
 
 Install:
@@ -29,7 +33,10 @@ Install:
   ```
 
   Windows is supported through native Windows or WSL2 ([Codex Windows guide](https://developers.openai.com/codex/windows)).
-- **Claude Code CLI** (optional backend) — install and authenticate Claude Code to select `Claude Code` in the UI. CoAutoResearch talks to the CLI directly; no SDK is added.
+- **Claude Code CLI** (optional backend) — install and authenticate Claude Code
+  to select `Claude Code` in the UI. CoAutoResearch talks to the CLI directly;
+  no SDK is added. Claude Code can also be pointed at an Anthropic-compatible
+  gateway such as Z.AI GLM from Settings.
 
 Check the basics:
 
@@ -45,6 +52,28 @@ claude auth status
 
 On Windows, use `python --version` or `py -3 --version` if `python3` is not
 available.
+
+### Claude Code With GLM / Z.AI
+
+To use Claude Code as the runtime while sending model calls to GLM, select
+`Claude Code` in Settings, set **Claude provider** to `Z.AI GLM Coding Plan`,
+and paste the Z.AI credential. CoAutoResearch injects the Anthropic-compatible
+endpoint into Claude Code runs only:
+
+```text
+ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
+ANTHROPIC_AUTH_TOKEN=<your Z.AI key>
+```
+
+Claude Code and Goose-style Anthropic clients should use
+`https://api.z.ai/api/anthropic`. Do not put Z.AI's OpenAI-compatible endpoint
+`https://api.z.ai/api/coding/paas/v4` into Claude Code.
+
+If you already keep these values in `~/.claude/settings.json` or
+`.claude/settings.local.json`, CoAutoResearch reads the `env` block for readiness
+checks and run launches. Shell aliases/functions are not inherited by the UI
+server; use Claude settings, the Settings gateway form, or set `COAUTO_CLAUDE`
+to a wrapper script file.
 
 ## Install the CLI Command
 

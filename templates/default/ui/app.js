@@ -112,6 +112,7 @@ const COLD_AUTOSAVE_DELAY = 900;
 const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024;
 const LARGE_RESOURCE_CHUNK_BYTES = 8 * 1024 * 1024;
 const FILE_VIEWER_SIZE_KEY = "coAutoResearchFileViewerSize";
+const INITIAL_PREFLIGHT_DISMISSED_KEY = "coAutoResearchInitialPreflightDismissed";
 const LATEST_MANUSCRIPT_PATH = "manuscript/BLUEPRINT.md";
 
 const panelTitles = {
@@ -148,6 +149,7 @@ const defaultClaudeSessionSettings = {
   reasoningEffort: "high",
   permissionPreset: "auto",
   permissionMode: "auto",
+  provider: "external",
   webSearch: true,
   fastMode: false,
   extraConfig: "",
@@ -177,8 +179,29 @@ const modelOptionsByBackend = {
     ["sonnet", "Claude Sonnet 4.6"],
     ["sonnet[1m]", "Claude Sonnet 4.6 1M"],
     ["haiku", "Claude Haiku 4.5"],
+    ["glm-5.2[1m]", "GLM-5.2 1M"],
+    ["glm-5.2", "GLM-5.2"],
+    ["glm-5-turbo", "GLM-5 Turbo"],
+    ["glm-4.7", "GLM-4.7"],
   ],
 };
+
+const claudeProviderLabels = {
+  external: "Use existing Claude Code configuration",
+  zai_glm: "Z.AI GLM Coding Plan",
+  custom_anthropic: "Custom Anthropic-compatible gateway",
+};
+const allowedClaudeProviders = new Set(Object.keys(claudeProviderLabels));
+const zaiClaudeEnvDefaults = {
+  ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
+  API_TIMEOUT_MS: "3000000",
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1000000",
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-4.5-air",
+  ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.2[1m]",
+  ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.2[1m]",
+};
+const claudeGatewaySecretKeys = new Set(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]);
 
 const backendDocLinks = {
   codex: [
@@ -1000,6 +1023,15 @@ function normalizeAgentBackend(value) {
   return allowedAgentBackends.has(backend) ? backend : defaultAgentSettings.backend;
 }
 
+function normalizeClaudeProvider(value) {
+  const provider = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+  return allowedClaudeProviders.has(provider) ? provider : defaultClaudeSessionSettings.provider;
+}
+
+function isValidCustomClaudeModel(value) {
+  return /^[A-Za-z0-9][A-Za-z0-9._:/+\-[\]]{1,140}$/.test(String(value || "").trim());
+}
+
 function claudeModelFamily(model) {
   const value = String(model || "").trim().toLowerCase();
   if (value === "best") return "opusRecent";
@@ -1109,9 +1141,19 @@ function agentStatusText(backend, scope = "settings") {
       parts.push(`COAUTO_AGENT_BACKEND forces ${forcedLabel} while active; saved Settings choices apply after the env var is removed.`);
     }
   }
-  if (status?.message) {
+  if (scope === "project" && status) {
+    const label = agentLabel(effective);
+    if (status.blocking) {
+      parts.push(`${label} readiness: You can create the project, but first run will be blocked until setup is complete. ${status.message || ""}`.trim());
+    } else {
+      parts.push(`${label} readiness: Ready to run after project creation.`);
+    }
+  } else if (status?.message) {
     const label = forced && requested !== effective ? `${agentLabel(effective)} readiness` : `${agentLabel(effective)} readiness`;
     parts.push(`${label}: ${status.message}`);
+  }
+  if (effective === "claude" && scope === "settings") {
+    parts.push("Shell aliases/functions are not inherited; use Claude settings, this gateway form, or COAUTO_CLAUDE pointing to a wrapper script.");
   }
   return parts.join(" ");
 }
@@ -1176,7 +1218,7 @@ function renderAgentStatusBanner() {
     tone = "warning";
     kicker = "Configuration";
     message = envWarning;
-    actions.push({ kind: "button", label: "Open settings", onClick: openSettingsDialog });
+    actions.push({ kind: "button", label: "Open settings", onClick: () => openSettingsDialog("codex") });
   } else if (status?.blocking) {
     tone = "error";
     const label = agentLabel(effective);
@@ -1188,7 +1230,7 @@ function renderAgentStatusBanner() {
       const otherLabel = agentLabel(otherBackend);
       actions.push({ kind: "button", label: `Switch to ${otherLabel}`, onClick: () => switchActiveBackend(otherBackend) });
     }
-    actions.push({ kind: "button", label: "Open settings", onClick: openSettingsDialog });
+    actions.push({ kind: "button", label: "Open settings", onClick: () => openSettingsDialog("codex") });
   } else if (status && statusTone(status) === "warning") {
     tone = "warning";
     kicker = `${agentLabel(effective)} readiness`;
@@ -1238,14 +1280,16 @@ function renderAgentStatusBanner() {
   });
 }
 
-function openSettingsDialog() {
+function openSettingsDialog(tab = "") {
   const dialog = document.getElementById("settings-dialog");
   if (!dialog) return;
   if (typeof loadUiSettings === "function") {
     Promise.resolve(loadUiSettings()).finally(() => {
+      if (tab) switchSettingsTab(tab);
       try { dialog.showModal(); } catch (_) { /* already open */ }
     });
   } else {
+    if (tab) switchSettingsTab(tab);
     try { dialog.showModal(); } catch (_) { /* already open */ }
   }
 }
@@ -1271,15 +1315,37 @@ function switchActiveBackend(backend) {
   refreshDiscoveredModels([target]);
 }
 
+async function saveActiveBackendChoice(backend) {
+  const target = normalizeAgentBackend(backend);
+  switchActiveBackend(target);
+  const payload = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({ agent: { backend: target } }),
+  });
+  uiSettings = payload.settings || uiSettings || {};
+  settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
+  hydrateSettingsDialog(uiSettings);
+  restoreSessionSettings();
+  renderAllAgentStatusNotes();
+  renderAgentSetupCards();
+  return target;
+}
+
 async function refreshAgentStatuses() {
   try {
     const payload = await api("/api/settings");
     uiSettings = payload.settings || uiSettings || {};
+    hydrateSettingsDialog(uiSettings);
+    restoreSessionSettings();
     renderAllAgentStatusNotes();
     renderAgentSetupCards();
   } catch (error) {
     showToast(error.message, true);
   }
+}
+
+function backendReady(status) {
+  return Boolean(status?.ok && !status?.blocking);
 }
 
 function allBackendsBlocking() {
@@ -1289,38 +1355,179 @@ function allBackendsBlocking() {
   return entries.every((status) => status.blocking === true);
 }
 
-function maybeShowAgentSetupDialog() {
+function noProjectsDashboard() {
+  const projects = Array.isArray(appState?.projects) ? appState.projects : [];
+  return Boolean(appState?.multi_project && !activeProjectId && !projects.length);
+}
+
+function initialPreflightDismissed() {
+  try {
+    return sessionStorage.getItem(INITIAL_PREFLIGHT_DISMISSED_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function dismissInitialPreflight() {
+  try {
+    sessionStorage.setItem(INITIAL_PREFLIGHT_DISMISSED_KEY, "1");
+  } catch (_) {
+    // Storage can be unavailable in private or embedded contexts.
+  }
+}
+
+function selectedEffectiveBackend(settings = uiSettings || {}) {
+  const envelope = agentStatusEnvelope(settings);
+  return effectiveBackend(envelope.selected || settings?.agent?.backend || activeSettingsBackend(), settings);
+}
+
+function orderedAgentSetupBackends(settings = uiSettings || {}) {
+  const selected = selectedEffectiveBackend(settings);
+  return [selected, ...Object.keys(agentBackends).filter((backend) => backend !== selected)];
+}
+
+function agentSetupGatewayText(backend, status = {}) {
+  if (normalizeAgentBackend(backend) !== "claude") return "";
+  const gateway = status.gateway && typeof status.gateway === "object" ? status.gateway : {};
+  if (gateway.complete || status.auth === "gateway") {
+    const credential = gateway.credential_key ? ` via ${gateway.credential_key}` : "";
+    return `Gateway configured${credential}.`;
+  }
+  if (gateway.base_url && !gateway.has_credential) {
+    return "Gateway missing credential.";
+  }
+  return "Using existing Claude Code auth.";
+}
+
+function agentSetupAuthText(status = {}) {
+  const auth = String(status.auth || "unknown");
+  if (auth === "ok") return "Auth: authenticated.";
+  if (auth === "gateway") return "Auth: gateway credential.";
+  if (auth === "missing") return "Auth: login or gateway credential needed.";
+  return "Auth: not confirmed yet.";
+}
+
+function updateAgentSetupDialogUi({ initial = false } = {}) {
   const dialog = document.getElementById("agent-setup-dialog");
   if (!dialog) return;
-  if (!allBackendsBlocking()) {
-    if (dialog.open) {
-      try { dialog.close(); } catch (_) { /* ignore */ }
-    }
-    return;
+  const title = document.getElementById("agent-setup-title");
+  if (title) title.textContent = "Check your agent runtime";
+  const intro = document.getElementById("agent-setup-intro");
+  if (intro) {
+    intro.textContent = "CoAutoResearch can create projects before an agent is ready, but agent runs need Codex or Claude Code to be installed and authenticated.";
   }
-  if (dialog.open) {
-    renderAgentSetupCards();
-    return;
-  }
+  const createButton = document.querySelector("[data-agent-setup-create-project]");
+  if (createButton) createButton.hidden = !(initial || noProjectsDashboard());
+  const settingsButton = document.querySelector("[data-agent-setup-settings]");
+  if (settingsButton) settingsButton.hidden = false;
+}
+
+function openAgentSetupDialog(options = {}) {
+  const dialog = document.getElementById("agent-setup-dialog");
+  if (!dialog) return;
+  updateAgentSetupDialogUi(options);
   renderAgentSetupCards();
+  if (dialog.open) return;
   try { dialog.showModal(); } catch (_) { /* may already be open */ }
+}
+
+function maybeShowAgentSetupDialog(options = {}) {
+  if (!options.force && !allBackendsBlocking()) return;
+  openAgentSetupDialog({ initial: options.initial || noProjectsDashboard() });
+}
+
+function runInitialPreflightFlow(options = {}) {
+  if (!noProjectsDashboard()) return;
+  if (initialProjectDialogOpened && !options.force) return;
+  if (initialPreflightDismissed() && !options.force) return;
+  const backends = agentStatusEnvelope().backends || {};
+  if (!Object.keys(backends).length) return;
+  initialProjectDialogOpened = true;
+  window.setTimeout(() => {
+    if (!noProjectsDashboard()) return;
+    if (initialPreflightDismissed() && !options.force) return;
+    const selected = selectedEffectiveBackend();
+    const selectedStatus = statusForBackend(selected);
+    if (backendReady(selectedStatus)) {
+      const setupDialog = document.getElementById("agent-setup-dialog");
+      if (setupDialog?.open) {
+        try { setupDialog.close(); } catch (_) { /* ignore */ }
+      }
+      const projectDialog = $("#project-dialog");
+      if (!projectDialog?.open) openProjectCreateDialog();
+      return;
+    }
+    openAgentSetupDialog({ initial: true });
+  }, 120);
+}
+
+async function useAgentSetupBackend(backend) {
+  const target = normalizeAgentBackend(backend);
+  if (envForcedBackend()) return;
+  try {
+    await saveActiveBackendChoice(target);
+    if (noProjectsDashboard()) {
+      dismissInitialPreflight();
+      const dialog = document.getElementById("agent-setup-dialog");
+      if (dialog?.open) {
+        try { dialog.close(); } catch (_) { /* ignore */ }
+      }
+      openProjectCreateDialog();
+    } else {
+      showToast(`Using ${agentLabel(target)} for new runs.`);
+    }
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function createProjectFromSetupDialog() {
+  dismissInitialPreflight();
+  const dialog = document.getElementById("agent-setup-dialog");
+  if (dialog?.open) {
+    try { dialog.close(); } catch (_) { /* ignore */ }
+  }
+  openProjectCreateDialog();
+}
+
+function openSettingsFromSetupDialog() {
+  const dialog = document.getElementById("agent-setup-dialog");
+  if (dialog?.open) {
+    try { dialog.close(); } catch (_) { /* ignore */ }
+  }
+  openSettingsDialog("codex");
 }
 
 function renderAgentSetupCards() {
   const grid = document.getElementById("agent-setup-grid");
   if (!grid) return;
   const backends = agentStatusEnvelope().backends || {};
-  const order = ["claude", "codex"];
+  const forced = envForcedBackend();
+  const selected = selectedEffectiveBackend();
+  const envWarning = String(agentStatusEnvelope().env_warning || "").trim();
+  const order = orderedAgentSetupBackends();
   grid.innerHTML = order
     .map((backend) => {
       const status = backends[backend] || {};
       const guide = backendInstallGuide(backend);
-      const ready = status.ok && !status.blocking;
-      const state = ready ? "ready" : "missing";
-      const stateLabel = ready ? "Ready" : "Not detected";
-      const detail = ready
-        ? (status.version || `${guide.label} CLI is installed and authenticated.`)
-        : (status.message || `${guide.label} CLI was not found on PATH.`);
+      const ready = backendReady(status);
+      const installed = Boolean(status.installed);
+      const state = ready ? "ready" : installed ? "warning" : "missing";
+      const stateLabel = ready ? "Ready" : installed ? "Setup needed" : "Not detected";
+      const installText = installed
+        ? `Installed: ${status.version || status.executable || `${guide.label} CLI found`}.`
+        : "Installed: not found.";
+      const detailLines = [installText, agentSetupAuthText(status)];
+      const gatewayText = agentSetupGatewayText(backend, status);
+      if (gatewayText) detailLines.push(`Gateway: ${gatewayText}`);
+      if (status.message) detailLines.push(status.message);
+      const canSwitch = ready && backend !== selected && !forced;
+      const switchAction = canSwitch
+        ? `<button class="secondary-button small-button" type="button" data-agent-setup-use="${escapeHtml(backend)}">Use ${escapeHtml(agentLabel(backend))}</button>`
+        : "";
+      const forcedNote = forced && backend !== forced
+        ? `<p class="agent-setup-card-note">${escapeHtml(envWarning || `COAUTO_AGENT_BACKEND forces ${agentLabel(forced)} while active.`)}</p>`
+        : "";
       return `
         <article class="agent-setup-card" data-agent-setup-card="${escapeHtml(backend)}">
           <div class="agent-setup-card-head">
@@ -1328,9 +1535,15 @@ function renderAgentSetupCards() {
             <span class="agent-setup-card-status" data-state="${escapeHtml(state)}">${escapeHtml(stateLabel)}</span>
           </div>
           <p>${escapeHtml(guide.description)}</p>
-          <p>${escapeHtml(detail)}</p>
+          <ul class="agent-setup-checks">
+            ${detailLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}
+          </ul>
+          ${forcedNote}
           <pre><code>${escapeHtml(guide.install)}</code></pre>
-          <a href="${escapeHtml(guide.docs)}" target="_blank" rel="noopener noreferrer">Open docs</a>
+          <div class="agent-setup-card-actions">
+            <a href="${escapeHtml(guide.docs)}" target="_blank" rel="noopener noreferrer">Open docs</a>
+            ${switchAction}
+          </div>
         </article>
       `;
     })
@@ -1714,14 +1927,7 @@ function renderProjectAvailability() {
 }
 
 function maybeOpenInitialProjectDialog() {
-  const projects = Array.isArray(appState?.projects) ? appState.projects : [];
-  if (initialProjectDialogOpened || !appState?.multi_project || projects.length) return;
-  initialProjectDialogOpened = true;
-  window.setTimeout(() => {
-    const dialog = $("#project-dialog");
-    if (dialog?.open) return;
-    openProjectCreateDialog();
-  }, 120);
+  runInitialPreflightFlow();
 }
 
 function renderProjectCreateButton() {
@@ -2555,7 +2761,11 @@ function agentWaitStateText(waitState = activeRunWaitState()) {
     return `Rate limit reported${ageText ? ` · last event ${ageText} ago` : ""}`;
   }
   if (kind === "idle") {
-    return `No agent events${ageText ? ` for ${ageText}` : ""}; process is still running.`;
+    const base = `No agent events${ageText ? ` for ${ageText}` : ""}; process is still running.`;
+    if (sessionBackend() === "claude") {
+      return `${base} Check Claude provider auth, gateway URL, model name, first-run API key approval, or shell alias configuration.`;
+    }
+    return base;
   }
   if (kind === "active" && ageText) {
     return `Last event ${ageText} ago${summary ? ` · ${compactText(summary, 140)}` : ""}`;
@@ -3317,7 +3527,7 @@ function currentRunLiveStatusHtml() {
   const entries = currentProgressEntries();
   const summary = currentRunReadableSummary(entries);
   const waitNotice = agentWaitStateHtml();
-  const showWaitNotice = Boolean(waitNotice && currentRunReadableEntry(entries));
+  const showWaitNotice = Boolean(waitNotice);
   const eventLabel = currentRunActivityEventLabel(entries.length);
   return `
     <article class="framing-message assistant is-thinking" aria-live="polite">
@@ -3827,9 +4037,13 @@ function fitComposerSelectWidths() {
 
 function syncModelSelectOptions(select, backend, selected = "") {
   if (!select) return;
-  const options = modelOptionsForBackend(backend);
+  const options = [...modelOptionsForBackend(backend)];
   const value = String(selected || "").trim();
-  const allowed = new Set(options.map(([optionValue]) => optionValue));
+  let allowed = new Set(options.map(([optionValue]) => optionValue));
+  if (normalizeAgentBackend(backend) === "claude" && value && !allowed.has(value) && isValidCustomClaudeModel(value)) {
+    options.push([value, `Custom: ${value}`]);
+    allowed = new Set(options.map(([optionValue]) => optionValue));
+  }
   const resolvedValue = allowed.has(value) ? value : defaultSettingsForBackend(backend).model;
 
   // Compute the desired option signature and compare with what is already rendered.
@@ -4007,9 +4221,11 @@ function normalizeSessionSettings(settings = {}) {
   if (backend === "claude") {
     const claudeModel = String(merged.model || "").trim();
     // A claude model is valid if it is a known alias/discovered option, or a full
-    // claude-* model ID. Anything else (e.g. a leftover codex "gpt-5.5") is rejected.
-    const validClaudeModel = Boolean(claudeModel) && (allowedModels.has(claudeModel) || /^claude-/i.test(claudeModel));
+    // Claude/custom gateway model ID. Anything else (e.g. a leftover codex
+    // "gpt-5.5") is rejected.
+    const validClaudeModel = Boolean(claudeModel) && (allowedModels.has(claudeModel) || isValidCustomClaudeModel(claudeModel));
     if (!validClaudeModel) merged.model = defaults.model;
+    merged.provider = normalizeClaudeProvider(merged.provider);
   }
   merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend, merged.model);
   merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
@@ -4107,6 +4323,73 @@ function stripBackendSetting(settings) {
   return copy;
 }
 
+function publicClaudeEnv(settings = uiSettings || {}) {
+  const payload = settings?.claude_env;
+  return payload && typeof payload === "object" ? payload : {};
+}
+
+function publicClaudeEnvValues(settings = uiSettings || {}) {
+  const values = publicClaudeEnv(settings).values;
+  return values && typeof values === "object" ? values : {};
+}
+
+function publicClaudeEnvPresent(settings = uiSettings || {}) {
+  const present = publicClaudeEnv(settings).present;
+  return present && typeof present === "object" ? present : {};
+}
+
+function claudeProviderFromSettings(settings = uiSettings || {}) {
+  return normalizeClaudeProvider(settings?.claude?.provider || publicClaudeEnv(settings).provider || defaultClaudeSessionSettings.provider);
+}
+
+function claudeGatewayFieldValue(settings, key, provider) {
+  const normalizedProvider = normalizeClaudeProvider(provider);
+  const savedProvider = claudeProviderFromSettings(settings);
+  if (normalizedProvider === "zai_glm" && savedProvider !== "zai_glm") {
+    return zaiClaudeEnvDefaults[key] || "";
+  }
+  const values = publicClaudeEnvValues(settings);
+  const saved = String(values[key] || "").trim();
+  if (saved) return saved;
+  return normalizedProvider === "zai_glm" ? (zaiClaudeEnvDefaults[key] || "") : "";
+}
+
+function claudeEnvPayloadFromModal() {
+  const form = $("#settings-form");
+  const provider = normalizeClaudeProvider(form.elements.settingsClaudeProvider?.value || claudeProviderFromSettings());
+  const env = {};
+  const clear = [];
+  if (provider === "external") {
+    return { env, clear };
+  }
+
+  const authMethod = String(form.elements.settingsClaudeAuthMethod?.value || "ANTHROPIC_AUTH_TOKEN").trim();
+  const credentialKey = claudeGatewaySecretKeys.has(authMethod) ? authMethod : "ANTHROPIC_AUTH_TOKEN";
+  const credentialValue = String(form.elements.settingsClaudeCredential?.value || "").trim();
+  const nonSecretFields = {
+    ANTHROPIC_BASE_URL: String(form.elements.settingsClaudeBaseUrl?.value || "").trim(),
+    ANTHROPIC_DEFAULT_SONNET_MODEL: String(form.elements.settingsClaudeSonnetModel?.value || "").trim(),
+    ANTHROPIC_DEFAULT_OPUS_MODEL: String(form.elements.settingsClaudeOpusModel?.value || "").trim(),
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: String(form.elements.settingsClaudeHaikuModel?.value || "").trim(),
+  };
+  const base = provider === "zai_glm" ? { ...zaiClaudeEnvDefaults, ...nonSecretFields } : nonSecretFields;
+  Object.entries(base).forEach(([key, value]) => {
+    const text = String(value || "").trim();
+    if (text) env[key] = text;
+    else clear.push(key);
+  });
+  if (provider === "zai_glm") {
+    env.API_TIMEOUT_MS = zaiClaudeEnvDefaults.API_TIMEOUT_MS;
+    env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = zaiClaudeEnvDefaults.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC;
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = zaiClaudeEnvDefaults.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+  }
+  if (credentialValue) {
+    env[credentialKey] = credentialValue;
+    clear.push(credentialKey === "ANTHROPIC_AUTH_TOKEN" ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN");
+  }
+  return { env, clear };
+}
+
 function settingsProviderFromModal(backend) {
   const form = $("#settings-form");
   const data = new FormData(form);
@@ -4121,6 +4404,9 @@ function settingsProviderFromModal(backend) {
     webSearch: Boolean(data.get("settingsWebSearch")),
     extraConfig: String(data.get("settingsExtraConfig") || "").trim(),
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("settingsReviewCheckpointInterval")),
+    provider: normalizedBackend === "claude"
+      ? normalizeClaudeProvider(data.get("settingsClaudeProvider") || claudeProviderFromSettings())
+      : undefined,
   });
 }
 
@@ -4155,6 +4441,7 @@ function hydrateSettingsDialog(settings) {
   form.elements.settingsWebSearch.checked = Boolean(provider.webSearch);
   form.elements.settingsExtraConfig.value = provider.extraConfig || "";
   if (form.elements.settingsReviewCheckpointInterval) form.elements.settingsReviewCheckpointInterval.value = provider.reviewCheckpointInterval;
+  hydrateClaudeProviderSettings(settings, backend, provider.provider);
   renderAgentStatusNote("#settings-agent-status", backend, "settings");
 
   const envPresent = settings?.env_present || {};
@@ -4184,6 +4471,48 @@ function hydrateSettingsDialog(settings) {
     .join("");
 }
 
+function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = activeSettingsBackend(), providerOverride = "") {
+  const form = $("#settings-form");
+  if (!form) return;
+  const isClaude = normalizeAgentBackend(backend) === "claude";
+  const provider = normalizeClaudeProvider(providerOverride || settings?.claude?.provider || defaultClaudeSessionSettings.provider);
+  if (form.elements.settingsClaudeProvider) form.elements.settingsClaudeProvider.value = provider;
+  document.querySelectorAll("[data-claude-provider-field]").forEach((node) => {
+    node.hidden = !isClaude;
+  });
+  const panel = $("#claude-gateway-settings");
+  if (panel) panel.hidden = !isClaude || provider === "external";
+  if (!isClaude) return;
+
+  const envPresent = publicClaudeEnvPresent(settings);
+  const authTokenSaved = Boolean(envPresent.ANTHROPIC_AUTH_TOKEN);
+  const apiKeySaved = Boolean(envPresent.ANTHROPIC_API_KEY);
+  const defaultAuth = apiKeySaved && !authTokenSaved ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN";
+  if (form.elements.settingsClaudeAuthMethod) form.elements.settingsClaudeAuthMethod.value = defaultAuth;
+  if (form.elements.settingsClaudeBaseUrl) form.elements.settingsClaudeBaseUrl.value = claudeGatewayFieldValue(settings, "ANTHROPIC_BASE_URL", provider);
+  if (form.elements.settingsClaudeSonnetModel) form.elements.settingsClaudeSonnetModel.value = claudeGatewayFieldValue(settings, "ANTHROPIC_DEFAULT_SONNET_MODEL", provider);
+  if (form.elements.settingsClaudeOpusModel) form.elements.settingsClaudeOpusModel.value = claudeGatewayFieldValue(settings, "ANTHROPIC_DEFAULT_OPUS_MODEL", provider);
+  if (form.elements.settingsClaudeHaikuModel) form.elements.settingsClaudeHaikuModel.value = claudeGatewayFieldValue(settings, "ANTHROPIC_DEFAULT_HAIKU_MODEL", provider);
+  if (form.elements.settingsClaudeCredential) {
+    form.elements.settingsClaudeCredential.value = "";
+    form.elements.settingsClaudeCredential.placeholder = authTokenSaved || apiKeySaved ? "Saved - leave blank to keep" : "Paste gateway credential";
+  }
+  const status = $("#settings-claude-credential-status");
+  const clearButton = document.querySelector("[data-clear-claude-secret]");
+  const savedCredentialKey = authTokenSaved ? "ANTHROPIC_AUTH_TOKEN" : apiKeySaved ? "ANTHROPIC_API_KEY" : "";
+  if (status) {
+    status.textContent = authTokenSaved
+      ? "ANTHROPIC_AUTH_TOKEN saved"
+      : apiKeySaved
+        ? "ANTHROPIC_API_KEY saved"
+        : "Empty";
+  }
+  if (clearButton) {
+    clearButton.hidden = !savedCredentialKey;
+    clearButton.dataset.clearClaudeSecret = savedCredentialKey;
+  }
+}
+
 function switchSettingsBackend(backend) {
   const normalized = normalizeAgentBackend(backend);
   const form = $("#settings-form");
@@ -4203,7 +4532,6 @@ async function loadUiSettings() {
     restoreSessionSettings();
     renderAllAgentStatusNotes();
     renderAgentStatusBanner();
-    maybeShowAgentSetupDialog();
     refreshDiscoveredModels().then((updated) => {
       // Only repaint selects if discovery actually added options, AND never while
       // a dialog is open — rebuilding a <select> mid-interaction collapses it.
@@ -4231,9 +4559,16 @@ async function saveUiSettings(event) {
         if (value) env[key] = value;
       });
       const settingsPayload = settingsPayloadFromModal();
+      const claudeEnvPayload = claudeEnvPayloadFromModal();
       const payload = await api("/api/settings", {
         method: "POST",
-        body: JSON.stringify({ ...settingsPayload, env, clear_env: clearEnv }),
+        body: JSON.stringify({
+          ...settingsPayload,
+          env,
+          clear_env: clearEnv,
+          claude_env: claudeEnvPayload.env,
+          clear_claude_env: claudeEnvPayload.clear,
+        }),
       });
       uiSettings = payload.settings || {};
       settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
@@ -4275,6 +4610,19 @@ async function clearSavedSecret(key) {
   hydrateSettingsDialog(uiSettings);
   applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
   showToast(`${secretKeyLabels[key] || key} cleared.`);
+}
+
+async function clearSavedClaudeSecret(key) {
+  if (!claudeGatewaySecretKeys.has(key)) return;
+  const settingsPayload = settingsPayloadFromModal();
+  const payload = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({ ...settingsPayload, claude_env: {}, clear_claude_env: [key] }),
+  });
+  uiSettings = payload.settings || {};
+  hydrateSettingsDialog(uiSettings);
+  applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
+  showToast(`${key} cleared.`);
 }
 
 function setPanel(panel) {
@@ -5101,7 +5449,7 @@ function runningTrialStatusHtml(trial) {
     : reportSummary || progressSummary || agentWaitStateText() || "";
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
-  const showWaitNotice = Boolean(waitNotice && (latestEntry || reportSummary || progressSummary));
+  const showWaitNotice = Boolean(waitNotice);
   const openActions = trialOpenActionButtonsHtml(report);
   return `
     <section class="trial-live-status" aria-live="polite">
@@ -10602,16 +10950,28 @@ function bindEvents() {
   });
   $$("[data-agent-setup-close]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (noProjectsDashboard()) dismissInitialPreflight();
       const dialog = document.getElementById("agent-setup-dialog");
       if (dialog?.open) {
         try { dialog.close(); } catch (_) { /* ignore */ }
       }
     });
   });
+  $("[data-agent-setup-create-project]")?.addEventListener("click", () => {
+    createProjectFromSetupDialog();
+  });
+  $("[data-agent-setup-settings]")?.addEventListener("click", () => {
+    openSettingsFromSetupDialog();
+  });
+  $("#agent-setup-grid")?.addEventListener("click", (event) => {
+    const button = event.target && event.target.closest("[data-agent-setup-use]");
+    if (!button) return;
+    useAgentSetupBackend(button.dataset.agentSetupUse);
+  });
   $$("[data-agent-setup-recheck]").forEach((button) => {
     button.addEventListener("click", async () => {
       await refreshAgentStatuses();
-      maybeShowAgentSetupDialog();
+      maybeShowAgentSetupDialog({ force: true, initial: noProjectsDashboard() });
     });
   });
   $$(".settings-nav-button").forEach((button) => {
@@ -10699,6 +11059,11 @@ function bindEvents() {
     settingsFromForm();
   });
   $("#settings-form")?.elements?.settingsBackend?.addEventListener("change", (event) => switchSettingsBackend(event.target.value));
+  $("#settings-form")?.elements?.settingsClaudeProvider?.addEventListener("change", () => {
+    const provider = $("#settings-form")?.elements?.settingsClaudeProvider?.value || "";
+    hydrateClaudeProviderSettings(uiSettings || {}, "claude", provider);
+    renderAgentStatusNote("#settings-agent-status", "claude", "settings");
+  });
   $("#settings-form")?.elements?.settingsModel?.addEventListener("change", () => {
     const form = $("#settings-form");
     const backend = normalizeAgentBackend(form?.elements?.settingsBackend?.value || activeSettingsBackend());
@@ -10850,6 +11215,11 @@ function bindEvents() {
     const clearSecret = event.target.closest("[data-clear-secret]");
     if (clearSecret) {
       clearSavedSecret(clearSecret.dataset.clearSecret);
+      return;
+    }
+    const clearClaudeSecret = event.target.closest("[data-clear-claude-secret]");
+    if (clearClaudeSecret) {
+      clearSavedClaudeSecret(clearClaudeSecret.dataset.clearClaudeSecret);
       return;
     }
     const closeBrowser = event.target.closest("[data-browser-close]");
@@ -11303,6 +11673,7 @@ function bindEvents() {
 async function init() {
   bindEvents();
   setResourceCategory(activeResourceCategory);
+  await loadUiSettings();
   await loadProjects().catch((error) => showToast(error.message, true));
   restoreNavigationState();
   if (!activeProjectId && appState?.multi_project) {
@@ -11314,7 +11685,6 @@ async function init() {
   }
   hydrateTargetVenueField({ force: true });
   restoreSessionSettings();
-  await loadUiSettings();
   restoreResourceSelections();
   restorePendingResourceImports();
   resizeComposer();

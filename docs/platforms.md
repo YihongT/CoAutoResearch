@@ -128,6 +128,34 @@ definitely missing or unauthenticated selected backend blocks startup with
 provider-specific instructions; the UI never silently falls back to the other
 backend.
 
+### Claude Code With Anthropic-Compatible Gateways
+
+Claude Code can run through an Anthropic-compatible gateway while CoAutoResearch
+still drives the normal Claude Code CLI. In Settings, choose `Claude Code`, then
+set **Claude provider** to `Z.AI GLM Coding Plan` or `Custom
+Anthropic-compatible gateway`. Z.AI GLM uses:
+
+```powershell
+$env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
+$env:ANTHROPIC_AUTH_TOKEN = "<your Z.AI key>"
+```
+
+The UI also detects gateway credentials in `~/.claude/settings.json` and the
+project's `.claude/settings.local.json` `env` blocks. A complete gateway config
+is treated as usable even if `claude auth status` reports that no Anthropic login
+is present.
+
+Use `https://api.z.ai/api/anthropic` for Claude Code. Z.AI's
+OpenAI-compatible endpoint, `https://api.z.ai/api/coding/paas/v4`, is for
+OpenAI-compatible clients and should not be used as Claude Code's
+`ANTHROPIC_BASE_URL`.
+
+Shell aliases and functions are not used when CoAutoResearch starts Claude Code;
+the UI launches a real executable with `subprocess`. If your GLM setup is a
+shell alias such as `glm() { ... claude "$@"; }`, move the env values into
+Claude settings or the UI Settings form, or set `COAUTO_CLAUDE` to a wrapper
+script file.
+
 Codex also documents native Windows sandbox modes. If native sandbox setup is
 blocked by enterprise policy or admin restrictions, use WSL2.
 

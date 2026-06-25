@@ -5763,7 +5763,11 @@ body.is-dragging-file .composer {
 }
 
 .settings-secret-card input[type="password"],
-.settings-secret-card input[type="url"] {
+.settings-secret-card input[type="url"],
+.settings-secret-card input[type="text"],
+.claude-gateway-settings input[type="password"],
+.claude-gateway-settings input[type="url"],
+.claude-gateway-settings input[type="text"] {
   width: 100%;
   min-height: 42px;
   padding: 9px 12px;
@@ -5774,6 +5778,26 @@ body.is-dragging-file .composer {
 .settings-secret-help {
   color: var(--muted);
   font-size: 12px;
+}
+
+.claude-gateway-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 253, 248, 0.66);
+}
+
+.claude-gateway-settings[hidden],
+[data-claude-provider-field][hidden] {
+  display: none;
+}
+
+.claude-gateway-settings .settings-note {
+  grid-column: 1 / -1;
+  padding: 0 0 2px;
 }
 
 .modal-settings-grid {
@@ -14732,6 +14756,9 @@ html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
 .agent-setup-card-status[data-state="ready"]::before {
   background: var(--success, #6f8c75);
 }
+.agent-setup-card-status[data-state="warning"]::before {
+  background: var(--warning, #b7791f);
+}
 .agent-setup-card-status[data-state="missing"]::before {
   background: var(--danger, #b4232a);
 }
@@ -14741,6 +14768,24 @@ html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--muted);
+}
+.agent-setup-checks {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-setup-checks li,
+.agent-setup-card-note {
+  margin: 0;
+  font-family: var(--reader);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.agent-setup-card-note {
+  color: var(--danger, #b4232a);
 }
 .agent-setup-card pre {
   margin: 0;
@@ -14760,6 +14805,13 @@ html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--ink);
+}
+.agent-setup-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* Final shell centering guard: the rail is fixed, so the main stage owns the

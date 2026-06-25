@@ -214,6 +214,10 @@
 	                                <option value="sonnet">Claude Sonnet 4.6</option>
 	                                <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
 	                                <option value="haiku">Claude Haiku 4.5</option>
+	                                <option value="glm-5.2[1m]">GLM-5.2 1M</option>
+	                                <option value="glm-5.2">GLM-5.2</option>
+	                                <option value="glm-5-turbo">GLM-5 Turbo</option>
+	                                <option value="glm-4.7">GLM-4.7</option>
 	                              </select>
 	                            </label>
 	                            <label>
@@ -549,6 +553,10 @@
                 <option value="sonnet">Claude Sonnet 4.6</option>
                 <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
                 <option value="haiku">Claude Haiku 4.5</option>
+                <option value="glm-5.2[1m]">GLM-5.2 1M</option>
+                <option value="glm-5.2">GLM-5.2</option>
+                <option value="glm-5-turbo">GLM-5 Turbo</option>
+                <option value="glm-4.7">GLM-4.7</option>
               </select>
             </label>
             <label class="field">
@@ -784,6 +792,15 @@
                   <option value="claude">Claude Code</option>
                 </select>
               </label>
+              <label class="field" data-claude-provider-field>
+                <span>Claude provider</span>
+                <select name="settingsClaudeProvider">
+                  <option value="external">Use existing Claude Code configuration</option>
+                  <option value="zai_glm">Z.AI GLM Coding Plan</option>
+                  <option value="custom_anthropic">Custom Anthropic-compatible gateway</option>
+                </select>
+                <small>Aliases and shell functions are not used here; CoAutoResearch starts the real Claude Code executable.</small>
+              </label>
               <label class="field">
                 <span>Default model</span>
                 <select name="settingsModel">
@@ -802,6 +819,10 @@
                   <option value="sonnet">Claude Sonnet 4.6</option>
                   <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
                   <option value="haiku">Claude Haiku 4.5</option>
+                  <option value="glm-5.2[1m]">GLM-5.2 1M</option>
+                  <option value="glm-5.2">GLM-5.2</option>
+                  <option value="glm-5-turbo">GLM-5 Turbo</option>
+                  <option value="glm-4.7">GLM-4.7</option>
                 </select>
               </label>
               <label class="field">
@@ -840,6 +861,38 @@
                 <span>Advanced config</span>
                 <textarea name="settingsExtraConfig" rows="4" placeholder='model_verbosity="low"'></textarea>
               </label>
+              <section class="claude-gateway-settings wide" id="claude-gateway-settings" hidden>
+                <div class="settings-note">Claude Code gateway settings are injected only into Claude Code runs from this UI.</div>
+                <label class="field">
+                  <span>Gateway base URL</span>
+                  <input name="settingsClaudeBaseUrl" type="url" autocomplete="off" placeholder="https://api.z.ai/api/anthropic" />
+                </label>
+                <label class="field">
+                  <span>Credential type</span>
+                  <select name="settingsClaudeAuthMethod">
+                    <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
+                    <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Credential</span>
+                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                  <small id="settings-claude-credential-status">Empty</small>
+                  <button class="settings-clear-button" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
+                </label>
+                <label class="field">
+                  <span>Sonnet model mapping</span>
+                  <input name="settingsClaudeSonnetModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
+                </label>
+                <label class="field">
+                  <span>Opus model mapping</span>
+                  <input name="settingsClaudeOpusModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
+                </label>
+                <label class="field">
+                  <span>Haiku model mapping</span>
+                  <input name="settingsClaudeHaikuModel" type="text" autocomplete="off" placeholder="glm-4.5-air" />
+                </label>
+              </section>
             </div>
             <p class="agent-status-note" id="settings-agent-status"></p>
           </section>
@@ -872,19 +925,20 @@
       <section class="project-dialog-shell">
         <header class="project-dialog-head">
           <div>
-            <p class="eyebrow">First-time setup</p>
-            <h2 id="agent-setup-title">Install an agent CLI to continue.</h2>
+            <p class="eyebrow">Runtime preflight</p>
+            <h2 id="agent-setup-title">Check your agent runtime</h2>
           </div>
           <button class="icon-button" type="button" data-agent-setup-close aria-label="Dismiss for now">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
         </header>
         <div class="agent-setup-body">
-          <p class="agent-setup-intro">CoAutoResearch drives research sessions through Claude Code or Codex CLI. Install one and re-check below to continue.</p>
+          <p class="agent-setup-intro" id="agent-setup-intro">CoAutoResearch can create projects before an agent is ready, but agent runs need Codex or Claude Code to be installed and authenticated.</p>
           <div class="agent-setup-grid" id="agent-setup-grid"></div>
         </div>
         <footer class="project-dialog-footer">
-          <button class="secondary-button" type="button" data-agent-setup-close>Continue anyway</button>
+          <button class="secondary-button" type="button" data-agent-setup-create-project hidden>Create project first</button>
+          <button class="secondary-button" type="button" data-agent-setup-settings>Open Settings</button>
           <button class="primary-button" type="button" data-agent-setup-recheck>I installed it — re-check</button>
         </footer>
       </section>

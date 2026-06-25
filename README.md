@@ -48,6 +48,10 @@ research should begin. Attach local files with the composer `+` button — they'
 copied into your project's `resources/user_input/attachments/` so the agent can
 cite them later.
 
+On first launch, the dashboard checks Codex and Claude Code readiness before it
+opens project creation. You can still create a project before runtime setup is
+complete; agent runs are blocked until one selected backend is ready.
+
 Bringing a proposal, a deep-research report, or a half-finished project? See
 [Best practices](docs/best-practices.md) for the recommended ways to start — and
 how to turn the blueprint into a finished paper.

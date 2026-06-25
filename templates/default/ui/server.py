@@ -1218,7 +1218,7 @@ class ProjectContext:
         self.research_state_path = self.root / "research_trajectory" / "STATE.md"
         self.trajectory_path = self.root / "research_trajectory" / "TRAJECTORY.json"
         self.session = new_research_session()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.refresh_metadata()
         self.load_runtime()
 
@@ -1668,6 +1668,7 @@ DEFAULT_CLAUDE_SETTINGS = {
     "reasoningEffort": "high",
     "permissionPreset": "auto",
     "permissionMode": "auto",
+    "provider": "external",
     "webSearch": True,
     "fastMode": False,
     "extraConfig": "",
@@ -1682,6 +1683,30 @@ SECRET_ENV_KEYS = [
     "GITHUB_TOKEN",
     "HF_TOKEN",
 ]
+ALLOWED_CLAUDE_PROVIDERS = {"external", "zai_glm", "custom_anthropic"}
+CLAUDE_ENV_KEYS = [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "API_TIMEOUT_MS",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+]
+CLAUDE_SECRET_ENV_KEYS = {"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+CLAUDE_NONSECRET_ENV_KEYS = [key for key in CLAUDE_ENV_KEYS if key not in CLAUDE_SECRET_ENV_KEYS]
+ZAI_GLM_CLAUDE_ENV_DEFAULTS = {
+    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.2[1m]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2[1m]",
+}
 
 ALLOWED_SANDBOXES = {"read-only", "workspace-write", "danger-full-access"}
 ALLOWED_APPROVAL_POLICIES = {"untrusted", "on-request", "never"}
@@ -1726,6 +1751,33 @@ LEGACY_CLAUDE_PERMISSION_PRESETS = {
 def normalize_agent_backend(value: Any = "") -> str:
     backend = str(value or "").strip().lower()
     return backend if backend in ALLOWED_AGENT_BACKENDS else DEFAULT_AGENT_SETTINGS["backend"]
+
+
+def normalize_claude_provider(value: Any = "") -> str:
+    provider = str(value or "").strip().lower().replace("-", "_")
+    return provider if provider in ALLOWED_CLAUDE_PROVIDERS else DEFAULT_CLAUDE_SETTINGS["provider"]
+
+
+def normalize_claude_env_values(payload: Any) -> dict[str, str]:
+    values = payload if isinstance(payload, dict) else {}
+    normalized: dict[str, str] = {}
+    for key in CLAUDE_ENV_KEYS:
+        value = str(values.get(key) or "").strip()
+        if value:
+            normalized[key] = value
+    return normalized
+
+
+def claude_env_for_provider(provider: Any, values: Any = None) -> dict[str, str]:
+    normalized_provider = normalize_claude_provider(provider)
+    env = normalize_claude_env_values(values)
+    if normalized_provider == "zai_glm":
+        merged = dict(ZAI_GLM_CLAUDE_ENV_DEFAULTS)
+        merged.update(env)
+        return merged
+    if normalized_provider == "custom_anthropic":
+        return env
+    return {}
 
 
 def raw_agent_backend_from_env(env: dict[str, str] | None = None) -> str:
@@ -1903,6 +1955,8 @@ def normalize_claude_settings(payload: Any, base: dict[str, Any] | None = None) 
             mode = str(values[key]).strip()
             if mode in {item["permissionMode"] for item in CLAUDE_PERMISSION_PRESETS.values()}:
                 settings[key] = mode
+        elif key == "provider":
+            settings[key] = normalize_claude_provider(values[key])
         elif key == "reasoningEffort":
             settings[key] = normalize_reasoning_effort(values[key], "claude", settings.get("model"))
         elif key == "reviewCheckpointInterval":
@@ -1933,6 +1987,7 @@ def default_ui_settings_payload(backend: Any = "") -> dict[str, Any]:
         "codex": normalize_codex_settings({}),
         "claude": normalize_claude_settings({}),
         "env": {},
+        "claude_env": {},
     }
 
 
@@ -2135,6 +2190,7 @@ def load_ui_settings() -> dict[str, Any]:
         "codex": normalize_codex_settings({}),
         "claude": normalize_claude_settings({}),
         "env": {},
+        "claude_env": {},
     }
     if not UI_SETTINGS_PATH.exists():
         return settings
@@ -2155,7 +2211,21 @@ def load_ui_settings() -> dict[str, Any]:
         settings["claude"] = normalize_claude_settings(payload["claude"], settings["claude"])
     if isinstance(payload.get("env"), dict):
         settings["env"] = {key: str(value) for key, value in payload["env"].items() if key in SECRET_ENV_KEYS and str(value)}
+    if isinstance(payload.get("claude_env"), dict):
+        settings["claude_env"] = normalize_claude_env_values(payload["claude_env"])
     return settings
+
+
+def public_claude_env(settings: dict[str, Any]) -> dict[str, Any]:
+    env = normalize_claude_env_values(settings.get("claude_env", {}))
+    return {
+        "provider": normalize_claude_provider(settings.get("claude", {}).get("provider")),
+        "present": {key: bool(env.get(key)) for key in CLAUDE_ENV_KEYS},
+        "masked": {key: ("Saved" if env.get(key) else "") for key in CLAUDE_SECRET_ENV_KEYS},
+        "values": {key: env.get(key, "") for key in CLAUDE_NONSECRET_ENV_KEYS},
+        "secret_keys": sorted(CLAUDE_SECRET_ENV_KEYS),
+        "keys": CLAUDE_ENV_KEYS,
+    }
 
 
 def public_ui_settings() -> dict[str, Any]:
@@ -2165,6 +2235,7 @@ def public_ui_settings() -> dict[str, Any]:
         "agent": settings["agent"],
         "codex": settings["codex"],
         "claude": settings["claude"],
+        "claude_env": public_claude_env(settings),
         "env_present": {key: bool(settings["env"].get(key)) for key in SECRET_ENV_KEYS},
         "env_masked": {key: ("Saved" if settings["env"].get(key) else "") for key in SECRET_ENV_KEYS},
         "agent_status": agent_status,
@@ -2191,10 +2262,27 @@ def save_ui_settings(payload: dict[str, Any]) -> dict[str, Any]:
         if key in SECRET_ENV_KEYS and str(value).strip():
             merged_env[key] = str(value).strip()
 
+    claude_env_values = payload.get("claude_env") if isinstance(payload.get("claude_env"), dict) else {}
+    merged_claude_env = dict(current.get("claude_env", {}))
+    for key in payload.get("clear_claude_env", []) if isinstance(payload.get("clear_claude_env"), list) else []:
+        if key in CLAUDE_ENV_KEYS:
+            merged_claude_env.pop(key, None)
+    for key, value in claude_env_values.items():
+        if key in CLAUDE_ENV_KEYS:
+            text = str(value).strip()
+            if text:
+                merged_claude_env[key] = text
+
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     UI_SETTINGS_PATH.write_text(
         json.dumps(
-            {"agent": merged_agent, "codex": merged_codex, "claude": merged_claude, "env": merged_env},
+            {
+                "agent": merged_agent,
+                "codex": merged_codex,
+                "claude": merged_claude,
+                "env": merged_env,
+                "claude_env": normalize_claude_env_values(merged_claude_env),
+            },
             ensure_ascii=False,
             indent=2,
         ),
@@ -2328,14 +2416,40 @@ def update_framing_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return save_framing_messages(messages)
 
 
-def agent_process_env() -> dict[str, str]:
+def read_claude_settings_env(path: Path) -> dict[str, str]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return normalize_claude_env_values(payload.get("env"))
+
+
+def external_claude_settings_env() -> dict[str, str]:
+    env: dict[str, str] = {}
+    for path in (
+        Path.home() / ".claude" / "settings.json",
+        REPO_ROOT / ".claude" / "settings.json",
+        REPO_ROOT / ".claude" / "settings.local.json",
+    ):
+        env.update(read_claude_settings_env(path))
+    return env
+
+
+def agent_process_env(backend: str = "") -> dict[str, str]:
     env = os.environ.copy()
-    env.update(load_ui_settings().get("env", {}))
+    settings = load_ui_settings()
+    env.update(settings.get("env", {}))
+    if normalize_agent_backend(backend) == "claude":
+        env.update(external_claude_settings_env())
+        provider = normalize_claude_provider(settings.get("claude", {}).get("provider"))
+        env.update(claude_env_for_provider(provider, settings.get("claude_env", {})))
     return env
 
 
 def codex_process_env() -> dict[str, str]:
-    return agent_process_env()
+    return agent_process_env("codex")
 
 
 def agent_executable_names(backend: str, windows: bool | None = None) -> list[str]:
@@ -2494,6 +2608,27 @@ def run_agent_probe(executable: str, args: list[str], env: dict[str, str] | None
     }
 
 
+def claude_gateway_status_from_env(env: dict[str, str] | None = None) -> dict[str, Any]:
+    process_env = env if env is not None else agent_process_env("claude")
+    base_url = str(process_env.get("ANTHROPIC_BASE_URL") or "").strip()
+    auth_token = str(process_env.get("ANTHROPIC_AUTH_TOKEN") or "").strip()
+    api_key = str(process_env.get("ANTHROPIC_API_KEY") or "").strip()
+    credential_key = "ANTHROPIC_AUTH_TOKEN" if auth_token else "ANTHROPIC_API_KEY" if api_key else ""
+    model_mappings = {
+        key: str(process_env.get(key) or "").strip()
+        for key in ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL")
+        if str(process_env.get(key) or "").strip()
+    }
+    return {
+        "configured": bool(base_url or credential_key or model_mappings),
+        "base_url": base_url,
+        "credential_key": credential_key,
+        "has_credential": bool(credential_key),
+        "complete": bool(base_url and credential_key),
+        "model_mappings": model_mappings,
+    }
+
+
 def auth_probe_status(backend: str, probe: dict[str, Any]) -> str:
     if probe.get("ok"):
         return "ok"
@@ -2558,7 +2693,8 @@ def agent_setup_instruction(backend: str, reason: str) -> str:
 def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
     backend = normalize_agent_backend(backend)
     label = agent_display_name(backend)
-    process_env = env if env is not None else os.environ
+    process_env = env if env is not None else agent_process_env(backend)
+    gateway_status = claude_gateway_status_from_env(process_env) if backend == "claude" else {}
     base: dict[str, Any] = {
         "backend": backend,
         "label": label,
@@ -2573,6 +2709,7 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
         "version_command": agent_version_command_text(backend),
         "login_command": agent_login_command_text(backend),
         "auth_status_command": agent_auth_status_command_text(backend),
+        "gateway": gateway_status,
     }
     try:
         executable = resolve_agent_executable(backend, process_env)
@@ -2601,6 +2738,28 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
     auth_probe = run_agent_probe(executable, agent_auth_command(backend), process_env)
     auth = auth_probe_status(backend, auth_probe)
     base["auth"] = auth
+    if backend == "claude" and gateway_status.get("base_url") and not gateway_status.get("has_credential"):
+        base.update({
+            "blocking": True,
+            "message": (
+                "Claude Code has an Anthropic-compatible gateway base URL configured, but no "
+                "ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is available to this UI process."
+            ),
+            "details": "Set the gateway credential in Settings, ~/.claude/settings.json, or the terminal environment that starts CoAutoResearch.",
+        })
+        return base
+    if backend == "claude" and gateway_status.get("complete") and auth in {"missing", "unknown"}:
+        base.update({
+            "ok": True,
+            "blocking": False,
+            "auth": "gateway",
+            "message": (
+                "Claude Code CLI is installed and an Anthropic-compatible gateway is configured "
+                f"via {gateway_status.get('credential_key') or 'environment credentials'}."
+            ),
+            "details": str(auth_probe.get("output") or auth_probe.get("error") or ""),
+        })
+        return base
     if auth == "missing":
         base.update({
             "blocking": True,
@@ -2708,7 +2867,7 @@ def _codex_model_sort_key(item: tuple[str, str]) -> tuple[int, int, str]:
 
 def agent_available_models(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
     backend = normalize_agent_backend(backend)
-    process_env = env if env is not None else os.environ
+    process_env = env if env is not None else agent_process_env(backend)
     try:
         executable = resolve_agent_executable(backend, process_env)
     except FileNotFoundError as exc:
@@ -2809,7 +2968,7 @@ def claude_permission_modes_from_help(help_text: str) -> set[str]:
 
 def claude_permission_mode_status(settings: dict[str, Any] | None = None, env: dict[str, str] | None = None) -> dict[str, Any]:
     mode = claude_permission_mode_from_settings(settings)
-    process_env = env if env is not None else os.environ
+    process_env = env if env is not None else agent_process_env("claude")
     try:
         executable = resolve_agent_executable("claude", process_env)
     except FileNotFoundError as exc:
@@ -7722,8 +7881,9 @@ def settings_to_codex_args(settings: dict[str, Any], resume: bool) -> list[str]:
 
 def settings_to_claude_args(settings: dict[str, Any], resume: bool) -> list[str]:
     args: list[str] = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
-    model = normalize_claude_model(settings.get("model"))
-    if model:
+    raw_model = str(settings.get("model") or "").strip()
+    model = normalize_claude_model(raw_model)
+    if raw_model and model and model != "default":
         args.extend(["--model", model])
     reasoning = normalize_reasoning_effort(settings.get("reasoningEffort"), "claude", model)
     if reasoning:
@@ -8918,7 +9078,7 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
 def agent_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str]:
     session_id = str(RESEARCH_SESSION.get("session_id") or "")
     backend = normalize_agent_backend(settings.get("backend"))
-    executable = resolve_agent_executable(backend)
+    executable = resolve_agent_executable(backend, agent_process_env(backend))
     if resume:
         if not session_id:
             raise ValueError(f"No {agent_display_name(backend)} session is active in this UI. Start project framing first.")
@@ -9044,7 +9204,7 @@ def start_research_run(
         proc = subprocess.Popen(
             popen_command,
             cwd=REPO_ROOT,
-            env=agent_process_env(),
+            env=agent_process_env(backend),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
