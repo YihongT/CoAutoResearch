@@ -45,6 +45,8 @@ Use only these decisions in reviewer outputs:
 - `blocked`: progress cannot continue without resolving a non-human blocker
   such as missing files, broken tooling, or inaccessible required resources.
 - `needs_human`: a human decision or clarification is genuinely required.
+  Reviewer files using `needs_human` must include `Response to human:` with one
+  concise user-facing question or decision request.
 
 Do not use `approved`, `completed`, `ready`, `plausible`, `acceptable`,
 `architecture pass`, or `targeted revision ready` as reviewer decisions. If
@@ -84,6 +86,8 @@ Migration source: <none, legacy REVIEW.md section, backfilled from older reviewe
 ## Unassessed Areas
 
 - <critical areas not checked, or none>
+
+Response to human: <required only when Decision or Gate impact is needs_human; otherwise omit>
 ```
 
 `Gate impact` must be no stronger than `Decision`. If any blocking issue,

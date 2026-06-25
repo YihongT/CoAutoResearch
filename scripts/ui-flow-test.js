@@ -1480,6 +1480,24 @@ function testTranscriptRecoveryUsesOnlyFinalAssistant() {
   assert.equal(activity.hasFinal, false, "final answer should not be hidden inside folded activity");
 }
 
+function testTranscriptEntriesDoNotExposeEdit() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+  `);
+  const html = app.run(`transcriptEntryHtml({
+    id: "tu1",
+    role: "user",
+    kind: "user",
+    raw_type: "ui.chat",
+    content: "Editable transcript message",
+    editable: true,
+    created_at: "2026-06-17T10:00:00.000Z"
+  })`);
+  assert.equal(html.includes("data-transcript-edit"), false, "transcript/activity entries should not expose a second edit model");
+  assert.equal(html.includes("transcript-edit-form"), false, "transcript/activity entries should not render resend forms");
+}
+
 async function testEditTruncatesLaterConversationBeforeResend() {
   const app = loadAppContext();
   app.run(`
@@ -1640,6 +1658,7 @@ async function testEditInitialBriefCancelDoesNotTruncate() {
   const messages = app.context.__messages();
   assert.equal(messages.length, 2, "cancelled pre-project framing edit must not truncate history");
   assert.equal(messages[0].text, "old initial brief", "cancelled pre-project framing edit must not mutate message text");
+  assert.equal(Boolean(messages[0].edited_at), false, "cancelled pre-project framing edit must not mark the message edited");
   assert.equal(app.context.__apiCalls.length, 0, "cancelled pre-project framing edit must not call backend");
 }
 
@@ -2063,7 +2082,11 @@ function testLatestClosedTrialShowsResumeAutoresearch() {
       mode: "goal",
       loop_active: false,
       loop_iteration: 18,
-      gate: { status: "blocked", raw_status: "needs_human" },
+      gate: {
+        status: "blocked",
+        raw_status: "needs_human",
+        response_to_human: "Should the next trial run the CSEUA pilot now, or explicitly defer it?"
+      },
       trajectory: {
         latest_active_trial: "000018_best_effect_analysis_method_design",
         next_trial_number: 19
@@ -2078,8 +2101,47 @@ function testLatestClosedTrialShowsResumeAutoresearch() {
   const html = app.run("__sessionTimelineProbe()");
   assert.equal(html.includes("data-resume-autoresearch"), true, "latest closed non-pass boundary should expose Resume autoresearch for the next trial");
   assert.equal(html.includes("Resume autoresearch"), true, "latest closed non-pass boundary should use Resume copy");
+  assert.equal(html.includes("Needs human input"), true, "latest closed needs_human boundary should show the human-facing prompt");
+  assert.equal(html.includes("Should the next trial run the CSEUA pilot now, or explicitly defer it?"), true, "latest closed boundary should show response_to_human");
   assert.equal(html.includes('data-trial-continue="18"'), false, "latest boundary should not use fork-style Continue from this trial");
   assert.equal(html.includes("data-restart-autoresearch"), true, "latest closed boundary should keep Restart beside Resume");
+}
+
+function testOldTrialDoesNotShowStaleHumanResponse() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000017_table_appendix_provenance_repair",
+      iteration: 17,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000017_table_appendix_provenance_repair/REPORT.md",
+      review_path: "research_trajectory/trials/000017_table_appendix_provenance_repair/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Trial 17 was closed earlier."
+    }];
+    __setSession({
+      id: "s17",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      gate: {
+        status: "blocked",
+        raw_status: "needs_human",
+        response_to_human: "This belongs to the latest Trial 18 gate, not Trial 17."
+      },
+      trajectory: {
+        latest_active_trial: "000018_best_effect_analysis_method_design",
+        next_trial_number: 19
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("Trial 17"), true, "old selected trial should still render");
+  assert.equal(html.includes("This belongs to the latest Trial 18 gate, not Trial 17."), false, "old selected trial should not show the current gate's human prompt");
+  assert.equal(html.includes("Needs human input"), false, "old selected trial should not show a stale needs-human notice");
 }
 
 function testPassedAutoresearchPanelHidesResumeAllowsRestart() {
@@ -2522,6 +2584,29 @@ function testStatusCardShowsReviewCheckpoint() {
   assert.equal(html.includes(">100<"), true, "status card should show next human review checkpoint");
   assert.equal(html.includes("Review checkpoint reached"), true, "status card should humanize checkpoint stop reason");
   assert.equal(html.includes("Review checkpoint"), true, "Codex settings should show checkpoint interval");
+}
+
+function testStatusCardShowsGateHumanResponse() {
+  const app = loadAppContext();
+  const html = app.run(`__statusCardProbe({
+    kind: "status_card",
+    session_id: "sid",
+    run_status: "completed",
+    goal_loop: "paused",
+    loop_iteration: 18,
+    trials_reported: 18,
+    gate: "needs_human",
+    gate_summary: "- Final gate reviewer: needs_human",
+    gate_response_to_human: "Should the next trial run the CSEUA pilot now, or explicitly defer it?",
+    stop_reason: "gate_requires_human_input",
+    settings: {},
+    process: { active: false },
+    events: { raw_logs: 12, transcript: 5 },
+    limits: []
+  })`);
+  assert.equal(html.includes("Needs human input"), true, "status card should label the human-facing gate response");
+  assert.equal(html.includes("Should the next trial run the CSEUA pilot now, or explicitly defer it?"), true, "status card should show gate_response_to_human");
+  assert.equal(html.includes("- Final gate reviewer: needs_human"), false, "human response should take priority over reviewer-line gate summary");
 }
 
 function testReviewStorageOutdatedDoesNotShowProjectWarning() {
@@ -4058,6 +4143,7 @@ await testLegacyGoalRestartIgnoresRestartCancelFlag();
 await testTypedLegacyGoalControlsStayOnCommandEndpoint();
 testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
+testTranscriptEntriesDoNotExposeEdit();
 await testEditTruncatesLaterConversationBeforeResend();
 await testEditAfterAutoresearchFirstMessageUsesChat();
 await testSteeringResendStartsVisibleNormalChatRun();
@@ -4075,6 +4161,7 @@ testPausedAutoresearchActionsRenderInTrialPanel();
 testAutoresearchPanelPersistsAfterFramingReply();
 testReportedTrialShowsContinueFromThisTrial();
 testLatestClosedTrialShowsResumeAutoresearch();
+testOldTrialDoesNotShowStaleHumanResponse();
 testPassedAutoresearchPanelHidesResumeAllowsRestart();
 testStagedTrialContinueActionsRenderInTrialPanel();
 await testResumeAutoresearchActionUsesResumeEndpoint();
@@ -4087,6 +4174,7 @@ testWorkingDurationFormatter();
 testTrialStripScrollRestoresAcrossRender();
 testRunningTrialUsesProgressFallback();
 testStatusCardShowsReviewCheckpoint();
+testStatusCardShowsGateHumanResponse();
 testReviewStorageOutdatedDoesNotShowProjectWarning();
 testReviewsPanelGroupsByTrial();
 testComposerPlaceholderBecomesGeneralAfterLaunch();

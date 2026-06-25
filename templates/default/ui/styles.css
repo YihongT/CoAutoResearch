@@ -6078,6 +6078,28 @@ body.is-dragging-file .composer {
   line-height: 1.5;
 }
 
+.status-human-response {
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(32, 31, 27, 0.08);
+}
+
+.status-human-response strong {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.status-human-response span {
+  color: rgba(32, 31, 27, 0.68);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .agent-status-note {
   margin: 0;
   padding: 10px 12px;
@@ -9893,6 +9915,33 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   line-height: 1.55;
 }
 
+.trial-human-response {
+  display: grid;
+  gap: 5px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(32, 31, 27, 0.08);
+  border-bottom: 1px solid rgba(32, 31, 27, 0.08);
+}
+
+.trial-human-response strong {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.trial-human-response p,
+.trial-report-card .trial-human-response p,
+.trial-live-status .trial-human-response p {
+  margin: 0;
+  color: rgba(32, 31, 27, 0.72);
+  font-family: var(--reader);
+  font-size: 15px;
+  line-height: 1.48;
+}
+
 .trial-report-actions {
   display: flex;
   flex-wrap: wrap;
@@ -9911,11 +9960,13 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 }
 
 .trial-report-open-actions {
+  flex: 0 0 auto;
   justify-content: flex-start;
   margin-right: auto;
 }
 
 .trial-report-control-actions {
+  flex: 1 1 auto;
   justify-content: flex-end;
   margin-left: auto;
 }
@@ -12854,15 +12905,13 @@ html[data-theme] .file-manager-head p {
     justify-content: space-between;
   }
 
-  html[data-theme] :is(.trial-report-open-actions, .trial-report-control-actions) {
-    flex: 1 1 auto;
-  }
-
   html[data-theme] .trial-report-open-actions {
+    flex: 0 0 auto;
     justify-content: flex-start;
   }
 
   html[data-theme] .trial-report-control-actions {
+    flex: 1 1 auto;
     justify-content: flex-end;
   }
 
@@ -12871,7 +12920,7 @@ html[data-theme] .file-manager-head p {
     justify-content: stretch;
   }
 
-  html[data-theme] :is(.trial-report-actions button, .trial-live-actions button) {
+  html[data-theme] :is(.trial-report-control-actions button, .trial-live-actions button) {
     flex: 1 1 150px;
     min-width: 0;
   }

@@ -473,6 +473,7 @@ Confidence: medium
   const evidenceReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "EVIDENCE_REVIEWER.md"), "utf8");
   const referenceReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "REFERENCE_REVIEWER.md"), "utf8");
   const finalGateReviewerInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
+  const reviewTaxonomyInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "REVIEW_TAXONOMY.md"), "utf8");
   const notesEntrypointTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "NOTES.md"), "utf8");
   const notesIndexTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "index.md"), "utf8");
   const resourceManifestTemplate = await fsp.readFile(path.join(root, "templates", "default", "resources", "user_input", "RESOURCE_MANIFEST.md"), "utf8");
@@ -523,6 +524,13 @@ Confidence: medium
     !finalGateReviewerInstructions.includes("Reviewer Scope Analyst status")
   ) {
     throw new Error("resource scout and reviewer-scope protocols must be wired into execution, intake, and relevant reviewers");
+  }
+  if (
+    !executionInstructions.includes("Response to human: <one concise user-facing question or decision request>") ||
+    !executionInstructions.includes("`Next action` is the system's next step. `Response to human` is the user-facing") ||
+    !reviewTaxonomyInstructions.includes("Response to human: <required only when Decision or Gate impact is needs_human")
+  ) {
+    throw new Error("needs_human gates and reviewers must define a human-facing response field");
   }
   if (
     executionInstructions.includes("Mandatory note triggers") ||
@@ -777,6 +785,9 @@ Confidence: medium
     !serverPy.includes("maybe_start_queued_chat_after_run") ||
     !serverPy.includes("sync_human_intervention_indexes") ||
     !serverPy.includes("sync_expected_trial_pending_interventions") ||
+    appJs.includes("resendTranscriptMessage") ||
+    appJs.includes("data-transcript-edit") ||
+    appJs.includes("transcript-edit-form") ||
     !appJs.includes("const useFramingRun = isTruePreProjectBriefResend(index)") ||
     !appJs.includes('showToast(useFramingRun ? `${agentLabel(sessionBackend())} is reframing PROJECT.md.` : "Regenerating reply.")') ||
     !serverPy.includes("CHAT_PROTECTED_PATHS") ||
@@ -1007,6 +1018,9 @@ Confidence: medium
     !appJs.includes("Continue from this trial") ||
     !appJs.includes("trial-report-open-actions") ||
     !appJs.includes("trial-report-control-actions") ||
+    !stylesCss.includes(".trial-report-open-actions") ||
+    !stylesCss.includes("html[data-theme] .trial-report-open-actions") ||
+    stylesCss.includes(":is(.trial-report-actions button, .trial-live-actions button)") ||
     !indexHtml.includes('id="resume-autoresearch-dialog"') ||
     !indexHtml.includes('id="resume-autoresearch-instruction"') ||
     !appJs.includes("data-resume-autoresearch") ||
@@ -1693,6 +1707,9 @@ Confidence: medium
       "assert 'human-intervention intake mode' not in captured[-1]['prompt'], captured[-1]['prompt']",
       "assert 'server has not classified it for you' in captured[-1]['prompt'], captured[-1]['prompt']",
       "assert ordinary['files'].get('intervention') is None, ordinary",
+      "marker_path = root / 'research_trajectory' / 'NEXT_TRIAL.json'",
+      "module.sync_expected_trial_pending_interventions('no_pending_interventions')",
+      "assert not marker_path.exists(), 'empty pending sync must not create NEXT_TRIAL.json'",
       "intervention_dir = root / 'research_trajectory' / 'human_interventions'",
       "intervention_dir.mkdir(parents=True, exist_ok=True)",
       "intervention_path = intervention_dir / 'I0001_method_direction.md'",
@@ -1788,6 +1805,7 @@ Confidence: medium
       "assert all('autoresearch_discovered' in prompt and 'not current truth' in prompt for prompt in prompts.values()), prompts",
       "assert all(all(name in prompt for name in review_files) for prompt in prompts.values()), prompts",
       "assert all('Reference' in prompt and 'Final gate' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Response to human' in prompt for prompt in prompts.values()), prompts",
       "assert module.infer_trial_status('Resource intake is no longer blocked by stale clues.', '', '# Report\\n\\nReplaced scaffold placeholders.') == 'reported'",
       "assert module.infer_trial_status('Status: blocked', '', '') == 'blocked'",
       "print('launch-prompt-ok')",
@@ -2030,6 +2048,18 @@ Confidence: medium
     "assert gate['reviewer_statuses']['evidence'] == 'continue', gate",
     "assert gate['all_reviewers_passed'] is False, gate",
     "assert module.gate_has_passed(gate) is False, gate",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: needs_human\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: needs_human - current process requires a decision\n- Evidence reviewer: continue\n- Venue fit reviewer: pass\n- Manuscript reviewer: continue\n- Figure/table reviewer: continue\n- Reference reviewer: pass\n- Final gate reviewer: needs_human\n\nNext action: wait for the user's CSEUA decision.\nResponse to human: Should the next trial run the CSEUA pilot now, or should CSEUA be explicitly deferred?\n\"\"\", encoding='utf-8')",
+    "human_gate = module.read_autoresearch_gate()",
+    "assert human_gate['status'] == 'blocked', human_gate",
+    "assert human_gate['raw_status'] == 'needs_human', human_gate",
+    "assert human_gate['response_to_human'] == 'Should the next trial run the CSEUA pilot now, or should CSEUA be explicitly deferred?', human_gate",
+    "assert human_gate['response_to_human_source'] == 'response_to_human', human_gate",
+    "assert module.gate_has_passed(human_gate) is False, human_gate",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: needs_human\n\nCurrent gate reason: The gate cannot choose between a pilot and a deferral.\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: needs_human\n- Evidence reviewer: continue\n- Venue fit reviewer: pass\n- Manuscript reviewer: continue\n- Figure/table reviewer: continue\n- Reference reviewer: pass\n- Final gate reviewer: needs_human\n\nNext action: ask the user whether to pilot now or defer.\n\"\"\", encoding='utf-8')",
+    "legacy_human_gate = module.read_autoresearch_gate()",
+    "assert legacy_human_gate['status'] == 'blocked', legacy_human_gate",
+    "assert legacy_human_gate['response_to_human'] == 'The gate cannot choose between a pilot and a deferral. ask the user whether to pilot now or defer.', legacy_human_gate",
+    "assert legacy_human_gate['response_to_human_source'] == 'legacy_gate_fields', legacy_human_gate",
     "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Reference reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
     "missing_final = module.read_autoresearch_gate()",
     "assert missing_final['status'] == 'continue', missing_final",
@@ -2117,7 +2147,11 @@ Confidence: medium
     "assert context.session['loop_instruction'] == 'Prioritize resume evidence.', context.session",
     "assert context.session['loop_active'] is True, context.session",
     "assert context.session['loop_review_checkpoint_iteration'] == expected_checkpoint_base + 25, context.session",
-    "print(json.dumps({'default': module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL, 'checkpoint_stop': 'review_checkpoint_reached', 'resumed_checkpoint': context.session['loop_review_checkpoint_iteration']}))"
+    "context.session.update({'loop_active': False, 'loop_instruction': 'Stale resume instruction', 'loop_stop_reason': 'review_checkpoint_reached', 'process': None})",
+    "blank = module.start_resume_autoresearch({'settings': {'backend': 'codex', 'reviewCheckpointInterval': 25}, 'resumeInstruction': ''})",
+    "assert 'Stale resume instruction' not in blank['session']['prompt'], blank['session']['prompt']",
+    "assert context.session['loop_instruction'] == '', context.session",
+    "print(json.dumps({'default': module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL, 'checkpoint_stop': 'review_checkpoint_reached', 'resumed_checkpoint': context.session['loop_review_checkpoint_iteration'], 'blank_instruction': context.session['loop_instruction']}))"
   ].join("\n");
   const checkpointOutput = execFileSync(python.command, [
     ...python.args,
@@ -2135,7 +2169,8 @@ Confidence: medium
   if (
     !checkpointOutput.includes('"default": 100') ||
     !checkpointOutput.includes('"checkpoint_stop": "review_checkpoint_reached"') ||
-    !checkpointOutput.includes('"resumed_checkpoint":')
+    !checkpointOutput.includes('"resumed_checkpoint":') ||
+    !checkpointOutput.includes('"blank_instruction": ""')
   ) {
     throw new Error(`checkpoint smoke test returned unexpected output: ${checkpointOutput}`);
   }
@@ -2172,9 +2207,10 @@ Confidence: medium
     "assert completed_snapshot['gate']['status'] == 'pass', completed_snapshot['gate']",
     "assert completed_snapshot['active_run']['trial_iteration'] is None, completed_snapshot['active_run']",
     "completed_marker = json.loads((root / 'research_trajectory' / 'NEXT_TRIAL.json').read_text(encoding='utf-8'))",
-    "assert completed_marker['status'] == 'complete', completed_marker",
+    "assert completed_marker['status'] == 'pending', completed_marker",
+    "assert 'completion_blocked_reason' in completed_marker, completed_marker",
     "assert 'Server repair:' not in (root / 'research_trajectory' / 'STATE.md').read_text(encoding='utf-8')",
-    "print(json.dumps({'complete_marker': complete_snapshot['active_run']['trial_iteration'], 'pending_marker': pending_snapshot['active_run']['trial_iteration'], 'completed_gate': completed_snapshot['gate']['status'], 'completed_marker_status': completed_marker['status']}))"
+    "print(json.dumps({'complete_marker': complete_snapshot['active_run']['trial_iteration'], 'pending_marker': pending_snapshot['active_run']['trial_iteration'], 'completed_gate': completed_snapshot['gate']['status'], 'completed_marker_status': completed_marker['status'], 'blocked': bool(completed_marker.get('completion_blocked_reason'))}))"
   ].join("\n");
   const activeTrialMarkerOutput = execFileSync(python.command, [
     ...python.args,
@@ -2192,7 +2228,8 @@ Confidence: medium
     !activeTrialMarkerOutput.includes('"complete_marker": 11') ||
     !activeTrialMarkerOutput.includes('"pending_marker": 12') ||
     !activeTrialMarkerOutput.includes('"completed_gate": "pass"') ||
-    !activeTrialMarkerOutput.includes('"completed_marker_status": "complete"')
+    !activeTrialMarkerOutput.includes('"completed_marker_status": "pending"') ||
+    !activeTrialMarkerOutput.includes('"blocked": true')
   ) {
     throw new Error(`active trial marker smoke test returned unexpected output: ${activeTrialMarkerOutput}`);
   }

@@ -283,7 +283,9 @@ Every active trial must produce all eight core reviewer files. No reviewer gate
 may silently carry forward from an earlier trial. If a reviewer cannot assess
 much in the current trial, it must still write the current trial file with
 `Decision: continue`, `blocked`, or `needs_human` as appropriate and list what
-was unassessed.
+was unassessed. If a reviewer uses `Decision: needs_human` or
+`Gate impact: needs_human`, it must also include `Response to human:` with one
+concise user-facing question or decision request.
 
 The Resource Scout is not a ninth core reviewer. It is a trial preparation
 step checked by existing reviewers: Plan checks the brief and skip reason,
@@ -330,7 +332,9 @@ Use this section to decide whether the autoresearch loop should continue or stop
 - `Status: pass`, `continue`, `blocked`, or `needs_human`;
 - reviewer gate lines for Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, and Final gate;
 - the current trial reviewer file path on each reviewer gate line;
-- the next action when any gate is not `pass`.
+- the next action when any gate is not `pass`;
+- `Response to human: <one concise user-facing question or decision request>`
+  when `Status: needs_human`.
 
 The autoresearch goal is complete only when `Status: pass` and every required
 current-trial reviewer file has `Decision: pass` and `Gate impact: pass`,
@@ -383,7 +387,10 @@ qualifications, active revision constraints, critical unassessed areas,
 outdated reviewer instructions, incomplete final blueprint sections, or stale
 pass-conflicting language remain.
 
-If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a human decision is genuinely required, mark `Status: needs_human` and state the exact question.
+`Next action` is the system's next step. `Response to human` is the user-facing
+question or decision request the UI should show.
+
+If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a human decision is genuinely required, mark `Status: needs_human` and write the exact question in `Response to human:`.
 
 ---
 

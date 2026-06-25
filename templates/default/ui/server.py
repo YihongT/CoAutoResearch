@@ -664,6 +664,27 @@ def reviewer_file_status(path: Path) -> str:
     return normalize_gate_status(regex_first_value(text, [r"Decision:\s*`?([^`\n]+)`?"]))
 
 
+def markdown_field_line(section: str, label: str) -> str:
+    match = re.search(rf"^\s*{re.escape(label)}\s*:\s*(.+?)\s*$", section, re.IGNORECASE | re.MULTILINE)
+    return match.group(1).strip().strip("`") if match else ""
+
+
+def gate_response_to_human(section: str, raw_status: str) -> tuple[str, str]:
+    explicit = markdown_field_line(section, "Response to human")
+    if explicit:
+        return explicit, "response_to_human"
+    if not re.search(r"\b(needs[_\s-]*human|human|clarification)\b", raw_status.strip().lower()):
+        return "", ""
+    reason = markdown_field_line(section, "Current gate reason")
+    next_action = markdown_field_line(section, "Next action")
+    parts = []
+    if reason:
+        parts.append(reason)
+    if next_action and next_action.lower() not in {reason.lower(), "none", "n/a"}:
+        parts.append(next_action)
+    return " ".join(parts).strip(), "legacy_gate_fields" if parts else ""
+
+
 def normalize_state_gate_references(project_root: Path, latest_trial: Path | None, migration_dir: Path, backed_up: list[str], dry_run: bool = False) -> str:
     if latest_trial is None:
         return ""
@@ -4690,8 +4711,22 @@ def complete_expected_trial_marker(reason: str) -> None:
         return
     expected = int(marker.get("expected_iteration") or 0)
     trial_dir = active_trial_dir_for_iteration(expected) if expected > 0 else None
-    if trial_dir is not None and trial_dir_satisfies_current_boundary(trial_dir):
-        mark_pending_interventions_applied(marker, trial_dir.name, rel_path(trial_dir), reason)
+    if trial_dir is None:
+        blocker = f"Expected Trial {expected} directory is not visible yet."
+        if marker.get("completion_blocked_reason") != blocker:
+            marker["completion_blocked_reason"] = blocker
+            update_expected_trial_marker(marker)
+            append_research_log(f"Expected trial marker not completed: {blocker}")
+        return
+    if not trial_dir_satisfies_current_boundary(trial_dir):
+        blocker = f"Expected Trial {expected} does not satisfy the current closed-boundary requirements."
+        if marker.get("completion_blocked_reason") != blocker:
+            marker["completion_blocked_reason"] = blocker
+            update_expected_trial_marker(marker)
+            append_research_log(f"Expected trial marker not completed: {blocker}")
+        return
+    mark_pending_interventions_applied(marker, trial_dir.name, rel_path(trial_dir), reason)
+    marker.pop("completion_blocked_reason", None)
     marker["status"] = "complete"
     marker["completed_reason"] = reason
     update_expected_trial_marker(marker)
@@ -5254,6 +5289,8 @@ def sync_expected_trial_pending_interventions(reason: str = "pending_interventio
     marker = read_expected_trial_marker()
     expected = active_expected_trial_iteration(marker)
     if expected <= 0 and has_autoresearch_context():
+        if not pending:
+            return marker
         expected = next_active_trial_iteration()
         trajectory = read_trajectory_state()
         marker = write_expected_trial_marker(
@@ -8214,6 +8251,8 @@ def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
             "exists": False,
             "status": "missing",
             "raw_status": "",
+            "response_to_human": "",
+            "response_to_human_source": "",
             "summary": "No STATE.md file yet.",
             "path": str(RESEARCH_STATE_PATH.relative_to(REPO_ROOT)),
         }
@@ -8224,6 +8263,8 @@ def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
             "exists": False,
             "status": "missing",
             "raw_status": "",
+            "response_to_human": "",
+            "response_to_human_source": "",
             "summary": f"Could not read STATE.md: {exc}",
             "path": str(RESEARCH_STATE_PATH.relative_to(REPO_ROOT)),
         }
@@ -8233,6 +8274,8 @@ def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
             "exists": False,
             "status": "missing",
             "raw_status": "",
+            "response_to_human": "",
+            "response_to_human_source": "",
             "summary": "No autoresearch gate section in STATE.md.",
             "path": str(RESEARCH_STATE_PATH.relative_to(REPO_ROOT)),
         }
@@ -8243,6 +8286,7 @@ def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
             raw_status = match.group(1).strip()
             break
     overall_status = normalize_gate_status(raw_status)
+    response_to_human, response_to_human_source = gate_response_to_human(section, raw_status)
     reviewer_lines = []
     reviewer_statuses: dict[str, str] = {}
     reviewer_raw_statuses: dict[str, str] = {}
@@ -8275,6 +8319,8 @@ def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
         "status": status,
         "raw_status": raw_status,
         "overall_status": overall_status,
+        "response_to_human": response_to_human,
+        "response_to_human_source": response_to_human_source,
         "reviewer_statuses": reviewer_statuses,
         "reviewer_raw_statuses": reviewer_raw_statuses,
         "missing_reviewers": missing_reviewers,
@@ -8639,6 +8685,10 @@ Reviewer Scope Analyst requirement for every substantive trial:
 - the Reviewer Scope Analyst and any specialized reviewer are not core reviewers and must not add a ninth Autoresearch Goal Gate line."""
 
 
+def gate_response_to_human_requirement() -> str:
+    return "if `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`; `Next action` remains the system's next step."
+
+
 def continue_autoresearch_loop_prompt(
     gate: dict[str, Any],
     next_iteration: int | None = None,
@@ -8691,7 +8741,8 @@ Otherwise, run exactly the next coherent autoresearch iteration needed to move t
 8. if the reviewer spawn decision says `Spawn needed: yes`, run the specialized reviewer before core reviewers;
 9. refresh all eight current-trial reviewer files after REPORT.md and reviewer-scope analysis: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md;
 10. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
-11. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end, with each reviewer line pointing to the current trial's reviewer file path.
+11. update the `Autoresearch Goal Gate` section in research_trajectory/STATE.md at the end, with each reviewer line pointing to the current trial's reviewer file path;
+12. {gate_response_to_human_requirement()}
 
 This invocation is complete after the Trial {expected} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start Trial {expected + 1} in this invocation.
 
@@ -8723,7 +8774,7 @@ Before creating or continuing any trial:
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
 
-Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawning the Resource Scout subagent if required, REPORT.md, spawning the Reviewer Scope Analyst subagent, any required specialized review, all eight reviewer files (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and the updated `Autoresearch Goal Gate` section. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
+Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawning the Resource Scout subagent if required, REPORT.md, spawning the Reviewer Scope Analyst subagent, any required specialized review, all eight reviewer files (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and the updated `Autoresearch Goal Gate` section. If the gate is `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
 
 
 def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
@@ -9149,7 +9200,8 @@ Run exactly the next autoresearch iteration and maintain the reviewer gate:
    - `Status: pass`, `continue`, `blocked`, or `needs_human`;
    - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, Final gate;
    - the current trial reviewer file path on each reviewer gate line;
-   - the next action if any gate is not pass.
+   - the next action if any gate is not pass;
+   - if `Status: needs_human`, `Response to human: <one concise user-facing question or decision request>`.
 
 This invocation is complete after the current trial boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation.
 
@@ -9174,7 +9226,7 @@ placement/caption/content/source/provenance/venue rationale, if reviewer
 instructions are outdated, or if stale language such as "tentative until
 source-level evidence checks are completed" remains, keep `Status: continue`.
 
-Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message and set `Status: needs_human` instead of silently inventing a different project."""
+Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message, set `Status: needs_human`, and write `Response to human:` in the gate instead of silently inventing a different project."""
 
 
 def compact_chat_history_items(items: Any, limit: int = CHAT_HISTORY_MAX_MESSAGES) -> list[dict[str, Any]]:
@@ -9394,7 +9446,7 @@ Read:
 
 Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do.
 
-Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. This invocation is complete after the Trial {next_iteration} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
+Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. If the gate is `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. This invocation is complete after the Trial {next_iteration} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: dict[str, Any]) -> dict[str, Any]:
@@ -9656,7 +9708,7 @@ Read:
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
 
-Create Trial 1 under `research_trajectory/trials/`. Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. This invocation is complete after the Trial 1 boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
+Create Trial 1 under `research_trajectory/trials/`. Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. If the gate is `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. This invocation is complete after the Trial 1 boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
@@ -10077,7 +10129,7 @@ def start_resume_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
         proc = RESEARCH_SESSION.get("process")
         running = bool(proc and proc.poll() is None)
         live_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
-        goal_instruction = resume_instruction or str(RESEARCH_SESSION.get("loop_instruction") or "")
+        goal_instruction = resume_instruction
     cleanup = {"archived": []}
     if not running:
         cleanup = archive_interrupted_trial_tail("resume_autoresearch_from_closed_boundary")
@@ -10281,6 +10333,7 @@ def build_status_payload() -> dict[str, Any]:
         "trials_reported": len(completed_trials),
         "gate": gate.get("raw_status") or gate.get("status") or "missing",
         "gate_summary": gate.get("summary") or "",
+        "gate_response_to_human": gate.get("response_to_human") or "",
         "stop_reason": stop_reason,
         "started_at": session.get("started_at") or "",
         "ended_at": session.get("ended_at") or "",

@@ -44,7 +44,6 @@ const FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection";
 let activeColdPath = "";
 let toastTimer = null;
 let coldAutosaveTimer = null;
-let editingTranscriptId = "";
 let coldDirty = false;
 let localBrowserPath = "";
 let localBrowserPayload = null;
@@ -1802,7 +1801,6 @@ function resetProjectClientState() {
   framingDraftPending = false;
   projectDraftEditMode = false;
   editingFramingId = "";
-  editingTranscriptId = "";
   lastFramingHtml = "";
   framingMessagesSaveVersion += 1;
   framingMessagesPersisting = false;
@@ -2466,6 +2464,31 @@ function isGoalPassed() {
   const gate = sessionState().gate || {};
   const status = String(gate.status || gate.raw_status || "").trim().toLowerCase();
   return status === "pass" || status === "passed";
+}
+
+function gateHumanResponse() {
+  const gate = sessionState().gate || {};
+  return cleanText(gate.response_to_human, "");
+}
+
+function gateRequiresHumanResponse() {
+  const gate = sessionState().gate || {};
+  if (!gateHumanResponse()) return false;
+  const status = String(gate.status || "").trim().toLowerCase();
+  const raw = String(gate.raw_status || "").trim().toLowerCase();
+  return status === "blocked" || /\b(needs[_\s-]*human|human|clarification)\b/.test(raw);
+}
+
+function trialHumanResponseHtml(iteration) {
+  const target = Number(iteration || 0);
+  if (!target || target !== latestTrajectoryTrialIteration()) return "";
+  if (isGoalPassed() || !gateRequiresHumanResponse()) return "";
+  return `
+    <div class="trial-human-response" role="note">
+      <strong>Needs human input</strong>
+      <p>${escapeHtml(gateHumanResponse())}</p>
+    </div>
+  `;
 }
 
 function autoresearchCompleteBadgeHtml() {
@@ -4686,7 +4709,12 @@ function statusCardHtml(payload, entry) {
           ${statusMetricHtml("Process", process.active ? `pid ${process.pid}` : "not running", process.active ? "active" : "")}
         </div>
         ${agentWaitStateHtml(waitState)}
-        ${payload.gate_summary ? `<p class="status-note">${escapeHtml(payload.gate_summary)}</p>` : ""}
+        ${payload.gate_response_to_human ? `
+          <p class="status-note status-human-response">
+            <strong>Needs human input</strong>
+            <span>${escapeHtml(payload.gate_response_to_human)}</span>
+          </p>
+        ` : payload.gate_summary ? `<p class="status-note">${escapeHtml(payload.gate_summary)}</p>` : ""}
         <section>
           <h4>${escapeHtml(provider)} settings</h4>
           ${statusSettingsHtml(payload.settings || {})}
@@ -5020,6 +5048,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
       ${trialProgressStepperHtml(progress)}
       ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
       ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
+      ${trialHumanResponseHtml(iteration)}
       <p>${escapeHtml(summary)}</p>
       <div class="trial-report-actions">
         ${openActions ? `<div class="trial-report-open-actions">${openActions}</div>` : ""}
@@ -5092,6 +5121,7 @@ function runningTrialStatusHtml(trial) {
       ${trialProgressStepperHtml(progress)}
       ${latestText ? `<p>${escapeHtml(compactText(latestText, 240))}</p>` : ""}
       ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
+      ${trialHumanResponseHtml(iteration)}
       ${showWaitNotice ? waitNotice : ""}
       ${openActions ? `<div class="trial-report-actions"><div class="trial-report-open-actions">${openActions}</div></div>` : ""}
       ${
@@ -5607,25 +5637,9 @@ function transcriptEntryHtml(entry) {
   const id = String(entry?.id || "");
   const content = String(entry?.content || "");
   const rawType = String(entry?.raw_type || "");
-  const editable = Boolean(entry?.editable) && role === "user" && canMessage();
-  const isEditing = editingTranscriptId === id;
   const meta = transcriptMeta(entry);
   const fileChange = parseFileChangeInfo(content);
   const statusPayload = isUiCommandResult(entry) ? parseStatusCardPayload(content) : null;
-  if (isEditing) {
-    return `
-      <article class="transcript-message ${role} is-editing" data-transcript-id="${escapeHtml(id)}">
-        <div class="transcript-meta">${escapeHtml(meta || "Edit message")}</div>
-        <form class="transcript-edit-form" data-transcript-edit-form="${escapeHtml(id)}">
-          <textarea name="message" rows="4">${escapeHtml(content)}</textarea>
-          <div class="transcript-actions">
-            <button class="text-button" type="button" data-transcript-cancel="${escapeHtml(id)}">Cancel</button>
-            <button class="primary-button" type="submit">Resend</button>
-          </div>
-        </form>
-      </article>
-    `;
-  }
   if (statusPayload) {
     return statusCardHtml(statusPayload, entry);
   }
@@ -5663,7 +5677,6 @@ function transcriptEntryHtml(entry) {
   }
   const actionItems = [
     messageCopyButton(content, `Copy ${role === "user" ? "your" : "transcript"} message`),
-    editable ? `<button class="text-button" type="button" data-transcript-edit="${escapeHtml(id)}">Edit</button>` : "",
   ].filter(Boolean);
   const actions = actionItems.length ? `<div class="transcript-actions message-action-row">${actionItems.join("")}</div>` : "";
   return `
@@ -10339,7 +10352,6 @@ async function resendConversationMessage(id, text) {
   const editAttachments = editDraftAttachments(id);
   const displayText = next || attachmentOnlyMessage(editAttachments);
   if (!displayText) return;
-  message.edited_at = new Date().toISOString();
   const archivedMessages = index >= 0 ? localMessages.slice(index + 1).map(chatHistoryItemForRequest).filter(Boolean) : [];
   if (useFramingRun) {
     const confirmed = await confirmPreProjectFramingResend(displayText, archivedMessages.length);
@@ -10351,6 +10363,7 @@ async function resendConversationMessage(id, text) {
   const resourceLinks = collectEditResourceLinks(id);
   const retainedAttachments = collectEditRetainedAttachments(id);
   const files = await collectUploadFiles(editAttachmentDraftForMessage(id).uploads);
+  message.edited_at = new Date().toISOString();
   message.text = displayText;
   if (editAttachments.length) message.attachments = editAttachments;
   else delete message.attachments;
@@ -10477,37 +10490,6 @@ async function sendCommand(command) {
       body: JSON.stringify({ command, settings: settingsFromForm() }),
     });
     mergeSessionFromApiResponse(response);
-    await loadOverview(true);
-    scrollThread();
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function resendTranscriptMessage(id, message) {
-  const text = String(message || "").trim();
-  if (!text) return;
-  if (!canMessage()) {
-    showToast("Wait for the current agent run to finish before resending.", true);
-    return;
-  }
-  try {
-    const response = await api("/api/research/chat", {
-      method: "POST",
-      body: JSON.stringify({
-        message: text,
-        conversationHistory: conversationHistoryForRequest(localMessages),
-        resendContext: {
-          editedMessageId: id,
-          archivedCount: 0,
-          archivedMessages: [],
-          forceFreshSession: true,
-        },
-        settings: settingsFromForm(),
-      }),
-    });
-    mergeSessionFromApiResponse(response);
-    editingTranscriptId = "";
     await loadOverview(true);
     scrollThread();
   } catch (error) {
@@ -11240,18 +11222,6 @@ function bindEvents() {
     if (stageLink) setStage(stageLink.dataset.stageLink);
     const coldFile = event.target.closest("[data-cold-file]");
     if (coldFile) switchColdFile(coldFile.dataset.coldFile);
-    const editTranscript = event.target.closest("[data-transcript-edit]");
-    if (editTranscript) {
-      editingTranscriptId = editTranscript.dataset.transcriptEdit;
-      renderChatSummary();
-      requestAnimationFrame(() => document.querySelector(`[data-transcript-edit-form="${CSS.escape(editingTranscriptId)}"] textarea`)?.focus());
-      return;
-    }
-    const cancelTranscript = event.target.closest("[data-transcript-cancel]");
-    if (cancelTranscript) {
-      editingTranscriptId = "";
-      renderChatSummary();
-    }
   });
 
   $("#file-viewer-dialog")?.addEventListener("click", (event) => {
@@ -11281,10 +11251,6 @@ function bindEvents() {
       resendConversationMessage(framingForm.dataset.framingEditForm, framingForm.elements.message.value);
       return;
     }
-    const form = event.target.closest("[data-transcript-edit-form]");
-    if (!form) return;
-    event.preventDefault();
-    resendTranscriptMessage(form.dataset.transcriptEditForm, form.elements.message.value);
   });
 
   document.body.addEventListener("change", (event) => {
