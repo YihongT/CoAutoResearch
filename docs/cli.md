@@ -167,5 +167,6 @@ hostnames are often not valid SSH aliases from your laptop.
 | `CLAUDE_BIN` | Alternate Claude Code executable path. |
 | `COAUTO_NO_OPEN` | Disable automatic browser launch. |
 | `COAUTO_CLOUDFLARED` | Explicit `cloudflared` executable path for `--remote`. |
+| `COAUTO_CLOUDFLARED_DOWNLOAD_URL` | Override the standalone `cloudflared` download URL used by `install-cloudflared`. |
 | `COAUTO_REMOTE_MODE` | Set to `ssh` to disable the default Cloudflare Quick Tunnel link and print SSH tunnel instructions instead. |
 | `COAUTO_REMOTE_TARGET` | Override the SSH target printed by the SSH fallback path, for example `yihong@login.example.edu`. |

@@ -360,6 +360,42 @@ async function smokeInstallCloudflaredCommand() {
   }
 }
 
+async function smokeInstallCloudflaredUsesCurl() {
+  if (process.platform === "win32") return;
+  const installDir = path.join(tempRoot, "cloudflared-curl-install");
+  const fakeBin = path.join(tempRoot, "fake-curl-bin");
+  await fsp.mkdir(fakeBin, { recursive: true });
+  const fakeCurl = path.join(fakeBin, "curl");
+  await fsp.writeFile(
+    fakeCurl,
+    [
+      "#!/bin/sh",
+      "out=\"\"",
+      "while [ \"$#\" -gt 0 ]; do",
+      "  if [ \"$1\" = \"-o\" ]; then shift; out=\"$1\"; fi",
+      "  shift",
+      "done",
+      "if [ -z \"$out\" ]; then exit 2; fi",
+      "printf '%s\\n' '#!/bin/sh' 'echo cloudflared fake curl 0.0.0' > \"$out\""
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.chmod(fakeCurl, 0o755);
+  const output = execFileSync(process.execPath, [cli, "install-cloudflared"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      PATH: fakeBin,
+      COAUTO_CLOUDFLARED_INSTALL_DIR: installDir,
+      COAUTO_CLOUDFLARED_DOWNLOAD_URL: "https://example.invalid/cloudflared"
+    },
+    encoding: "utf8"
+  });
+  if (!output.includes("Downloading https://example.invalid/cloudflared") || !output.includes("Installed cloudflared: cloudflared fake curl 0.0.0")) {
+    throw new Error(`install-cloudflared should prefer curl before fetch:\n${output}`);
+  }
+}
+
 async function smokeRemoteAuth() {
   const python = findPython();
   const port = await freePort();
@@ -1629,6 +1665,7 @@ Confidence: medium
   }
   await smokeRemoteCloudflareLink();
   await smokeInstallCloudflaredCommand();
+  await smokeInstallCloudflaredUsesCurl();
   await smokeRemoteCloudflaredMissing();
   await smokeRemoteSshMode();
   await smokeRemoteCloudflareFallback();

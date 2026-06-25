@@ -1303,7 +1303,9 @@ function cloudflaredLinuxAssetArch() {
   throw new Error(`cloudflared standalone install is not available for ${process.platform}/${arch}. See https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/`);
 }
 
-function cloudflaredStandaloneDownloadUrl() {
+function cloudflaredStandaloneDownloadUrl(env = process.env) {
+  const configured = String(env.COAUTO_CLOUDFLARED_DOWNLOAD_URL || "").trim();
+  if (configured) return configured;
   if (process.platform !== "linux") {
     throw new Error("The built-in cloudflared installer currently supports Linux servers. Use Homebrew on macOS or winget on Windows.");
   }
@@ -1315,13 +1317,57 @@ async function writeMockCloudflared(target) {
   await fsp.writeFile(target, body, "utf8");
 }
 
-async function downloadCloudflared(target, url) {
+function runDownloadTool(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited with ${signal || code}${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
+    });
+  });
+}
+
+async function downloadWithFetch(target, url) {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Download failed (${response.status} ${response.statusText}) from ${url}`);
+    throw new Error(`fetch returned ${response.status} ${response.statusText}`);
   }
   const bytes = Buffer.from(await response.arrayBuffer());
   await fsp.writeFile(target, bytes);
+}
+
+async function downloadCloudflared(target, url) {
+  const attempts = [];
+  const curl = findOnPath("curl");
+  if (curl) {
+    try {
+      await runDownloadTool(curl, ["-L", "--fail", "--show-error", "-o", target, url]);
+      return;
+    } catch (error) {
+      attempts.push(`curl: ${error.message}`);
+    }
+  }
+  const wget = findOnPath("wget");
+  if (wget) {
+    try {
+      await runDownloadTool(wget, ["-O", target, url]);
+      return;
+    } catch (error) {
+      attempts.push(`wget: ${error.message}`);
+    }
+  }
+  try {
+    await downloadWithFetch(target, url);
+    return;
+  } catch (error) {
+    attempts.push(`fetch: ${error.message}`);
+  }
+  throw new Error(`Could not download cloudflared from ${url}\n${attempts.map((line) => `  ${line}`).join("\n")}`);
 }
 
 async function commandInstallCloudflared(args) {
@@ -1338,13 +1384,21 @@ async function commandInstallCloudflared(args) {
   const target = defaultCloudflaredPath();
   const installDir = path.dirname(target);
   const url = process.env.COAUTO_CLOUDFLARED_INSTALL_MOCK ? "" : cloudflaredStandaloneDownloadUrl();
+  const tempTarget = `${target}.download`;
   await fsp.mkdir(installDir, { recursive: true });
   console.log(`Installing cloudflared to ${target}`);
   if (process.env.COAUTO_CLOUDFLARED_INSTALL_MOCK) {
     await writeMockCloudflared(target);
   } else {
     console.log(`Downloading ${url}`);
-    await downloadCloudflared(target, url);
+    await fsp.rm(tempTarget, { force: true });
+    try {
+      await downloadCloudflared(tempTarget, url);
+      await fsp.rename(tempTarget, target);
+    } catch (error) {
+      await fsp.rm(tempTarget, { force: true });
+      throw error;
+    }
   }
   await fsp.chmod(target, 0o755);
   const result = spawnSync(target, ["--version"], { encoding: "utf8" });
