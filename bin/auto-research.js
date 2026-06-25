@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1238,21 +1238,22 @@ function remoteTunnelMockConfigured() {
   return Boolean(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL);
 }
 
-function withRemoteAuthToken(url, token) {
-  if (!token) return url;
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.set("coauto_token", token);
-    return parsed.toString();
-  } catch {
-    const separator = String(url).includes("?") ? "&" : "?";
-    return `${url}${separator}coauto_token=${encodeURIComponent(token)}`;
-  }
-}
-
 function cloudflareTunnelUrlFromText(value) {
-  const match = String(value || "").match(/https:\/\/[A-Za-z0-9.-]+\.trycloudflare\.com\b[^\s]*/);
-  return match ? match[0].replace(/[),.;]+$/, "") : "";
+  const candidates = String(value || "").match(/https:\/\/[^\s"'<>`]+/g) || [];
+  for (const candidate of candidates) {
+    const cleaned = candidate.replace(/[),.;:]+$/, "");
+    try {
+      const parsed = new URL(cleaned);
+      const hostname = parsed.hostname.toLowerCase();
+      if (!hostname.endsWith(".trycloudflare.com")) continue;
+      if (hostname === "api.trycloudflare.com") continue;
+      if (parsed.pathname && parsed.pathname !== "/") continue;
+      return parsed.origin;
+    } catch {
+      // Keep scanning; cloudflared may print other URLs in diagnostic output.
+    }
+  }
+  return "";
 }
 
 function remoteSetupError(code, message) {
@@ -1425,10 +1426,10 @@ async function commandInstallCloudflared(args) {
   console.log(`  ${coAutoResearchCommand()} ui --remote`);
 }
 
-async function startRemoteTunnel(localUrl, token) {
+async function startRemoteTunnel(localUrl) {
   const mockUrl = String(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || "").trim();
   if (mockUrl) {
-    return { url: withRemoteAuthToken(mockUrl, token), close: async () => {} };
+    return { url: mockUrl, close: async () => {} };
   }
   if (process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL) {
     throw remoteSetupError("cloudflared_failed", "Mock cloudflared failure.");
@@ -1466,7 +1467,7 @@ async function startRemoteTunnel(localUrl, token) {
       settled = true;
       clearTimeout(timeout);
       resolve({
-        url: withRemoteAuthToken(url, token),
+        url,
         close: () => closeChildProcess(child)
       });
     };
@@ -1493,7 +1494,7 @@ function printRemoteSshAccessHint(url, options) {
     return;
   }
   const port = parsed.port || DEFAULT_PORT;
-  const localUrl = withRemoteAuthToken(`http://127.0.0.1:${port}`, options.remoteAuthToken || "");
+  const localUrl = `http://127.0.0.1:${port}`;
   const target = remoteSshTarget();
   console.log("");
   console.log("Remote browser access");
@@ -1522,7 +1523,7 @@ async function printRemoteAccessHint(url, options) {
   console.log("");
   console.log("Creating Cloudflare link...");
   try {
-    const tunnel = await startRemoteTunnel(url, options.remoteAuthToken || "");
+    const tunnel = await startRemoteTunnel(url);
     console.log("");
     console.log("Open:");
     console.log(`  ${tunnel.url}`);
@@ -1684,8 +1685,6 @@ async function commandUi(args) {
       return;
     }
   }
-  const remoteAuthToken = useCloudflareRemote ? randomBytes(32).toString("base64url") : "";
-  if (remoteAuthToken) options.remoteAuthToken = remoteAuthToken;
   const python = findPythonCommand();
   if (!python.ok) {
     throw new Error("No Python 3 executable found. Install Python 3 or set COAUTO_PYTHON to the Python executable path.");
@@ -1740,8 +1739,7 @@ async function commandUi(args) {
     cwd: projectsDir || projectRoot,
     env: {
       ...process.env,
-      COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT,
-      ...(remoteAuthToken ? { COAUTO_REMOTE_AUTH_TOKEN: remoteAuthToken } : {})
+      COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT
     },
     stdio: ["inherit", "pipe", "inherit"]
   });

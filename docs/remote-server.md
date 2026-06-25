@@ -13,7 +13,7 @@ Quick Tunnel, and prints a browser URL you can open from your local machine:
 
 ```text
 Open:
-  https://example.trycloudflare.com/?coauto_token=...
+  https://example.trycloudflare.com
 ```
 
 Keep the terminal running while you use the UI. Press `Ctrl+C` to stop both the
@@ -90,9 +90,8 @@ co-auto-research ui --projects-dir . --remote
 ```
 
 Cloudflare Quick Tunnels are intended for development and personal temporary
-access. CoAutoResearch adds a one-time token to the printed URL and stores it in
-a session cookie on first load, but the link is still a temporary public URL.
-Do not use it as a long-running public service.
+access. The printed link is a temporary public URL while the terminal process is
+running. Do not share it broadly or use it as a long-running public service.
 
 ## SSH Fallback
 
@@ -123,8 +122,6 @@ Then open:
 http://127.0.0.1:8765
 ```
 
-If the server prints a tokenized local URL, open that full URL.
-
 ## File Access Semantics
 
 - The UI server runs on the remote machine.
@@ -141,7 +138,7 @@ If the server prints a tokenized local URL, open that full URL.
 ## Security
 
 Prefer `--remote` for temporary remote access because it keeps the UI bound to
-localhost and adds a one-time token to the Cloudflare link. Avoid
-`--host 0.0.0.0` unless the server is protected by network controls and
+localhost and uses Cloudflare Quick Tunnel instead of opening a server port.
+Avoid `--host 0.0.0.0` unless the server is protected by network controls and
 authentication. The UI can read project files and launch local agent CLI runs,
-so it should not be exposed as an unauthenticated public web service.
+so it should not be exposed as a long-running public web service.

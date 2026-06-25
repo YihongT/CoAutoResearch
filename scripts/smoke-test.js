@@ -246,19 +246,50 @@ async function smokeRemoteCloudflareLink() {
   await runRemoteCliSmoke(
     { COAUTO_REMOTE_TUNNEL_MOCK_URL: "https://example.trycloudflare.com" },
     {
-      waitFor: (output) => output.includes("https://example.trycloudflare.com/?coauto_token=") && output.includes("Keep this terminal open."),
+      waitFor: (output) => output.includes("https://example.trycloudflare.com") && output.includes("Keep this terminal open."),
       assert: (output) => {
         if (!output.includes("Open:")) {
           throw new Error(`remote Cloudflare output should use compact Open heading:\n${output}`);
         }
-        if (!output.includes("https://example.trycloudflare.com/?coauto_token=")) {
-          throw new Error(`remote Cloudflare mock URL should include access token:\n${output}`);
+        if (!output.includes("https://example.trycloudflare.com")) {
+          throw new Error(`remote Cloudflare mock URL should be printed:\n${output}`);
+        }
+        if (output.includes("coauto_token")) {
+          throw new Error(`remote Cloudflare URL should not expose a query token:\n${output}`);
         }
         if (!output.includes("Keep this terminal open. Press Ctrl+C to stop.")) {
           throw new Error(`remote Cloudflare output should explain lifecycle:\n${output}`);
         }
         if (output.includes("ssh -N -L")) {
           throw new Error(`remote Cloudflare success should not show SSH tunnel as primary output:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
+async function smokeRemoteCloudflareParserIgnoresApiUrl() {
+  if (process.platform === "win32") return;
+  const fakeCloudflared = path.join(tempRoot, "fake-cloudflared-parser");
+  await fsp.writeFile(
+    fakeCloudflared,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"--version\" ]; then echo cloudflared fake parser 0.0.0; exit 0; fi",
+      "printf '%s\\n' 'request to https://api.trycloudflare.com/tunnel\": ignored' >&2",
+      "printf '%s\\n' 'quick tunnel https://parser-good.trycloudflare.com ready' >&2",
+      "while true; do /bin/sleep 1; done"
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.chmod(fakeCloudflared, 0o755);
+  await runRemoteCliSmoke(
+    { COAUTO_CLOUDFLARED: fakeCloudflared },
+    {
+      waitFor: (output) => output.includes("https://parser-good.trycloudflare.com") && output.includes("Keep this terminal open."),
+      assert: (output) => {
+        if (output.includes("api.trycloudflare.com") || output.includes("coauto_token")) {
+          throw new Error(`remote Cloudflare parser should ignore API URLs and avoid tokens:\n${output}`);
         }
       }
     }
@@ -857,8 +888,8 @@ Confidence: medium
     !cliSource.includes('["tunnel", "--url", localUrl]') ||
     !cliSource.includes("COAUTO_REMOTE_TUNNEL_MOCK_URL") ||
     !cliSource.includes("COAUTO_REMOTE_TUNNEL_MOCK_FAIL") ||
-    !cliSource.includes("COAUTO_REMOTE_AUTH_TOKEN") ||
     !cliSource.includes("COAUTO_CLOUDFLARED") ||
+    cliSource.includes("coauto_token") ||
     !cliSource.includes("ssh -N -L") ||
     !cliSource.includes("user}@<ssh-host>") ||
     cliSource.includes("os.hostname") ||
@@ -876,7 +907,7 @@ Confidence: medium
     !remoteDocs.includes("brew install cloudflared") ||
     !remoteDocs.includes("winget install -e --id Cloudflare.cloudflared") ||
     !remoteDocs.includes("COAUTO_CLOUDFLARED") ||
-    !remoteDocs.includes("coauto_token") ||
+    remoteDocs.includes("coauto_token") ||
     !remoteDocs.includes("COAUTO_REMOTE_MODE=ssh") ||
     !remoteDocs.includes("user@<ssh-host>") ||
     !remoteDocs.includes("COAUTO_REMOTE_TARGET=user@host") ||
@@ -1004,7 +1035,7 @@ Confidence: medium
     !serverPy.includes("Set-Cookie") ||
     !serverPy.includes("coauto_remote_auth")
   ) {
-    throw new Error("remote Cloudflare access must be protected by centralized token auth");
+    throw new Error("server must keep the optional centralized remote token auth gate");
   }
   const blueprintTemplate = await fsp.readFile(path.join(root, "templates", "default", "manuscript", "BLUEPRINT.md"), "utf8");
   const manuscriptInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "MANUSCRIPT.md"), "utf8");
@@ -1687,6 +1718,7 @@ Confidence: medium
     throw new Error("upgrade advisory output did not match expectation");
   }
   await smokeRemoteCloudflareLink();
+  await smokeRemoteCloudflareParserIgnoresApiUrl();
   await smokeInstallCloudflaredCommand();
   await smokeInstallCloudflaredGlobalCommandHint();
   await smokeInstallCloudflaredUsesCurl();

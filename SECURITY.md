@@ -22,10 +22,10 @@ public interface without an authenticated tunnel or other access control.
 
 `co-auto-research ui --remote` uses the official `cloudflared` CLI to create a
 temporary Cloudflare Quick Tunnel URL for browser access from another machine.
-CoAutoResearch protects that URL with a one-time token stored in a session
-cookie after first load, but the URL is still publicly reachable while the
-terminal process is running. Treat it as temporary personal access, not a
-long-running shared service.
+That URL is publicly reachable while the terminal process is running. Treat it
+as temporary personal access, do not share it broadly, and do not use it as a
+long-running shared service. For stronger access control, put the tunnel behind
+Cloudflare Access or another authenticated network boundary.
 
 Before launching an agent run, the UI may execute local readiness probes for the
 selected backend: `codex --version`, `codex login status`, `claude --version`,
