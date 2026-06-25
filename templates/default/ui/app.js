@@ -5167,13 +5167,33 @@ function isContinuedTrial(iteration, trial) {
   return trialIterationValue({ id: baseTrial }) === Number(iteration || trialIterationValue(trial));
 }
 
+function isLatestClosedTrial(iteration, trial) {
+  if (trial?.is_closed !== true) return false;
+  const target = Number(iteration || trialIterationValue(trial) || 0);
+  return target > 0 && target === latestTrajectoryTrialIteration();
+}
+
+function isHistoricalReportedTrial(iteration, trial) {
+  if (!String(trial?.report_path || "").trim()) return false;
+  const target = Number(iteration || trialIterationValue(trial) || 0);
+  return target > 0 && target < latestTrajectoryTrialIteration();
+}
+
+function isDisplayIncompleteTrial(iteration, trial, running = false) {
+  if (!trial || running || trial?.is_closed === true) return false;
+  if (isHistoricalReportedTrial(iteration, trial)) return false;
+  return true;
+}
+
 function trialStatusLabel(iteration, trial) {
   if (isTrialLive(iteration, trial)) return "Running";
   const reportStatus = cleanText(trial?.status, "");
   if (isContinuedTrial(iteration, trial)) return "Continued";
-  if (trial?.is_closed === true) return "Done";
   if (reportStatus === "blocked") return "Blocked";
-  if (String(trial?.report_path || "").trim()) return reportStatus === "reported" ? "Reported" : reportStatus || "Reported";
+  if (isLatestClosedTrial(iteration, trial)) return "Done";
+  if (trial?.is_closed === true) return "Reported";
+  if (isHistoricalReportedTrial(iteration, trial)) return "Reported";
+  if (String(trial?.report_path || "").trim()) return "Incomplete";
   if (trial) return "Incomplete";
   return "Active";
 }
@@ -5290,7 +5310,7 @@ function iterationNavHtml(trials, activeTrial) {
         ${trials
           .map(({ iteration, entries, report }) => {
             const running = isTrialLive(iteration, report);
-            const incomplete = Boolean(report) && !running && report?.is_closed !== true;
+            const incomplete = isDisplayIncompleteTrial(iteration, report, running);
             const label = trialStatusLabel(iteration, report);
             const title = report ? cleanText(report.id, `Trial ${iteration}`) : `Trial ${iteration}`;
             const active = Number(iteration) === Number(activeTrial);
@@ -5313,7 +5333,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
   if (!trials.length) return "";
   const selectedLabel = activeTrial ? `Trial ${activeTrial}` : "No trial selected";
   const reportedCount = trials.filter((trial) => trial.report?.report_path).length;
-  const incompleteCount = trials.filter((trial) => trial.report && trial.report?.is_closed !== true).length;
+  const incompleteCount = trials.filter((trial) => isDisplayIncompleteTrial(trial.iteration, trial.report, isTrialLive(trial.iteration, trial.report))).length;
   const countParts = [`${trials.length} active trial${trials.length === 1 ? "" : "s"}`];
   if (reportedCount) countParts.push(`${reportedCount} reported`);
   if (incompleteCount) countParts.push(`${incompleteCount} incomplete`);

@@ -2384,6 +2384,76 @@ function testContinuedBaseTrialStatusLabel() {
   assert.equal(html.includes("<span class=\"trial-chip-status\">Done</span>"), true, "latest closed trial should remain Done");
 }
 
+function testOnlyLatestClosedTrialUsesDoneStatus() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [16, 17, 18].map((iteration) => {
+      const id = String(iteration).padStart(6, "0") + (iteration === 16 ? "_reference_repair" : iteration === 17 ? "_appendix_repair" : "_method_design");
+      return {
+        id,
+        iteration,
+        status: "reported",
+        is_closed: true,
+        report_path: "research_trajectory/trials/" + id + "/REPORT.md",
+        report_summary: "Reported trial " + iteration
+      };
+    });
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      trajectory: {
+        base_trial: "000016_reference_repair",
+        latest_active_trial: "000018_method_design",
+        next_trial_number: 19
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  const chipStatuses = [...html.matchAll(/<span class="trial-chip-status">([^<]+)<\/span>/g)].map((match) => match[1]);
+  assert.deepEqual(chipStatuses, ["Continued", "Reported", "Done"], "only explicit continue base and latest closed trial should get special labels");
+}
+
+function testHistoricalReportedTrialsDoNotUseIncompleteChipStyle() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [13, 14, 15, 17, 18].map((iteration) => {
+      const id = String(iteration).padStart(6, "0") + "_reported_trial";
+      return {
+        id,
+        iteration,
+        status: "reported",
+        is_closed: iteration >= 17,
+        report_path: "research_trajectory/trials/" + id + "/REPORT.md",
+        report_summary: "Reported trial " + iteration
+      };
+    });
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      trajectory: {
+        latest_active_trial: "000018_reported_trial",
+        next_trial_number: 19
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  const chipMatches = [...html.matchAll(/<button class="trial-chip([^"]*)"[^>]*>\s*<strong class="trial-chip-index">([^<]+)<\/strong>\s*<span class="trial-chip-status">([^<]+)<\/span>/g)];
+  const chips = chipMatches.map((match) => ({ classes: match[1], iteration: match[2], status: match[3] }));
+  assert.deepEqual(chips.map((chip) => `${chip.iteration}:${chip.status}`), ["13:Reported", "14:Reported", "15:Reported", "17:Reported", "18:Done"], "historical reported trials should keep Reported labels");
+  assert.deepEqual(chips.filter((chip) => chip.classes.includes("is-incomplete")).map((chip) => chip.iteration), [], "historical reported trials must not use incomplete chip styling");
+  assert.equal(html.includes("15 incomplete"), false, "historical reported trials should not inflate the incomplete count");
+}
+
 function testUncreatedTrialMentionDoesNotCreateTimelineTrial() {
   const app = loadAppContext();
   app.run(`
@@ -4168,6 +4238,8 @@ await testResumeAutoresearchActionUsesResumeEndpoint();
 testRunningTrialIgnoresPreviousRunUpdate();
 testPassedGoalDoesNotShowStaleRunningTrial();
 testContinuedBaseTrialStatusLabel();
+testOnlyLatestClosedTrialUsesDoneStatus();
+testHistoricalReportedTrialsDoNotUseIncompleteChipStyle();
 testChatRunThinkingUsesLiveStatus();
 testChatRunCommandOnlyKeepsRawCommandFolded();
 testWorkingDurationFormatter();
