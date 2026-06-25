@@ -269,13 +269,25 @@ async function smokeRemoteCloudflaredMissing() {
   await runRemoteCliSmoke(
     { COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared") },
     {
-      waitFor: (output) => output.includes("Remote mode needs cloudflared to create a browser link.") && output.includes("winget install --id Cloudflare.cloudflared"),
+      waitFor: (output) => output.includes("Remote mode needs cloudflared to create a browser link.") && output.includes("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"),
       assert: (output) => {
-        if (!output.includes("brew install cloudflared") || !output.includes("winget install --id Cloudflare.cloudflared")) {
-          throw new Error(`missing cloudflared output should include concise install commands:\n${output}`);
+        if (
+          !output.includes("1. Install cloudflared") ||
+          !output.includes("sudo apt-get update && sudo apt-get install cloudflared") ||
+          !output.includes("brew install cloudflared") ||
+          !output.includes("winget install -e --id Cloudflare.cloudflared") ||
+          !output.includes("2. Run") ||
+          !output.includes("co-auto-research ui --remote") ||
+          !output.includes("3. Check") ||
+          !output.includes("co-auto-research doctor")
+        ) {
+          throw new Error(`missing cloudflared output should include setup-style install, run, and check steps:\n${output}`);
         }
         if (!output.includes("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")) {
           throw new Error(`missing cloudflared output should include official downloads page:\n${output}`);
+        }
+        if (output.includes("CoAutoResearch UI serving")) {
+          throw new Error(`missing cloudflared should be detected before starting the UI server:\n${output}`);
         }
         if (output.includes("ssh -N -L")) {
           throw new Error(`missing cloudflared should not default to SSH tunnel instructions:\n${output}`);
@@ -765,8 +777,10 @@ Confidence: medium
     !readme.includes("cloudflared") ||
     !remoteDocs.includes("co-auto-research ui --remote") ||
     !remoteDocs.includes("Cloudflare Quick Tunnel") ||
+    !remoteDocs.includes("Cloudflare CLI setup") ||
+    !remoteDocs.includes("sudo apt-get update && sudo apt-get install cloudflared") ||
     !remoteDocs.includes("brew install cloudflared") ||
-    !remoteDocs.includes("winget install --id Cloudflare.cloudflared") ||
+    !remoteDocs.includes("winget install -e --id Cloudflare.cloudflared") ||
     !remoteDocs.includes("COAUTO_CLOUDFLARED") ||
     !remoteDocs.includes("coauto_token") ||
     !remoteDocs.includes("COAUTO_REMOTE_MODE=ssh") ||

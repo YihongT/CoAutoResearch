@@ -203,4 +203,5 @@ co-auto-research ui --remote
 
 With `cloudflared` installed on the server, the CLI prints a temporary
 Cloudflare browser link after the server starts. Keep the terminal open while
-you use the link.
+you use the link. If `cloudflared` is missing, the same command prints the
+minimal setup steps first.

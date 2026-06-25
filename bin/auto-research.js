@@ -1199,6 +1199,10 @@ function remoteMode() {
   return String(process.env.COAUTO_REMOTE_MODE || "cloudflare").trim().toLowerCase();
 }
 
+function remoteTunnelMockConfigured() {
+  return Boolean(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL);
+}
+
 function withRemoteAuthToken(url, token) {
   if (!token) return url;
   try {
@@ -1245,16 +1249,29 @@ function printCloudflaredInstallInstructions() {
   console.log("");
   console.log("Remote mode needs cloudflared to create a browser link.");
   console.log("");
-  console.log("Install cloudflared:");
-  console.log("  macOS:   brew install cloudflared");
-  console.log("  Linux:   see https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
-  console.log("  Windows: winget install --id Cloudflare.cloudflared");
+  console.log("Cloudflare CLI setup");
   console.log("");
-  console.log("Then rerun:");
-  console.log("  co-auto-research ui --remote");
+  console.log("1. Install cloudflared");
+  console.log("   Debian/Ubuntu:");
+  console.log("     sudo mkdir -p --mode=0755 /usr/share/keyrings");
+  console.log("     curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null");
+  console.log("     echo \"deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main\" | sudo tee /etc/apt/sources.list.d/cloudflared.list");
+  console.log("     sudo apt-get update && sudo apt-get install cloudflared");
   console.log("");
-  console.log("Advanced SSH fallback:");
-  console.log("  COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote");
+  console.log("   macOS/Homebrew:");
+  console.log("     brew install cloudflared");
+  console.log("");
+  console.log("   Windows/PowerShell:");
+  console.log("     winget install -e --id Cloudflare.cloudflared");
+  console.log("");
+  console.log("2. Run");
+  console.log("   co-auto-research ui --remote");
+  console.log("");
+  console.log("3. Check");
+  console.log("   co-auto-research doctor");
+  console.log("");
+  console.log("Other platforms:");
+  console.log("  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
 }
 
 async function startRemoteTunnel(localUrl, token) {
@@ -1509,6 +1526,13 @@ async function commandUi(args) {
   const host = options.host || DEFAULT_HOST;
   const port = options.port || DEFAULT_PORT;
   const useCloudflareRemote = Boolean(options.remote && remoteMode() !== "ssh");
+  if (useCloudflareRemote && !remoteTunnelMockConfigured()) {
+    const cloudflared = cloudflaredAvailable();
+    if (!cloudflared.ok) {
+      printCloudflaredInstallInstructions();
+      return;
+    }
+  }
   const remoteAuthToken = useCloudflareRemote ? randomBytes(32).toString("base64url") : "";
   if (remoteAuthToken) options.remoteAuthToken = remoteAuthToken;
   const python = findPythonCommand();

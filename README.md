@@ -77,7 +77,9 @@ co-auto-research attach my-project
 
 On a remote server, `co-auto-research ui --remote` uses `cloudflared` to print
 a temporary Cloudflare browser link, so you can open the UI without SSH port
-forwarding — see [Remote servers](docs/remote-server.md).
+forwarding. If `cloudflared` is not installed yet, the CLI prints a short
+Cloudflare CLI setup guide with install, run, and check commands — see
+[Remote servers](docs/remote-server.md).
 
 ## Why it's different
 

@@ -19,20 +19,47 @@ Open:
 Keep the terminal running while you use the UI. Press `Ctrl+C` to stop both the
 UI and the temporary link.
 
-## Install cloudflared
+## Cloudflare CLI setup
 
-Install `cloudflared` once on the remote server for the best remote experience:
+Install `cloudflared` once on the remote server for the best remote experience.
+
+### 1. Install cloudflared
+
+Debian/Ubuntu:
 
 ```bash
-# macOS
-brew install cloudflared
-
-# Windows
-winget install --id Cloudflare.cloudflared
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install cloudflared
 ```
 
-For Linux packages and other platforms, use the official downloads page:
+macOS/Homebrew:
+
+```bash
+brew install cloudflared
+```
+
+Windows/PowerShell:
+
+```powershell
+winget install -e --id Cloudflare.cloudflared
+```
+
+Other platforms:
 <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>.
+
+### 2. Run
+
+```bash
+co-auto-research ui --remote
+```
+
+### 3. Check
+
+```bash
+co-auto-research doctor
+```
 
 If `cloudflared` is installed in a non-standard location, set
 `COAUTO_CLOUDFLARED=/path/to/cloudflared`.

@@ -145,7 +145,9 @@ Remote mode is for SSH-accessible servers. It keeps browser launch disabled on
 the server, keeps the UI bound to `127.0.0.1`, and prints a temporary
 Cloudflare browser link with a one-time access token. Install the official
 `cloudflared` CLI on the remote server for this one-command browser access.
-Keep the terminal open while using the link.
+If `cloudflared` is missing, the command prints a short Cloudflare CLI setup
+guide with install, run, and check commands. Keep the terminal open while using
+the link.
 
 If Cloudflare is blocked on the server, set `COAUTO_REMOTE_MODE=ssh` to force
 SSH-only remote mode. In that fallback path, the command uses
