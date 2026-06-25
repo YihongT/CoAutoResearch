@@ -201,5 +201,5 @@ If you are SSH'd into a server:
 co-auto-research ui --remote
 ```
 
-The CLI prints the SSH tunnel command and local browser URL after the server
-starts.
+The CLI prints a temporary Cloudflare browser link after the server starts.
+Keep the terminal open while you use the link.

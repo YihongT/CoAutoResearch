@@ -142,9 +142,15 @@ co-auto-research ui --remote
 ```
 
 Remote mode is for SSH-accessible servers. It keeps browser launch disabled on
-the server and prints the local SSH tunnel command. The command uses
-`user@<ssh-host>` unless `COAUTO_REMOTE_TARGET` is set, because server hostnames
-are often not valid SSH aliases from your laptop.
+the server, keeps the UI bound to `127.0.0.1`, and prints a temporary
+Cloudflare browser link with a one-time access token. Keep the terminal open
+while using the link.
+
+If Cloudflare is blocked on the server, CoAutoResearch falls back to SSH tunnel
+instructions. Set `COAUTO_REMOTE_MODE=ssh` to force SSH-only remote mode. In
+that fallback path, the command uses `user@<ssh-host>` unless
+`COAUTO_REMOTE_TARGET` is set, because server hostnames are often not valid SSH
+aliases from your laptop.
 
 ## Environment Variables
 
@@ -157,4 +163,5 @@ are often not valid SSH aliases from your laptop.
 | `COAUTO_CLAUDE` | Explicit Claude Code executable path. |
 | `CLAUDE_BIN` | Alternate Claude Code executable path. |
 | `COAUTO_NO_OPEN` | Disable automatic browser launch. |
-| `COAUTO_REMOTE_TARGET` | Override the SSH target printed by `--remote`, for example `yihong@login.example.edu`. |
+| `COAUTO_REMOTE_MODE` | Set to `ssh` to disable the default Cloudflare Quick Tunnel link and print SSH tunnel instructions instead. |
+| `COAUTO_REMOTE_TARGET` | Override the SSH target printed by the SSH fallback path, for example `yihong@login.example.edu`. |

@@ -6,7 +6,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1170,7 +1170,60 @@ function remoteSshTarget() {
   return `${user}@<ssh-host>`;
 }
 
-function printRemoteAccessHint(url, options) {
+function remoteMode() {
+  return String(process.env.COAUTO_REMOTE_MODE || "cloudflare").trim().toLowerCase();
+}
+
+function withRemoteAuthToken(url, token) {
+  if (!token) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set("coauto_token", token);
+    return parsed.toString();
+  } catch {
+    const separator = String(url).includes("?") ? "&" : "?";
+    return `${url}${separator}coauto_token=${encodeURIComponent(token)}`;
+  }
+}
+
+function remoteTunnelUrl(tunnel) {
+  if (typeof tunnel === "string") return tunnel;
+  for (const key of ["url", "publicUrl", "publicURL", "tunnelUrl", "tunnelURL"]) {
+    if (typeof tunnel?.[key] === "string") return tunnel[key];
+  }
+  if (typeof tunnel?.getURL === "function") return tunnel.getURL();
+  if (typeof tunnel?.getUrl === "function") return tunnel.getUrl();
+  return "";
+}
+
+function remoteTunnelClose(tunnel) {
+  return async () => {
+    for (const key of ["close", "stop", "kill"]) {
+      if (typeof tunnel?.[key] === "function") {
+        await tunnel[key]();
+        return;
+      }
+    }
+  };
+}
+
+async function startRemoteTunnel(localUrl, token) {
+  const mockUrl = String(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || "").trim();
+  if (mockUrl) {
+    if (mockUrl === "__fail__") throw new Error("Mock remote tunnel failure.");
+    return { url: withRemoteAuthToken(mockUrl, token), close: async () => {} };
+  }
+  const { startTunnel } = await import("untun");
+  const tunnel = await startTunnel({
+    url: localUrl,
+    acceptCloudflareNotice: true
+  });
+  const url = remoteTunnelUrl(tunnel);
+  if (!url) throw new Error("Cloudflare tunnel started but did not return a public URL.");
+  return { url: withRemoteAuthToken(url, token), close: remoteTunnelClose(tunnel) };
+}
+
+function printRemoteSshAccessHint(url, options) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -1179,7 +1232,7 @@ function printRemoteAccessHint(url, options) {
     return;
   }
   const port = parsed.port || DEFAULT_PORT;
-  const localUrl = `http://127.0.0.1:${port}`;
+  const localUrl = withRemoteAuthToken(`http://127.0.0.1:${port}`, options.remoteAuthToken || "");
   const target = remoteSshTarget();
   console.log("");
   console.log("Remote browser access");
@@ -1197,6 +1250,30 @@ function printRemoteAccessHint(url, options) {
   if (!localhostHost(options.host || DEFAULT_HOST)) {
     console.log("");
     console.log(`Warning: --remote is safest with --host 127.0.0.1. Current host is ${options.host}.`);
+  }
+}
+
+async function printRemoteAccessHint(url, options) {
+  if (remoteMode() === "ssh") {
+    printRemoteSshAccessHint(url, options);
+    return null;
+  }
+  console.log("");
+  console.log("Creating temporary Cloudflare link...");
+  try {
+    const tunnel = await startRemoteTunnel(url, options.remoteAuthToken || "");
+    console.log("");
+    console.log("Remote browser link:");
+    console.log(`  ${tunnel.url}`);
+    console.log("");
+    console.log("Keep this terminal open. Press Ctrl+C to stop the UI and link.");
+    return tunnel;
+  } catch (error) {
+    console.log("");
+    console.log(`Cloudflare link failed: ${error.message}`);
+    console.log("Falling back to SSH tunnel instructions.");
+    printRemoteSshAccessHint(url, options);
+    return null;
   }
 }
 
@@ -1227,6 +1304,7 @@ function openBrowser(url) {
 
 function attachServerOutput(child, options) {
   const autoOpen = shouldAutoOpenBrowser(options);
+  const remoteState = { tunnel: null, tunnelPromise: null };
   let opened = false;
   let remoteHintShown = false;
   let buffered = "";
@@ -1243,7 +1321,15 @@ function attachServerOutput(child, options) {
       if (!match) continue;
       if (options.remote && !remoteHintShown) {
         remoteHintShown = true;
-        printRemoteAccessHint(match[1], options);
+        remoteState.tunnelPromise = printRemoteAccessHint(match[1], options)
+          .then((tunnel) => {
+            remoteState.tunnel = tunnel;
+            return tunnel;
+          })
+          .catch((error) => {
+            console.log(`Remote browser access setup failed: ${error.message}`);
+            return null;
+          });
       }
       if (autoOpen && !opened) {
         opened = true;
@@ -1254,6 +1340,7 @@ function attachServerOutput(child, options) {
       break;
     }
   });
+  return remoteState;
 }
 
 async function commandDoctor(args) {
@@ -1313,10 +1400,13 @@ async function commandDoctor(args) {
   console.log(`${fs.existsSync(projectUi) ? "ok" : "warn"}      legacy project ui/server.py${fs.existsSync(projectUi) ? " present as fallback" : " not found in current directory"}`);
 }
 
-function commandUi(args) {
+async function commandUi(args) {
   const { options } = parseOptions(args);
   const host = options.host || DEFAULT_HOST;
   const port = options.port || DEFAULT_PORT;
+  const useCloudflareRemote = Boolean(options.remote && remoteMode() !== "ssh");
+  const remoteAuthToken = useCloudflareRemote ? randomBytes(32).toString("base64url") : "";
+  if (remoteAuthToken) options.remoteAuthToken = remoteAuthToken;
   const python = findPythonCommand();
   if (!python.ok) {
     throw new Error("No Python 3 executable found. Install Python 3 or set COAUTO_PYTHON to the Python executable path.");
@@ -1344,7 +1434,11 @@ function commandUi(args) {
   if (options.remote) {
     console.log("Remote mode enabled: CoAutoResearch will not try to open a browser on this server.");
     if (localhostHost(host)) {
-      console.log("The UI will stay bound to localhost; tunnel instructions will appear after startup.");
+      if (useCloudflareRemote) {
+        console.log("The UI will stay bound to localhost; a temporary Cloudflare browser link will appear after startup.");
+      } else {
+        console.log("The UI will stay bound to localhost; SSH tunnel instructions will appear after startup.");
+      }
     } else {
       console.log(`The UI is configured with --host ${host}. Prefer --host 127.0.0.1 unless this server is protected by a VPN or firewall.`);
     }
@@ -1365,26 +1459,61 @@ function commandUi(args) {
   }
   const child = spawn(python.command, [...python.args, ...serverArgs], {
     cwd: projectsDir || projectRoot,
-    env: { ...process.env, COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT },
+    env: {
+      ...process.env,
+      COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT,
+      ...(remoteAuthToken ? { COAUTO_REMOTE_AUTH_TOKEN: remoteAuthToken } : {})
+    },
     stdio: ["inherit", "pipe", "inherit"]
   });
-  attachServerOutput(child, options);
+  const remoteState = attachServerOutput(child, options);
   let shuttingDown = false;
-  function forwardSignal(signal) {
+  let remoteTunnelClosed = false;
+  async function closeRemoteTunnel() {
+    if (remoteTunnelClosed) return;
+    remoteTunnelClosed = true;
+    let tunnel = remoteState.tunnel;
+    if (!tunnel && remoteState.tunnelPromise) {
+      try {
+        tunnel = await Promise.race([
+          remoteState.tunnelPromise,
+          new Promise((resolve) => setTimeout(() => resolve(null), 2000))
+        ]);
+      } catch {
+        tunnel = null;
+      }
+    }
+    if (tunnel?.close) {
+      try {
+        await tunnel.close();
+      } catch {
+        // The UI is already shutting down; a tunnel close failure should not keep the CLI alive.
+      }
+    }
+  }
+  async function forwardSignal(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
+    await closeRemoteTunnel();
     if (!child.killed) child.kill(signal);
     const timeout = setTimeout(() => {
       process.exit(signal === "SIGINT" ? 130 : 143);
     }, 3000);
     timeout.unref?.();
   }
-  process.once("SIGINT", () => forwardSignal("SIGINT"));
-  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+  process.once("SIGINT", () => {
+    void forwardSignal("SIGINT");
+  });
+  process.once("SIGTERM", () => {
+    void forwardSignal("SIGTERM");
+  });
   child.on("exit", (code, signal) => {
-    if (signal === "SIGINT") process.exit(130);
-    if (signal === "SIGTERM") process.exit(143);
-    process.exit(code ?? 0);
+    void (async () => {
+      await closeRemoteTunnel();
+      if (signal === "SIGINT") process.exit(130);
+      if (signal === "SIGTERM") process.exit(143);
+      process.exit(code ?? 0);
+    })();
   });
 }
 

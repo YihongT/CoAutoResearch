@@ -4,7 +4,7 @@ import fsp from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,6 +44,40 @@ async function freePort() {
     return port;
   }
   throw new Error("Could not find a free low-numbered localhost port for the smoke test.");
+}
+
+function waitForProcessOutput(proc, predicate, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for process output:\n${output}`));
+    }, timeoutMs);
+    const handleChunk = (chunk) => {
+      output += chunk.toString();
+      if (predicate(output)) {
+        clearTimeout(timeout);
+        resolve(output);
+      }
+    };
+    proc.stdout?.on("data", handleChunk);
+    proc.stderr?.on("data", handleChunk);
+    proc.once("exit", (code, signal) => {
+      if (!predicate(output)) {
+        clearTimeout(timeout);
+        reject(new Error(`Process exited before expected output (code=${code}, signal=${signal}):\n${output}`));
+      }
+    });
+  });
+}
+
+async function terminateProcess(proc) {
+  if (proc.exitCode !== null || proc.signalCode) return;
+  proc.kill("SIGTERM");
+  await Promise.race([
+    new Promise((resolve) => proc.once("exit", resolve)),
+    new Promise((resolve) => setTimeout(resolve, 3000))
+  ]);
+  if (proc.exitCode === null && !proc.signalCode) proc.kill("SIGKILL");
 }
 
 function tryReservePort(port) {
@@ -184,6 +218,112 @@ async function writeFakeCodexBin(directory) {
     await fsp.chmod(shellClaude, 0o755);
     await fsp.chmod(cmdCodex, 0o755);
     await fsp.chmod(cmdClaude, 0o755);
+  }
+}
+
+async function runRemoteCliSmoke(extraEnv, expected) {
+  const port = await freePort();
+  const proc = spawn("node", [cli, "ui", "--project", projectDir, "--remote", "--port", String(port)], {
+    cwd: root,
+    env: { ...process.env, ...extraEnv },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  try {
+    const output = await waitForProcessOutput(proc, expected.waitFor, 15000);
+    expected.assert(output);
+  } finally {
+    await terminateProcess(proc);
+  }
+}
+
+async function smokeRemoteCloudflareLink() {
+  await runRemoteCliSmoke(
+    { COAUTO_REMOTE_TUNNEL_MOCK_URL: "https://example.trycloudflare.com" },
+    {
+      waitFor: (output) => output.includes("https://example.trycloudflare.com/?coauto_token=") && output.includes("Keep this terminal open."),
+      assert: (output) => {
+        if (!output.includes("https://example.trycloudflare.com/?coauto_token=")) {
+          throw new Error(`remote Cloudflare mock URL should include access token:\n${output}`);
+        }
+        if (!output.includes("Keep this terminal open. Press Ctrl+C to stop the UI and link.")) {
+          throw new Error(`remote Cloudflare output should explain lifecycle:\n${output}`);
+        }
+        if (output.includes("ssh -N -L")) {
+          throw new Error(`remote Cloudflare success should not show SSH tunnel as primary output:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
+async function smokeRemoteSshMode() {
+  await runRemoteCliSmoke(
+    { COAUTO_REMOTE_MODE: "ssh" },
+    {
+      waitFor: (output) => output.includes("ssh -N -L"),
+      assert: (output) => {
+        if (!output.includes("Remote browser access") || output.includes("Remote browser link:")) {
+          throw new Error(`SSH remote mode should print only SSH tunnel instructions:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
+async function smokeRemoteCloudflareFallback() {
+  await runRemoteCliSmoke(
+    { COAUTO_REMOTE_TUNNEL_MOCK_URL: "__fail__" },
+    {
+      waitFor: (output) => output.includes("Falling back to SSH tunnel instructions.") && output.includes("coauto_token="),
+      assert: (output) => {
+        if (!output.includes("Cloudflare link failed") || !output.includes("ssh -N -L") || !output.includes("coauto_token=")) {
+          throw new Error(`Cloudflare failure should fall back to tokenized SSH instructions:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
+async function smokeRemoteAuth() {
+  const python = findPython();
+  const port = await freePort();
+  const serverPath = path.join(root, "templates", "default", "ui", "server.py");
+  const proc = spawn(python.command, [...python.args, serverPath, "--host", "127.0.0.1", "--port", String(port), "--project-root", projectDir], {
+    cwd: projectDir,
+    env: { ...process.env, COAUTO_TEMPLATE_ROOT: path.join(root, "templates", "default"), COAUTO_REMOTE_AUTH_TOKEN: "test-token" },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  try {
+    await waitForProcessOutput(proc, (output) => output.includes(`Open http://127.0.0.1:${port}`), 15000);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const unauthorized = await fetch(`${baseUrl}/api/health`);
+    if (unauthorized.status !== 401) {
+      throw new Error(`remote auth should reject missing token, got ${unauthorized.status}`);
+    }
+    const redirect = await fetch(`${baseUrl}/?coauto_token=test-token`, { redirect: "manual" });
+    const setCookie = redirect.headers.get("set-cookie") || "";
+    if (redirect.status !== 302 || !setCookie.includes("coauto_remote_auth=test-token")) {
+      throw new Error(`remote auth should set cookie on tokenized first load, got ${redirect.status} ${setCookie}`);
+    }
+    const cookie = setCookie.split(";")[0];
+    const authorized = await fetch(`${baseUrl}/api/health`, { headers: { Cookie: cookie } });
+    if (authorized.status !== 200) {
+      throw new Error(`remote auth should accept cookie, got ${authorized.status}`);
+    }
+    const badToken = await fetch(`${baseUrl}/api/health`, { headers: { Authorization: "Bearer wrong-token" } });
+    if (badToken.status !== 401) {
+      throw new Error(`remote auth should reject wrong bearer token, got ${badToken.status}`);
+    }
+    const rawFile = await fetch(`${baseUrl}/api/file/raw?path=README.md`);
+    if (rawFile.status !== 401) {
+      throw new Error(`remote auth should protect raw files, got ${rawFile.status}`);
+    }
+    const exportDownload = await fetch(`${baseUrl}/api/export/download?id=missing`);
+    if (exportDownload.status !== 401) {
+      throw new Error(`remote auth should protect export downloads, got ${exportDownload.status}`);
+    }
+  } finally {
+    await terminateProcess(proc);
   }
 }
 
@@ -568,6 +708,7 @@ Confidence: medium
   const gettingStartedDocs = await fsp.readFile(path.join(root, "docs", "getting-started.md"), "utf8");
   const cliDocs = await fsp.readFile(path.join(root, "docs", "cli.md"), "utf8");
   const contributingDocs = await fsp.readFile(path.join(root, "CONTRIBUTING.md"), "utf8");
+  const securityDocs = await fsp.readFile(path.join(root, "SECURITY.md"), "utf8");
   const upgradingDocs = await fsp.readFile(path.join(root, "docs", "upgrading.md"), "utf8");
   const pagesWorkflow = await fsp.readFile(path.join(root, ".github", "workflows", "pages.yml"), "utf8");
   const ciWorkflow = await fsp.readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
@@ -576,14 +717,22 @@ Confidence: medium
   if (
     !helpOutput.includes("[--remote]") ||
     !cliSource.includes("function printRemoteAccessHint") ||
+    !cliSource.includes("async function startRemoteTunnel") ||
+    !cliSource.includes("COAUTO_REMOTE_TUNNEL_MOCK_URL") ||
+    !cliSource.includes("COAUTO_REMOTE_AUTH_TOKEN") ||
     !cliSource.includes("ssh -N -L") ||
     !cliSource.includes("user}@<ssh-host>") ||
     cliSource.includes("os.hostname") ||
     !cliSource.includes("Remote mode enabled") ||
     !readme.includes("co-auto-research ui --remote") ||
+    !readme.includes("Cloudflare browser link") ||
     !remoteDocs.includes("co-auto-research ui --remote") ||
+    !remoteDocs.includes("Cloudflare Quick Tunnel") ||
+    !remoteDocs.includes("coauto_token") ||
+    !remoteDocs.includes("COAUTO_REMOTE_MODE=ssh") ||
     !remoteDocs.includes("user@<ssh-host>") ||
     !remoteDocs.includes("COAUTO_REMOTE_TARGET=user@host") ||
+    !securityDocs.includes("temporary Cloudflare Quick Tunnel URL") ||
     !docsIndex.includes("```{toctree}") ||
     !docsIndex.includes("Welcome to CoAutoResearch's documentation") ||
     !docsConfig.includes('html_theme = "sphinx_rtd_theme"') ||
@@ -605,6 +754,7 @@ Confidence: medium
     packageManifest.homepage !== "https://yihongt.github.io/CoAutoResearch/" ||
     packageManifest.publishConfig?.access !== "public" ||
     !packageManifest.packageManager?.startsWith("npm@") ||
+    !packageManifest.dependencies?.untun ||
     !pagesWorkflow.includes("sphinx-build -b html docs ./_site") ||
     !readme.includes("npm install -g co-auto-research") ||
     !docsIndex.includes("npm install -g co-auto-research") ||
@@ -625,7 +775,9 @@ Confidence: medium
     !contributingDocs.includes("npm install -g co-auto-research@latest") ||
     readme.includes("node bin/auto-research.js ui") ||
     gettingStartedDocs.includes("node bin/auto-research.js ui") ||
+    !gettingStartedDocs.includes("Cloudflare browser link") ||
     !gettingStartedDocs.includes("co-auto-research ui") ||
+    !cliDocs.includes("COAUTO_REMOTE_MODE") ||
     !cliDocs.includes("COAUTO_REMOTE_TARGET") ||
     !helpOutput.includes("co-auto-research attach") ||
     !readme.includes("co-auto-research attach my-project") ||
@@ -696,6 +848,14 @@ Confidence: medium
   }
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
+  if (
+    !serverPy.includes("REMOTE_AUTH_TOKEN") ||
+    !serverPy.includes("authorize_remote_request") ||
+    !serverPy.includes("Set-Cookie") ||
+    !serverPy.includes("coauto_remote_auth")
+  ) {
+    throw new Error("remote Cloudflare access must be protected by centralized token auth");
+  }
   const blueprintTemplate = await fsp.readFile(path.join(root, "templates", "default", "manuscript", "BLUEPRINT.md"), "utf8");
   const manuscriptInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "MANUSCRIPT.md"), "utf8");
   const figureTableReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FIGURE_TABLE_REVIEWER.md"), "utf8");
@@ -1376,6 +1536,10 @@ Confidence: medium
   ) {
     throw new Error("upgrade advisory output did not match expectation");
   }
+  await smokeRemoteCloudflareLink();
+  await smokeRemoteSshMode();
+  await smokeRemoteCloudflareFallback();
+  await smokeRemoteAuth();
 
   const fakeBin = path.join(tempRoot, "fake-bin");
   await writeFakeCodexBin(fakeBin);

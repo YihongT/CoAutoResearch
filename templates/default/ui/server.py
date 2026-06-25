@@ -8,6 +8,7 @@ import base64
 from contextlib import contextmanager
 import errno
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -21,10 +22,11 @@ import time
 import uuid
 import zipfile
 from datetime import datetime
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse
 
 
 UI_DIR = Path(__file__).resolve().parent
@@ -41,6 +43,9 @@ EXPORT_CONFIRMATION_BYTES = 1 * 1024 * 1024 * 1024
 EXPORT_CHUNK_BYTES = 1024 * 1024
 EXPORT_JOB_TTL_SECONDS = 24 * 60 * 60
 EXPORT_STORE_WITHOUT_COMPRESSION_BYTES = 16 * 1024 * 1024
+REMOTE_AUTH_TOKEN = os.environ.get("COAUTO_REMOTE_AUTH_TOKEN", "").strip()
+REMOTE_AUTH_QUERY = "coauto_token"
+REMOTE_AUTH_COOKIE = "coauto_remote_auth"
 AUTO_RESOURCE_SEARCH_MAX_RESULTS = 8
 AUTO_RESOURCE_SEARCH_MAX_DIRS = 2500
 AUTO_RESOURCE_SEARCH_MAX_DEPTH = 5
@@ -10709,8 +10714,72 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
             project_id = str(payload.get("project") or payload.get("projectId") or "")
         return unquote(str(project_id or "")).strip()
 
+    def remote_auth_valid(self, token: str) -> bool:
+        return bool(REMOTE_AUTH_TOKEN and token and hmac.compare_digest(token, REMOTE_AUTH_TOKEN))
+
+    def remote_auth_cookie_token(self) -> str:
+        raw_cookie = self.headers.get("Cookie", "")
+        if not raw_cookie:
+            return ""
+        cookie = SimpleCookie()
+        try:
+            cookie.load(raw_cookie)
+        except Exception:
+            return ""
+        morsel = cookie.get(REMOTE_AUTH_COOKIE)
+        return morsel.value if morsel else ""
+
+    def remote_auth_header_token(self) -> str:
+        authorization = str(self.headers.get("Authorization", "")).strip()
+        prefix = "Bearer "
+        if authorization.startswith(prefix):
+            return authorization[len(prefix):].strip()
+        return ""
+
+    def send_remote_auth_redirect(self, parsed: Any) -> None:
+        query = urlencode([(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != REMOTE_AUTH_QUERY])
+        location = parsed.path or "/"
+        if query:
+            location = f"{location}?{query}"
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Set-Cookie", f"{REMOTE_AUTH_COOKIE}={REMOTE_AUTH_TOKEN}; HttpOnly; SameSite=Lax; Path=/")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def send_remote_auth_required(self, parsed: Any) -> None:
+        if parsed.path.startswith("/api/"):
+            self.send_json({"ok": False, "error": "Remote access token is required."}, status=401)
+            return
+        data = b"Remote access token is required."
+        self.send_response(401)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def authorize_remote_request(self, parsed: Any) -> bool:
+        if not REMOTE_AUTH_TOKEN:
+            return True
+        query = parse_qs(parsed.query)
+        query_token = query.get(REMOTE_AUTH_QUERY, [""])[0]
+        if self.remote_auth_valid(query_token):
+            if self.command == "GET":
+                self.send_remote_auth_redirect(parsed)
+                return False
+            return True
+        if self.remote_auth_valid(self.remote_auth_header_token()):
+            return True
+        if self.remote_auth_valid(self.remote_auth_cookie_token()):
+            return True
+        self.send_remote_auth_required(parsed)
+        return False
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if not self.authorize_remote_request(parsed):
+            return
         if parsed.path == "/api/projects":
             if PROJECT_REGISTRY:
                 PROJECT_REGISTRY.refresh()
@@ -10790,6 +10859,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if not self.authorize_remote_request(parsed):
+            return
         try:
             if parsed.path == "/api/resource-import/chunk":
                 query = parse_qs(parsed.query)

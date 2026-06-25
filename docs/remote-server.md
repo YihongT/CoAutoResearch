@@ -8,8 +8,16 @@ co-auto-research ui --remote
 ```
 
 Remote mode keeps the UI bound to `127.0.0.1`, skips browser launch on the
-server, and prints the SSH tunnel command plus local browser URL after the UI
-starts.
+server, creates a temporary Cloudflare Quick Tunnel, and prints a browser URL
+you can open from your local machine:
+
+```text
+Remote browser link:
+  https://example.trycloudflare.com/?coauto_token=...
+```
+
+Keep the terminal running while you use the UI. Press `Ctrl+C` to stop both the
+UI and the temporary link.
 
 Equivalent explicit command:
 
@@ -25,10 +33,24 @@ cd /path/to/projects
 co-auto-research ui --projects-dir . --host 127.0.0.1 --port 8765 --no-open
 ```
 
-Or, with the same remote-mode hints:
+Or, with the same remote browser link:
 
 ```bash
 co-auto-research ui --projects-dir . --remote
+```
+
+Cloudflare Quick Tunnels are intended for development and personal temporary
+access. CoAutoResearch adds a one-time token to the printed URL and stores it in
+a session cookie on first load, but the link is still a temporary public URL.
+Do not use it as a long-running public service.
+
+## SSH Fallback
+
+If the server cannot reach Cloudflare, `--remote` falls back to SSH tunnel
+instructions. You can also force the SSH-only path:
+
+```bash
+COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote
 ```
 
 From your local machine, forward the printed port:
@@ -52,8 +74,7 @@ Then open:
 http://127.0.0.1:8765
 ```
 
-`--remote` is the recommended command because it prints the correct local
-instructions after the server picks its actual port.
+If the server prints a tokenized local URL, open that full URL.
 
 ## File Access Semantics
 
@@ -70,7 +91,8 @@ instructions after the server picks its actual port.
 
 ## Security
 
-Prefer SSH tunnels. Avoid `--host 0.0.0.0` unless the server is protected by
-network controls and authentication. The UI can read project files and launch
-local agent CLI runs, so it should not be exposed as an unauthenticated public
-web service.
+Prefer `--remote` for temporary remote access because it keeps the UI bound to
+localhost and adds a one-time token to the Cloudflare link. Avoid
+`--host 0.0.0.0` unless the server is protected by network controls and
+authentication. The UI can read project files and launch local agent CLI runs,
+so it should not be exposed as an unauthenticated public web service.

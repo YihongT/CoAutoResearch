@@ -75,8 +75,9 @@ co-auto-research ls
 co-auto-research attach my-project
 ```
 
-On a remote server, `co-auto-research ui --remote` prints an SSH tunnel command
-so you can open the UI from your local browser — see [Remote servers](docs/remote-server.md).
+On a remote server, `co-auto-research ui --remote` prints a temporary
+Cloudflare browser link so you can open the UI without SSH port forwarding —
+see [Remote servers](docs/remote-server.md).
 
 ## Why it's different
 
