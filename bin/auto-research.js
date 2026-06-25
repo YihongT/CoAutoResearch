@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -59,6 +60,7 @@ Usage:
   co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
   co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
+  co-auto-research install-cloudflared
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
   co-auto-research upgrade
   co-auto-research upgrade-project [project-name-or-path] [--all] [--projects-dir <dir>] [--dry-run]
@@ -1067,6 +1069,23 @@ function findOnPath(name, env = process.env) {
   return "";
 }
 
+function userHomeDir(env = process.env) {
+  return env.HOME || env.USERPROFILE || os.homedir();
+}
+
+function defaultCloudflaredInstallDir(env = process.env) {
+  const configured = String(env.COAUTO_CLOUDFLARED_INSTALL_DIR || "").trim();
+  if (configured) return path.resolve(configured.replace(/^~(?=$|[\\/])/, userHomeDir(env)));
+  if (process.platform === "win32") {
+    return path.join(env.LOCALAPPDATA || path.join(userHomeDir(env), "AppData", "Local"), "CoAutoResearch", "bin");
+  }
+  return path.join(userHomeDir(env), ".local", "bin");
+}
+
+function defaultCloudflaredPath(env = process.env) {
+  return path.join(defaultCloudflaredInstallDir(env), process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+}
+
 function findCodexCommand(env = process.env) {
   return findAgentCommand("codex", env);
 }
@@ -1098,7 +1117,11 @@ function findCloudflaredCommand(env = process.env) {
     if (configuredOnPath) return configuredOnPath;
     return expanded;
   }
-  return findOnPath("cloudflared", env) || "cloudflared";
+  const onPath = findOnPath("cloudflared", env);
+  if (onPath) return onPath;
+  const defaultLocal = defaultCloudflaredPath(env);
+  if (fs.existsSync(defaultLocal)) return defaultLocal;
+  return "cloudflared";
 }
 
 function codexAvailable() {
@@ -1253,11 +1276,7 @@ function printCloudflaredInstallInstructions() {
   console.log("");
   console.log("1. Install cloudflared");
   console.log("   Linux (no sudo):");
-  console.log("     mkdir -p \"$HOME/.local/bin\"");
-  console.log("     arch=$(uname -m); case \"$arch\" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; i386|i686) arch=386 ;; armv7l|armv6l) arch=arm ;; *) echo \"Unsupported arch: $arch\"; exit 1 ;; esac");
-  console.log("     curl -L --fail -o \"$HOME/.local/bin/cloudflared\" \"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}\"");
-  console.log("     chmod +x \"$HOME/.local/bin/cloudflared\"");
-  console.log("     export PATH=\"$HOME/.local/bin:$PATH\"");
+  console.log("     npx --yes co-auto-research install-cloudflared");
   console.log("");
   console.log("   macOS/Homebrew:");
   console.log("     brew install cloudflared");
@@ -1273,6 +1292,70 @@ function printCloudflaredInstallInstructions() {
   console.log("");
   console.log("Other platforms:");
   console.log("  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+}
+
+function cloudflaredLinuxAssetArch() {
+  const arch = process.arch;
+  if (arch === "x64") return "amd64";
+  if (arch === "arm64") return "arm64";
+  if (arch === "ia32") return "386";
+  if (arch === "arm") return "arm";
+  throw new Error(`cloudflared standalone install is not available for ${process.platform}/${arch}. See https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/`);
+}
+
+function cloudflaredStandaloneDownloadUrl() {
+  if (process.platform !== "linux") {
+    throw new Error("The built-in cloudflared installer currently supports Linux servers. Use Homebrew on macOS or winget on Windows.");
+  }
+  return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cloudflaredLinuxAssetArch()}`;
+}
+
+async function writeMockCloudflared(target) {
+  const body = "#!/bin/sh\necho cloudflared fake installed 0.0.0\n";
+  await fsp.writeFile(target, body, "utf8");
+}
+
+async function downloadCloudflared(target, url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Download failed (${response.status} ${response.statusText}) from ${url}`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await fsp.writeFile(target, bytes);
+}
+
+async function commandInstallCloudflared(args) {
+  const { rest } = parseOptions(args);
+  if (rest.length > 0) {
+    throw new Error("Usage: co-auto-research install-cloudflared");
+  }
+  const available = cloudflaredAvailable();
+  if (available.ok) {
+    console.log(`cloudflared is already available: ${available.output}`);
+    console.log(`Using: ${available.command}`);
+    return;
+  }
+  const target = defaultCloudflaredPath();
+  const installDir = path.dirname(target);
+  const url = process.env.COAUTO_CLOUDFLARED_INSTALL_MOCK ? "" : cloudflaredStandaloneDownloadUrl();
+  await fsp.mkdir(installDir, { recursive: true });
+  console.log(`Installing cloudflared to ${target}`);
+  if (process.env.COAUTO_CLOUDFLARED_INSTALL_MOCK) {
+    await writeMockCloudflared(target);
+  } else {
+    console.log(`Downloading ${url}`);
+    await downloadCloudflared(target, url);
+  }
+  await fsp.chmod(target, 0o755);
+  const result = spawnSync(target, ["--version"], { encoding: "utf8" });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("").trim().split(/\r?\n/)[0] || "";
+  if (result.status !== 0) {
+    throw new Error(`Installed cloudflared but could not run it. Try: COAUTO_CLOUDFLARED=${target} co-auto-research doctor`);
+  }
+  console.log(`Installed cloudflared: ${output}`);
+  console.log("");
+  console.log("Run:");
+  console.log("  co-auto-research ui --remote");
 }
 
 async function startRemoteTunnel(localUrl, token) {
@@ -1730,6 +1813,7 @@ async function main() {
   if (command === "ls" || command === "list") return commandList(args);
   if (command === "attach") return commandAttach(args);
   if (command === "ui") return commandUi(args);
+  if (command === "install-cloudflared") return commandInstallCloudflared(args);
   if (command === "doctor") return commandDoctor(args);
   if (command === "upgrade") return commandUpgrade(args);
   if (command === "upgrade-project") return commandUpgradeProject(args);

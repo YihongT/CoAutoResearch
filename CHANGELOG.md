@@ -4,6 +4,8 @@
 
 - Changed `co-auto-research ui --remote` to use the official `cloudflared` CLI
   for a temporary Cloudflare browser link with one-time token access.
+- Added `co-auto-research install-cloudflared` for no-sudo Linux setup into the
+  user directory used automatically by `--remote`.
 - Fixed Claude Code `/goal` handling so Claude backend commands follow Claude
   Code native goal semantics.
 - Passed Claude `/goal` clear aliases through correctly: `clear`, `stop`,

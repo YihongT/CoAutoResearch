@@ -274,8 +274,8 @@ async function smokeRemoteCloudflaredMissing() {
         if (
           !output.includes("1. Install cloudflared") ||
           !output.includes("Linux (no sudo):") ||
-          !output.includes("mkdir -p \"$HOME/.local/bin\"") ||
-          !output.includes("cloudflared-linux-${arch}") ||
+          !output.includes("npx --yes co-auto-research install-cloudflared") ||
+          output.includes("cloudflared-linux-${arch}") ||
           output.includes("sudo apt-get install cloudflared") ||
           !output.includes("brew install cloudflared") ||
           !output.includes("winget install -e --id Cloudflare.cloudflared") ||
@@ -329,6 +329,35 @@ async function smokeRemoteCloudflareFallback() {
       }
     }
   );
+}
+
+async function smokeInstallCloudflaredCommand() {
+  if (process.platform === "win32") return;
+  const installDir = path.join(tempRoot, "cloudflared-install");
+  const output = execFileSync(process.execPath, [cli, "install-cloudflared"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      PATH: "",
+      COAUTO_CLOUDFLARED_INSTALL_DIR: installDir,
+      COAUTO_CLOUDFLARED_INSTALL_MOCK: "1"
+    },
+    encoding: "utf8"
+  });
+  const installedPath = path.join(installDir, "cloudflared");
+  let installed = false;
+  try {
+    await fsp.access(installedPath);
+    installed = true;
+  } catch {
+    installed = false;
+  }
+  if (!installed || !output.includes(`Installing cloudflared to ${installedPath}`) || !output.includes("Installed cloudflared: cloudflared fake installed 0.0.0")) {
+    throw new Error(`install-cloudflared should install into the user install directory:\n${output}`);
+  }
+  if (!output.includes("co-auto-research ui --remote")) {
+    throw new Error(`install-cloudflared should print the next remote command:\n${output}`);
+  }
 }
 
 async function smokeRemoteAuth() {
@@ -782,7 +811,8 @@ Confidence: medium
     !remoteDocs.includes("Cloudflare Quick Tunnel") ||
     !remoteDocs.includes("Cloudflare CLI setup") ||
     !remoteDocs.includes("Linux without sudo") ||
-    !remoteDocs.includes("cloudflared-linux-${arch}") ||
+    !remoteDocs.includes("npx --yes co-auto-research install-cloudflared") ||
+    remoteDocs.includes("cloudflared-linux-${arch}") ||
     remoteDocs.includes("sudo apt-get install cloudflared") ||
     !remoteDocs.includes("brew install cloudflared") ||
     !remoteDocs.includes("winget install -e --id Cloudflare.cloudflared") ||
@@ -1598,6 +1628,7 @@ Confidence: medium
     throw new Error("upgrade advisory output did not match expectation");
   }
   await smokeRemoteCloudflareLink();
+  await smokeInstallCloudflaredCommand();
   await smokeRemoteCloudflaredMissing();
   await smokeRemoteSshMode();
   await smokeRemoteCloudflareFallback();

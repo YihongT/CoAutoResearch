@@ -30,6 +30,7 @@ Source-checkout development commands are covered in the contributor guide.
 | `attach [project]` | Reopen the UI for an existing generated project. |
 | `ui` | Start the local web UI. |
 | `ui --projects-dir <dir>` | Start a dashboard over several generated projects. |
+| `install-cloudflared` | Install the Cloudflare tunnel CLI into the user directory on Linux, without sudo. |
 | `doctor` | Check local prerequisites and port availability. |
 | `upgrade` | Print installed version, detected project template version, and npm update command. |
 | `upgrade-project` | Sync core reviewer and trial-protocol instructions in an existing project, with backup. |

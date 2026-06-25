@@ -28,12 +28,12 @@ Install `cloudflared` once on the remote server for the best remote experience.
 Linux without sudo:
 
 ```bash
-mkdir -p "$HOME/.local/bin"
-arch=$(uname -m); case "$arch" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; i386|i686) arch=386 ;; armv7l|armv6l) arch=arm ;; *) echo "Unsupported arch: $arch"; exit 1 ;; esac
-curl -L --fail -o "$HOME/.local/bin/cloudflared" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}"
-chmod +x "$HOME/.local/bin/cloudflared"
-export PATH="$HOME/.local/bin:$PATH"
+npx --yes co-auto-research install-cloudflared
 ```
+
+This installs the standalone `cloudflared` binary into `~/.local/bin`. The
+CoAutoResearch CLI checks that location automatically, so you do not need to
+change `PATH` before rerunning `--remote`.
 
 macOS/Homebrew:
 
