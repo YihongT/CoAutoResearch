@@ -267,7 +267,7 @@ async function smokeRemoteCloudflareLink() {
 
 async function smokeRemoteCloudflaredMissing() {
   await runRemoteCliSmoke(
-    { COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared") },
+    { COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared"), npm_command: "exec", npm_lifecycle_event: "npx" },
     {
       waitFor: (output) => output.includes("Remote mode needs cloudflared to create a browser link.") && output.includes("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"),
       assert: (output) => {
@@ -280,9 +280,9 @@ async function smokeRemoteCloudflaredMissing() {
           !output.includes("brew install cloudflared") ||
           !output.includes("winget install -e --id Cloudflare.cloudflared") ||
           !output.includes("2. Run") ||
-          !output.includes("co-auto-research ui --remote") ||
+          !output.includes("npx --yes co-auto-research ui --remote") ||
           !output.includes("3. Check") ||
-          !output.includes("co-auto-research doctor")
+          !output.includes("npx --yes co-auto-research doctor")
         ) {
           throw new Error(`missing cloudflared output should include setup-style install, run, and check steps:\n${output}`);
         }
@@ -316,11 +316,11 @@ async function smokeRemoteSshMode() {
 
 async function smokeRemoteCloudflareFallback() {
   await runRemoteCliSmoke(
-    { COAUTO_REMOTE_TUNNEL_MOCK_FAIL: "1" },
+    { COAUTO_REMOTE_TUNNEL_MOCK_FAIL: "1", npm_command: "exec", npm_lifecycle_event: "npx" },
     {
-      waitFor: (output) => output.includes("Cloudflare link failed:") && output.includes("COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote"),
+      waitFor: (output) => output.includes("Cloudflare link failed:") && output.includes("COAUTO_REMOTE_MODE=ssh npx --yes co-auto-research ui --remote"),
       assert: (output) => {
-        if (!output.includes("Check that cloudflared can reach Cloudflare") || !output.includes("COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote")) {
+        if (!output.includes("Check that cloudflared can reach Cloudflare") || !output.includes("COAUTO_REMOTE_MODE=ssh npx --yes co-auto-research ui --remote")) {
           throw new Error(`Cloudflare failure should point to troubleshooting and explicit SSH fallback:\n${output}`);
         }
         if (output.includes("ssh -N -L")) {
@@ -355,8 +355,31 @@ async function smokeInstallCloudflaredCommand() {
   if (!installed || !output.includes(`Installing cloudflared to ${installedPath}`) || !output.includes("Installed cloudflared: cloudflared fake installed 0.0.0")) {
     throw new Error(`install-cloudflared should install into the user install directory:\n${output}`);
   }
-  if (!output.includes("co-auto-research ui --remote")) {
-    throw new Error(`install-cloudflared should print the next remote command:\n${output}`);
+  if (!output.includes("npx --yes co-auto-research ui --remote")) {
+    throw new Error(`install-cloudflared should print the npx remote command when no global CLI is on PATH:\n${output}`);
+  }
+}
+
+async function smokeInstallCloudflaredGlobalCommandHint() {
+  if (process.platform === "win32") return;
+  const installDir = path.join(tempRoot, "cloudflared-global-hint-install");
+  const fakeBin = path.join(tempRoot, "fake-coauto-bin");
+  await fsp.mkdir(fakeBin, { recursive: true });
+  const fakeCoauto = path.join(fakeBin, "co-auto-research");
+  await fsp.writeFile(fakeCoauto, "#!/bin/sh\nexit 0\n", "utf8");
+  await fsp.chmod(fakeCoauto, 0o755);
+  const output = execFileSync(process.execPath, [cli, "install-cloudflared"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      PATH: fakeBin,
+      COAUTO_CLOUDFLARED_INSTALL_DIR: installDir,
+      COAUTO_CLOUDFLARED_INSTALL_MOCK: "1"
+    },
+    encoding: "utf8"
+  });
+  if (!output.includes("  co-auto-research ui --remote") || output.includes("npx --yes co-auto-research ui --remote")) {
+    throw new Error(`install-cloudflared should print the short command when the CLI is on PATH:\n${output}`);
   }
 }
 
@@ -1665,6 +1688,7 @@ Confidence: medium
   }
   await smokeRemoteCloudflareLink();
   await smokeInstallCloudflaredCommand();
+  await smokeInstallCloudflaredGlobalCommandHint();
   await smokeInstallCloudflaredUsesCurl();
   await smokeRemoteCloudflaredMissing();
   await smokeRemoteSshMode();

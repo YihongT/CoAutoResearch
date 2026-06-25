@@ -1069,6 +1069,18 @@ function findOnPath(name, env = process.env) {
   return "";
 }
 
+function invokedViaNpx(env = process.env) {
+  const pathValue = env.PATH || env.Path || env.path || "";
+  return env.npm_command === "exec" || env.npm_lifecycle_event === "npx" || /(^|[\\/])_npx[\\/]/.test(pathValue);
+}
+
+function coAutoResearchCommand(env = process.env) {
+  const configured = String(env.COAUTO_CLI_COMMAND || "").trim();
+  if (configured) return configured;
+  if (invokedViaNpx(env)) return "npx --yes co-auto-research";
+  return findOnPath("co-auto-research", env) ? "co-auto-research" : "npx --yes co-auto-research";
+}
+
 function userHomeDir(env = process.env) {
   return env.HOME || env.USERPROFILE || os.homedir();
 }
@@ -1269,6 +1281,7 @@ function closeChildProcess(child) {
 }
 
 function printCloudflaredInstallInstructions() {
+  const cli = coAutoResearchCommand();
   console.log("");
   console.log("Remote mode needs cloudflared to create a browser link.");
   console.log("");
@@ -1276,7 +1289,7 @@ function printCloudflaredInstallInstructions() {
   console.log("");
   console.log("1. Install cloudflared");
   console.log("   Linux (no sudo):");
-  console.log("     npx --yes co-auto-research install-cloudflared");
+  console.log(`     ${cli} install-cloudflared`);
   console.log("");
   console.log("   macOS/Homebrew:");
   console.log("     brew install cloudflared");
@@ -1285,10 +1298,10 @@ function printCloudflaredInstallInstructions() {
   console.log("     winget install -e --id Cloudflare.cloudflared");
   console.log("");
   console.log("2. Run");
-  console.log("   co-auto-research ui --remote");
+  console.log(`   ${cli} ui --remote`);
   console.log("");
   console.log("3. Check");
-  console.log("   co-auto-research doctor");
+  console.log(`   ${cli} doctor`);
   console.log("");
   console.log("Other platforms:");
   console.log("  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
@@ -1409,7 +1422,7 @@ async function commandInstallCloudflared(args) {
   console.log(`Installed cloudflared: ${output}`);
   console.log("");
   console.log("Run:");
-  console.log("  co-auto-research ui --remote");
+  console.log(`  ${coAutoResearchCommand()} ui --remote`);
 }
 
 async function startRemoteTunnel(localUrl, token) {
@@ -1524,10 +1537,10 @@ async function printRemoteAccessHint(url, options) {
       console.log(`Cloudflare link failed: ${error.message}`);
       console.log("");
       console.log("Check that cloudflared can reach Cloudflare, then rerun:");
-      console.log("  co-auto-research ui --remote");
+      console.log(`  ${coAutoResearchCommand()} ui --remote`);
       console.log("");
       console.log("Advanced SSH fallback:");
-      console.log("  COAUTO_REMOTE_MODE=ssh co-auto-research ui --remote");
+      console.log(`  COAUTO_REMOTE_MODE=ssh ${coAutoResearchCommand()} ui --remote`);
     }
     return null;
   }

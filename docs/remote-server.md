@@ -56,6 +56,10 @@ System packages and other platforms:
 co-auto-research ui --remote
 ```
 
+If you use CoAutoResearch through `npx`, keep the prefix:
+`npx --yes co-auto-research ui --remote`. The CLI setup prompt prints the
+matching command automatically.
+
 ### 3. Check
 
 ```bash
