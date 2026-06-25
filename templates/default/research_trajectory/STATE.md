@@ -33,13 +33,13 @@ Status: <planned / active / completed / blocked / none yet>
 
 ## Current Method Status
 
-Implementation lives in `workspace/`.
+Concrete method, model, framework, system, prototype, and implementation artifacts live in `workspace/`.
 
 This section records only current method status and rationale.
 
 ### Active Methods
 
-- <method / script / config / protocol and path in workspace>
+- <method / model / framework / system design / prototype / script / config / protocol and path in workspace>
 
 ### Rationale
 

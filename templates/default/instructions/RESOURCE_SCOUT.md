@@ -2,13 +2,15 @@
 
 ## Purpose
 
-The Resource Scout is a trial-local research subagent for finding, filing, and
-summarizing external resources before main execution.
+The Resource Scout is a research-resource subagent for finding, filing, and
+summarizing resources before main execution. It serves the overall research goal
+first and the current trial objective second, so scout work should be grounded
+in `PROJECT.md`, current state/findings, and the active trial plan.
 
-It discovers materials that may help the current trial, records provenance, and
-saves small public artifacts under `resources/`. It does not decide project
-truth, promote findings, rewrite canonical state, or replace any of the eight
-core reviewers.
+It discovers materials that may help this research and this trial, records
+provenance, and saves small public artifacts under `resources/`. It does not
+decide project truth, promote findings, rewrite canonical state, or replace any
+of the eight core reviewers.
 
 ## When To Use
 
@@ -18,15 +20,41 @@ Default:
 
 `Scout: required`
 
-Skipping is allowed only when the trial is narrow local-only work, explicitly
-offline, or when external resource search is irrelevant to the objective. A
-skipped scout requires a concrete `Skip reason:` in `PLAN.md`.
+Require a scout when any of these are true:
+
+- the trial may change project framing, research question, claim, method,
+  dataset, literature base, benchmark, venue fit, or manuscript evidence;
+- the current state depends on sources that may be incomplete, stale, weakly
+  cited, or not yet externally grounded;
+- the latest user message, project files, or manifest contains papers, data,
+  reports, repositories, standards, news, websites, institutions, products,
+  policies, or other resource clues;
+- the trial needs evidence, examples, comparisons, baselines, target-venue
+  expectations, standards, reproducibility materials, or external factual
+  context;
+- the project is entering a new domain, topic, subquestion, method, data source,
+  or evaluation frame;
+- the trial uses or interprets external facts that could have changed;
+- there is material uncertainty about what resources exist.
+
+Skipping is allowed only when the trial is narrow local-only work over already
+verified resources, explicitly offline, or when no external source could
+plausibly affect the objective. A skipped scout requires a concrete `Skip
+reason:` in `PLAN.md`.
+
+Do not skip merely because the agent thinks it already knows the area, the trial
+is small, search may take time, the needed resource type is unclear, or current
+resources look probably sufficient.
 
 When the plan says `Scout: required`, the main execution agent must run the
 Resource Scout after `PLAN.md` and `reviews/PLAN_REVIEW.md`, before main
 execution, by following this explicit action:
 
-`spawn a Resource Scout subagent to search, file, and report external resources for this trial`
+`spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources`
+
+If the search scope is too broad for one focused scout, the plan may split the
+brief into multiple scoped Resource Scout subagents. Each scout must still write
+or contribute to the same trial resource-scout report and manifest update.
 
 If the scout materially changes assumptions, required resources, risks, or
 success criteria, the main execution agent must revise `PLAN.md` and rerun the
@@ -38,7 +66,8 @@ autoresearch gate to `blocked` or `needs_human`.
 
 ## Required Inputs
 
-The scout reads only what is needed for the current trial:
+The scout reads only what is needed for the overall research goal and current
+trial:
 
 - `AGENTS.md`
 - `PROJECT.md`
@@ -58,24 +87,34 @@ Each trial plan must include:
 ```markdown
 ## Resource Scout Brief
 Scout: required | skipped
+Decision reason:
 Skip reason:
 Search scope:
 Resource types:
 Disciplines/domains:
+Known resource clues:
+Freshness / date sensitivity:
 Download policy:
 Expected destinations:
 Stop criteria:
 ```
 
-Use short, concrete entries. `Scout: skipped` is invalid unless `Skip reason:`
-explains why web/resource search would not help this trial.
+Use short, concrete entries. `Decision reason:` must explain why the scout is
+required or skipped for the overall research goal and current trial. `Scout:
+skipped` is invalid unless `Skip reason:` explains why web/resource search would
+not help this trial.
 
 ## Search Taxonomy
 
-Search according to the trial objective and target domain. Common resource
-types include papers, surveys, datasets, benchmarks, code repositories, reports,
-news, standards, policies, venue materials, model cards, evaluation artifacts,
-leaderboards, and reproducibility materials.
+Search according to the overall research target, current state/findings, and
+trial objective. Common resource types include files, papers, surveys, datasets,
+benchmarks, code repositories, reports, news, standards, policies, venue
+materials, model cards, evaluation artifacts, leaderboards, and reproducibility
+materials.
+
+Use web search, official websites, scholarly indexes, dataset portals, standards
+or policy repositories, public code hosts, venue pages, and existing resource
+clues as appropriate for the project domain and trial need.
 
 Default domain cues:
 

@@ -61,7 +61,7 @@ If planning or running a substantive trial, also read:
 - `PROJECT.md`: canonical research proposal and target definition.
 - `instructions/`: reusable agent protocols.
 - `resources/`: raw input materials, user brief, prior/ongoing work, seed papers, literature, data-source notes.
-- `workspace/`: live executable workspace for code, notebooks, configs, working data, and generated outputs.
+- `workspace/`: live workbench for concrete research work products: implementations, models, methods, frameworks, system designs, prototypes, pipelines, analyses, simulations, configs, prompts, schemas, working/derived data, generated outputs, logs, checkpoints, weights, and caches.
 - `research_trajectory/STATE.md`: current control state: objective, active plan, method status, blockers, constraints, next step.
 - `research_trajectory/CURRENT_FINDINGS.md`: latest global synthesis of accepted/tentative/rejected findings, results, claims, limitations, and evidence.
 - `research_trajectory/trials/`: audit trail of planned research work packages.
@@ -90,8 +90,8 @@ Research proceeds as a loop:
 5. create a trial under `research_trajectory/trials/<trial_id>/`;
 6. write `PLAN.md` with a `Resource Scout Brief`;
 7. write `reviews/PLAN_REVIEW.md`;
-8. if required, spawn a Resource Scout subagent to search, file, and report external resources for this trial;
-9. execute mainly in `workspace/`;
+8. if required, spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources;
+9. build, run, analyze, and evaluate mainly in `workspace/`;
 10. record outputs in or from the trial `artifacts/`;
 11. write `REPORT.md` after execution;
 12. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
@@ -115,16 +115,18 @@ When sources conflict, use this priority order:
 7. `resources/`;
 8. `archive/`.
 
-`workspace/` may contain the latest implementation, but it is not automatically accepted research truth. A method or result becomes current only when reflected in `STATE.md`, `CURRENT_FINDINGS.md`, and/or a trial report.
+`workspace/` may contain the latest working artifact or implementation state, but it is not automatically accepted research truth. A method or result becomes current only when reflected in `STATE.md`, `CURRENT_FINDINGS.md`, and/or a trial report.
 
 ---
 
 ## Human Messages During a Run
 
-Human messages are either ordinary interaction or formal human intervention.
+Human messages are either ordinary interaction or formal human intervention. The UI/server does not make the semantic classification; the agent must decide from the message, project context, and `instructions/INTERVENTION_PROTOCOL.md`.
 
 Ordinary interaction includes progress questions, clarifications, temporary pauses, requests to inspect logs, and requests for explanations. Do not create intervention files for ordinary interaction.
 
-Formal human intervention changes or constrains research direction, plan, method, resource, claim, target venue, or priority. Formal interventions must be recorded under `research_trajectory/human_interventions/`.
+Formal human intervention changes or constrains research direction, plan, method, resource, claim, target venue, or priority. In chat mode, record pending interventions under `research_trajectory/human_interventions/` and update the intervention index only; do not update canonical research state, trials, reviewer files, or manuscript gates from chat.
+
+Pending interventions are priority inputs for the next Start/Resume autoresearch run. The execution agent must read them before selecting or executing the next objective.
 
 When unsure, follow `instructions/INTERVENTION_PROTOCOL.md`.

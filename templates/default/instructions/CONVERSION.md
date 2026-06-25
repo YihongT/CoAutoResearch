@@ -73,7 +73,7 @@ The conversion `REPORT.md` should explain:
 - what the prior or proposed project was trying to do;
 - what should be reused;
 - what should not be trusted;
-- what should be migrated into `workspace/`;
+- what useful working artifacts should be migrated into `workspace/`;
 - how `PROJECT.md` was derived;
 - how `STATE.md` was initialized;
 - whether any findings are already active, tentative, superseded, or rejected;
@@ -89,7 +89,7 @@ Recommended pattern:
 
 1. keep the original snapshot under `resources/ongoing_work/`;
 2. inspect it as raw input;
-3. migrate only useful executable pieces to `workspace/`;
+3. migrate only useful working artifacts to `workspace/`: executable pieces, prototypes, configs, evaluation harnesses, design/system implementation materials, or derived data needed for future work;
 4. record migration decisions in the conversion trial;
 5. record current method status in `STATE.md`;
 6. record accepted/tentative/rejected findings in `CURRENT_FINDINGS.md` only when evidence supports them.

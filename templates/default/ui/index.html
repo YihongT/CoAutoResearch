@@ -28,7 +28,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png" />
     <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260624-framing-bottom-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260625-resume-dialog-2" />
   </head>
   <body>
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
@@ -236,8 +236,6 @@
                         <span>Try</span>
                         <button class="composer-suggestion-chip" type="button" data-pause-autoresearch>Pause after current turn</button>
                         <button class="composer-suggestion-chip" type="button" data-stop-current-run>Stop current run</button>
-                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal resume">Resume autoresearch</button>
-                        <button class="composer-suggestion-chip" type="button" data-composer-prompt="/goal">Show autoresearch</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/status">Status</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/ps">Processes</button>
                         <button class="composer-suggestion-chip" type="button" data-composer-prompt="/diff">Diff</button>
@@ -292,19 +290,11 @@
                       <div class="command-row" aria-label="Slash commands">
                         <button class="command-chip" type="button" data-command="/status">Status</button>
                         <button class="command-chip" type="button" data-command="/ps">Processes</button>
-                        <button class="command-chip" type="button" data-command="/goal">Show autoresearch</button>
-                        <button class="command-chip" type="button" data-command="/goal pause">Pause autoresearch</button>
-                        <button class="command-chip" type="button" data-command="/goal resume">Resume autoresearch</button>
-                        <button class="command-chip" type="button" data-command="/goal restart">Restart autoresearch</button>
                         <button class="command-chip" type="button" data-command="/permissions">Permissions</button>
                         <button class="command-chip" type="button" data-command="/model">Model</button>
                         <button class="command-chip" type="button" data-command="/plan">Plan</button>
                         <button class="command-chip" type="button" data-command="/diff">Diff</button>
                       </div>
-                      <form id="goal-form" class="goal-form">
-                        <input name="goal" type="text" placeholder="Set a session goal..." autocomplete="off" />
-                        <button class="secondary-button" type="submit">Set goal</button>
-                      </form>
                     </div>
                   </details>
 
@@ -646,6 +636,32 @@
       </section>
     </dialog>
 
+    <dialog class="project-dialog resume-autoresearch-dialog" id="resume-autoresearch-dialog" aria-labelledby="resume-autoresearch-title">
+      <section class="project-dialog-shell">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Autoresearch resume</p>
+            <h2 id="resume-autoresearch-title">Resume autoresearch?</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-resume-autoresearch-cancel aria-label="Close resume dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="resume-autoresearch-body">
+          <div class="resume-autoresearch-summary" id="resume-autoresearch-summary"></div>
+          <label class="field resume-autoresearch-instruction-field">
+            <span>Optional resume instruction</span>
+            <textarea id="resume-autoresearch-instruction" name="resumeInstruction" rows="3" maxlength="4000" placeholder="Optional instruction for the next autoresearch step..."></textarea>
+            <small>Used only for this resumed autoresearch loop. Leave blank to continue from the current project state and pending interventions.</small>
+          </label>
+        </div>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-resume-autoresearch-cancel>Cancel</button>
+          <button class="primary-button" type="button" data-resume-autoresearch-confirm>Resume autoresearch</button>
+        </footer>
+      </section>
+    </dialog>
+
     <dialog class="project-dialog restart-autoresearch-dialog" id="restart-autoresearch-dialog" aria-labelledby="restart-autoresearch-title">
       <section class="project-dialog-shell">
         <header class="project-dialog-head">
@@ -876,6 +892,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260624-framing-bottom-1"></script>
+    <script src="/app.js?v=20260625-resume-dialog-2"></script>
   </body>
 </html>

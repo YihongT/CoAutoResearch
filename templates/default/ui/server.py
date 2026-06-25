@@ -75,6 +75,8 @@ CHAT_PROTECTED_PATHS = [
     "manuscript/reviews",
     "manuscript/figures/FIGURE_SPECS.md",
 ]
+CHAT_HISTORY_MAX_MESSAGES = 80
+CHAT_QUEUE_MAX_MESSAGES = 50
 RESOURCE_PROVENANCE_VALUES = {
     "user_explicit",
     "user_confirmed",
@@ -2188,7 +2190,7 @@ def sanitize_framing_message(item: Any) -> dict[str, Any] | None:
     kind = str(item.get("kind") or "text").strip()
     if role not in {"user", "assistant"}:
         return None
-    if kind not in {"text", "project", "goal-launch", "command"}:
+    if kind not in {"text", "project", "goal-launch", "command", "intervention-recorded"}:
         kind = "text"
     clean: dict[str, Any] = {
         "id": str(item.get("id") or "").strip()[:120],
@@ -3945,6 +3947,27 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     reference_status = clean_summary_value(value_after_label(references_text, "Reference integrity status"))
     inline_artifacts = [block for block in architecture if block.get("is_artifact")]
     section_architecture = [block for block in architecture if not block.get("is_artifact")]
+
+    def appendix_files() -> list[dict[str, str]]:
+        root = REPO_ROOT / "manuscript" / "appendix"
+        if not root.is_dir():
+            return []
+        files: list[dict[str, str]] = []
+        for path in sorted(root.glob("*.md")):
+            if path.name == ".gitkeep" or not path.is_file():
+                continue
+            relative = rel_path(path)
+            text = path.read_text(encoding="utf-8", errors="replace")[:MAX_TEXT_BYTES]
+            heading = re.search(r"^\s*#\s+(.+?)\s*$", text, re.MULTILINE)
+            title = clean_summary_value(heading.group(1) if heading else path.stem.replace("_", " ").replace("-", " "))
+            body = re.sub(r"^\s*#\s+.+?\s*$", "", text, count=1, flags=re.MULTILINE).strip()
+            files.append({
+                "path": relative,
+                "title": title or path.name,
+                "summary": first_meaningful_line(body, ""),
+            })
+        return files
+
     return {
         "target": clean_summary_value(value_after_label(target_section, "Target venue") or first_meaningful_line(target_section)),
         "audience": clean_summary_value(value_after_label(target_section, "Audience")),
@@ -3966,6 +3989,8 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         "no_table_rationale": no_table_rationale,
         "references": references,
         "reference_status": reference_status,
+        "appendix_plan": clean_summary_value(extract_section(blueprint_text, "Appendix / Supplement Plan")),
+        "appendix_files": appendix_files(),
         "provenance": provenance,
         "traceability": provenance,
         "missing_evidence": [item for item in list_section_items(extract_section(blueprint_text, "Blocking Missing Evidence") or extract_section(blueprint_text, "Missing Evidence")) if meaningful_summary_value(item)][:12],
@@ -4482,6 +4507,17 @@ def trial_dir_is_closed(trial_dir: Path) -> bool:
     return review_dir.is_dir() and all((review_dir / name).is_file() for name in REQUIRED_REVIEWER_FILES)
 
 
+def trial_dir_is_reported(trial_dir: Path) -> bool:
+    return (trial_dir / "REPORT.md").is_file()
+
+
+def active_trial_dir_for_iteration(iteration: int) -> Path | None:
+    for path in active_trial_dirs():
+        if trial_iteration_from_id(path.name) == iteration:
+            return path
+    return None
+
+
 def closed_active_trial_dirs() -> list[Path]:
     # The canonical resume boundary stops at the first unclosed active trial.
     closed: list[Path] = []
@@ -4492,14 +4528,38 @@ def closed_active_trial_dirs() -> list[Path]:
     return closed
 
 
+def closed_trial_dirs_any_order() -> list[Path]:
+    return [path for path in active_trial_dirs() if trial_dir_is_closed(path)]
+
+
+def reported_trial_dirs_any_order() -> list[Path]:
+    return [path for path in active_trial_dirs() if trial_dir_is_reported(path)]
+
+
+def trajectory_boundary_iteration() -> int:
+    state = read_trajectory_state()
+    return max(
+        trial_iteration_from_id(state.get("latest_active_trial") or ""),
+        trial_iteration_from_id(state.get("base_trial") or ""),
+        0,
+    )
+
+
 def interrupted_tail_trial_dirs() -> list[Path]:
     active = active_trial_dirs()
-    boundary_iteration = max([trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()], default=0)
-    return [path for path in active if trial_iteration_from_id(path.name) > boundary_iteration]
+    boundary_iteration = latest_active_trial_iteration()
+    return [
+        path
+        for path in active
+        if trial_iteration_from_id(path.name) > boundary_iteration and not trial_dir_is_reported(path)
+    ]
 
 
 def latest_active_trial_iteration() -> int:
-    return max([trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()], default=0)
+    return max(
+        [trial_iteration_from_id(path.name) for path in reported_trial_dirs_any_order()],
+        default=trajectory_boundary_iteration(),
+    )
 
 
 def latest_trial_dir_iteration() -> int:
@@ -4516,9 +4576,21 @@ def next_active_trial_iteration() -> int:
 
 def sync_trajectory_state(reason: str = "") -> dict[str, Any]:
     state = read_trajectory_state()
-    active = closed_active_trial_dirs()
+    active = reported_trial_dirs_any_order()
+    latest_by_iteration = {
+        trial_iteration_from_id(path.name): path.name
+        for path in active
+        if trial_iteration_from_id(path.name) > 0
+    }
     latest = active[-1].name if active else ""
-    next_number = trial_iteration_from_id(latest) + 1 if latest else 1
+    boundary_iteration = trajectory_boundary_iteration()
+    latest_iteration = max(trial_iteration_from_id(latest), boundary_iteration)
+    if latest_iteration:
+        latest = latest_by_iteration.get(
+            latest_iteration,
+            str(state.get("latest_active_trial") or state.get("base_trial") or latest),
+        )
+    next_number = latest_iteration + 1 if latest_iteration else 1
     if (
         state.get("latest_active_trial") != latest
         or int(state.get("next_trial_number") or 1) != next_number
@@ -4556,7 +4628,14 @@ def expected_trial_marker_path() -> Path:
     return REPO_ROOT / "research_trajectory" / "NEXT_TRIAL.json"
 
 
-def write_expected_trial_marker(iteration: int, reason: str, base_trial: str = "", fork_id: str = "") -> dict[str, Any]:
+def write_expected_trial_marker(
+    iteration: int,
+    reason: str,
+    base_trial: str = "",
+    fork_id: str = "",
+    pending_interventions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    interventions = pending_interventions if pending_interventions is not None else pending_human_interventions()
     payload = {
         "schema_version": TRAJECTORY_SCHEMA_VERSION,
         "status": "pending",
@@ -4564,6 +4643,8 @@ def write_expected_trial_marker(iteration: int, reason: str, base_trial: str = "
         "reason": reason,
         "base_trial": base_trial,
         "fork_id": fork_id,
+        "pending_intervention_ids": [str(item.get("id") or "") for item in interventions if str(item.get("id") or "").strip()],
+        "pending_intervention_paths": [str(item.get("path") or "") for item in interventions if str(item.get("path") or "").strip()],
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -4607,6 +4688,10 @@ def complete_expected_trial_marker(reason: str) -> None:
     marker = read_expected_trial_marker()
     if active_expected_trial_iteration(marker) <= 0:
         return
+    expected = int(marker.get("expected_iteration") or 0)
+    trial_dir = active_trial_dir_for_iteration(expected) if expected > 0 else None
+    if trial_dir is not None and trial_dir_satisfies_current_boundary(trial_dir):
+        mark_pending_interventions_applied(marker, trial_dir.name, rel_path(trial_dir), reason)
     marker["status"] = "complete"
     marker["completed_reason"] = reason
     update_expected_trial_marker(marker)
@@ -4619,21 +4704,40 @@ def validate_expected_trial_marker() -> None:
     expected = int(marker.get("expected_iteration") or 0)
     if expected <= 0:
         return
-    closed_iterations = [trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()]
-    if expected in closed_iterations:
+    current_boundary_iterations = [
+        trial_iteration_from_id(path.name)
+        for path in active_trial_dirs()
+        if trial_dir_satisfies_current_boundary(path)
+    ]
+    if expected in current_boundary_iterations:
+        trial_dir = active_trial_dir_for_iteration(expected)
+        if trial_dir is not None:
+            mark_pending_interventions_applied(marker, trial_dir.name, rel_path(trial_dir), "expected_trial_fulfilled")
         marker["status"] = "fulfilled"
         update_expected_trial_marker(marker)
         sync_trajectory_state("expected_trial_fulfilled")
         return
-    higher = [value for value in closed_iterations if value > expected]
+    reported_iterations = [trial_iteration_from_id(path.name) for path in reported_trial_dirs_any_order()]
+    higher = [value for value in reported_iterations if value > expected]
     if higher:
         marker["status"] = "mismatch"
-        marker["actual_iterations"] = sorted(closed_iterations)
+        marker["actual_iterations"] = sorted(reported_iterations)
         update_expected_trial_marker(marker)
         stop_autoresearch_loop("trajectory_mismatch", read_autoresearch_gate())
         append_research_log(
-            f"Trajectory mismatch: expected the agent to close Trial {expected}, but closed trials are {sorted(closed_iterations)}."
+            f"Trajectory mismatch: expected the agent to close Trial {expected}, but reported trials are {sorted(reported_iterations)}."
         )
+
+
+def pending_expected_trial_iteration() -> int:
+    marker = read_expected_trial_marker()
+    expected = active_expected_trial_iteration(marker)
+    if expected <= 0:
+        return 0
+    trial_dir = active_trial_dir_for_iteration(expected)
+    if trial_dir is None or not trial_dir_satisfies_current_boundary(trial_dir):
+        return expected
+    return 0
 
 
 def write_trial_checkpoint(trial: dict[str, Any]) -> dict[str, Any]:
@@ -4847,7 +4951,7 @@ def archive_interrupted_trial_tail(reason: str) -> dict[str, Any]:
     if marker and active_expected_trial_iteration(marker) > 0:
         expected = int(marker.get("expected_iteration") or 0)
         archived_iterations = [trial_iteration_from_id(item["id"]) for item in archived]
-        if expected in archived_iterations or any(value >= expected for value in archived_iterations):
+        if expected in archived_iterations:
             marker["status"] = "interrupted"
             marker["reason"] = reason
             marker["archived_trials"] = archived
@@ -4988,6 +5092,313 @@ def next_intervention_id() -> int:
     return highest + 1
 
 
+def human_intervention_root() -> Path:
+    return REPO_ROOT / "research_trajectory" / "human_interventions"
+
+
+def human_intervention_index_json_path() -> Path:
+    return human_intervention_root() / "INDEX.json"
+
+
+def queued_chat_messages_path() -> Path:
+    return RUNTIME_DIR / "queued_chat_messages.json"
+
+
+def resend_archive_root() -> Path:
+    return RUNTIME_DIR / "chat_resend_archives"
+
+
+def intervention_id_from_path(path: str) -> str:
+    name = Path(str(path or "")).name
+    match = re.match(r"(I0*\d+)", name)
+    return match.group(1) if match else ""
+
+
+def compact_intervention_summary(text: str, limit: int = 160) -> str:
+    value = compact_single_line(text, limit)
+    return value or "Attached resources were submitted with this intervention."
+
+
+def normalize_intervention_index_entry(entry: Any) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    intervention_id = str(entry.get("id") or intervention_id_from_path(str(entry.get("path") or ""))).strip()
+    path = str(entry.get("path") or "").strip()
+    if not intervention_id or not path:
+        return None
+    status = str(entry.get("status") or "pending").strip().lower()
+    if status not in {"pending", "applied", "superseded"}:
+        status = "pending"
+    return {
+        "id": intervention_id,
+        "path": path,
+        "created_at": str(entry.get("created_at") or "").strip(),
+        "source": str(entry.get("source") or "ui.chat").strip(),
+        "status": status,
+        "applied_in_trial": str(entry.get("applied_in_trial") or "").strip(),
+        "applied_trial_path": str(entry.get("applied_trial_path") or "").strip(),
+        "applied_at": str(entry.get("applied_at") or "").strip(),
+        "superseded_by": str(entry.get("superseded_by") or "").strip(),
+        "client_message_id": str(entry.get("client_message_id") or "").strip(),
+        "summary": str(entry.get("summary") or "").strip(),
+    }
+
+
+def read_human_intervention_index() -> dict[str, Any]:
+    path = human_intervention_index_json_path()
+    payload: dict[str, Any] = {"schema_version": 1, "interventions": []}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload.update(loaded)
+        except (OSError, json.JSONDecodeError):
+            payload = {"schema_version": 1, "interventions": []}
+    entries = payload.get("interventions")
+    if not isinstance(entries, list):
+        entries = []
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        item = normalize_intervention_index_entry(entry)
+        if not item or item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        normalized.append(item)
+    payload["schema_version"] = 1
+    payload["interventions"] = normalized
+    return payload
+
+
+def write_human_intervention_index(payload: dict[str, Any]) -> None:
+    path = human_intervention_index_json_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "interventions": [
+            item
+            for item in (normalize_intervention_index_entry(entry) for entry in payload.get("interventions", []))
+            if item is not None
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def record_pending_human_intervention(
+    intervention_id: str,
+    path: str,
+    summary: str,
+    source: str = "ui.chat",
+    created_at: str | None = None,
+    client_message_id: str = "",
+) -> dict[str, Any]:
+    payload = read_human_intervention_index()
+    entries = payload["interventions"]
+    existing = next((item for item in entries if item.get("id") == intervention_id), None)
+    if existing is None:
+        existing = {
+            "id": intervention_id,
+            "path": path,
+            "created_at": created_at or now_iso(),
+            "source": source,
+            "status": "pending",
+            "applied_in_trial": "",
+            "applied_trial_path": "",
+            "applied_at": "",
+            "superseded_by": "",
+            "client_message_id": client_message_id,
+            "summary": compact_intervention_summary(summary),
+        }
+        entries.append(existing)
+    else:
+        existing["path"] = path
+        existing["source"] = existing.get("source") or source
+        existing["client_message_id"] = existing.get("client_message_id") or client_message_id
+        existing["summary"] = compact_intervention_summary(summary)
+        if str(existing.get("status") or "").strip().lower() != "applied":
+            existing["status"] = "pending"
+    write_human_intervention_index(payload)
+    return existing
+
+
+def find_pending_intervention_by_client_message(client_message_id: str) -> dict[str, Any] | None:
+    value = str(client_message_id or "").strip()
+    if not value:
+        return None
+    for item in read_human_intervention_index().get("interventions", []):
+        if (
+            str(item.get("client_message_id") or "").strip() == value
+            and str(item.get("status") or "").strip().lower() == "pending"
+            and str(item.get("path") or "").strip()
+        ):
+            path = REPO_ROOT / str(item.get("path") or "")
+            if path.exists():
+                return item
+    return None
+
+
+def pending_human_interventions() -> list[dict[str, Any]]:
+    payload = read_human_intervention_index()
+    pending = [
+        item
+        for item in payload.get("interventions", [])
+        if str(item.get("status") or "").strip().lower() == "pending"
+        and str(item.get("path") or "").strip()
+        and (REPO_ROOT / str(item.get("path") or "")).exists()
+    ]
+    return sorted(pending, key=lambda item: str(item.get("id") or ""))
+
+
+def sync_expected_trial_pending_interventions(reason: str = "pending_interventions_updated") -> dict[str, Any]:
+    pending = pending_human_interventions()
+    marker = read_expected_trial_marker()
+    expected = active_expected_trial_iteration(marker)
+    if expected <= 0 and has_autoresearch_context():
+        expected = next_active_trial_iteration()
+        trajectory = read_trajectory_state()
+        marker = write_expected_trial_marker(
+            expected,
+            reason,
+            base_trial=str(trajectory.get("latest_active_trial") or trajectory.get("base_trial") or ""),
+            fork_id=str(trajectory.get("fork_id") or ""),
+            pending_interventions=pending,
+        )
+        return marker
+    if expected <= 0:
+        return marker
+    marker["pending_intervention_ids"] = [
+        str(item.get("id") or "") for item in pending if str(item.get("id") or "").strip()
+    ]
+    marker["pending_intervention_paths"] = [
+        str(item.get("path") or "") for item in pending if str(item.get("path") or "").strip()
+    ]
+    marker["updated_at"] = now_iso()
+    if reason:
+        marker["last_pending_sync_reason"] = reason
+    update_expected_trial_marker(marker)
+    return marker
+
+
+def mark_pending_interventions_applied(marker: dict[str, Any], trial_id: str, trial_path: str, reason: str = "") -> None:
+    ids = [str(item or "").strip() for item in marker.get("pending_intervention_ids", []) if str(item or "").strip()]
+    if not ids:
+        return
+    payload = read_human_intervention_index()
+    changed = False
+    for entry in payload.get("interventions", []):
+        if str(entry.get("id") or "") not in ids:
+            continue
+        if str(entry.get("status") or "").strip().lower() != "pending":
+            continue
+        entry["status"] = "applied"
+        entry["applied_in_trial"] = trial_id
+        entry["applied_trial_path"] = trial_path
+        entry["applied_at"] = now_iso()
+        if reason:
+            entry["applied_reason"] = reason
+        changed = True
+    if changed:
+        write_human_intervention_index(payload)
+
+
+def intervention_summary_from_file(path: Path) -> str:
+    text = safe_read(path, 12_000)
+    for heading in ("Current Effective Instruction", "User Instruction", "Expected Autoresearch Consequence"):
+        section = extract_section(text, heading)
+        if section:
+            return compact_intervention_summary(first_meaningful_line(section, section))
+    return compact_intervention_summary(first_meaningful_line(text, path.stem))
+
+
+def sync_human_intervention_indexes(reason: str = "intervention_index_sync") -> dict[str, Any]:
+    root = human_intervention_root()
+    root.mkdir(parents=True, exist_ok=True)
+    payload = read_human_intervention_index()
+    entries = payload["interventions"]
+    by_id = {str(item.get("id") or ""): item for item in entries}
+    changed = False
+    for path in sorted(root.glob("I*.md")):
+        intervention_id = intervention_id_from_path(path.name)
+        if not intervention_id:
+            continue
+        relative = rel_path(path)
+        summary = intervention_summary_from_file(path)
+        existing = by_id.get(intervention_id)
+        if existing is None:
+            existing = {
+                "id": intervention_id,
+                "path": relative,
+                "created_at": datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds"),
+                "source": "agent.chat",
+                "status": "pending",
+                "applied_in_trial": "",
+                "applied_trial_path": "",
+                "applied_at": "",
+                "superseded_by": "",
+                "client_message_id": "",
+                "summary": summary,
+            }
+            entries.append(existing)
+            by_id[intervention_id] = existing
+            changed = True
+            continue
+        if existing.get("path") != relative:
+            existing["path"] = relative
+            changed = True
+        status = str(existing.get("status") or "").strip().lower()
+        if status not in {"applied", "superseded"}:
+            if status != "pending":
+                existing["status"] = "pending"
+                changed = True
+            if summary and existing.get("summary") != summary:
+                existing["summary"] = summary
+                changed = True
+    if changed:
+        write_human_intervention_index(payload)
+    else:
+        # Re-write through the normalizer so hand-edited JSON is kept canonical.
+        write_human_intervention_index(payload)
+    payload = read_human_intervention_index()
+    index_path = root / "INDEX.md"
+    lines = ["# Human Interventions", ""]
+    for item in payload.get("interventions", []):
+        status = str(item.get("status") or "pending").strip()
+        summary = str(item.get("summary") or "").strip()
+        suffix = f" — {summary}" if summary else ""
+        lines.append(f"- `{item.get('id')}` `{status}`: `{item.get('path')}`{suffix}")
+    index_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    sync_expected_trial_pending_interventions(reason)
+    return payload
+
+
+def pending_intervention_prompt_section() -> str:
+    pending = pending_human_interventions()
+    if not pending:
+        return ""
+    lines = [
+        "",
+        "Pending human interventions:",
+        "",
+        "Apply these before selecting or executing the next autoresearch objective. Read `instructions/INTERVENTION_PROTOCOL.md` and every pending intervention file listed here.",
+        "",
+    ]
+    for item in pending:
+        summary = str(item.get("summary") or "").strip()
+        suffix = f" — {summary}" if summary else ""
+        lines.append(f"- `{item.get('id')}` `{item.get('path')}`{suffix}")
+    lines.extend(
+        [
+            "",
+            "Trial reporting requirements for these interventions:",
+            "- PLAN.md must include `## Human Interventions` stating how each pending intervention changes or constrains the trial.",
+            "- REPORT.md must state which pending interventions were applied, deferred, or blocked, with reasons.",
+            "- Do not mark an intervention as obsolete unless a newer explicit human intervention supersedes it.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def write_resume_intervention(
     fork_id: str,
     fork_sequence: int,
@@ -4997,16 +5408,17 @@ def write_resume_intervention(
     restore_mode: str,
     archived_trials: list[dict[str, str]],
 ) -> str:
-    root = REPO_ROOT / "research_trajectory" / "human_interventions"
+    root = human_intervention_root()
     root.mkdir(parents=True, exist_ok=True)
     intervention_number = next_intervention_id()
+    intervention_id = f"I{intervention_number:04d}"
     title_slug = slugify(f"resume_from_{trial.get('id', 'trial')}", "resume_from_trial")
-    path = root / f"I{intervention_number:04d}_{title_slug}.md"
+    path = root / f"{intervention_id}_{title_slug}.md"
     uploaded = attachments.get("saved_files", []) if isinstance(attachments, dict) else []
     linked = attachments.get("resource_links", []) if isinstance(attachments, dict) else []
     clues = attachments.get("resource_clues", []) if isinstance(attachments, dict) else []
     lines = [
-        f"# I{intervention_number:04d} Resume From Trial",
+        f"# {intervention_id} Resume From Trial",
         "",
         f"Created: {now_iso()}",
         f"Fork number: `F{fork_sequence:04d}`",
@@ -5053,30 +5465,11 @@ def write_resume_intervention(
 
     index_path = root / "INDEX.md"
     existing = safe_read(index_path) if index_path.exists() else "# Human Interventions\n"
-    entry = f"- `I{intervention_number:04d}` Resume from `{trial.get('id', '')}`: `{rel_path(path)}`"
+    entry = f"- `{intervention_id}` Resume from `{trial.get('id', '')}`: `{rel_path(path)}`"
     if entry not in existing:
         index_path.write_text(existing.rstrip() + "\n" + entry + "\n", encoding="utf-8")
+    record_pending_human_intervention(intervention_id, rel_path(path), user_instruction, source="ui.resume_from_trial")
     return rel_path(path)
-
-
-EXPLICIT_INTERVENTION_RE = re.compile(
-    r"^\s*(?:human\s+intervention|formal\s+intervention|intervention|人类干预|正式干预|干预)\s*[:：]",
-    re.IGNORECASE,
-)
-INTERVENTION_EN_PATTERNS = [
-    re.compile(r"\b(?:stop using|do not use|don't use|avoid|reject|invalidate|prioritize|focus on|use this|use the attached|use attached|pivot to|switch to)\b", re.IGNORECASE),
-    re.compile(r"\b(?:change|switch|set|move|pivot|revise|update)\b.{0,80}\b(?:target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b", re.IGNORECASE),
-    re.compile(r"\b(?:target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b.{0,60}\b(?:to|should be|is now|must|needs to|instead)\b", re.IGNORECASE),
-]
-INTERVENTION_ZH_PATTERNS = [
-    re.compile(r"(?:改变|更改|修改|调整|换成|改成|转向|聚焦|优先).{0,40}(?:方向|计划|方法|资源|数据集|venue|期刊|目标|claim|主张|范围|约束|优先级)"),
-    re.compile(r"(?:不要|别|停止|避免).{0,40}(?:用|使用|采用|依赖|引用)"),
-    re.compile(r"(?:目标|venue|期刊|claim|主张|方法|资源|数据集|方向|计划|范围|约束|优先级).{0,40}(?:改成|换成|变成|优先|不要|别|停止|必须|需要)"),
-]
-ORDINARY_CHAT_RE = re.compile(
-    r"(?:\b(?:status|progress|log|logs|where|summarize|summary|explain|what is|what's|show me|tell me)\b|进度|状态|日志|哪里|在哪|解释|总结|是什么)",
-    re.IGNORECASE,
-)
 
 
 def has_autoresearch_context() -> bool:
@@ -5089,6 +5482,9 @@ def has_autoresearch_context() -> bool:
         return True
     if session_id and mode not in {"", "framing", "chat"}:
         return True
+    marker = read_expected_trial_marker()
+    if active_expected_trial_iteration(marker) > 0:
+        return True
     trials_dir = REPO_ROOT / "research_trajectory" / "trials"
     if trials_dir.is_dir() and any(child.is_dir() for child in trials_dir.iterdir()):
         return True
@@ -5096,94 +5492,6 @@ def has_autoresearch_context() -> bool:
     if "Autoresearch Goal Gate" in state_text:
         return True
     return False
-
-
-def is_human_intervention_candidate(message: str, attachments: dict[str, Any] | None = None) -> bool:
-    text = str(message or "").strip()
-    if not has_autoresearch_context():
-        return False
-    if EXPLICIT_INTERVENTION_RE.search(text):
-        return True
-    if not text:
-        return False
-    lowered = text.lower()
-    if text.endswith(("?", "？")) and ORDINARY_CHAT_RE.search(text):
-        return False
-    if any(pattern.search(lowered) for pattern in INTERVENTION_EN_PATTERNS):
-        return True
-    if any(pattern.search(text) for pattern in INTERVENTION_ZH_PATTERNS):
-        return True
-    return False
-
-
-def write_chat_intervention(
-    original_message: str,
-    prepared_message: str,
-    attachments: dict[str, Any],
-    settings: dict[str, Any],
-) -> str:
-    root = REPO_ROOT / "research_trajectory" / "human_interventions"
-    root.mkdir(parents=True, exist_ok=True)
-    intervention_number = next_intervention_id()
-    path = root / f"I{intervention_number:04d}_ui_intervention.md"
-    backend = normalize_agent_backend(settings.get("backend"))
-    with RESEARCH_LOCK:
-        session_id = str(RESEARCH_SESSION.get("session_id") or "").strip()
-        run_id = str(RESEARCH_SESSION.get("id") or "").strip()
-        mode = str(RESEARCH_SESSION.get("mode") or "").strip()
-    uploaded = attachments.get("saved_files", []) if isinstance(attachments, dict) else []
-    linked = attachments.get("resource_links", []) if isinstance(attachments, dict) else []
-    clues = attachments.get("resource_clues", []) if isinstance(attachments, dict) else []
-    metadata = attachments.get("metadata_files", []) if isinstance(attachments, dict) else []
-    lines = [
-        f"# I{intervention_number:04d} UI Human Intervention",
-        "",
-        f"Created: {now_iso()}",
-        "Source: UI chat",
-        f"Backend: `{backend}`",
-        f"Session id: `{session_id or 'none'}`",
-        f"Run id: `{run_id or 'none'}`",
-        f"Run mode: `{mode or 'idle'}`",
-        "",
-        "## User Instruction",
-        "",
-        original_message.strip() or "(No text; attached resources were submitted with this intervention.)",
-        "",
-        "## Attached Context",
-        "",
-    ]
-    if not uploaded and not linked and not clues and not metadata:
-        lines.append("- No additional files or resources were attached with this intervention.")
-    for item in uploaded:
-        lines.append(f"- Uploaded file: `{item}`")
-    for item in linked:
-        if isinstance(item, dict):
-            lines.append(f"- {item.get('mode', 'linked')} {item.get('category', 'resource')}: `{item.get('path', '')}`")
-    for item in clues:
-        if isinstance(item, dict):
-            lines.append(f"- Resource clue: `{item.get('reference', '')}` ({item.get('status', '')})")
-    for item in metadata:
-        lines.append(f"- Metadata file: `{item}`")
-    if prepared_message.strip() and prepared_message.strip() != original_message.strip():
-        lines.extend(["", "## Prepared Agent Context", "", prepared_message.strip()])
-    lines.extend(
-        [
-            "",
-            "## Effective Consequence",
-            "",
-            "- Treat this as the latest formal human intervention.",
-            "- Apply it before the next autoresearch step or trial.",
-            "- Update canonical research state and manuscript-facing artifacts only as required by `instructions/INTERVENTION_PROTOCOL.md`.",
-        ]
-    )
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-
-    index_path = root / "INDEX.md"
-    existing = safe_read(index_path) if index_path.exists() else "# Human Interventions\n"
-    entry = f"- `I{intervention_number:04d}` UI intervention: `{rel_path(path)}`"
-    if entry not in existing:
-        index_path.write_text(existing.rstrip() + "\n" + entry + "\n", encoding="utf-8")
-    return rel_path(path)
 
 
 def write_resume_fork_manifest(
@@ -7660,6 +7968,75 @@ def current_trial_reviewer_file_blockers() -> list[str]:
     return blockers
 
 
+def trial_protocol_file_blockers(trial_dir: Path) -> list[str]:
+    latest = trial_dir
+    blockers: list[str] = []
+
+    plan_path = latest / "PLAN.md"
+    plan_text = safe_read(plan_path) if plan_path.exists() else ""
+    scout_brief = markdown_section(plan_text, "Resource Scout Brief")
+    if not scout_brief:
+        blockers.append(f"`{rel_path(plan_path)}` is missing `## Resource Scout Brief`.")
+    else:
+        scout_status = normalize_gate_status(regex_first_value(scout_brief, [r"Scout:\s*`?([^`\n]+)`?"]))
+        if scout_status not in {"required", "skipped"}:
+            blockers.append(f"`{rel_path(plan_path)}` Resource Scout brief must declare `Scout: required` or `Scout: skipped`.")
+        for label in ("Decision reason", "Search scope", "Resource types", "Disciplines/domains", "Known resource clues", "Freshness / date sensitivity", "Download policy", "Expected destinations", "Stop criteria"):
+            if not re.search(rf"{re.escape(label)}:\s*\S", scout_brief, re.IGNORECASE):
+                blockers.append(f"`{rel_path(plan_path)}` Resource Scout brief is missing `{label}:`.")
+        if scout_status == "skipped" and not re.search(r"Skip reason:\s*\S", scout_brief, re.IGNORECASE):
+            blockers.append(f"`{rel_path(plan_path)}` Resource Scout brief skips scout without a concrete `Skip reason:`.")
+
+    scout_report = latest / "artifacts" / "resource_scout" / "RESOURCE_SCOUT_REPORT.md"
+    scout_report_text = safe_read(scout_report) if scout_report.exists() else ""
+    if not scout_report.exists() or not scout_report.is_file():
+        blockers.append(f"Current trial is missing `{rel_path(scout_report)}`.")
+    elif re.search(r"Scout:\s*skipped\b", scout_report_text, re.IGNORECASE):
+        if not markdown_section(scout_report_text, "Reason") and not re.search(r"Skip reason:\s*\S", scout_report_text, re.IGNORECASE):
+            blockers.append(f"`{rel_path(scout_report)}` skips Resource Scout without a recorded reason.")
+        if scout_brief and not re.search(r"Scout:\s*skipped\b", scout_brief, re.IGNORECASE):
+            blockers.append(f"`{rel_path(scout_report)}` skips Resource Scout but `PLAN.md` did not declare `Scout: skipped`.")
+
+    spawn_decision = latest / "artifacts" / "reviewer_spawn" / "REVIEWER_SPAWN_DECISION.md"
+    decision_text = safe_read(spawn_decision) if spawn_decision.exists() else ""
+    if not spawn_decision.exists() or not spawn_decision.is_file():
+        blockers.append(f"Current trial is missing `{rel_path(spawn_decision)}`.")
+        return blockers
+    spawn_needed_raw = regex_first_value(decision_text, [r"Spawn needed:\s*`?([^`\n]+)`?"])
+    spawn_needed = str(spawn_needed_raw or "").strip().lower()
+    if spawn_needed not in {"yes", "no"}:
+        blockers.append(f"`{rel_path(spawn_decision)}` must declare `Spawn needed: yes` or `Spawn needed: no`.")
+    if spawn_needed == "yes":
+        review_ref = regex_first_value(
+            decision_text,
+            [
+                r"Specialized reviewer output:\s*`?([^`\n]+)`?",
+                r"Specialized review output path:\s*`?([^`\n]+)`?",
+                r"Specialized review(?:er)?(?: name/path if yes)?:\s*`?([^`\n]+)`?",
+                r"Specialized review path:\s*`?([^`\n]+)`?",
+            ],
+        )
+        review_ref = str(review_ref or "").strip().strip("`")
+        if not review_ref or review_ref.upper() in {"N/A", "NA", "NONE"}:
+            blockers.append(f"`{rel_path(spawn_decision)}` says `Spawn needed: yes` but does not name a specialized review output path.")
+        else:
+            review_path = (REPO_ROOT / review_ref) if review_ref.startswith("research_trajectory/") else (latest / review_ref)
+            if not review_path.exists() or not review_path.is_file():
+                blockers.append(f"`{rel_path(spawn_decision)}` requires missing specialized review `{rel_path(review_path)}`.")
+    return blockers
+
+
+def current_trial_protocol_file_blockers() -> list[str]:
+    trials = active_trial_dirs()
+    if not trials:
+        return ["No active trial exists for current protocol validation."]
+    return trial_protocol_file_blockers(trials[-1])
+
+
+def trial_dir_satisfies_current_boundary(trial_dir: Path) -> bool:
+    return trial_dir_is_closed(trial_dir) and not trial_protocol_file_blockers(trial_dir)
+
+
 def final_blueprint_consistency_blockers() -> list[str]:
     blockers: list[str] = []
     blueprint_path = REPO_ROOT / "manuscript" / "BLUEPRINT.md"
@@ -7821,6 +8198,7 @@ def final_gate_consistency_blockers() -> list[str]:
         blockers.append(f"Core instructions are outdated ({detail}).")
     blockers.extend(final_gate_review_schema_blockers())
     blockers.extend(current_trial_reviewer_file_blockers())
+    blockers.extend(current_trial_protocol_file_blockers())
     blockers.extend(final_blueprint_consistency_blockers())
     findings_path = REPO_ROOT / "research_trajectory" / "CURRENT_FINDINGS.md"
     if findings_path.exists():
@@ -8078,6 +8456,22 @@ def research_session_snapshot() -> dict[str, Any]:
             "wait_state": wait_state,
             "progress": active_progress,
         }
+        marker = read_expected_trial_marker()
+        expected_iteration = active_expected_trial_iteration(marker)
+        expected_trial = {}
+        if expected_iteration > 0:
+            expected_trial = {
+                "schema_version": marker.get("schema_version", TRAJECTORY_SCHEMA_VERSION),
+                "status": str(marker.get("status") or ""),
+                "expected_iteration": expected_iteration,
+                "reason": str(marker.get("reason") or ""),
+                "base_trial": str(marker.get("base_trial") or ""),
+                "fork_id": str(marker.get("fork_id") or ""),
+                "pending_intervention_ids": [str(item) for item in marker.get("pending_intervention_ids", []) if str(item).strip()],
+                "pending_intervention_paths": [str(item) for item in marker.get("pending_intervention_paths", []) if str(item).strip()],
+                "created_at": str(marker.get("created_at") or ""),
+                "updated_at": str(marker.get("updated_at") or ""),
+            }
         return {
             "id": RESEARCH_SESSION.get("id", ""),
             "session_id": RESEARCH_SESSION.get("session_id", ""),
@@ -8105,7 +8499,9 @@ def research_session_snapshot() -> dict[str, Any]:
             "loop_stop_reason": loop_stop_reason,
             "gate": gate,
             "trajectory": trajectory,
+            "expected_trial": expected_trial,
             "active_run": active_run,
+            **queued_chat_summary(),
         }
 
 
@@ -8212,19 +8608,19 @@ def goal_instruction_prompt_section(instruction: str = "") -> str:
         return ""
     return f"""
 
-Additional CoAutoResearch goal instruction from the user:
+Additional user instruction for this resume:
 {text}
 
-Apply this instruction when choosing and executing the next trial objective, but do not let it weaken reviewer standards, provenance requirements, or final-pass requirements."""
+Apply this resume instruction when choosing and executing the next trial objective, but do not let it weaken reviewer standards, provenance requirements, or final-pass requirements."""
 
 
 def resource_scout_prompt_section() -> str:
     return """
 Resource Scout requirement for every substantive trial:
 - read instructions/RESOURCE_SCOUT.md;
-- PLAN.md must include `## Resource Scout Brief` with `Scout: required | skipped`, `Skip reason:`, `Search scope:`, `Resource types:`, `Disciplines/domains:`, `Download policy:`, `Expected destinations:`, and `Stop criteria:`;
+- PLAN.md must include `## Resource Scout Brief` with `Scout: required | skipped`, `Decision reason:`, `Skip reason:`, `Search scope:`, `Resource types:`, `Disciplines/domains:`, `Known resource clues:`, `Freshness / date sensitivity:`, `Download policy:`, `Expected destinations:`, and `Stop criteria:`;
 - default to `Scout: required`; use `Scout: skipped` only for narrow local-only work, explicitly offline runs, or truly irrelevant external search, and write a concrete skip reason;
-- after PLAN.md and reviews/PLAN_REVIEW.md, before main execution, `spawn a Resource Scout subagent to search, file, and report external resources for this trial` when required;
+- after PLAN.md and reviews/PLAN_REVIEW.md, before main execution, `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` when required;
 - write `research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and save small public artifacts under the appropriate `resources/` folder;
 - record scout-discovered materials as `autoresearch_discovered`; they are raw inputs, not current truth, until promoted by the main execution agent into REPORT.md, STATE.md, CURRENT_FINDINGS.md, PROJECT.md, or manuscript files;
 - if scout outputs change assumptions, resources, risks, or success criteria, revise PLAN.md and rerun PLAN_REVIEW.md before execution;
@@ -8257,10 +8653,11 @@ def continue_autoresearch_loop_prompt(
 This is one bounded agent invocation. The CoAutoResearch server owns the outer loop and will inspect the gate after this run to decide whether another trial is needed.
 {fast_mode_prompt_section(fast_mode)}
 {goal_instruction_prompt_section(goal_instruction)}
+{pending_intervention_prompt_section()}
 
 Current autoresearch gate status: {status}
 
-Next active trial must be Trial {expected}. Create it under `research_trajectory/trials/` with an id beginning `{expected:06d}_`. Do not skip ahead because old runtime state or archived/superseded trials had higher numbers.
+Next active trial must be Trial {expected}. If a `research_trajectory/trials/{expected:06d}_*` directory already exists, complete that existing trial boundary; otherwise create it under `research_trajectory/trials/` with an id beginning `{expected:06d}_`. Do not skip ahead because old runtime state or archived/superseded trials had higher numbers.
 
 Gate summary:
 {summary}
@@ -8284,10 +8681,10 @@ Read:
 If the `Autoresearch Goal Gate` section in `research_trajectory/STATE.md` says `Status: pass` and every current-trial reviewer file is a strict pass, including the Final gate reviewer, do not create a new trial. Report that the autoresearch goal has passed all reviewer gates.
 
 Otherwise, run exactly the next coherent autoresearch iteration needed to move the gate toward pass:
-1. create the next trial under research_trajectory/trials/;
+1. create or complete Trial {expected} under research_trajectory/trials/;
 2. write PLAN.md before execution, including `## Resource Scout Brief`;
 3. create `reviews/` and write PLAN_REVIEW.md before execution;
-4. spawn a Resource Scout subagent to search, file, and report external resources for this trial if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
+4. spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
 5. execute mainly in workspace/;
 6. write REPORT.md;
 7. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
@@ -8377,7 +8774,7 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
     append_research_log(
         f"Autoresearch gate is {gate.get('raw_status') or gate.get('status')}; continuing from the last closed trial boundary."
     )
-    next_iteration = next_active_trial_iteration()
+    next_iteration = pending_expected_trial_iteration() or next_active_trial_iteration()
     resume_same_session = should_resume_research_session(settings)
     start_research_run(
         continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode")), goal_instruction),
@@ -8388,6 +8785,46 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         loop_active=True,
         loop_iteration_override=next_iteration,
     )
+
+
+def maybe_start_queued_chat_after_run(previous_mode: str, returncode: int | None) -> bool:
+    if previous_mode not in {"goal", "research", "command"}:
+        return False
+    queued = read_queued_chat_messages()
+    if not queued:
+        return False
+    settings = dict(RESEARCH_SESSION.get("settings") or {})
+    for item in reversed(queued):
+        if isinstance(item.get("settings"), dict):
+            settings = dict(item["settings"])
+            break
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["loop_active"] = False
+        RESEARCH_SESSION["loop_stop_reason"] = "queued_chat_after_current_run"
+    persist_research_session()
+    display = "Reply to queued chat messages."
+    prompt_message = "\n\n".join(str(item.get("prepared_message") or item.get("text") or "").strip() for item in queued if str(item.get("prepared_message") or item.get("text") or "").strip())
+    try:
+        session = start_research_run(
+            chat_research_prompt(
+                prompt_message or "Reply to queued chat messages.",
+                queued_messages=queued,
+            ),
+            "chat",
+            resume=False,
+            settings_payload=settings,
+            display_prompt=display,
+            loop_active=False,
+        )
+        archive_path = archive_queued_chat_messages(queued, "started_chat_after_current_run")
+        clear_queued_chat_messages()
+        append_research_log(
+            f"Started queued chat reply after current run; autoresearch loop is paused until Resume is clicked. Archived queue: {archive_path or 'none'}"
+        )
+        return bool(session)
+    except Exception as exc:  # pragma: no cover - defensive queue handling
+        append_research_log(f"Queued chat could not start after current run; autoresearch loop remains paused: {exc}")
+        return True
 
 
 def process_research_run(proc: subprocess.Popen[str]) -> None:
@@ -8410,6 +8847,7 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
                 "Chat mode guard restored protected autoresearch artifacts; use the Start/Resume autoresearch controls to create trials: "
                 + ", ".join(restored_paths)
             )
+        sync_human_intervention_indexes("chat_completed")
         with RESEARCH_LOCK:
             RESEARCH_SESSION["protected_snapshot"] = None
         persist_research_session()
@@ -8421,6 +8859,8 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
                 sync_trajectory_state("run_completed")
         except Exception as exc:  # pragma: no cover - checkpointing should not kill the UI loop
             append_research_log(f"Trajectory/checkpoint warning: {exc}")
+    if maybe_start_queued_chat_after_run(mode, returncode):
+        return
     maybe_continue_autoresearch_loop(returncode)
 
 
@@ -8674,6 +9114,7 @@ This is after the user-facing framing pass. Do not rerun cold-start framing just
 This is one bounded agent invocation. The CoAutoResearch server owns the outer loop and will inspect the gate after this run to decide whether another trial is needed.
 {instruction_section}
 {fast_mode_prompt_section(fast_mode)}
+{pending_intervention_prompt_section()}
 
 Use the repository instructions:
 - read AGENTS.md
@@ -8697,7 +9138,7 @@ Run exactly the next autoresearch iteration and maintain the reviewer gate:
 2. create the next trial under research_trajectory/trials/;
 3. write PLAN.md before execution, including `## Resource Scout Brief`;
 4. create `reviews/` and write PLAN_REVIEW.md before execution;
-5. spawn a Resource Scout subagent to search, file, and report external resources for this trial if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
+5. spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
 6. execute primarily in workspace/;
 7. write REPORT.md after execution;
 8. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
@@ -8736,12 +9177,121 @@ source-level evidence checks are completed" remains, keep `Status: continue`.
 Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message and set `Status: needs_human` instead of silently inventing a different project."""
 
 
-def chat_research_prompt(message: str = "") -> str:
+def compact_chat_history_items(items: Any, limit: int = CHAT_HISTORY_MAX_MESSAGES) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    clean: list[dict[str, str]] = []
+    for item in items[-limit:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        text = str(item.get("text") or item.get("content") or "").strip()
+        if not text:
+            continue
+        clean_item: dict[str, Any] = {
+            "id": str(item.get("id") or "").strip()[:120],
+            "role": role,
+            "kind": str(item.get("kind") or "text").strip()[:80],
+            "text": text[:8000],
+            "created_at": str(item.get("created_at") or "").strip()[:80],
+        }
+        attachments = item.get("attachments")
+        if isinstance(attachments, list):
+            clean_attachments: list[dict[str, str]] = []
+            for attachment in attachments[:20]:
+                if not isinstance(attachment, dict):
+                    continue
+                name = str(attachment.get("name") or "").strip()[:240]
+                path = str(attachment.get("path") or "").strip()[:1000]
+                if not name and not path:
+                    continue
+                clean_attachments.append(
+                    {
+                        "kind": str(attachment.get("kind") or "attachment").strip()[:80],
+                        "name": name,
+                        "path": path,
+                        "category": str(attachment.get("category") or "").strip()[:80],
+                    }
+                )
+            if clean_attachments:
+                clean_item["attachments"] = clean_attachments
+        clean.append(clean_item)
+    return clean
+
+
+def chat_history_prompt_section(conversation_history: Any = None) -> str:
+    items = compact_chat_history_items(conversation_history)
+    if not items:
+        return ""
+    lines = ["", "Authoritative UI conversation history for this chat turn:", ""]
+    for item in items:
+        item_id = f" `{item['id']}`" if item.get("id") else ""
+        timestamp = f" ({item['created_at']})" if item.get("created_at") else ""
+        lines.append(f"{item['role'].upper()}{item_id}{timestamp}:")
+        lines.append(item["text"])
+        attachments = item.get("attachments") if isinstance(item.get("attachments"), list) else []
+        for attachment in attachments:
+            label = attachment.get("path") or attachment.get("name") or "attachment"
+            lines.append(f"- attachment: {label} ({attachment.get('kind') or 'attachment'}, {attachment.get('category') or 'resource'})")
+        lines.append("")
+    lines.append("Use this history as the current UI truth for this chat turn.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def resend_prompt_section(resend_context: Any = None) -> str:
+    if not isinstance(resend_context, dict):
+        return ""
+    edited = str(resend_context.get("editedMessageId") or "").strip()
+    if not edited:
+        return ""
+    archived_count = int(resend_context.get("archivedCount") or 0)
+    return f"""
+
+Regenerated reply context:
+- The user edited an earlier message `{edited}`.
+- The UI has archived {archived_count} later message(s) from the visible conversation.
+- Treat the supplied conversation history and current user message as authoritative.
+- Ignore any stale context from a resumed CLI session that conflicts with this edited linear history.
+"""
+
+
+def queued_chat_prompt_section(queued_messages: Any = None) -> str:
+    items = compact_chat_history_items(queued_messages, CHAT_QUEUE_MAX_MESSAGES)
+    if not items:
+        return ""
+    lines = [
+        "",
+        "Queued user messages sent while autoresearch was running:",
+        "",
+        "Answer these messages together in order. They were not answered while the autoresearch run was active.",
+        "",
+    ]
+    for item in items:
+        item_id = f" `{item['id']}`" if item.get("id") else ""
+        timestamp = f" ({item['created_at']})" if item.get("created_at") else ""
+        lines.append(f"USER{item_id}{timestamp}:")
+        lines.append(item["text"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+def chat_research_prompt(
+    message: str = "",
+    conversation_history: Any = None,
+    resend_context: Any = None,
+    queued_messages: Any = None,
+) -> str:
     extra = message.strip()
     return f"""Respond in CoAutoResearch chat/framing mode. This is not an autoresearch launch.
 
 User message:
 {extra or "(No text; attached resources may have been saved by the UI.)"}
+{chat_history_prompt_section(conversation_history)}
+{resend_prompt_section(resend_context)}
+{queued_chat_prompt_section(queued_messages)}
 
 Hard boundary:
 - Do not create, edit, delete, rename, or summarize as newly completed anything under `research_trajectory/trials/`.
@@ -8750,8 +9300,15 @@ Hard boundary:
 - Do not run the autoresearch loop from this chat path. If the user asks to continue research, start autoresearch, run trials, overqualify the work, or otherwise perform the loop, tell them to use the Start/Resume autoresearch controls, and do not modify protected autoresearch artifacts.
 
 Allowed behavior:
-- Answer questions from current project files.
-- If explicitly asked for framing edits, update only framing-level files such as `PROJECT.md` or resource intake notes.
+- Answer questions from current project files and the supplied UI conversation history.
+- If the message clearly changes the project framing, you may update framing-level files such as `PROJECT.md` or resource intake notes.
+- Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you.
+- If it is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
+- If it clarifies an existing pending intervention, update that same pending intervention instead of creating a new ID. Create a new ID only for a distinct intervention topic.
+- The final response must first answer the user's current question or discussion request with substantive analysis. If you updated files, report those updates after the answer and briefly explain why they were warranted.
+- If you created or updated a pending intervention, end with one concise sentence naming the path, e.g. `Recorded pending intervention: research_trajectory/human_interventions/I0001_topic.md`.
+- If you did not create or update a pending intervention, do not mention interventions.
+- Do not use a file-update summary such as "Updated PROJECT.md" as a substitute for answering the user's question.
 - If resources were attached, acknowledge what the UI saved and say that Resource Intake or autoresearch should be launched explicitly before treating them as trial evidence.
 
 Use AGENTS.md for repository conventions, but the boundary above overrides any instruction that would start or continue a trial. Be concise in the final response."""
@@ -8767,12 +9324,12 @@ User instruction:
 
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached.
 
-For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report external resources for this trial` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
+For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
 
 If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
     return """Continue the next coherent CoAutoResearch iteration in this same agent session.
 
-Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report external resources for this trial` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 
 
 def resume_from_trial_prompt(
@@ -8817,6 +9374,7 @@ User instruction for the resumed trajectory:
 {user_instruction.strip() or "Continue from the selected trial boundary."}
 
 {best_effort_note}
+{pending_intervention_prompt_section()}
 Read:
 - AGENTS.md
 - instructions/EXECUTION_AGENT.md
@@ -9075,6 +9633,7 @@ Restart id: `{restart_id}`
 
 User restart instruction:
 {reason.strip() or "Restart autoresearch from a clean active trajectory."}
+{pending_intervention_prompt_section()}
 
 Semantics:
 - Treat archived trials, prior runtime state, prior working manuscript revisions, and prior current findings as superseded context.
@@ -9191,6 +9750,10 @@ def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def start_research_framing(payload: dict[str, Any]) -> dict[str, Any]:
+    if has_autoresearch_context():
+        raise ValueError(
+            "This project already has autoresearch history. Edit/resend should use chat; framing cannot be restarted for an active trajectory."
+        )
     payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload))
     file_edits = payload.get("fileEdits", [])
     saved_edits = []
@@ -9286,19 +9849,41 @@ def start_research_go(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def retained_attachments_from_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
+    items = payload.get("retainedAttachments", [])
+    if not isinstance(items, list):
+        return []
+    retained: list[dict[str, str]] = []
+    for item in items[:30]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:240]
+        path = str(item.get("path") or "").strip()[:1000]
+        kind = str(item.get("kind") or "attachment").strip()[:80]
+        category = str(item.get("category") or "").strip()[:80]
+        if not name and not path:
+            continue
+        retained.append({"name": name, "path": path, "kind": kind, "category": category})
+    return retained
+
+
 def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str, dict[str, Any]]:
     payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload, message))
     saved_files = save_uploads(payload)
     linked_resources = save_resource_links(payload)
+    retained_attachments = retained_attachments_from_payload(payload)
     metadata_files = write_ui_metadata(payload, saved_files, linked_resources)
     resolutions = payload.get("_resourceResolution", [])
-    if not saved_files and not linked_resources and not resolutions:
-        return message, {"saved_files": [], "resource_links": [], "metadata_files": []}
+    if not saved_files and not linked_resources and not retained_attachments and not resolutions:
+        return message, {"saved_files": [], "resource_links": [], "retained_attachments": [], "metadata_files": []}
     lines = ["", "", "Resource handling for this message:"]
     for path in saved_files:
         lines.append(f"- uploaded file: {path}")
     for item in linked_resources:
         lines.append(f"- {item.get('mode', 'linked')} {item.get('category', 'resource')}: {item.get('path')} (source: {item.get('source')})")
+    for item in retained_attachments:
+        label = item.get("path") or item.get("name") or "attachment"
+        lines.append(f"- retained prior {item.get('kind') or 'attachment'}: {label} ({item.get('category') or 'resource'})")
     if isinstance(resolutions, list):
         for item in resolutions:
             if not isinstance(item, dict):
@@ -9318,9 +9903,108 @@ def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str
     return f"{message}{chr(10).join(lines)}", {
         "saved_files": saved_files,
         "resource_links": linked_resources,
+        "retained_attachments": retained_attachments,
         "resource_clues": resolutions if isinstance(resolutions, list) else [],
         "metadata_files": metadata_files,
     }
+
+
+def read_queued_chat_messages() -> list[dict[str, Any]]:
+    path = queued_chat_messages_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    items = payload.get("messages") if isinstance(payload, dict) else payload
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def write_queued_chat_messages(messages: list[dict[str, Any]]) -> None:
+    path = queued_chat_messages_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": 1, "messages": messages[-CHAT_QUEUE_MAX_MESSAGES:]}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def queued_chat_summary() -> dict[str, Any]:
+    messages = read_queued_chat_messages()
+    latest = ""
+    if messages:
+        latest = str(messages[-1].get("created_at") or "")
+    return {
+        "queued_chat_count": len(messages),
+        "queued_chat_latest_at": latest,
+        "queued_chat_after_current_run": bool(messages),
+    }
+
+
+def enqueue_chat_message(display_message: str, prepared_message: str, attachments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    messages = read_queued_chat_messages()
+    entry = {
+        "id": str(payload.get("clientMessageId") or payload.get("client_message_id") or f"queued_{now_id()}").strip()[:120],
+        "role": "user",
+        "kind": "text",
+        "text": display_message or prepared_message or "Attached resources.",
+        "prepared_message": prepared_message,
+        "attachments": attachments if isinstance(attachments, dict) else {},
+        "created_at": now_iso(),
+        "settings": normalize_research_settings(payload.get("settings")),
+    }
+    messages.append(entry)
+    write_queued_chat_messages(messages)
+    append_research_log(f"Queued chat message for reply after the current autoresearch run: {entry['text'][:180]}")
+    return {"queued": True, "count": len(messages), "run_after_current": True, "latest_at": entry["created_at"]}
+
+
+def archive_queued_chat_messages(messages: list[dict[str, Any]], reason: str) -> str:
+    if not messages:
+        return ""
+    root = RUNTIME_DIR / "queued_chat_archive"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"{now_id()}_{slugify(reason, 'queued_chat')}.json"
+    payload = {"schema_version": 1, "reason": reason, "archived_at": now_iso(), "messages": messages}
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return str(path.relative_to(RUNTIME_DIR))
+
+
+def clear_queued_chat_messages() -> None:
+    path = queued_chat_messages_path()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def archive_resend_context(resend_context: Any) -> str:
+    if not isinstance(resend_context, dict):
+        return ""
+    archived = resend_context.get("archivedMessages")
+    if not isinstance(archived, list) or not archived:
+        return ""
+    root = resend_archive_root()
+    root.mkdir(parents=True, exist_ok=True)
+    edited = slugify(str(resend_context.get("editedMessageId") or "edited"), "edited")
+    path = root / f"{now_id()}_{edited}.json"
+    payload = {
+        "schema_version": 1,
+        "archived_at": now_iso(),
+        "edited_message_id": str(resend_context.get("editedMessageId") or ""),
+        "archived_count": int(resend_context.get("archivedCount") or len(archived)),
+        "messages": compact_chat_history_items(archived, 200),
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return str(path.relative_to(RUNTIME_DIR))
+
+
+def active_process_mode() -> tuple[bool, str]:
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        running = bool(proc and proc.poll() is None)
+        mode = str(RESEARCH_SESSION.get("mode") or "").strip().lower()
+    return running, mode
 
 
 def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
@@ -9333,75 +10017,29 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
     message, attachments = attach_message_resources(payload, message)
     if not display_message and any(attachments.get(key) for key in ("saved_files", "resource_links", "resource_clues", "metadata_files")):
         display_message = "Attached resources."
-    if is_human_intervention_candidate(display_message or message, attachments):
-        return start_chat_intervention(payload, display_message, message, attachments)
+    running, mode = active_process_mode()
+    if running:
+        if mode in {"goal", "research", "command"}:
+            queued = enqueue_chat_message(display_message, message, attachments, payload)
+            return {"files": {**attachments, "queued_chat": queued}, "session": research_session_snapshot()}
+        raise ValueError("Wait for the current framing/chat run to finish before sending another chat message.")
+    resend_context = payload.get("resendContext") if isinstance(payload.get("resendContext"), dict) else {}
+    archive_resend_context(resend_context)
+    force_fresh = bool(resend_context.get("forceFreshSession"))
+    conversation_history = payload.get("conversationHistory") if isinstance(payload.get("conversationHistory"), list) else []
     return {
         "files": attachments,
         "session": start_research_run(
-            chat_research_prompt(message),
+            chat_research_prompt(
+                message,
+                conversation_history=conversation_history,
+                resend_context=resend_context,
+            ),
             "chat",
-            resume=should_resume_research_session(payload.get("settings")),
+            resume=False if force_fresh else should_resume_research_session(payload.get("settings")),
             settings_payload=payload.get("settings"),
             display_prompt=display_message,
         ),
-    }
-
-
-def start_chat_intervention(
-    payload: dict[str, Any],
-    display_message: str,
-    prepared_message: str,
-    attachments: dict[str, Any],
-) -> dict[str, Any]:
-    settings = normalize_research_settings(payload.get("settings"))
-    with RESEARCH_LOCK:
-        proc = RESEARCH_SESSION.get("process")
-        running = bool(proc and proc.poll() is None)
-        mode = str(RESEARCH_SESSION.get("mode") or "")
-        if running and mode not in {"goal", "research", "command"}:
-            raise ValueError("Wait for the current framing/chat run to finish before recording a research intervention.")
-    intervention_path = write_chat_intervention(display_message, prepared_message, attachments, settings)
-    with RESEARCH_LOCK:
-        if running:
-            RESEARCH_SESSION["loop_active"] = True
-            RESEARCH_SESSION["loop_stop_reason"] = ""
-            RESEARCH_SESSION["settings"] = settings
-    if running:
-        display = display_message or "Human intervention."
-        append_transcript("user", "user", "User", display, "ui.chat", True)
-        append_transcript(
-            "assistant",
-            "assistant",
-            "CoAutoResearch",
-            f"Human intervention recorded: `{intervention_path}`. It will be applied before the next autoresearch step.",
-            "item.completed",
-            False,
-        )
-        append_research_log(f"Human intervention recorded: {intervention_path}")
-        persist_research_session()
-        return {
-            "files": {
-                **attachments,
-                "intervention": {"path": intervention_path, "status": "recorded", "running": True},
-            },
-            "session": research_session_snapshot(),
-        }
-    ensure_autoresearch_gate_for_loop()
-    session = start_research_run(
-        intervention_goal_prompt(intervention_path, prepared_message or display_message, bool(settings.get("fastMode"))),
-        "goal",
-        resume=should_resume_research_session(settings),
-        settings_payload=settings,
-        display_prompt=display_message or "Human intervention.",
-        loop_active=True,
-        reset_review_checkpoint=True,
-    )
-    return {
-        "files": {
-            **attachments,
-            "intervention": {"path": intervention_path, "status": "started", "running": False},
-        },
-        "session": session,
     }
 
 
@@ -9415,6 +10053,89 @@ def append_local_command_result(command: str, message: str) -> dict[str, Any]:
     append_transcript("user", "user", "User", command, "ui.command", False)
     append_transcript("assistant", "assistant", "CoAutoResearch", message, "ui.command.result", False)
     return {"local": True, "session": research_session_snapshot()}
+
+
+def pause_autoresearch(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    gate = read_autoresearch_gate()
+    reason = "all_reviewer_gates_passed" if gate_has_passed(gate) else "paused_by_user"
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["loop_active"] = False
+        RESEARCH_SESSION["loop_stop_reason"] = reason
+        RESEARCH_SESSION["gate"] = gate
+    persist_research_session()
+    return {
+        "paused": True,
+        "reason": reason,
+        "session": research_session_snapshot(),
+    }
+
+
+def start_resume_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
+    settings = normalize_research_settings(payload.get("settings"))
+    resume_instruction = str(payload.get("resumeInstruction") or "").strip()[:4000]
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        running = bool(proc and proc.poll() is None)
+        live_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
+        goal_instruction = resume_instruction or str(RESEARCH_SESSION.get("loop_instruction") or "")
+    cleanup = {"archived": []}
+    if not running:
+        cleanup = archive_interrupted_trial_tail("resume_autoresearch_from_closed_boundary")
+    ensure_autoresearch_gate_for_loop()
+    gate = read_autoresearch_gate()
+    if gate_has_passed(gate):
+        with RESEARCH_LOCK:
+            RESEARCH_SESSION["loop_active"] = False
+            RESEARCH_SESSION["loop_stop_reason"] = "all_reviewer_gates_passed"
+            RESEARCH_SESSION["gate"] = gate
+        persist_research_session()
+        return {
+            "resumed": False,
+            "reason": "all_reviewer_gates_passed",
+            "session": research_session_snapshot(),
+        }
+    review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
+    current_iteration = live_iteration if running and live_iteration > 0 else latest_active_trial_iteration()
+    next_iteration = pending_expected_trial_iteration() or next_active_trial_iteration()
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["loop_active"] = True
+        RESEARCH_SESSION["loop_stop_reason"] = ""
+        RESEARCH_SESSION["loop_instruction"] = goal_instruction
+        RESEARCH_SESSION["settings"] = settings
+        RESEARCH_SESSION["loop_max_iterations"] = review_checkpoint_interval
+        RESEARCH_SESSION["loop_review_checkpoint_iteration"] = current_iteration + review_checkpoint_interval
+    persist_research_session()
+    if running:
+        append_research_log("Autoresearch resume requested; current run remains active and the next loop iteration will continue.")
+        return {
+            "resumed": True,
+            "running": True,
+            "next_iteration": next_iteration,
+            "session": research_session_snapshot(),
+        }
+    archived = cleanup.get("archived") or []
+    if archived:
+        append_research_log(
+            "Archived interrupted trial tail before resuming from the last closed trial: "
+            + ", ".join(item["from"] for item in archived)
+        )
+    resume_same_session = should_resume_research_session(settings)
+    return {
+        "resumed": True,
+        "running": False,
+        "next_iteration": next_iteration,
+        "archived": archived,
+        "session": start_research_run(
+            continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode")), goal_instruction),
+            "goal",
+            resume=resume_same_session,
+            settings_payload=settings,
+            display_prompt=f"Resume autoresearch (Trial {next_iteration}).",
+            loop_active=True,
+            reset_review_checkpoint=True,
+            loop_iteration_override=next_iteration,
+        ),
+    }
 
 
 def numeric_value(value: Any) -> int | float | None:
@@ -9644,7 +10365,7 @@ def start_custom_goal_instruction(command: str, goal_instruction: str, settings_
     with RESEARCH_LOCK:
         live_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
     current_iteration = live_iteration if running and live_iteration > 0 else latest_active_trial_iteration()
-    next_iteration = next_active_trial_iteration()
+    next_iteration = pending_expected_trial_iteration() or next_active_trial_iteration()
     with RESEARCH_LOCK:
         RESEARCH_SESSION["loop_active"] = True
         RESEARCH_SESSION["loop_stop_reason"] = ""
@@ -9701,104 +10422,16 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
                 ]
             ),
         )
-    if normalized == "/goal pause":
-        gate = read_autoresearch_gate()
-        if gate_has_passed(gate):
-            with RESEARCH_LOCK:
-                RESEARCH_SESSION["loop_active"] = False
-                RESEARCH_SESSION["loop_stop_reason"] = "all_reviewer_gates_passed"
-                RESEARCH_SESSION["gate"] = gate
-            persist_research_session()
-            return append_local_command_result(command, "The autoresearch goal is already passed; there is no active loop to pause.")
-        with RESEARCH_LOCK:
-            RESEARCH_SESSION["loop_active"] = False
-            RESEARCH_SESSION["loop_stop_reason"] = "paused_by_user"
-        persist_research_session()
+    if normalized in {"/goal clear", "/goal stop", "/goal off", "/goal reset", "/goal none", "/goal cancel"}:
         return append_local_command_result(
             command,
-            "Paused the autoresearch goal loop. If the agent is already in the middle of a turn, that turn can finish, but the UI will not auto-start the next iteration.",
+            "Autoresearch is controlled by the UI buttons. No loop state was changed from this legacy `/goal` command.",
         )
-    if normalized == "/goal clear":
-        with RESEARCH_LOCK:
-            RESEARCH_SESSION["loop_active"] = False
-            RESEARCH_SESSION["loop_iteration"] = 0
-            RESEARCH_SESSION["loop_stop_reason"] = "cleared_by_user"
-            RESEARCH_SESSION["loop_instruction"] = ""
-        persist_research_session()
-        return append_local_command_result(
-            command,
-            "Cleared the UI goal loop state. The project files and STATE.md gate were not deleted.",
-        )
-    if normalized in {"/goal stop", "/goal off", "/goal reset", "/goal none", "/goal cancel"}:
-        with RESEARCH_LOCK:
-            RESEARCH_SESSION["loop_active"] = False
-            RESEARCH_SESSION["loop_stop_reason"] = "cleared_by_user"
-            RESEARCH_SESSION["loop_instruction"] = ""
-        persist_research_session()
-        return append_local_command_result(
-            command,
-            "Cleared the UI goal loop state. The project files and STATE.md gate were not deleted.",
-        )
-    if normalized == "/goal restart":
-        result = start_restart_autoresearch({"message": command, "settings": settings_payload})
-        result["local"] = True
-        return result
-    if normalized == "/goal resume":
-        with RESEARCH_LOCK:
-            proc = RESEARCH_SESSION.get("process")
-            running = bool(proc and proc.poll() is None)
-        cleanup = {"archived": []}
-        if not running:
-            cleanup = archive_interrupted_trial_tail("goal_resume_from_closed_boundary")
-        ensure_autoresearch_gate_for_loop()
-        gate = read_autoresearch_gate()
-        if gate_has_passed(gate):
-            with RESEARCH_LOCK:
-                RESEARCH_SESSION["loop_active"] = False
-                RESEARCH_SESSION["loop_stop_reason"] = "all_reviewer_gates_passed"
-                RESEARCH_SESSION["gate"] = gate
-            persist_research_session()
-            return append_local_command_result(command, "The autoresearch goal is already passed; no new iteration was started.")
-        settings = normalize_research_settings(settings_payload)
-        review_checkpoint_interval = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
-        with RESEARCH_LOCK:
-            live_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
-            goal_instruction = str(RESEARCH_SESSION.get("loop_instruction") or "")
-        current_iteration = live_iteration if running and live_iteration > 0 else latest_active_trial_iteration()
-        next_iteration = next_active_trial_iteration()
-        with RESEARCH_LOCK:
-            RESEARCH_SESSION["loop_active"] = True
-            RESEARCH_SESSION["loop_stop_reason"] = ""
-            RESEARCH_SESSION["settings"] = settings
-            RESEARCH_SESSION["loop_max_iterations"] = review_checkpoint_interval
-            RESEARCH_SESSION["loop_review_checkpoint_iteration"] = current_iteration + review_checkpoint_interval
-        persist_research_session()
-        if running:
-            return append_local_command_result(command, "Goal loop resumed. The next iteration will start after the current agent turn finishes.")
-        archived = cleanup.get("archived") or []
-        if archived:
-            append_local_command_result(
-                command,
-                "Archived interrupted trial tail before resuming from the last closed trial: "
-                + ", ".join(item["from"] for item in archived),
-            )
-        resume_same_session = should_resume_research_session(settings)
-        return {
-            "local": True,
-            "session": start_research_run(
-                continue_autoresearch_loop_prompt(gate, next_iteration, bool(settings.get("fastMode")), goal_instruction),
-                "goal",
-                resume=resume_same_session,
-                settings_payload=settings,
-                display_prompt=command,
-                loop_active=True,
-                reset_review_checkpoint=True,
-                loop_iteration_override=next_iteration,
-            ),
-        }
     if normalized.startswith("/goal "):
-        goal_instruction = re.sub(r"^/goal\b", "", command, flags=re.IGNORECASE).strip()
-        return start_custom_goal_instruction(command, goal_instruction, settings_payload)
+        return append_local_command_result(
+            command,
+            "Autoresearch is controlled by the UI buttons. Use Resume autoresearch, Pause after current turn, Restart autoresearch, or Continue from Trial instead of `/goal` commands.",
+        )
     return None
 
 
@@ -10046,6 +10679,12 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/research/resume-from-trial":
                     self.send_json({"ok": True, "result": start_research_resume_from_trial(payload)})
+                    return
+                if parsed.path == "/api/research/resume":
+                    self.send_json({"ok": True, "result": start_resume_autoresearch(payload)})
+                    return
+                if parsed.path == "/api/research/pause":
+                    self.send_json({"ok": True, "result": pause_autoresearch(payload)})
                     return
                 if parsed.path == "/api/research/restart":
                     self.send_json({"ok": True, "result": start_restart_autoresearch(payload)})

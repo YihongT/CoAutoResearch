@@ -7,7 +7,7 @@ It separates:
 - reusable agent instructions;
 - project definition;
 - raw resources;
-- live execution workspace;
+- live workbench for implementation, execution, analysis, and evaluation artifacts;
 - research trajectory records;
 - manuscript blueprint and deliverable-facing materials.
 

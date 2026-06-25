@@ -491,7 +491,11 @@ Confidence: medium
   if (
     !resourceScoutInstructions.includes("## Resource Scout Brief") ||
     !resourceScoutInstructions.includes("Scout: required | skipped") ||
-    !resourceScoutInstructions.includes("spawn a Resource Scout subagent to search, file, and report external resources for this trial") ||
+    !resourceScoutInstructions.includes("Require a scout when any of these are true") ||
+    !resourceScoutInstructions.includes("Decision reason:") ||
+    !resourceScoutInstructions.includes("Known resource clues:") ||
+    !resourceScoutInstructions.includes("Freshness / date sensitivity:") ||
+    !resourceScoutInstructions.includes("spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources") ||
     !resourceScoutInstructions.includes("research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md") ||
     !resourceScoutInstructions.includes("resources/user_input/RESOURCE_MANIFEST.md") ||
     !resourceScoutInstructions.includes("autoresearch_discovered") ||
@@ -507,6 +511,8 @@ Confidence: medium
     !resourceIntakeInstructions.includes("## Resource Scout Discoveries") ||
     !resourceIntakeInstructions.includes("Scout-discovered materials remain raw inputs") ||
     !planReviewerInstructions.includes("includes the required `Resource Scout Brief`") ||
+    !planReviewerInstructions.includes("gives a concrete `Decision reason:`") ||
+    !planReviewerInstructions.includes("does not skip Resource Scout merely because") ||
     !planReviewerInstructions.includes("gives a concrete `Skip reason:`") ||
     !processReviewerInstructions.includes("Resource Scout process status") ||
     !processReviewerInstructions.includes("Reviewer Scope Analyst decision status") ||
@@ -729,7 +735,7 @@ Confidence: medium
   }
   assertThemeContrast(stylesCss);
   if (
-    !serverPy.includes('{"text", "project", "goal-launch", "command"}') ||
+    !serverPy.includes('{"text", "project", "goal-launch", "command", "intervention-recorded"}') ||
     !serverPy.includes('clean["text"] = f"Attached {count}') ||
     !serverPy.includes('display_message = "Attached resources."')
   ) {
@@ -738,6 +744,41 @@ Confidence: medium
   if (
     !serverPy.includes("def chat_research_prompt") ||
     !serverPy.includes("This is not an autoresearch launch") ||
+    !serverPy.includes("the server has not classified it for you") ||
+    !serverPy.includes("create or update a pending intervention file") ||
+    !serverPy.includes("If it clarifies an existing pending intervention, update that same pending intervention") ||
+    !serverPy.includes("The final response must first answer the user's current question or discussion request with substantive analysis") ||
+    !serverPy.includes('Do not use a file-update summary such as "Updated PROJECT.md" as a substitute for answering the user') ||
+    serverPy.includes("def intervention_chat_prompt") ||
+    serverPy.includes("is_human_intervention_candidate") ||
+    serverPy.includes("INTERVENTION_EN_PATTERNS") ||
+    serverPy.includes("INTERVENTION_ZH_PATTERNS") ||
+    !appJs.includes("function shouldStartInitialFramingRun") ||
+    !appJs.includes("function isTruePreProjectBriefResend") ||
+    !appJs.includes("async function resendConversationMessage") ||
+    !appJs.includes("function confirmPreProjectFramingResend") ||
+    !appJs.includes("function editAttachmentDraftForMessage") ||
+    !appJs.includes("data-edit-upload") ||
+    !appJs.includes("data-edit-link") ||
+    !appJs.includes("retainedAttachments") ||
+    !serverPy.includes("def retained_attachments_from_payload") ||
+    !serverPy.includes("framing cannot be restarted for an active trajectory") ||
+    appJs.includes("function isHumanInterventionCandidateText") ||
+    appJs.includes("function canSendInterventionDuringRun") ||
+    appJs.includes("appendInterventionAcknowledgementFromResponse") ||
+    !appJs.includes("function canQueueChatDuringAutoresearchRun") ||
+    !appJs.includes("Queued; CoAutoResearch will reply after the current run finishes.") ||
+    !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command", "intervention-recorded"])') ||
+    !appJs.includes("clientMessageId: message.id") ||
+    !appJs.includes("clientMessageId: appendedMessage?.id") ||
+    !appJs.includes("conversationHistory: conversationHistoryForRequest(localMessages)") ||
+    !appJs.includes("forceFreshSession: true") ||
+    !serverPy.includes("queued_chat_messages_path") ||
+    !serverPy.includes("maybe_start_queued_chat_after_run") ||
+    !serverPy.includes("sync_human_intervention_indexes") ||
+    !serverPy.includes("sync_expected_trial_pending_interventions") ||
+    !appJs.includes("const useFramingRun = isTruePreProjectBriefResend(index)") ||
+    !appJs.includes('showToast(useFramingRun ? `${agentLabel(sessionBackend())} is reframing PROJECT.md.` : "Regenerating reply.")') ||
     !serverPy.includes("CHAT_PROTECTED_PATHS") ||
     !serverPy.includes("create_chat_protected_snapshot() if mode == \"chat\" else None") ||
     !serverPy.includes("restore_chat_protected_snapshot") ||
@@ -750,8 +791,8 @@ Confidence: medium
     !indexHtml.includes('id="composer-attach-button"') ||
     !indexHtml.includes('id="composer-file-input"') ||
     !indexHtml.includes('type="file" multiple hidden') ||
-    !indexHtml.includes('/styles.css?v=20260624-framing-bottom-1') ||
-    !indexHtml.includes('/app.js?v=20260624-framing-bottom-1') ||
+    !indexHtml.includes('/styles.css?v=20260625-resume-dialog-2') ||
+    !indexHtml.includes('/app.js?v=20260625-resume-dialog-2') ||
     indexHtml.includes("Claude Fable") ||
     !indexHtml.includes('id="attachment-menu"') ||
     !indexHtml.includes('data-attachment-action="upload-files"') ||
@@ -865,7 +906,7 @@ Confidence: medium
   const sendSessionStart = appJs.indexOf("async function sendSessionComposerMessage");
   const sendAppendIndex = appJs.indexOf('appendFramingMessage("user", displayText', sendSessionStart);
   const sendClearIndex = appJs.indexOf("clearFramingComposerText(text || displayText)", sendSessionStart);
-  const sendCollectIndex = appJs.indexOf("const files = await collectUploadFiles()", sendSessionStart);
+  const sendCollectIndex = appJs.indexOf("const files = await collectUploadFiles(uploadItemsForRequest)", sendSessionStart);
   if (!(sendSessionStart >= 0 && sendAppendIndex > sendSessionStart && sendClearIndex > sendAppendIndex && sendCollectIndex > sendClearIndex)) {
     throw new Error("session composer must render the sent message and clear input before collecting uploads or posting");
   }
@@ -874,7 +915,7 @@ Confidence: medium
   const launchPersistIndex = appJs.indexOf("await persistFramingMessages();", launchStart);
   const launchApiIndex = appJs.indexOf('api("/api/research/cold-start"', launchStart);
   if (!(launchStart >= 0 && launchCloseIndex > launchStart && launchPersistIndex > launchCloseIndex && launchApiIndex > launchCloseIndex)) {
-    throw new Error("launch dialog must close immediately after local /goal pending UI is rendered");
+    throw new Error("launch dialog must close immediately after local launch pending UI is rendered");
   }
   if (
     !indexHtml.includes('id="launch-instruction"') ||
@@ -922,7 +963,11 @@ Confidence: medium
     !appJs.includes("function activeRun()") ||
     !appJs.includes("function activeRunTrialIteration()") ||
     !appJs.includes("function isAutoresearchActiveRun()") ||
-    !appJs.includes("const activeTrial = liveIteration || selectedTrial(trials)") ||
+    !serverPy.includes('"expected_trial": expected_trial') ||
+    !appJs.includes("function pendingExpectedTrialIteration()") ||
+    !appJs.includes("function pendingExpectedTrialReport") ||
+    !appJs.includes("function persistentAutoresearchPanelHtml") ||
+    !appJs.includes("const activeTrial = liveIteration || (manuallySelected ? selected : (pendingExpected || selected))") ||
     !appJs.includes("const countParts = [`${trials.length} active trial") ||
     !appJs.includes("if (reportedCount) countParts.push(`${reportedCount} reported`)") ||
     appJs.includes("const activeTrial = selectedTrial(reports)") ||
@@ -956,34 +1001,47 @@ Confidence: medium
   }
   if (
     !appJs.includes("function isSessionInterrupted()") ||
-    !appJs.includes("function sessionGoalResumeCommand()") ||
-    !appJs.includes("function sessionGoalPauseCommand()") ||
     appJs.includes("claudeAutoresearchGoalCommand") ||
-    !appJs.includes('addChip("Resume autoresearch", sessionGoalResumeCommand());') ||
-    !appJs.includes('addChip("Pause autoresearch", sessionGoalPauseCommand());') ||
-    !appJs.includes('"Gate incomplete"') ||
-    !appJs.includes('interrupted ? "Goal interrupted"')
+    !appJs.includes("function trialLifecycleActionButtonsHtml") ||
+    !appJs.includes("Resume autoresearch") ||
+    !appJs.includes("Continue from this trial") ||
+    !appJs.includes("trial-report-open-actions") ||
+    !appJs.includes("trial-report-control-actions") ||
+    !indexHtml.includes('id="resume-autoresearch-dialog"') ||
+    !indexHtml.includes('id="resume-autoresearch-instruction"') ||
+    !appJs.includes("data-resume-autoresearch") ||
+    !appJs.includes("function openResumeAutoresearchDialog()") ||
+    !appJs.includes("function confirmResumeAutoresearch()") ||
+    !appJs.includes("function handleResumeAutoresearch(options = {})") ||
+    !appJs.includes("body: JSON.stringify({ settings: settingsFromForm(), resumeInstruction })") ||
+    !appJs.includes('api("/api/research/resume"') ||
+    !appJs.includes('api("/api/research/pause"') ||
+    appJs.includes("sendSessionComposerMessage(sessionGoalResumeCommand())") ||
+    appJs.includes("sendCommand(sessionGoalPauseCommand())") ||
+    !appJs.includes("data-trial-continue") ||
+    !appJs.includes('row.hidden = true;') ||
+    !appJs.includes('row.innerHTML = "";')
   ) {
-    throw new Error("interrupted goal sessions must show resume controls instead of pause controls");
+    throw new Error("autoresearch lifecycle controls must live in the Trials panel while slash commands stay supported");
   }
   if (
     !appVersion ||
-    !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command"])') ||
+    !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command", "intervention-recorded"])') ||
     !appJs.includes('appendFramingMessage("user", displayText, { kind: "command" })') ||
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
     !appJs.includes("function framingControlMessageHtml(message)") ||
     !appJs.includes("function controlMessageDisplay(message") ||
     !appJs.includes("const localSlashCommandRegistry = {") ||
     !appJs.includes('return { label: "Autoresearch", value: "Start autoresearch" }') ||
-    !appJs.includes('"/goal resume": { label: "Autoresearch", value: "Resume autoresearch"') ||
-    !appJs.includes('"/goal restart": { label: "Autoresearch", value: "Restart autoresearch"') ||
+    appJs.includes('"/goal resume": { label: "Autoresearch", value: "Resume autoresearch"') ||
+    appJs.includes('"/goal restart": { label: "Autoresearch", value: "Restart autoresearch"') ||
+    !appJs.includes('data-project-launch>Start autoresearch') ||
+    !appJs.includes('data-resume-autoresearch>Resume autoresearch') ||
+    !appJs.includes('data-trial-continue="${escapeHtml(iteration)}">Continue from this trial') ||
+    !appJs.includes('trial-danger-button" type="button" data-restart-autoresearch>Restart autoresearch') ||
+    !stylesCss.includes(".trial-report-open-actions") ||
+    !stylesCss.includes(".trial-report-control-actions") ||
     !indexHtml.includes(">Start autoresearch<") ||
-    !indexHtml.includes(">Resume autoresearch<") ||
-    !indexHtml.includes(">Show autoresearch<") ||
-    !indexHtml.includes(">Pause after current turn<") ||
-    !indexHtml.includes(">Stop current run<") ||
-    !indexHtml.includes(">Pause autoresearch<") ||
-    !indexHtml.includes(">Restart autoresearch<") ||
     />\/goal(?:\s+\w+)?<\/button>/.test(indexHtml) ||
     appJs.includes("Start with /goal") ||
     appJs.includes("Start /goal") ||
@@ -1028,11 +1086,15 @@ Confidence: medium
     !stylesVersion ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
     !appJs.includes("const latestRunStart = transcript.reduce") ||
-    !appJs.includes("function framingProgressDetailsHtml()") ||
-    !appJs.includes('details class="framing-progress-details"') ||
+    !appJs.includes("function currentRunLiveStatusHtml()") ||
+    !appJs.includes("function currentRunActivityDetailsHtml") ||
+    !appJs.includes("function currentRunReadableSummary") ||
+    !appJs.includes('details class="run-live-details"') ||
     appJs.includes("${framingProgressHtml()}") ||
-    !stylesCss.includes(".framing-progress-details > summary") ||
-    !stylesCss.includes(".framing-progress-details[open] > summary::before")
+    !stylesCss.includes(".run-live-status") ||
+    !stylesCss.includes(".run-live-details > summary") ||
+    !stylesCss.includes(".run-live-details[open] > summary::before") ||
+    !stylesCss.includes(":is(.run-live-details, .framing-progress-details)")
   ) {
     throw new Error("running Codex progress must be scoped to the current run and collapsed by default");
   }
@@ -1146,10 +1208,13 @@ Confidence: medium
     !appJs.includes("function architectureFieldListHtml") ||
     !appJs.includes("function publicationReadyTableMarkdown") ||
     !appJs.includes("Missing publication-ready table body") ||
+    !appJs.includes("function renderManuscriptAppendixPanel") ||
+    !appJs.includes("function blueprintAppendixItems") ||
     !appJs.includes("function renderManuscriptAuditPanel") ||
     !appJs.includes("function figureSpecCardsHtml") ||
     !appJs.includes("function figureSpecFields") ||
     !appJs.includes('contextCard("Manuscript story map"') ||
+    !appJs.includes('contextCard("Appendix / supplement"') ||
     appJs.includes('contextCard("Architecture overview"') ||
     appJs.includes('contextCard("Manuscript architecture"') ||
     !appJs.includes('contextCard("Audit / provenance"') ||
@@ -1173,6 +1238,8 @@ Confidence: medium
     !serverPy.includes('"figure_plans"') ||
     !serverPy.includes('"table_plans"') ||
     !serverPy.includes('"provenance"') ||
+    !serverPy.includes('"appendix_plan"') ||
+    !serverPy.includes('"appendix_files"') ||
     !stylesCss.includes(".figure-spec-card") ||
     !stylesCss.includes(".figure-caption") ||
     !stylesCss.includes(".figure-status.is-caution") ||
@@ -1189,6 +1256,8 @@ Confidence: medium
     !stylesCss.includes(".manuscript-artifact-card") ||
     !stylesCss.includes(".manuscript-abstract-card") ||
     !stylesCss.includes(".manuscript-table-card") ||
+    !stylesCss.includes(".manuscript-appendix") ||
+    !stylesCss.includes(".appendix-file-card") ||
     !stylesCss.includes(".publication-table-preview") ||
     !stylesCss.includes(".table-missing-warning") ||
     !stylesCss.includes(".architecture-toc") ||
@@ -1235,11 +1304,12 @@ Confidence: medium
     !appJs.includes("resumeFromTrial") ||
     !appJs.includes("data-trial-continue") ||
     !appJs.includes("data-resume-trial-submit") ||
+    !appJs.includes("data-resume-trial-remove") ||
+    !appJs.includes("function trialLifecycleActionButtonsHtml") ||
     !appJs.includes("function confirmResumeTrialSend") ||
     !appJs.includes("data-resume-trial-confirm") ||
     !appJs.includes('"/api/research/resume-from-trial"') ||
     !appJs.includes("Remove the Continue from Trial chip before sending a slash command") ||
-    !appJs.includes('"Trial continue"') ||
     !indexHtml.includes('id="resume-trial-dialog"') ||
     !indexHtml.includes("Trajectory fork") ||
     !stylesCss.includes(".resume-context-chip") ||
@@ -1257,8 +1327,8 @@ Confidence: medium
   }
   if (
     !indexHtml.includes('id="restart-autoresearch-dialog"') ||
-    !indexHtml.includes('data-command="/goal restart"') ||
-    !appJs.includes('"/goal restart"') ||
+    indexHtml.includes('data-command="/goal restart"') ||
+    appJs.includes('"/goal restart"') ||
     !appJs.includes("function confirmRestartAutoresearch") ||
     !appJs.includes('"/api/research/restart"') ||
     !appJs.includes("data-restart-autoresearch") ||
@@ -1560,9 +1630,7 @@ Confidence: medium
       "assert captured == [] and context.session['loop_active'] is False, captured",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000123', 'status': 'completed'})",
       "module.start_research_command({'command': '/goal Complete the work', 'settings': {'backend': 'claude'}})",
-      "assert captured[-1]['mode'] == 'goal' and captured[-1]['loop_active'] is True and captured[-1]['resume'] is True, captured[-1]",
-      "assert not captured[-1]['prompt'].lstrip().startswith('/goal'), captured[-1]['prompt']",
-      "assert 'Complete exactly the next coherent trial boundary' in captured[-1]['prompt'] and 'Complete the work' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert captured == [] and context.session['loop_active'] is False, captured",
       "system_line = json.dumps({'type': 'system', 'subtype': 'init', 'session_id': '00000000-0000-0000-0000-000000000999'})",
       "assistant_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Final assistant text.'}], 'stop_reason': 'end_turn', 'usage': {'input_tokens': 3, 'output_tokens': 5}}})",
       "tool_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'pwd'}}], 'stop_reason': 'tool_use'}})",
@@ -1596,7 +1664,7 @@ Confidence: medium
     throw new Error(`Python Claude backend fixture returned unexpected output: ${agentBackendOutput}`);
   }
 
-  const interventionOutput = execFileSync(python.command, [
+  const chatBoundaryOutput = execFileSync(python.command, [
     ...python.args,
     "-c",
     [
@@ -1613,44 +1681,53 @@ Confidence: medium
       "context = module.ProjectContext(root)",
       "module._CONTEXT.project = context",
       "settings = module.normalize_research_settings({'backend': 'codex', 'reviewCheckpointInterval': 5})",
-      "assert module.is_human_intervention_candidate('intervention: change target venue to Nature Machine Intelligence', {}) is True",
-      "assert module.is_human_intervention_candidate('请把目标期刊改成 Nature Machine Intelligence', {}) is True",
-      "assert module.is_human_intervention_candidate('Can you show progress?', {}) is False",
       "assert not module.continue_autoresearch_loop_prompt({'status': 'continue', 'summary': 'still open'}, 2).lstrip().startswith('/goal')",
       "captured = []",
       "module.start_research_run = lambda prompt, mode, resume, settings_payload=None, loop_active=None, **kwargs: captured.append({'prompt': prompt, 'mode': mode, 'resume': resume, 'loop_active': loop_active, 'settings': settings_payload, 'kwargs': kwargs}) or {'id': 'mock-session', 'status': 'running', 'mode': mode}",
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 1, 'settings': settings, 'session_id': '00000000-0000-0000-0000-000000000abc', 'logs': [], 'raw_logs': [], 'transcript': []})",
+      "guard_ns = {'module': module, 'settings': settings, 'guarded': False}",
+      "exec(\"try:\\n module.start_research_framing({'brief': 'rewrite project', 'settings': settings})\\nexcept ValueError as exc:\\n guarded = 'framing cannot be restarted' in str(exc)\\n\", guard_ns)",
+      "assert guard_ns['guarded'], 'framing guard did not reject existing autoresearch context'",
       "ordinary = module.start_research_chat({'message': 'Can you show progress?', 'settings': settings})",
-      "assert captured[-1]['mode'] == 'chat', captured[-1]",
-      "captured.clear()",
-      "started = module.start_research_chat({'message': 'intervention: change target venue to Nature Machine Intelligence', 'settings': settings})",
-      "intervention = started['files']['intervention']",
-      "assert intervention['status'] == 'started', intervention",
-      "assert (root / intervention['path']).exists(), intervention",
-      "assert 'I0001' in (root / 'research_trajectory' / 'human_interventions' / 'INDEX.md').read_text(encoding='utf-8')",
-      "assert captured[-1]['mode'] == 'goal' and captured[-1]['loop_active'] is True, captured[-1]",
-      "assert not captured[-1]['prompt'].lstrip().startswith('/goal'), captured[-1]['prompt']",
-      "assert 'Apply the latest formal human intervention' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert captured[-1]['mode'] == 'chat' and 'chat/framing mode' in captured[-1]['prompt'], captured[-1]",
+      "assert 'human-intervention intake mode' not in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'server has not classified it for you' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert ordinary['files'].get('intervention') is None, ordinary",
+      "intervention_dir = root / 'research_trajectory' / 'human_interventions'",
+      "intervention_dir.mkdir(parents=True, exist_ok=True)",
+      "intervention_path = intervention_dir / 'I0001_method_direction.md'",
+      "intervention_path.write_text('# Human Intervention I0001\\n\\n## Current Effective Instruction\\n\\nUse a better method direction.\\n\\n## Rationale / User Intent\\n\\nThe user wants stronger analysis.\\n\\n## Expected Autoresearch Consequence\\n\\nNext trial should plan around this.\\n\\n## Scope / Non-goals\\n\\nDo not rewrite old trials.\\n\\n## Open Questions\\n\\nNone.\\n\\n## Amendment History\\n\\n- 2026-06-17: created.\\n\\n## Source Chat Turns\\n\\n- u1\\n', encoding='utf-8')",
+      "module.sync_human_intervention_indexes('test_agent_created_intervention')",
+      "index_payload = json.loads((intervention_dir / 'INDEX.json').read_text(encoding='utf-8'))",
+      "assert index_payload['interventions'][0]['status'] == 'pending' and index_payload['interventions'][0]['id'] == 'I0001', index_payload",
+      "pending = module.pending_human_interventions()",
+      "assert [item['id'] for item in pending] == ['I0001'], pending",
+      "marker = module.read_expected_trial_marker()",
+      "assert marker.get('pending_intervention_ids') == ['I0001'], marker",
+      "assert marker.get('pending_intervention_paths') == ['research_trajectory/human_interventions/I0001_method_direction.md'], marker",
       "RunningProc = type('RunningProc', (), {'poll': lambda self: None})",
       "captured.clear()",
       "context.session.update({'process': RunningProc(), 'status': 'running', 'mode': 'goal', 'loop_active': True, 'loop_iteration': 2, 'settings': settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
-      "recorded = module.start_research_chat({'message': 'prioritize source-level evidence before drafting', 'settings': settings})",
-      "assert recorded['files']['intervention']['status'] == 'recorded', recorded",
+      "queued = module.start_research_chat({'message': 'prioritize source-level evidence before drafting', 'settings': settings, 'clientMessageId': 'q1'})",
+      "assert queued['files']['queued_chat']['queued'] is True and queued['files']['queued_chat']['count'] == 1, queued",
       "assert captured == [], captured",
       "assert context.session['loop_active'] is True",
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 2, 'settings': settings})",
       "captured.clear()",
+      "started_queued_chat = module.maybe_start_queued_chat_after_run('goal', 0)",
+      "assert started_queued_chat is True, started_queued_chat",
+      "assert captured and captured[-1]['mode'] == 'chat' and captured[-1]['resume'] is False and captured[-1]['loop_active'] is False, captured",
+      "assert 'Queued user messages sent while autoresearch was running' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert module.read_queued_chat_messages() == [], module.read_queued_chat_messages()",
+      "captured.clear()",
       "module.start_research_command({'command': '/goal Follow the new intervention', 'settings': {'backend': 'codex'}})",
-      "assert captured[-1]['mode'] == 'goal' and captured[-1]['loop_active'] is True, captured[-1]",
-      "assert not captured[-1]['prompt'].lstrip().startswith('/goal') and 'Follow the new intervention' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert captured == [] and context.session['loop_active'] is False, captured",
       "claude_settings = module.normalize_research_settings({'backend': 'claude'})",
       "captured.clear()",
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 2, 'settings': claude_settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "module.start_research_chat({'message': 'intervention: change method to simulation', 'settings': claude_settings})",
-      "assert captured[-1]['settings']['backend'] == 'claude', captured[-1]",
-      "assert not captured[-1]['prompt'].lstrip().startswith('/goal'), captured[-1]['prompt']",
-      "assert 'Apply the latest formal human intervention' in captured[-1]['prompt'], captured[-1]['prompt']",
-      "print(json.dumps({'intervention': intervention['path'], 'recorded': recorded['files']['intervention']['status'], 'codex_loop': captured[-1]['settings']['backend']}))",
+      "assert captured and captured[-1]['mode'] == 'chat' and captured[-1]['settings']['backend'] == 'claude', captured",
+      "print(json.dumps({'queued': queued['files']['queued_chat']['count'], 'pending': len(module.pending_human_interventions()), 'prompt': captured[-1]['mode']}))",
     ].join("; ")
   ], {
     cwd: root,
@@ -1663,8 +1740,8 @@ Confidence: medium
     },
     encoding: "utf8"
   }).trim();
-  if (!interventionOutput.includes('"recorded": "recorded"') || !interventionOutput.includes('"codex_loop": "claude"')) {
-    throw new Error(`Python intervention fixture returned unexpected output: ${interventionOutput}`);
+  if (!chatBoundaryOutput.includes('"queued": 1') || !chatBoundaryOutput.includes('"pending": 1') || !chatBoundaryOutput.includes('"prompt": "chat"')) {
+    throw new Error(`Python chat boundary fixture returned unexpected output: ${chatBoundaryOutput}`);
   }
 
   const launchPromptOutput = execFileSync(python.command, [
@@ -1697,10 +1774,13 @@ Confidence: medium
       "review_files = ['PLAN_REVIEW.md', 'PROCESS_REVIEW.md', 'EVIDENCE_REVIEW.md', 'VENUE_FIT_REVIEW.md', 'MANUSCRIPT_REVIEW.md', 'FIGURE_TABLE_REVIEW.md', 'REFERENCE_REVIEW.md', 'FINAL_GATE_REVIEW.md']",
       "assert all('## Resource Scout Brief' in prompt for prompt in prompts.values()), prompts",
       "assert all('Scout: required | skipped' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Decision reason:' in prompt for prompt in prompts.values()), prompts",
       "assert all('Skip reason:' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Known resource clues:' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Freshness / date sensitivity:' in prompt for prompt in prompts.values()), prompts",
       "assert all('RESOURCE_SCOUT_REPORT.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('instructions/RESOURCE_SCOUT.md' in prompt for prompt in prompts.values()), prompts",
-      "assert all('spawn a Resource Scout subagent to search, file, and report external resources for this trial' in prompt for prompt in prompts.values()), prompts",
+      "assert all('spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial\\'s review risks' in prompt for prompt in prompts.values()), prompts",
       "assert all('REVIEWER_SPAWN_DECISION.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('instructions/REVIEWER_SCOPE_ANALYST.md' in prompt for prompt in prompts.values()), prompts",
@@ -1920,8 +2000,14 @@ Confidence: medium
     "review_dir.mkdir(parents=True, exist_ok=True)",
     "def write_final_artifacts():",
     "    trial_dir.mkdir(parents=True, exist_ok=True)",
-    "    (trial_dir / 'PLAN.md').write_text('# Plan\\n\\nFinal gate smoke plan.\\n', encoding='utf-8')",
+    "    (trial_dir / 'PLAN.md').write_text('# Plan\\n\\nFinal gate smoke plan.\\n\\n## Resource Scout Brief\\n\\nScout: skipped\\n\\nDecision reason: fixture uses local synthetic artifacts only and no external source can affect this smoke objective.\\n\\nSkip reason: fixture uses local synthetic artifacts only.\\n\\nSearch scope: none.\\n\\nResource types: none.\\n\\nDisciplines/domains: none.\\n\\nKnown resource clues: none.\\n\\nFreshness / date sensitivity: none.\\n\\nDownload policy: none.\\n\\nExpected destinations: none.\\n\\nStop criteria: fixture complete.\\n', encoding='utf-8')",
     "    (trial_dir / 'REPORT.md').write_text('# Report\\n\\nFinal gate smoke report.\\n', encoding='utf-8')",
+    "    scout_dir = trial_dir / 'artifacts' / 'resource_scout'",
+    "    scout_dir.mkdir(parents=True, exist_ok=True)",
+    "    (scout_dir / 'RESOURCE_SCOUT_REPORT.md').write_text('# Resource Scout Report\\n\\nScout: skipped\\n\\n## Reason\\n\\nFixture uses local synthetic artifacts only.\\n', encoding='utf-8')",
+    "    spawn_dir = trial_dir / 'artifacts' / 'reviewer_spawn'",
+    "    spawn_dir.mkdir(parents=True, exist_ok=True)",
+    "    (spawn_dir / 'REVIEWER_SPAWN_DECISION.md').write_text('# Reviewer Scope Analyst Decision\\n\\nSpawn needed: no\\n\\n## Reasoning\\n\\nThe core reviewers cover this synthetic final-gate fixture.\\n', encoding='utf-8')",
     "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected display / method / result style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Architecture Overview / Table of Contents\n\n- [Section 1: Introduction](#section-1-introduction)\n\n---\n\n## Manuscript Architecture\n\n### Section 1: Introduction\n\nTarget-venue role: Open the perspective with a qualified evidence synthesis.\n\nReader question answered: Why should this perspective exist and what claim is supported?\n\nLocal thesis / purpose: The bounded accepted claim is important but constrained by the reviewed evidence.\n\nLocal claims in plain language: The manuscript makes one bounded claim that is understandable without opening a claim/evidence index.\n\nLocal evidence, results, or artifacts: `research_trajectory/CURRENT_FINDINGS.md` supports the claim through the current source audit.\n\nPlaced displays / methods / results: none.\n\nLocal qualifications: The claim remains bounded to the reviewed evidence.\n\nTransition job: sets up the implication section.\n\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|\n| P1 | Establish problem and bounded claim | State the research problem and say exactly what the current finding supports without drafting final prose. | `research_trajectory/CURRENT_FINDINGS.md` | none | cite the accepted source audit | bounded to reviewed evidence | sets up the implication section |\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports. No active tables are needed because the comparison is carried locally in Section 1 paragraph P1.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence and that qualification is reflected in Section 1 paragraph P1.\n\n---\n\n## Provenance / Audit Index\n\n### Claim / Evidence Index\n\nC000001 maps to the local Section 1 claim and `research_trajectory/CURRENT_FINDINGS.md`.\n\n### Display / Method / Result Inventory\n\nNo active displays, methods, datasets, benchmarks, or result blocks are required for this scoped fixture.\n\n### Source Links\n\n- `research_trajectory/CURRENT_FINDINGS.md`\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
     "    review_template = \"\"\"Reviewer: {reviewer}\nScope: {scope}\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `{instruction}`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `PROJECT.md`\n- `research_trajectory/STATE.md`\n- `research_trajectory/trials/000001_final_smoke/PLAN.md`\n- `research_trajectory/trials/000001_final_smoke/REPORT.md`\n\n## Context Summary\n\nSmoke test reviewer fixture.\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\"",
     "    for key, config in module.REQUIRED_REVIEWER_OUTPUTS.items():",
@@ -2019,11 +2105,18 @@ Confidence: medium
     "assert context.session['loop_stop_reason'] == 'all_reviewer_gates_passed', context.session",
     "state.write_text(continue_gate, encoding='utf-8')",
     "context.session.update({'loop_active': False, 'mode': 'goal', 'loop_iteration': 100, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': 'review_checkpoint_reached', 'settings': {'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000000', 'logs': [], 'raw_logs': [], 'transcript': []})",
-    "module.start_research_run = lambda *args, **kwargs: {'ok': True, 'kwargs': kwargs}",
-    "resumed = module.handle_local_slash_command('/goal resume', '/goal resume', {'backend': 'codex', 'reviewCheckpointInterval': 25})",
-    "assert resumed and resumed.get('local') is True, resumed",
+    "module.start_research_run = lambda prompt, mode, resume, settings_payload=None, loop_active=None, **kwargs: {'ok': True, 'mode': mode, 'resume': resume, 'loop_active': loop_active, 'kwargs': kwargs, 'prompt': prompt}",
+    "legacy = module.handle_local_slash_command('/goal resume', '/goal resume', {'backend': 'codex', 'reviewCheckpointInterval': 25})",
+    "assert legacy and legacy.get('local') is True, legacy",
+    "assert context.session['loop_active'] is False, context.session",
+    "expected_checkpoint_base = module.latest_active_trial_iteration()",
+    "resumed = module.start_resume_autoresearch({'settings': {'backend': 'codex', 'reviewCheckpointInterval': 25}, 'resumeInstruction': 'Prioritize resume evidence.'})",
+    "assert resumed and resumed.get('resumed') is True, resumed",
+    "assert 'Additional user instruction for this resume' in resumed['session']['prompt'], resumed['session']['prompt']",
+    "assert 'Prioritize resume evidence.' in resumed['session']['prompt'], resumed['session']['prompt']",
+    "assert context.session['loop_instruction'] == 'Prioritize resume evidence.', context.session",
     "assert context.session['loop_active'] is True, context.session",
-    "assert context.session['loop_review_checkpoint_iteration'] == 26, context.session",
+    "assert context.session['loop_review_checkpoint_iteration'] == expected_checkpoint_base + 25, context.session",
     "print(json.dumps({'default': module.DEFAULT_REVIEW_CHECKPOINT_INTERVAL, 'checkpoint_stop': 'review_checkpoint_reached', 'resumed_checkpoint': context.session['loop_review_checkpoint_iteration']}))"
   ].join("\n");
   const checkpointOutput = execFileSync(python.command, [
@@ -2042,7 +2135,7 @@ Confidence: medium
   if (
     !checkpointOutput.includes('"default": 100') ||
     !checkpointOutput.includes('"checkpoint_stop": "review_checkpoint_reached"') ||
-    !checkpointOutput.includes('"resumed_checkpoint": 26')
+    !checkpointOutput.includes('"resumed_checkpoint":')
   ) {
     throw new Error(`checkpoint smoke test returned unexpected output: ${checkpointOutput}`);
   }
@@ -2102,6 +2195,123 @@ Confidence: medium
     !activeTrialMarkerOutput.includes('"completed_marker_status": "complete"')
   ) {
     throw new Error(`active trial marker smoke test returned unexpected output: ${activeTrialMarkerOutput}`);
+  }
+
+  const specializedReviewOutputPathScript = [
+    "import importlib.util, json, os, pathlib, tempfile",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server_specialized_output_path', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "root = pathlib.Path(tempfile.mkdtemp(prefix='coauto-specialized-output-path-'))",
+    "(root / 'PROJECT.md').write_text('# Specialized Output Path Smoke\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'STATE.md').parent.mkdir(parents=True, exist_ok=True)",
+    "(root / 'research_trajectory' / 'STATE.md').write_text('# Research State\\n\\n## Autoresearch Goal Gate\\n\\nStatus: continue\\n', encoding='utf-8')",
+    "trial = root / 'research_trajectory' / 'trials' / '000001_specialized_review'",
+    "(trial / 'artifacts' / 'resource_scout').mkdir(parents=True, exist_ok=True)",
+    "(trial / 'artifacts' / 'reviewer_spawn').mkdir(parents=True, exist_ok=True)",
+    "(trial / 'reviews').mkdir(parents=True, exist_ok=True)",
+    "plan = \"\"\"# Plan\n\n## Resource Scout Brief\n\nScout: skipped\nDecision reason: local fixture only\nSearch scope: none\nResource types: none\nDisciplines/domains: fixture\nKnown resource clues: none\nFreshness / date sensitivity: none\nDownload policy: none\nExpected destinations: none\nStop criteria: fixture complete\nSkip reason: no external resources needed\n\"\"\"",
+    "(trial / 'PLAN.md').write_text(plan, encoding='utf-8')",
+    "(trial / 'REPORT.md').write_text('# Report\\n\\nClosed fixture.\\n', encoding='utf-8')",
+    "(trial / 'artifacts' / 'resource_scout' / 'RESOURCE_SCOUT_REPORT.md').write_text('# Resource Scout Report\\n\\nScout: skipped\\n\\n## Reason\\n\\nFixture uses local artifacts only.\\n', encoding='utf-8')",
+    "(trial / 'artifacts' / 'reviewer_spawn' / 'REVIEWER_SPAWN_DECISION.md').write_text('Spawn needed: yes\\nSpecialized review output path: `research_trajectory/trials/000001_specialized_review/reviews/SPECIALIZED_REVIEW.md`\\n', encoding='utf-8')",
+    "(trial / 'reviews' / 'SPECIALIZED_REVIEW.md').write_text('Reviewer: Specialized Reviewer\\nDecision: pass\\nGate impact: pass\\n', encoding='utf-8')",
+    "for config in module.REQUIRED_REVIEWER_OUTPUTS.values():",
+    "    (trial / 'reviews' / config['file']).write_text(f\"Reviewer: {config['label']}\\nDecision: pass\\nGate impact: pass\\n\", encoding='utf-8')",
+    "context = module.ProjectContext(root)",
+    "module._CONTEXT.project = context",
+    "assert module.trial_dir_is_closed(trial), module.trial_dir_is_closed(trial)",
+    "blockers = module.trial_protocol_file_blockers(trial)",
+    "assert blockers == [], blockers",
+    "(root / 'research_trajectory' / 'NEXT_TRIAL.json').write_text(json.dumps({'schema_version': 1, 'status': 'pending', 'expected_iteration': 1}, indent=2), encoding='utf-8')",
+    "assert module.pending_expected_trial_iteration() == 0, module.pending_expected_trial_iteration()",
+    "module.validate_expected_trial_marker()",
+    "marker = json.loads((root / 'research_trajectory' / 'NEXT_TRIAL.json').read_text(encoding='utf-8'))",
+    "assert marker['status'] == 'fulfilled', marker",
+    "print(json.dumps({'blockers': blockers, 'marker': marker['status']}))"
+  ].join("\n");
+  const specializedReviewOutputPathOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    specializedReviewOutputPathScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!specializedReviewOutputPathOutput.includes('"marker": "fulfilled"')) {
+    throw new Error(`specialized review output path smoke test returned unexpected output: ${specializedReviewOutputPathOutput}`);
+  }
+
+  const legacyBoundaryScript = [
+    "import importlib.util, json, os, pathlib, tempfile",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server_legacy_boundary', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "root = pathlib.Path(tempfile.mkdtemp(prefix='coauto-legacy-boundary-'))",
+    "(root / 'PROJECT.md').write_text('# Legacy Boundary Smoke\\n', encoding='utf-8')",
+    "(root / 'research_trajectory').mkdir(parents=True, exist_ok=True)",
+    "(root / 'research_trajectory' / 'STATE.md').write_text('# Research State\\n\\n## Autoresearch Goal Gate\\n\\nStatus: continue\\n', encoding='utf-8')",
+    "trials = root / 'research_trajectory' / 'trials'",
+    "trials.mkdir(parents=True, exist_ok=True)",
+    "for iteration in range(1, 21):",
+    "    trial = trials / f'{iteration:06d}_legacy_reported'",
+    "    (trial / 'artifacts' / 'reviewer_spawn').mkdir(parents=True, exist_ok=True)",
+    "    (trial / 'PLAN.md').write_text('# Plan\\n', encoding='utf-8')",
+    "    (trial / 'REPORT.md').write_text('# Report\\n', encoding='utf-8')",
+    "    (trial / 'reviews').mkdir(exist_ok=True)",
+    "    (trial / 'reviews' / 'PLAN_REVIEW.md').write_text('Decision: pass\\nGate impact: pass\\n', encoding='utf-8')",
+    "    (trial / 'artifacts' / 'reviewer_spawn' / 'REVIEWER_SPAWN_DECISION.md').write_text('Spawn needed: yes\\nSpecialized reviewer output: reviews/SPECIALIZED_REVIEW.md\\n', encoding='utf-8')",
+    "partial = trials / '000021_partial_plan_only'",
+    "(partial).mkdir(parents=True, exist_ok=True)",
+    "(partial / 'PLAN.md').write_text('# Partial plan\\n', encoding='utf-8')",
+    "context = module.ProjectContext(root)",
+    "module._CONTEXT.project = context",
+    "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 0, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "assert module.latest_active_trial_iteration() == 20, module.latest_active_trial_iteration()",
+    "assert module.next_active_trial_iteration() == 21, module.next_active_trial_iteration()",
+    "trajectory = module.sync_trajectory_state('legacy_boundary_smoke')",
+    "assert trajectory['latest_active_trial'] == '000020_legacy_reported', trajectory",
+    "assert trajectory['next_trial_number'] == 21, trajectory",
+    "(root / 'research_trajectory' / 'NEXT_TRIAL.json').write_text(json.dumps({'schema_version': 1, 'status': 'pending', 'expected_iteration': 20}, indent=2), encoding='utf-8')",
+    "module.validate_expected_trial_marker()",
+    "marker = json.loads((root / 'research_trajectory' / 'NEXT_TRIAL.json').read_text(encoding='utf-8'))",
+    "assert marker['status'] == 'pending', marker",
+    "assert module.pending_expected_trial_iteration() == 20, module.pending_expected_trial_iteration()",
+    "cleanup = module.archive_interrupted_trial_tail('legacy_boundary_smoke')",
+    "archived_ids = [item['id'] for item in cleanup['archived']]",
+    "assert archived_ids == ['000021_partial_plan_only'], cleanup",
+    "assert (trials / '000020_legacy_reported').exists(), 'reported legacy trial must remain active'",
+    "assert not (trials / '000021_partial_plan_only').exists(), 'partial unreported tail should be archived'",
+    "trajectory_after = json.loads((root / 'research_trajectory' / 'TRAJECTORY.json').read_text(encoding='utf-8'))",
+    "assert trajectory_after['latest_active_trial'] == '000020_legacy_reported' and trajectory_after['next_trial_number'] == 21, trajectory_after",
+    "print(json.dumps({'latest': trajectory['latest_active_trial'], 'next': trajectory['next_trial_number'], 'archived': archived_ids, 'marker': marker['status'], 'pending': module.pending_expected_trial_iteration()}))"
+  ].join("\n");
+  const legacyBoundaryOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    legacyBoundaryScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (
+    !legacyBoundaryOutput.includes('"latest": "000020_legacy_reported"') ||
+    !legacyBoundaryOutput.includes('"next": 21') ||
+    !legacyBoundaryOutput.includes('"000021_partial_plan_only"') ||
+    !legacyBoundaryOutput.includes('"marker": "pending"') ||
+    !legacyBoundaryOutput.includes('"pending": 20')
+  ) {
+    throw new Error(`legacy boundary smoke test returned unexpected output: ${legacyBoundaryOutput}`);
   }
 
   const resumeForkScript = [

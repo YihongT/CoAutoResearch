@@ -136,6 +136,13 @@ function loadAppContext() {
     close() { this.closed = true; },
     showModal() { this.open = true; },
   });
+  const resumeAutoresearchDialog = element({
+    close() { this.closed = true; this.open = false; },
+    showModal() { this.open = true; this.closed = false; },
+  });
+  const resumeAutoresearchSummary = element();
+  const resumeAutoresearchInstruction = element();
+  const resumeAutoresearchConfirm = element();
   const largeImportDialog = element({
     close() { this.closed = true; this.open = false; },
     showModal() { this.open = true; },
@@ -242,6 +249,10 @@ function loadAppContext() {
     ["#project-create-note", element()],
     ["#restart-autoresearch-dialog", restartDialog],
     ["#restart-autoresearch-reason", element()],
+    ["#resume-autoresearch-dialog", resumeAutoresearchDialog],
+    ["#resume-autoresearch-summary", resumeAutoresearchSummary],
+    ["#resume-autoresearch-instruction", resumeAutoresearchInstruction],
+    ["[data-resume-autoresearch-confirm]", resumeAutoresearchConfirm],
     ["#large-resource-import-dialog", largeImportDialog],
     ["#large-import-title", element()],
     ["#large-import-file-name", element()],
@@ -301,11 +312,21 @@ function loadAppContext() {
         this.type = type;
       }
     },
+    FileReader: class FileReader {
+      readAsDataURL(file) {
+        this.result = `data:${file?.type || "application/octet-stream"};base64,${file?.contentBase64 || ""}`;
+        if (typeof this.onload === "function") this.onload();
+      }
+    },
     window: {
       location: { search: "?project=p1", origin: "http://localhost" },
       origin: "http://localhost",
       innerWidth: 1400,
       innerHeight: 900,
+      confirm(message) {
+        context.__confirmMessages.push(String(message || ""));
+        return context.__confirmNext !== false;
+      },
       addEventListener() {},
       scrollTo() {},
     },
@@ -354,6 +375,8 @@ function loadAppContext() {
   vm.runInContext(
     `
     globalThis.__apiCalls = [];
+    globalThis.__confirmMessages = [];
+    globalThis.__confirmNext = true;
     globalThis.__renderCount = 0;
     globalThis.__persistCount = 0;
     globalThis.__scrollCount = 0;
@@ -392,6 +415,7 @@ function loadAppContext() {
     };
     globalThis.__renderStageImpl = renderStage;
     globalThis.__renderResumeCommandBarImpl = renderResumeCommandBar;
+    globalThis.__renderComposerSuggestionsImpl = renderComposerSuggestions;
     scheduleOverviewPoll = () => {};
     renderChatState = () => {};
     renderSession = () => {};
@@ -406,7 +430,6 @@ function loadAppContext() {
     resizeComposer = () => {};
     scrollFramingToBottomSoon = () => { globalThis.__scrollCount += 1; };
     scrollThread = () => { globalThis.__scrollCount += 1; };
-    notifyResourceHandlingFromResponse = () => {};
     showResourceBrowser = () => {
       globalThis.__browserOpenCount += 1;
       globalThis.__browserOpenCategory = activeResourceCategory;
@@ -423,13 +446,23 @@ function loadAppContext() {
       appState.research_session = { ...appState.research_session, mode: "framing", status: "running" };
       return { ok: true };
     };
-    collectUploadFiles = async () => {
+    collectUploadFiles = async (items = selectedUploadItems) => {
       globalThis.__collectSeen = {
         messages: globalThis.__messages(),
         editorValue: document.querySelector("#cold-file-editor")?.value || "",
         renderCount: globalThis.__renderCount,
       };
       if (globalThis.__collectPromise) return globalThis.__collectPromise;
+      if (items !== selectedUploadItems && Array.isArray(items) && items.length) {
+        return items
+          .filter((item) => item.file)
+          .map((item) => ({
+            category: item.category,
+            name: item.name,
+            relativePath: item.name,
+            contentBase64: item.file.contentBase64 || "",
+          }));
+      }
       return [];
     };
     api = async (endpoint, options = {}) => {
@@ -761,6 +794,39 @@ function loadAppContext() {
       framingReplyPending = true;
       framingMessagesPersisting = true;
     };
+    globalThis.__setConfirmNext = (value) => {
+      globalThis.__confirmNext = Boolean(value);
+    };
+    globalThis.__confirmMessageLog = () => [...globalThis.__confirmMessages];
+    globalThis.__startEdit = (id) => {
+      editingFramingId = id;
+      editAttachmentDraftForMessage(id);
+      renderFramingConversation();
+      return framingMessageHtml(localMessages.find((message) => message.id === id));
+    };
+    globalThis.__editDraftState = (id) => {
+      const draft = editAttachmentDraftForMessage(id);
+      return {
+        resources: draft.resources.map((item) => ({ path: item.path, category: item.category, alreadyImported: Boolean(item.alreadyImported) })),
+        retained: draft.retained.map((item) => ({ name: item.name, path: item.path, category: item.category, originalKind: item.originalKind })),
+        uploads: draft.uploads.map((item) => ({ name: item.name, category: item.category, size: item.size })),
+      };
+    };
+    globalThis.__removeEditAttachment = (id, token) => {
+      editingFramingId = id;
+      removeEditAttachment(id, token);
+      return globalThis.__editDraftState(id);
+    };
+    globalThis.__addEditResource = (id, path, options = {}) => {
+      addEditResourcePath(id, path, options);
+      return globalThis.__editDraftState(id);
+    };
+    globalThis.__addEditUpload = (id, file, options = {}) => {
+      addEditUploadFile(id, file, options);
+      return globalThis.__editDraftState(id);
+    };
+    globalThis.__collectEditUploads = async (id) => collectUploadFiles(editAttachmentDraftForMessage(id).uploads);
+    globalThis.__editUploadHasFile = (id) => Boolean(editAttachmentDraftForMessage(id).uploads[0]?.file);
     globalThis.__pendingState = () => ({
       reply: framingReplyPending,
       draft: framingDraftPending,
@@ -799,12 +865,23 @@ function loadAppContext() {
     };
     globalThis.__messageHtml = (index = 0) => framingMessageHtml(localMessages[index]);
     globalThis.__sessionTimelineProbe = () => sessionTimelineHtml(sessionTranscriptEntries());
+    globalThis.__framingThreadHtmlProbe = () => {
+      const thread = $("#framing-thread");
+      renderFramingConversation();
+      const directMessages = collapseProjectDraftMessages(localMessages).map((message) => framingMessageHtml(message)).join("");
+      const directPanel = persistentAutoresearchPanelHtml(sessionTranscriptEntries());
+      return thread?.innerHTML || lastFramingHtml || directMessages + directPanel || "";
+    };
     globalThis.__thinkingProbe = () => framingThinkingHtml();
     globalThis.__progressDetailsProbe = () => framingProgressDetailsHtml();
+    globalThis.__composerSuggestionsProbe = () => {
+      globalThis.__renderComposerSuggestionsImpl();
+      const row = document.querySelector("#composer-suggestions");
+      return { hidden: Boolean(row?.hidden), html: row?.innerHTML || "", className: row?.className || "" };
+    };
     globalThis.__progressSummaryProbe = () => {
       const entries = currentProgressEntries();
-      const entry = latestTrialProgressEntry(entries);
-      return entry ? framingProgressTitle(entry) + ": " + framingProgressContent(entry) : "Waiting for Codex events...";
+      return currentRunReadableSummary(entries);
     };
     globalThis.__formatWorkedDuration = (seconds) => formatWorkedDuration(seconds);
     globalThis.__statusCardProbe = (payload) => statusCardHtml(payload, { id: "status-test" });
@@ -1074,22 +1151,48 @@ async function testImmediateUserMessage() {
   assert.equal(app.context.__apiCalls[0].body.message, "Can you explain the project?");
 }
 
-async function testRunningOrdinaryMessageIsBlocked() {
+async function testExistingProjectComposerUsesChatEndpoint() {
   const app = loadAppContext();
-  app.run('__setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] })');
-  const sent = await app.run('sendSessionComposerMessage("Can you show progress?")');
-  assert.equal(sent, false, "ordinary chat should not send while an autoresearch run is active");
-  assert.equal(app.context.__apiCalls.length, 0, "blocked ordinary running chat must not call backend");
-  assert.equal(app.context.__toastMessages.at(-1).message, "Wait for the current agent run to finish before sending another message.");
+  app.coldEditor.value = "Let's discuss the analysis method.";
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "existing PROJECT.md composer messages should use chat, not framing");
+  assert.equal(app.context.__apiCalls[0].body.message, "Let's discuss the analysis method.");
+  assert.equal(app.context.__startedFramingBrief, undefined, "existing project chat must not start a framing run");
 }
 
-async function testRunningInterventionMessageIsAllowed() {
+async function testRunningChatMessageIsQueued() {
   const app = loadAppContext();
   app.run('__setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] })');
+  app.context.__apiResponse = {
+    ok: true,
+    result: {
+      files: { queued_chat: { queued: true, count: 1, run_after_current: true } },
+      session: { id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] }
+    }
+  };
+  const sent = await app.run('sendSessionComposerMessage("Can you show progress?")');
+  assert.equal(sent, true, "ordinary chat should queue while an autoresearch run is active");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat");
+  assert.equal(app.context.__apiCalls[0].body.message, "Can you show progress?");
+  assert.equal(app.context.__toastMessages.at(-1).message, "Queued; CoAutoResearch will reply after the current run finishes.");
+  assert.equal(app.context.__pendingState().reply, false, "queued chat should not leave a visible chat run pending");
+}
+
+async function testRunningSteeringLookingMessageIsQueuedTheSameWay() {
+  const app = loadAppContext();
+  app.run('__setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] })');
+  app.context.__apiResponse = {
+    ok: true,
+    result: {
+      files: { queued_chat: { queued: true, count: 1, run_after_current: true } },
+      session: { id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] }
+    }
+  };
   const sent = await app.run('sendSessionComposerMessage("intervention: change target venue to Nature Machine Intelligence")');
-  assert.equal(sent, true, "explicit intervention should send while an autoresearch run is active");
+  assert.equal(sent, true, "steering-looking text should use the same queued chat path while autoresearch is active");
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat");
   assert.equal(app.context.__apiCalls[0].body.message, "intervention: change target venue to Nature Machine Intelligence");
+  assert.equal(app.context.__apiCalls[0].body.conversationHistory.length, 1, "queued chat request should still send the authoritative visible history");
 }
 
 async function testAttachmentOnlyMessage() {
@@ -1106,6 +1209,28 @@ async function testAttachmentOnlyMessage() {
   await pending;
   assert.equal(app.context.__apiCalls[0].body.message, "Attached 1 resource.");
   assertJsonEqual(app.context.__apiCalls[0].body.resourceLinks, [{ path: "/tmp/paper.pdf", category: "literature" }]);
+}
+
+async function testResourceLinksDoNotRepeatAcrossMessages() {
+  const app = loadAppContext();
+  app.context.__apiResponse = {
+    ok: true,
+    result: {
+      session: {
+        id: "s-completed",
+        session_id: "sid",
+        status: "completed",
+        mode: "chat",
+        started_at: "2026-06-17T10:01:00.000Z",
+        transcript: []
+      }
+    }
+  };
+  app.run('__setSelectedResources([{ path: "/tmp/paper.pdf", category: "literature" }])');
+  await app.run('sendSessionComposerMessage("Use this paper.")');
+  assertJsonEqual(app.context.__apiCalls[0].body.resourceLinks, [{ path: "/tmp/paper.pdf", category: "literature" }]);
+  await app.run('sendSessionComposerMessage("Now answer without new attachments.")');
+  assertJsonEqual(app.context.__apiCalls[1].body.resourceLinks, [], "second message must not resend previous resource links");
 }
 
 async function testResumeFromTrialRequiresConfirmationAndSendsPayload() {
@@ -1244,20 +1369,20 @@ async function testSuccessfulSessionSendClearsComposerDraft() {
 
 async function testSlashCommandVisibleAndIgnoredAsUnanswered() {
   const app = loadAppContext();
-  app.coldEditor.value = "/goal resume";
+  app.coldEditor.value = "/status";
   app.run("__installBlockingCollect()");
-  const pending = app.run('sendSessionComposerMessage("/goal resume")');
+  const pending = app.run('sendSessionComposerMessage("/status")');
   const [message] = app.context.__messages();
   assert.equal(message.kind, "command");
-  assert.equal(message.text, "/goal resume");
+  assert.equal(message.text, "/status");
   const pendingState = app.context.__pendingState();
   assert.equal(pendingState.reply, true, "slash commands should show immediate pending feedback while the command posts");
   assert.equal(pendingState.pendingId, message.id, "slash command pending state should be tied to the visible command row");
   assert.ok(pendingState.since > 0, "slash command pending state should start a visible working timer");
   const html = app.run("__messageHtml(0)");
   assert.equal(html.includes('class="framing-message control"'), true, "slash command should render as a control row, not a user bubble");
-  assert.equal(html.includes("Resume autoresearch"), true, "slash command control row should render human-facing autoresearch copy");
-  assert.equal(html.includes("/goal resume"), false, "slash command control row should not expose the internal command text");
+  assert.equal(html.includes("Show status"), true, "slash command control row should render human-facing status copy");
+  assert.equal(html.includes("/status"), false, "slash command control row should not expose the internal command text");
   assert.equal(html.includes(">You<"), false, "slash command control row should not be labelled as a user chat turn");
   assert.equal(html.includes("data-framing-edit"), false, "slash command control row should not be editable like a normal user message");
   app.context.__resolveCollect();
@@ -1266,39 +1391,39 @@ async function testSlashCommandVisibleAndIgnoredAsUnanswered() {
   assert.equal(app.run("__latestUnansweredText()"), "", "slash command should not create a fake unanswered chat state");
 }
 
-async function testRestartCommandRequiresConfirmationAndSendsRestartEndpoint() {
+async function testLegacyGoalRestartCommandUsesCommandEndpoint() {
   const app = loadAppContext();
   app.coldEditor.value = "/goal restart";
   app.run("__installBlockingCollect()");
   const pending = app.run('sendSessionComposerMessage("/goal restart")');
-  assert.equal(app.context.__restartConfirmCalls.length, 1, "restart must ask for explicit confirmation");
+  assert.equal(app.context.__restartConfirmCalls.length, 0, "typed legacy /goal restart must not invoke restart confirmation");
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(app.coldEditor.value, "", "confirmed restart should clear composer before backend work");
+  assert.equal(app.coldEditor.value, "", "legacy command should clear composer before backend work");
   const [message] = app.context.__messages();
-  assert.equal(message.kind, "command", "restart command should render as a command control row");
+  assert.equal(message.kind, "command", "legacy command should render as a command control row");
   const html = app.run("__messageHtml(0)");
-  assert.equal(html.includes("Restart autoresearch"), true, "restart command should use human-facing copy");
+  assert.equal(html.includes("/goal restart"), true, "legacy command row should show the typed compatibility command");
   app.context.__resolveCollect();
   await pending;
-  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/restart");
-  assert.equal(app.context.__apiCalls[0].body.message, "/goal restart");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/command");
+  assert.equal(app.context.__apiCalls[0].body.command, "/goal restart");
 }
 
-async function testRestartCancelPreservesComposer() {
+async function testLegacyGoalRestartIgnoresRestartCancelFlag() {
   const app = loadAppContext();
   app.context.__confirmRestart = false;
   app.coldEditor.value = "/goal restart";
   const sent = await app.run('sendSessionComposerMessage("/goal restart")');
-  assert.equal(sent, false, "cancelled restart should not submit");
-  assert.equal(app.context.__apiCalls.length, 0, "cancelled restart must not call backend");
-  assert.equal(app.context.__messages().length, 0, "cancelled restart must not append a command row");
-  assert.equal(app.coldEditor.value, "/goal restart", "cancelled restart should preserve typed command");
+  assert.equal(sent, true, "legacy restart command should submit as a compatibility command");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/command", "legacy restart command must not call restart endpoint");
+  assert.equal(app.context.__messages()[0].kind, "command", "legacy restart command should append a command row");
+  assert.equal(app.coldEditor.value, "", "successful legacy command should clear composer");
 }
 
-async function testClaudeGoalControlsUseProductCommands() {
+async function testTypedLegacyGoalControlsStayOnCommandEndpoint() {
   const app = loadAppContext();
-  const commands = app.run(`
+  app.run(`
     __setSession({
       id: "s-claude",
       session_id: "00000000-0000-0000-0000-000000000cla",
@@ -1307,19 +1432,15 @@ async function testClaudeGoalControlsUseProductCommands() {
       status: "completed",
       mode: "goal"
     });
-    ({ resume: sessionGoalResumeCommand(), pause: sessionGoalPauseCommand() });
   `);
-  assert.equal(commands.resume, "/goal resume", "Claude resume must use the CoAutoResearch product command");
-  assert.equal(commands.pause, "/goal pause", "Claude pause must not be normalized to Claude Code /goal stop");
-
   app.coldEditor.value = "/goal restart";
   app.run("__installBlockingCollect()");
   const pending = app.run('sendSessionComposerMessage("/goal restart")');
-  assert.equal(app.context.__restartConfirmCalls.length, 1, "Claude restart must still use product restart confirmation");
+  assert.equal(app.context.__restartConfirmCalls.length, 0, "typed legacy restart must not use product restart confirmation");
   app.context.__resolveCollect();
   await pending;
-  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/restart", "Claude /goal restart must route through CoAutoResearch restart");
-  assert.equal(app.context.__apiCalls[0].body.message, "/goal restart");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/command", "typed legacy /goal restart must stay on command endpoint");
+  assert.equal(app.context.__apiCalls[0].body.command, "/goal restart");
 }
 
 function testStaleOverviewDoesNotSwallowPendingUser() {
@@ -1363,18 +1484,203 @@ async function testEditTruncatesLaterConversationBeforeResend() {
   const app = loadAppContext();
   app.run(`
     __setMessages([
-      { id: "u1", role: "user", kind: "text", text: "old question", created_at: "2026-06-17T10:00:00.000Z" },
+      {
+        id: "u1",
+        role: "user",
+        kind: "text",
+        text: "old question",
+        created_at: "2026-06-17T10:00:00.000Z",
+        attachments: [{ kind: "link", path: "resources/old/paper.pdf", category: "literature" }]
+      },
       { id: "a1", role: "assistant", kind: "text", text: "old answer", created_at: "2026-06-17T10:00:01.000Z" },
       { id: "u2", role: "user", kind: "text", text: "later question", created_at: "2026-06-17T10:00:02.000Z" },
       { id: "a2", role: "assistant", kind: "text", text: "later answer", created_at: "2026-06-17T10:00:03.000Z" }
     ]);
   `);
-  await app.run('resendFramingMessage("u1", "edited question")');
+  await app.run('resendConversationMessage("u1", "edited question")');
   const messages = app.context.__messages();
   assert.equal(messages.length, 1);
   assert.equal(messages[0].text, "edited question");
   assert.ok(messages[0].edited_at, "edited user message should record edited_at");
-  assert.equal(app.context.__startedFramingBrief, "edited question");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "editing an established discussion turn should regenerate a chat reply");
+  assert.equal(app.context.__apiCalls[0].body.message, "edited question");
+  assert.equal(app.context.__apiCalls[0].body.clientMessageId, "u1", "resend should identify the edited message");
+  assertJsonEqual(app.context.__apiCalls[0].body.resourceLinks, [{ path: "resources/old/paper.pdf", category: "literature", alreadyImported: true }], "retained link attachments on the edited message should be resubmitted as current references");
+  assertJsonEqual(app.context.__apiCalls[0].body.conversationHistory[0].attachments, [{ kind: "link", name: "paper.pdf", path: "resources/old/paper.pdf", category: "literature" }], "conversation history should include attachment summaries");
+  assert.equal(app.context.__startedFramingBrief, undefined, "discussion resend must not start a framing run");
+  assert.equal(app.context.__toastMessages.at(-1).message, "Regenerating reply.");
+}
+
+async function testEditAfterAutoresearchFirstMessageUsesChat() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "# Project\\n\\nReady.";
+    appState.files.project.text = "# Project\\n\\nReady.";
+    appState.trials = [{ id: "000001_seed", status: "reported", path: "research_trajectory/trials/000001_seed" }];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_iteration: 1,
+      trajectory: { latest_active_trial: "000001_seed", next_trial_number: 2 },
+      transcript: []
+    });
+    __setMessages([
+      { id: "u-initial", role: "user", kind: "text", text: "old initial brief", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "old answer", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+  `);
+  await app.run('resendConversationMessage("u-initial", "edited first message after trials")');
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "editing the first message after autoresearch must use chat");
+  assert.equal(app.context.__startedFramingBrief, undefined, "post-autoresearch edit must not restart framing");
+  assert.equal(app.context.__confirmMessageLog().length, 0, "chat resend should not show destructive framing confirmation");
+}
+
+async function testSteeringResendStartsVisibleNormalChatRun() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "old method instruction", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "old answer", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    globalThis.__apiHandler = (endpoint, body) => {
+      if (endpoint === "/api/framing/messages") {
+        appState.framing.messages = body.messages || [];
+        return { ok: true };
+      }
+      if (endpoint === "/api/overview") {
+        return { ...appState, generated_at: "2026-06-17T10:01:00.000Z" };
+      }
+      if (endpoint === "/api/research/chat") {
+        return {
+          ok: true,
+          result: {
+            session: {
+              id: "s-chat",
+              session_id: "sid",
+              status: "running",
+              mode: "chat",
+              started_at: "2026-06-17T10:01:00.000Z",
+              active_run: {
+                running: true,
+                mode: "chat",
+                trial_iteration: null,
+                status_label: "Codex is working"
+              },
+              transcript: []
+            }
+          }
+        };
+      }
+      return { ok: true };
+    };
+  `);
+  await app.run('resendConversationMessage("u1", "我觉得对于这些找到的resources的分析，得用更好的方法，你先别考虑现在方法的思维，先考虑一下，从最好的效果和预期来说，应该怎么分析")');
+  const messages = app.context.__messages();
+  assert.equal(messages.length, 1, "resend should keep the edited user turn and wait for the agent reply");
+  assert.equal(messages[0].role, "user");
+  assert.equal(app.context.__pendingState().reply, true, "resend chat should keep reply pending while Codex works");
+  assert.equal(app.run("__thinkingProbe()").includes("Codex is working"), true, "resend chat should show the normal working UI");
+  const chatCalls = app.context.__apiCalls.filter((call) => call.endpoint === "/api/research/chat");
+  assert.equal(chatCalls.length, 1, "resend should call chat once");
+  assert.equal(chatCalls[0].body.clientMessageId, "u1", "resend should identify the edited message");
+  assert.equal(chatCalls[0].body.resendContext.forceFreshSession, true, "resend should force a fresh non-resumed chat session");
+  assert.equal(chatCalls[0].body.resendContext.archivedCount, 1, "resend should archive the truncated assistant tail");
+  assert.equal(app.context.__startedFramingBrief, undefined, "resend must not start framing");
+}
+
+async function testLegacyRecordedInterventionMessageStillRenders() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "old method instruction", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "i1", role: "assistant", kind: "intervention-recorded", text: "Recorded this as a pending human intervention: research_trajectory/human_interventions/I0011_ui_intervention.md.", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+  `);
+  assert.equal(app.context.__messages()[1].kind, "intervention-recorded", "legacy intervention-recorded history should still be accepted");
+  assert.equal(app.context.__messages()[1].text.includes("I0011_ui_intervention.md"), true, "legacy acknowledgement should retain the recorded path");
+}
+
+async function testEditInitialBriefConfirmsThenUsesFraming() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    __setMessages([
+      { id: "u-initial", role: "user", kind: "text", text: "old initial brief", created_at: "2026-06-17T10:00:00.000Z" }
+    ]);
+  `);
+  await app.run('resendConversationMessage("u-initial", "edited initial brief")');
+  assert.equal(app.context.__startedFramingBrief, "edited initial brief", "editing a true pre-project brief should still re-run framing");
+  assert.equal(app.context.__confirmMessageLog().length, 1, "pre-project framing resend should require confirmation");
+  assert.equal(app.context.__apiCalls.length, 0, "initial brief resend should use the framing helper, not chat API directly");
+}
+
+async function testEditInitialBriefCancelDoesNotTruncate() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    __setMessages([
+      { id: "u-initial", role: "user", kind: "text", text: "old initial brief", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "old answer", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    __setConfirmNext(false);
+  `);
+  await app.run('resendConversationMessage("u-initial", "edited initial brief")');
+  const messages = app.context.__messages();
+  assert.equal(messages.length, 2, "cancelled pre-project framing edit must not truncate history");
+  assert.equal(messages[0].text, "old initial brief", "cancelled pre-project framing edit must not mutate message text");
+  assert.equal(app.context.__apiCalls.length, 0, "cancelled pre-project framing edit must not call backend");
+}
+
+async function testEditAttachmentsCanRemoveRetainAndAdd() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      {
+        id: "u1",
+        role: "user",
+        kind: "text",
+        text: "old question",
+        created_at: "2026-06-17T10:00:00.000Z",
+        attachments: [
+          { kind: "link", path: "resources/old/paper.pdf", category: "literature", alreadyImported: true },
+          { kind: "upload", name: "old_note.md", category: "user_input", type: "text/markdown", size: 12 }
+        ]
+      },
+      { id: "a1", role: "assistant", kind: "text", text: "old answer", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    __startEdit("u1");
+    __removeEditAttachment("u1", "resources:0");
+    __addEditResource("u1", "/tmp/new-folder", { category: "ongoing_work" });
+    __addEditUpload("u1", { name: "new_note.md", type: "text/markdown", size: 8, lastModified: 1, contentBase64: "bmV3IG5vdGU=" }, { category: "user_input" });
+  `);
+  const draftState = app.run('__editDraftState("u1")');
+  assert.equal(draftState.uploads.length, 1, `edit draft should contain the new upload: ${JSON.stringify(draftState)}`);
+  assert.equal(app.run('__editUploadHasFile("u1")'), true, "edit draft upload should retain its File object");
+  const uploadPayload = await app.run('__collectEditUploads("u1")');
+  assert.equal(uploadPayload.length, 1, "edit draft upload should be collectable before resend");
+  await app.run('resendConversationMessage("u1", "")');
+  const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/research/chat");
+  assert.ok(call, "edit attachment resend should call chat");
+  assert.equal(call.endpoint, "/api/research/chat");
+  assert.equal(call.body.message, "Attached 3 resources.", "attachment-only edited resend should use attachment summary text");
+  assertJsonEqual(call.body.resourceLinks, [{ path: "/tmp/new-folder", category: "ongoing_work" }], "resend should include only retained/new current link attachments");
+  assertJsonEqual(call.body.retainedAttachments, [{ kind: "upload", name: "old_note.md", path: "", category: "user_input", type: "text/markdown", size: 12, alreadyImported: false }], "resend should retain old upload metadata without re-uploading it");
+  assert.equal(call.body.files.length, 1, "new edit upload should be submitted as a fresh upload");
+  assert.equal(call.body.files[0].name, "new_note.md");
+  assert.equal(call.body.files[0].contentBase64, "bmV3IG5vdGU=");
+  assert.equal(app.context.__messages()[0].attachments.length, 3, "edited visible message should reflect current attachments only");
 }
 
 async function testLaunchGoalMessageBeforeBackendWork() {
@@ -1533,18 +1839,412 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(html.includes("Stop current run"), true, "running trial live status should expose a contextual stop button");
   assert.equal(html.includes("data-stop-current-run"), true, "contextual stop button should stop the active Codex process");
   assert.equal(html.includes("Live trial activity"), true, "running trial event details should be folded under the live status row");
+  assert.equal(html.includes("data-resume-autoresearch"), false, "running trial panel should not duplicate resume controls");
+  assert.equal(html.includes("data-restart-autoresearch"), false, "running trial panel should not duplicate restart controls");
   assert.equal(html.includes("Open latest manuscript"), false, "first running trial should not expose latest manuscript before a report exists");
   assert.equal(html.includes("Report pending"), false, "running trial should not render a low-information pending report card");
   assert.equal(html.includes("Report is not available yet."), false, "running trial should not render a low-information pending report card");
   assert.equal(html.includes("<span>Trial activity</span>"), false, "running trial details should stay in the live status row instead of a duplicate report card");
+  const composer = app.run("__composerSuggestionsProbe()");
+  assert.equal(composer.hidden, true, "autoresearch composer suggestion row should stay hidden while running");
+  assert.equal(composer.html.includes("Show autoresearch"), false, "composer suggestions should not expose Show autoresearch");
+  assert.equal(composer.html.includes("Status"), false, "composer suggestions should not expose Status");
+  assert.equal(composer.html.includes("Processes"), false, "composer suggestions should not expose Processes");
   const thinkingHtml = app.run("__thinkingProbe()");
   assert.equal(thinkingHtml.includes("Codex is working on Trial 1"), true, "working bubble should name the active trial");
   assert.equal(thinkingHtml.includes("Working for"), true, "working bubble should show elapsed running time");
   assert.equal(thinkingHtml.includes("Trial 1"), true, "working bubble should include the trial axis for autoresearch runs");
   assert.equal(thinkingHtml.includes("Current run activity"), false, "autoresearch working bubble should not duplicate the trial live activity panel");
   assert.equal(thinkingHtml.includes("Live trial activity"), true, "autoresearch working bubble should keep the trial live activity panel");
+  assert.equal(thinkingHtml.includes("<span>Run activity</span>"), false, "autoresearch working bubble should not use the ordinary chat activity label");
   assert.equal(thinkingHtml.includes("Update: Checking sources."), true, "trial live activity summary should expose the latest update");
   assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking sources.", "collapsed current run summary should prefer readable Codex updates over later commands");
+}
+
+function testRunningTrialOpenButtonsStayGroupedLeft() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000018_best_effect_analysis_method_design",
+      iteration: 18,
+      status: "reported",
+      is_closed: false,
+      report_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/REPORT.md",
+      review_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Gate update in progress."
+    }];
+    __setSession({
+      id: "s18",
+      session_id: "sid",
+      status: "running",
+      mode: "goal",
+      loop_active: true,
+      loop_iteration: 18,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "goal",
+        run_id: "s18",
+        started_at: "2026-06-17T10:00:00.000Z",
+        trial_iteration: 18,
+        trial_label: "Trial 18",
+        status_label: "Codex is working on Trial 18"
+      },
+      transcript: [
+        { id: "tu18", role: "user", kind: "user", raw_type: "ui.goal", content: "Continue autoresearch.", created_at: "2026-06-17T10:00:00.000Z" },
+        { id: "ta18", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Update: Gate update in progress.", created_at: "2026-06-17T10:00:04.000Z" }
+      ]
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  const openGroup = html.match(/<div class="trial-report-open-actions">([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.equal(openGroup.includes("Open report"), true, "running trial open group should contain Open report");
+  assert.equal(openGroup.includes("Open review"), true, "running trial open group should contain Open review");
+  assert.equal(html.includes('<div class="trial-report-actions"><div class="trial-report-open-actions">'), true, "running trial should keep open buttons in the left open-action group");
+  assert.equal(html.includes('<div class="trial-report-control-actions">Open review'), false, "running trial must not place Open review in the right control group");
+}
+
+function testPausedAutoresearchActionsRenderInTrialPanel() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000001_method_design",
+      iteration: 1,
+      status: "working",
+      is_closed: false,
+      report_summary: "Method design needs another pass."
+    }];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 1,
+      gate: { status: "continue" },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("data-resume-autoresearch"), true, "paused incomplete autoresearch should show Resume Autoresearch in the selected trial row");
+  assert.equal(html.includes("Resume autoresearch"), true, "paused incomplete autoresearch should label the loop resume action");
+  assert.equal(html.includes("trial-report-open-actions"), false, "incomplete trials without report/review links should not render an empty open-action group");
+  assert.equal(html.includes("trial-report-control-actions"), true, "autoresearch controls should be grouped on the right side of the trial action row");
+  assert.equal(html.includes('data-trial-continue="1"'), false, "incomplete trials without a report boundary should not show fork-style continue");
+  assert.equal(html.includes("data-restart-autoresearch"), true, "paused incomplete autoresearch should keep Restart beside the trial actions");
+  assert.equal(html.includes("trial-danger-button"), true, "Restart autoresearch should use the danger treatment");
+  assert.equal(html.includes("trial-history-actions"), false, "autoresearch lifecycle actions should not render as a separate bottom row");
+  assert.equal(html.includes("Show autoresearch"), false, "Trials panel should not expose the old Show autoresearch chip");
+  assert.equal(html.includes(">Status<"), false, "Trials panel should not expose the old Status chip");
+  assert.equal(html.includes(">Diff<"), false, "Trials panel should not expose the old Diff chip");
+  assert.equal(html.includes("Pause after current turn"), false, "paused panel should not show running controls");
+  const composer = app.run("__composerSuggestionsProbe()");
+  assert.equal(composer.hidden, true, "composer suggestion row should be hidden for paused autoresearch");
+  assert.equal(composer.html, "", "composer suggestion row should not render lifecycle chips");
+}
+
+function testAutoresearchPanelPersistsAfterFramingReply() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000017_table_appendix_provenance_repair",
+      iteration: 17,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000017_table_appendix_provenance_repair/REPORT.md",
+      review_path: "research_trajectory/trials/000017_table_appendix_provenance_repair/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Table appendix provenance repaired."
+    }];
+    __setMessages([
+      {
+        id: "u1",
+        role: "user",
+        kind: "text",
+        text: "我觉得得用更好的方法，你先别考虑现在方法的思维，先考虑一下，从最好的效果和预期来说，应该怎么分析",
+        created_at: "2026-06-25T00:00:00.000Z"
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        kind: "text",
+        text: "Updated PROJECT.md for the pre-loop framing pass.",
+        created_at: "2026-06-25T00:01:00.000Z"
+      }
+    ]);
+    __setSession({
+      id: "s-chat",
+      session_id: "sid",
+      status: "completed",
+      mode: "framing",
+      loop_active: false,
+      loop_iteration: 17,
+      gate: { status: "continue" },
+      trajectory: {
+        base_trial: "000016_reference_and_submission_source_repair",
+        latest_active_trial: "000017_table_appendix_provenance_repair",
+        next_trial_number: 18
+      },
+      expected_trial: {
+        status: "pending",
+        expected_iteration: 18,
+        pending_intervention_ids: ["I0008"],
+        pending_intervention_paths: ["research_trajectory/human_interventions/I0008_ui_intervention.md"],
+        updated_at: "2026-06-25T00:11:20-04:00"
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__framingThreadHtmlProbe()");
+  assert.equal(html.includes("Updated PROJECT.md for the pre-loop framing pass."), true, "ordinary framing reply should remain visible");
+  assert.equal(html.includes("Trial 18"), true, "pending expected trial should remain visible after a framing reply");
+  assert.equal(html.includes("Pending autoresearch step with I0008."), true, "pending intervention should be summarized in the trial panel");
+  assert.equal(html.includes("data-resume-autoresearch"), true, "pending expected trial should expose Resume autoresearch");
+  assert.equal(html.includes("Latest: 000017_table_appendix_provenance_repair"), true, "latest reported trial context should remain visible");
+}
+
+function testReportedTrialShowsContinueFromThisTrial() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000001_method_design",
+      iteration: 1,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000001_method_design/REPORT.md",
+      review_path: "research_trajectory/trials/000001_method_design/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Method design reported."
+    }];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 1,
+      gate: { status: "continue" },
+      trajectory: {
+        latest_active_trial: "000002_later_boundary",
+        next_trial_number: 3
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("data-resume-autoresearch"), false, "reported trial boundary should not show generic Resume Autoresearch");
+  assert.equal(html.includes('data-trial-continue="1"'), true, "reported trial boundary should keep the fork-style continue action");
+  assert.equal(html.includes("Continue from this trial"), true, "reported trial boundary should use Continue copy");
+  assert.equal(html.includes("Open report"), true, "reported trial boundary should keep Open report");
+  assert.equal(html.includes("Open review"), true, "reported trial boundary should keep Open review");
+  assert.equal(html.includes("trial-report-open-actions"), true, "Open actions should render in their own left-side group");
+  assert.equal(html.includes("trial-report-control-actions"), true, "Autoresearch controls should render in their own right-side group");
+  assert.ok(
+    html.indexOf("trial-report-open-actions") < html.indexOf("trial-report-control-actions"),
+    "Open actions should be ordered before autoresearch controls in the row"
+  );
+  assert.equal(html.includes("data-restart-autoresearch"), true, "reported trial boundary should keep Restart beside the trial actions");
+}
+
+function testLatestClosedTrialShowsResumeAutoresearch() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000018_best_effect_analysis_method_design",
+      iteration: 18,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/REPORT.md",
+      review_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Gate continues after Trial 18."
+    }];
+    __setSession({
+      id: "s18",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      gate: { status: "blocked", raw_status: "needs_human" },
+      trajectory: {
+        latest_active_trial: "000018_best_effect_analysis_method_design",
+        next_trial_number: 19
+      },
+      expected_trial: {
+        status: "fulfilled",
+        expected_iteration: 18
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("data-resume-autoresearch"), true, "latest closed non-pass boundary should expose Resume autoresearch for the next trial");
+  assert.equal(html.includes("Resume autoresearch"), true, "latest closed non-pass boundary should use Resume copy");
+  assert.equal(html.includes('data-trial-continue="18"'), false, "latest boundary should not use fork-style Continue from this trial");
+  assert.equal(html.includes("data-restart-autoresearch"), true, "latest closed boundary should keep Restart beside Resume");
+}
+
+function testPassedAutoresearchPanelHidesResumeAllowsRestart() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000002_final_gate",
+      iteration: 2,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000002_final_gate/REPORT.md",
+      report_summary: "Final gate passed."
+    }];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 2,
+      gate: { status: "pass" },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("data-resume-autoresearch"), false, "passed autoresearch should not show Resume");
+  assert.equal(html.includes("data-trial-continue"), false, "passed autoresearch should not show trial-boundary resume");
+  assert.equal(html.includes("data-restart-autoresearch"), true, "passed autoresearch should still allow Restart");
+  assert.equal(html.includes("Restart autoresearch"), true, "passed autoresearch should label the restart action");
+  assert.equal(html.includes("trial-danger-button"), true, "passed autoresearch Restart should use the danger treatment");
+  const composer = app.run("__composerSuggestionsProbe()");
+  assert.equal(composer.hidden, true, "composer suggestion row should stay hidden for passed autoresearch");
+  assert.equal(composer.html.includes("Restart autoresearch"), false, "Restart should move out of composer suggestions");
+}
+
+function testStagedTrialContinueActionsRenderInTrialPanel() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000003_evidence_repair",
+      iteration: 3,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000003_evidence_repair/REPORT.md",
+      report_summary: "Evidence repair completed."
+    }];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 3,
+      gate: { status: "continue" },
+      transcript: []
+    });
+    __setResumeTrialContext({
+      iteration: 3,
+      id: "000003_evidence_repair",
+      name: "000003_evidence_repair",
+      path: "research_trajectory/trials/000003_evidence_repair",
+      reportPath: "research_trajectory/trials/000003_evidence_repair/REPORT.md",
+      checkpointExists: true
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("data-resume-trial-submit"), true, "staged continue-from-trial should show its submit control in the Trials panel");
+  assert.equal(html.includes("Continue from Trial 3"), true, "staged continue-from-trial should name the source trial");
+  assert.equal(html.includes("data-resume-trial-remove"), true, "staged continue-from-trial should show a cancel control in the Trials panel");
+  const composer = app.run("__composerSuggestionsProbe()");
+  assert.equal(composer.hidden, true, "composer suggestion row should stay hidden for staged trial continue");
+  assert.equal(composer.html.includes("Cancel trial continue"), false, "staged trial continue controls should move out of composer suggestions");
+}
+
+async function testResumeAutoresearchActionUsesResumeEndpoint() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000004_resume_target",
+      iteration: 4,
+      status: "working",
+      is_closed: false,
+      report_summary: "Resume target."
+    }];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 4,
+      gate: { status: "continue" },
+      trajectory: {
+        latest_active_trial: "000003_previous_boundary",
+        next_trial_number: 4
+      },
+      expected_trial: {
+        status: "pending",
+        expected_iteration: 4,
+        pending_intervention_ids: ["I0012"],
+        pending_intervention_paths: ["research_trajectory/human_interventions/I0012_ui_intervention.md"]
+      },
+      queued_chat_count: 1,
+      queued_chat_latest_at: "2026-06-17T10:02:00.000Z",
+      transcript: []
+    });
+  `);
+  const opened = app.run("openResumeAutoresearchDialog()");
+  assert.equal(opened, true, "resume action should open the confirmation dialog");
+  assert.equal(app.run('$("#resume-autoresearch-dialog").open'), true, "resume dialog should be open");
+  assert.equal(app.context.__apiCalls.length, 0, "opening resume dialog must not call the resume endpoint");
+  assert.equal(app.run('$("#resume-autoresearch-summary").innerHTML.includes("Trial 4")'), true, "resume dialog should summarize the next trial boundary");
+  assert.equal(app.run('$("#resume-autoresearch-summary").innerHTML.includes("I0012")'), true, "resume dialog should summarize pending interventions");
+  app.run('$("#resume-autoresearch-instruction").value = "Do not send yet."; closeResumeAutoresearchDialog();');
+  assert.equal(app.context.__apiCalls.length, 0, "cancelling resume dialog must not call the resume endpoint");
+  assert.equal(app.run('$("#resume-autoresearch-dialog").open'), false, "cancelled resume dialog should close");
+  app.run("openResumeAutoresearchDialog()");
+  app.run('$("#resume-autoresearch-instruction").value = "Prioritize quote-backed method design."');
+  const sent = await app.run("confirmResumeAutoresearch()");
+  assert.equal(sent, true, "confirming resume should submit successfully");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/resume", "confirmed resume action should use the resume endpoint");
+  assert.equal(app.context.__apiCalls[0].body.settings.backend, "codex", "confirmed resume action should include current settings");
+  assert.equal(app.context.__apiCalls[0].body.resumeInstruction, "Prioritize quote-backed method design.", "confirmed resume action should include the optional instruction");
+  assert.equal(app.context.__messages().length, 0, "confirmed resume action should not append a legacy command row");
+  assert.equal(app.run('$("#resume-autoresearch-dialog").open'), false, "successful resume confirmation should close the dialog");
+}
+
+function testRunningTrialIgnoresPreviousRunUpdate() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "goal",
+      loop_active: true,
+      loop_iteration: 18,
+      started_at: "2026-06-17T09:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "goal",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:10.000Z",
+        trial_iteration: 18,
+        trial_label: "Trial 18",
+        status_label: "Codex is working on Trial 18",
+        progress: {
+          stage_index: 1,
+          stage_label: "Planning",
+          detail: "Trial 18 has started, but its trial directory is not visible yet."
+        }
+      },
+      transcript: [
+        { id: "old1", role: "assistant", kind: "assistant", raw_type: "item.completed", iteration: 18, content: "Stale previous assistant response.", created_at: "2026-06-17T10:00:04.000Z" },
+        { id: "cmd1", role: "command", kind: "command", raw_type: "process.started", iteration: 18, content: "codex exec resume", created_at: "2026-06-17T10:00:11.000Z" }
+      ]
+    });
+  `);
+  const html = app.run("__thinkingProbe()");
+  assert.equal(html.includes("Stale previous assistant response."), false, "running trial live summary should ignore updates before the active run start");
+  assert.equal(html.includes("Update:"), false, "running trial should not show an Update line before the current run has a readable update");
+  assert.equal(html.includes("Command: codex exec resume"), false, "running trial should not expose raw commands as the main summary");
+  assert.equal(html.includes("Trial 18 has started, but its trial directory is not visible yet."), true, "running trial should still show current progress detail");
+  assert.equal(html.includes("codex exec resume"), true, "folded live activity should keep current raw command details");
 }
 
 function testPassedGoalDoesNotShowStaleRunningTrial() {
@@ -1588,6 +2288,40 @@ function testPassedGoalDoesNotShowStaleRunningTrial() {
   assert.equal(continuingHtml.includes("Autoresearch complete"), false, "incomplete gates must not show the autoresearch complete tag");
 }
 
+function testContinuedBaseTrialStatusLabel() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [16, 17].map((iteration) => {
+      const id = String(iteration).padStart(6, "0") + (iteration === 16 ? "_reference_repair" : "_appendix_repair");
+      return {
+        id,
+        iteration,
+        status: "reported",
+        is_closed: true,
+        report_path: "research_trajectory/trials/" + id + "/REPORT.md",
+        report_summary: "Reported trial " + iteration
+      };
+    });
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 17,
+      trajectory: {
+        base_trial: "000016_reference_repair",
+        latest_active_trial: "000017_appendix_repair",
+        next_trial_number: 18
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("<span class=\"trial-chip-status\">Continued</span>"), true, "continued base trial should be labeled Continued");
+  assert.equal(html.includes("<span class=\"trial-chip-status\">Done</span>"), true, "latest closed trial should remain Done");
+}
+
 function testUncreatedTrialMentionDoesNotCreateTimelineTrial() {
   const app = loadAppContext();
   app.run(`
@@ -1624,7 +2358,7 @@ function testUncreatedTrialMentionDoesNotCreateTimelineTrial() {
   assert.equal(html.includes("Trial 12"), true, "timeline should stay anchored to the latest materialized trial");
 }
 
-function testCurrentRunActivityShowsPauseForChatRun() {
+function testChatRunThinkingUsesLiveStatus() {
   const app = loadAppContext();
   app.run(`
     __setSession({
@@ -1650,20 +2384,61 @@ function testCurrentRunActivityShowsPauseForChatRun() {
       ]
     });
   `);
-  const html = app.run("__progressDetailsProbe()");
-  assert.equal(html.includes("Current run activity"), true, "running chat sessions should still show current run activity");
+  const html = app.run("__thinkingProbe()");
+  assert.equal(html.includes("run-live-status"), true, "running chat sessions should use the lightweight live status surface");
+  assert.equal(html.includes("Codex is working"), true, "running chat status should use the server-provided active run label");
+  assert.equal(html.includes("Working for"), true, "running chat status should show elapsed running time");
+  assert.equal(html.includes("Run activity"), true, "running chat sessions should keep raw events folded under run activity");
+  assert.equal(html.includes("Current run activity"), false, "running chat sessions should not show the legacy current-run activity panel");
   assert.equal(html.includes("Pause after current turn"), false, "running chat sessions should not show autoresearch loop pause");
   assert.equal(html.includes("data-pause-autoresearch"), false, "chat runs do not have an autoresearch next turn to pause");
   assert.equal(html.includes("Stop current run"), true, "running chat sessions should expose a current-run stop control");
   assert.equal(html.includes("data-stop-current-run"), true, "current-run stop must terminate the active process");
-  assert.equal(html.includes("Current run"), true, "chat run summary should identify the scope without showing a trial");
   assert.equal(html.includes("Update: Checking the selected trial boundary."), true, "chat run summary should expose the latest update");
+  assert.equal(html.includes("Planning"), false, "ordinary chat thinking should not render trial progress stages");
+  assert.equal(html.includes("Synthesizing"), false, "ordinary chat thinking should not render trial progress stages");
+  assert.equal(html.includes("Gate update"), false, "ordinary chat thinking should not render trial progress stages");
   assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking the selected trial boundary.", "chat run summary should prefer readable updates over later commands");
   const expandedHtml = app.run(`
     openRunActivityDetails.add(activeRunActivityDetailsKey());
     __progressDetailsProbe();
   `);
-  assert.match(expandedHtml, /data-run-activity-details="[^"]+" open/, "current run activity should stay expanded across re-render");
+  assert.match(expandedHtml, /data-run-activity-details="[^"]+" open/, "run activity should stay expanded across re-render");
+  assert.equal(expandedHtml.includes("git diff -- PROJECT.md"), true, "folded run activity should still include raw command details");
+}
+
+function testChatRunCommandOnlyKeepsRawCommandFolded() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "chat",
+      loop_active: false,
+      loop_iteration: 0,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "chat",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z",
+        trial_iteration: null,
+        trial_label: "",
+        status_label: "Codex is working"
+      },
+      transcript: [
+        { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "codex exec resume", created_at: "2026-06-17T10:00:03.000Z" }
+      ]
+    });
+  `);
+  const html = app.run("__thinkingProbe()");
+  const summary = app.run("__progressSummaryProbe()");
+  assert.equal(summary.includes("codex exec resume"), false, "command-only chat runs should not expose raw commands as the main summary");
+  assert.match(summary, /Waiting|No agent events|Last event|Rate limit/i, "command-only chat runs should show a user-readable waiting summary");
+  assert.equal(html.includes("Run activity"), true, "command-only chat runs should still expose folded activity details");
+  assert.equal(html.includes("codex exec resume"), true, "folded activity details should retain raw command content for debugging");
+  assert.equal(html.includes("Current run activity"), false, "command-only chat runs should not use the legacy activity label");
 }
 
 function testWorkingDurationFormatter() {
@@ -2651,24 +3426,24 @@ function testCompactComposerAutosizesFromCenteredBase() {
 function testComposerPromptInsertionIsIdempotent() {
   const app = loadAppContext();
   app.coldEditor.value = "";
-  app.run('insertComposerPrompt("/goal")');
-  assert.equal(app.coldEditor.value, "/goal", "empty composer should receive the selected prompt");
-  app.run('insertComposerPrompt("/goal")');
-  assert.equal(app.coldEditor.value, "/goal", "clicking the same prompt twice should not duplicate it");
+  app.run('insertComposerPrompt("/status")');
+  assert.equal(app.coldEditor.value, "/status", "empty composer should receive the selected prompt");
+  app.run('insertComposerPrompt("/status")');
+  assert.equal(app.coldEditor.value, "/status", "clicking the same prompt twice should not duplicate it");
 
   app.coldEditor.value = "Please explain this run";
-  app.run('insertComposerPrompt("/goal")');
-  assert.equal(app.coldEditor.value, "Please explain this run\n/goal", "prompt should append once after existing user text");
-  app.run('insertComposerPrompt("/goal")');
-  assert.equal(app.coldEditor.value, "Please explain this run\n/goal", "existing user text plus prompt should remain idempotent");
-
-  app.coldEditor.value = "/goal";
   app.run('insertComposerPrompt("/status")');
-  assert.equal(app.coldEditor.value, "/status", "a lone command should be replaced by the newly selected command");
-
-  app.coldEditor.value = "Please explain this run\n/goal";
+  assert.equal(app.coldEditor.value, "Please explain this run\n/status", "prompt should append once after existing user text");
   app.run('insertComposerPrompt("/status")');
-  assert.equal(app.coldEditor.value, "Please explain this run\n/status", "the trailing command line should be replaced while preserving user text");
+  assert.equal(app.coldEditor.value, "Please explain this run\n/status", "existing user text plus prompt should remain idempotent");
+
+  app.coldEditor.value = "/status";
+  app.run('insertComposerPrompt("/diff")');
+  assert.equal(app.coldEditor.value, "/diff", "a lone command should be replaced by the newly selected command");
+
+  app.coldEditor.value = "Please explain this run\n/status";
+  app.run('insertComposerPrompt("/diff")');
+  assert.equal(app.coldEditor.value, "Please explain this run\n/diff", "the trailing command line should be replaced while preserving user text");
 
   app.run(`
     __setResumeTrialContext({
@@ -2681,12 +3456,12 @@ function testComposerPromptInsertionIsIdempotent() {
     });
   `);
   app.coldEditor.value = "";
-  app.run('insertComposerPrompt("/goal restart")');
-  assert.equal(app.coldEditor.value, "/goal restart", "restart prompt should insert the selected command once");
-  app.run('insertComposerPrompt("/goal restart")');
-  assert.equal(app.coldEditor.value, "/goal restart", "restart prompt should not duplicate");
-  app.run('insertComposerPrompt("/goal resume")');
-  assert.equal(app.coldEditor.value, "/goal resume", "command prompt should replace an existing slash command");
+  app.run('insertComposerPrompt("/status")');
+  assert.equal(app.coldEditor.value, "/status", "status prompt should insert the selected command once");
+  app.run('insertComposerPrompt("/status")');
+  assert.equal(app.coldEditor.value, "/status", "status prompt should not duplicate");
+  app.run('insertComposerPrompt("/diff")');
+  assert.equal(app.coldEditor.value, "/diff", "command prompt should replace an existing slash command");
   assert.equal(app.context.__resumeTrialContext().id, "000001_uploaded_manuscript_baseline_audit", "command prompt should not discard staged continue-from-trial context");
 }
 
@@ -2865,6 +3640,12 @@ function testBlueprintInspectorRendersSidebarForLatestManuscriptOnly() {
         "Source artifact: `research_trajectory/CURRENT_FINDINGS.md`"
       ].join("\n")
     }],
+    appendix_plan: "Supplement A explains the source classes, coding rubric, and aggregation limits for Table T000001.",
+    appendix_files: [{
+      path: "manuscript/appendix/table_t1_source_method.md",
+      title: "Table T1 source and method appendix",
+      summary: "Reader-facing appendix for source classes, coding fields, and aggregation rules."
+    }],
   };
   const payload = {
     path: "manuscript/BLUEPRINT.md",
@@ -2927,6 +3708,8 @@ function testBlueprintInspectorRendersSidebarForLatestManuscriptOnly() {
   assert.equal(html.includes("Figures"), true);
   assert.equal(html.includes("Tables"), true);
   assert.equal(html.includes("Results / Methods"), true);
+  assert.equal(html.includes("Appendix"), true);
+  assert.equal(html.includes("Appendix / supplement"), true);
   assert.equal(html.includes("Reviews"), true);
   assert.equal(html.includes('data-blueprint-anchor="section-2-calibration-result"'), true);
   assert.equal(html.includes('id="section-2-calibration-result"'), true);
@@ -2937,6 +3720,9 @@ function testBlueprintInspectorRendersSidebarForLatestManuscriptOnly() {
   assert.equal(html.includes("Table T000001: Evidence Matrix"), true);
   assert.equal(html.includes("<td>C1</td>"), true);
   assert.equal(html.includes("Result R000001: Benchmark Summary"), true);
+  assert.equal(html.includes("Supplement A explains the source classes"), true);
+  assert.equal(html.includes("Table T1 source and method appendix"), true);
+  assert.equal(html.includes('data-inline-fullscreen="manuscript/appendix/table_t1_source_method.md"'), true);
   assert.equal(html.includes("Evidence reviewer"), true);
   assert.equal(html.includes("Old evidence reviewer"), false, "blueprint inspector should not show older trial reviews when active trial reviews exist");
   assert.equal(html.includes("Later evidence reviewer"), false, "blueprint inspector should prefer active trial reviews over later historical reviews when active reviews exist");
@@ -3104,6 +3890,12 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
     figure_plans: [],
     table_plans: [],
     no_table_rationale: "No active tables are present because the current evidence is figure-led.",
+    appendix_plan: "Appendix A carries source provenance and the table coding method.",
+    appendix_files: [{
+      path: "manuscript/appendix/table_t1_source_method.md",
+      title: "Table T1 source and method appendix",
+      summary: "Source classes, coding fields, aggregation rules, exclusions, and limits."
+    }],
     provenance: "Claim C1 maps to calibration evidence E1.",
     missing_evidence: [],
     figure_specs: [{
@@ -3139,6 +3931,9 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("Nature Machine Intelligence"), true);
   assert.equal(html.includes("Perspective"), true);
   assert.equal(html.includes("Audit / provenance"), true);
+  assert.equal(html.includes("Appendix / supplement"), true);
+  assert.equal(html.indexOf("manuscript-story-map") < html.indexOf("Appendix / supplement"), true, "story map should render before appendix and audit sections");
+  assert.equal(html.indexOf("Appendix / supplement") < html.indexOf("Audit / provenance"), true, "appendix should render before audit and provenance");
   assert.equal(html.indexOf("manuscript-story-map") < html.indexOf("Audit / provenance"), true, "story map should render before audit and raw file sections");
   assert.equal(html.includes("manuscript-abstract-card"), true);
   assert.equal(html.includes("architecture-field-list"), true);
@@ -3169,6 +3964,9 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("manuscript/figures/calibration_map.pdf"), true);
   assert.equal(html.includes("No active tables are present because the current evidence is figure-led."), true);
   assert.equal(html.includes("Claim C1 maps to calibration evidence E1."), true);
+  assert.equal(html.includes("Appendix A carries source provenance"), true);
+  assert.equal(html.includes("Table T1 source and method appendix"), true);
+  assert.equal(html.includes("manuscript/appendix/table_t1_source_method.md"), true);
   assert.equal(html.includes("Figure descriptions"), false);
   assert.equal(html.includes("manuscript-table-card"), true);
   assert.equal(html.includes("Table block"), true);
@@ -3243,9 +4041,11 @@ function testNavigationStatePersistsPanelAndScroll() {
 testButtonInventoryHasHandlers();
 testNavigationStatePersistsPanelAndScroll();
 await testImmediateUserMessage();
-await testRunningOrdinaryMessageIsBlocked();
-await testRunningInterventionMessageIsAllowed();
+await testExistingProjectComposerUsesChatEndpoint();
+await testRunningChatMessageIsQueued();
+await testRunningSteeringLookingMessageIsQueuedTheSameWay();
 await testAttachmentOnlyMessage();
+await testResourceLinksDoNotRepeatAcrossMessages();
 await testResumeFromTrialRequiresConfirmationAndSendsPayload();
 await testPrepareSubmitWithResumeContextSendsResumePayload();
 await testResumeFromTrialCancelPreservesComposer();
@@ -3253,19 +4053,36 @@ await testResumeTrialSlashCommandIsBlocked();
 await testFailedSessionSendRestoresComposerState();
 await testSuccessfulSessionSendClearsComposerDraft();
 await testSlashCommandVisibleAndIgnoredAsUnanswered();
-await testRestartCommandRequiresConfirmationAndSendsRestartEndpoint();
-await testRestartCancelPreservesComposer();
-await testClaudeGoalControlsUseProductCommands();
+await testLegacyGoalRestartCommandUsesCommandEndpoint();
+await testLegacyGoalRestartIgnoresRestartCancelFlag();
+await testTypedLegacyGoalControlsStayOnCommandEndpoint();
 testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 await testEditTruncatesLaterConversationBeforeResend();
+await testEditAfterAutoresearchFirstMessageUsesChat();
+await testSteeringResendStartsVisibleNormalChatRun();
+await testLegacyRecordedInterventionMessageStillRenders();
+await testEditInitialBriefConfirmsThenUsesFraming();
+await testEditInitialBriefCancelDoesNotTruncate();
+await testEditAttachmentsCanRemoveRetainAndAdd();
 await testLaunchGoalMessageBeforeBackendWork();
 testStartAutoresearchOnlyAppearsOnProjectDraftCard();
 testMessagesExposeCopyButtons();
 testFileTreePdfPreviewControls();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
+testRunningTrialOpenButtonsStayGroupedLeft();
+testPausedAutoresearchActionsRenderInTrialPanel();
+testAutoresearchPanelPersistsAfterFramingReply();
+testReportedTrialShowsContinueFromThisTrial();
+testLatestClosedTrialShowsResumeAutoresearch();
+testPassedAutoresearchPanelHidesResumeAllowsRestart();
+testStagedTrialContinueActionsRenderInTrialPanel();
+await testResumeAutoresearchActionUsesResumeEndpoint();
+testRunningTrialIgnoresPreviousRunUpdate();
 testPassedGoalDoesNotShowStaleRunningTrial();
-testCurrentRunActivityShowsPauseForChatRun();
+testContinuedBaseTrialStatusLabel();
+testChatRunThinkingUsesLiveStatus();
+testChatRunCommandOnlyKeepsRawCommandFolded();
 testWorkingDurationFormatter();
 testTrialStripScrollRestoresAcrossRender();
 testRunningTrialUsesProgressFallback();

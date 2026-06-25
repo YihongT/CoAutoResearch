@@ -61,6 +61,9 @@ let pendingFramingUserMessageId = "";
 let framingPendingSince = 0;
 let projectDraftEditMode = false;
 let editingFramingId = "";
+const editAttachmentDrafts = new Map();
+let activeEditResourceTargetId = "";
+let pendingPreProjectResendConfirm = null;
 let projectRenderedScrollTop = 0;
 let overviewPollTimer = null;
 let workingTickerTimer = null;
@@ -83,6 +86,7 @@ let trialStripScrollState = {
 let selectedResumeTrialContext = null;
 let pendingResumeTrialConfirm = null;
 let pendingRestartAutoresearchConfirm = null;
+let resumeAutoresearchSubmitting = false;
 let activeLargeResourceImportId = "";
 let activeExportJob = null;
 let exportPollTimer = null;
@@ -200,10 +204,6 @@ const legacyThemeModes = {
 let currentThemeMode = normalizeThemeMode(localStorage.getItem("coAutoResearchTheme") || document.documentElement.dataset.theme || defaultThemeMode);
 
 const localSlashCommandRegistry = {
-  "/goal": { label: "Autoresearch", value: "Show autoresearch" },
-  "/goal pause": { label: "Autoresearch", value: "Pause after current turn" },
-  "/goal resume": { label: "Autoresearch", value: "Resume autoresearch", requiresSession: true },
-  "/goal restart": { label: "Autoresearch", value: "Restart autoresearch", requiresSession: true, destructive: true },
   "/status": { label: "Session", value: "Show status" },
   "/ps": { label: "Session", value: "Show processes" },
   "/diff": { label: "Session", value: "Show diff" },
@@ -480,7 +480,7 @@ function normalizeResumeTrialContext(value) {
 
 function normalizeFramingMessage(message) {
   if (!message || !["user", "assistant"].includes(message.role)) return null;
-  const allowedKinds = new Set(["text", "project", "goal-launch", "command"]);
+  const allowedKinds = new Set(["text", "project", "goal-launch", "command", "intervention-recorded"]);
   const kind = allowedKinds.has(message.kind) ? message.kind : "text";
   const artifact = message.artifact && typeof message.artifact === "object"
     ? {
@@ -529,6 +529,36 @@ function normalizeFramingMessage(message) {
     ...(attachments.length ? { attachments } : {}),
     ...(resumeFromTrial ? { resumeFromTrial } : {}),
   };
+}
+
+function chatHistoryItemForRequest(message) {
+  const normalized = normalizeFramingMessage(message);
+  if (!normalized) return null;
+  if (!["user", "assistant"].includes(normalized.role)) return null;
+  if (normalized.kind === "project") return null;
+  const item = {
+    id: normalized.id,
+    role: normalized.role,
+    kind: normalized.kind || "text",
+    text: String(normalized.text || "").trim(),
+    created_at: normalized.created_at || "",
+  };
+  if (Array.isArray(normalized.attachments) && normalized.attachments.length) {
+    item.attachments = normalized.attachments.map((attachment) => ({
+      kind: attachment.kind || "attachment",
+      name: attachment.name || basename(attachment.path || ""),
+      path: attachment.path || "",
+      category: attachment.category || "",
+    }));
+  }
+  return item;
+}
+
+function conversationHistoryForRequest(messages = localMessages) {
+  return (Array.isArray(messages) ? messages : [])
+    .map(chatHistoryItemForRequest)
+    .filter((item) => item && item.text)
+    .slice(-80);
 }
 
 function attachmentOnlyMessage(attachments = []) {
@@ -2313,14 +2343,6 @@ function selectedRunBackend() {
   return isSessionRunning() ? sessionBackend() : effectiveBackend(currentLaunchBackend());
 }
 
-function sessionGoalResumeCommand() {
-  return "/goal resume";
-}
-
-function sessionGoalPauseCommand() {
-  return "/goal pause";
-}
-
 function agentResumeCommand() {
   const sessionId = String(sessionState().session_id || "").trim();
   if (!sessionId) return "";
@@ -2403,6 +2425,41 @@ function hasGoalStarted() {
   const session = sessionState();
   const mode = String(session.mode || "").toLowerCase();
   return ["goal", "research"].includes(mode) || Boolean(session.loop_active) || Number(session.loop_iteration || 0) > 0;
+}
+
+function expectedTrialMarker() {
+  const marker = sessionState().expected_trial || {};
+  return marker && typeof marker === "object" ? marker : {};
+}
+
+function pendingExpectedTrialIteration() {
+  const marker = expectedTrialMarker();
+  const status = String(marker.status || "").trim().toLowerCase();
+  if (!["pending", "mismatch"].includes(status)) return 0;
+  const expected = Number(marker.expected_iteration || 0);
+  return Number.isFinite(expected) && expected > 0 ? expected : 0;
+}
+
+function latestTrajectoryTrialIteration() {
+  const session = sessionState();
+  const trajectory = session.trajectory && typeof session.trajectory === "object" ? session.trajectory : {};
+  const explicit = trialIterationValue({ id: cleanText(trajectory.latest_active_trial, "") });
+  if (explicit > 0) return explicit;
+  const loopIteration = Number(session.loop_iteration || 0);
+  if (loopIteration > 0) return loopIteration;
+  return visibleTrialReports().reduce((latest, trial) => {
+    if (trial?.is_closed !== true || !String(trial?.report_path || "").trim()) return latest;
+    return Math.max(latest, trialIterationValue(trial));
+  }, 0);
+}
+
+function hasAutoresearchTrajectory() {
+  const session = sessionState();
+  const trajectory = session.trajectory && typeof session.trajectory === "object" ? session.trajectory : {};
+  return hasGoalStarted()
+    || visibleTrials().length > 0
+    || pendingExpectedTrialIteration() > 0
+    || Boolean(trajectory.base_trial || trajectory.latest_active_trial || trajectory.next_trial_number);
 }
 
 function isGoalPassed() {
@@ -2537,6 +2594,10 @@ function canMessage() {
   return hasLaunched() && hasSession() && !isSessionRunning();
 }
 
+function canChatWithProjectDraft() {
+  return hasProjectDraftReady() && !isSessionRunning();
+}
+
 function canChatWithFramingDraft() {
   const session = sessionState();
   const mode = String(session.mode || "").toLowerCase();
@@ -2544,7 +2605,43 @@ function canChatWithFramingDraft() {
 }
 
 function canSendSessionComposerMessage() {
-  return canMessage() || canChatWithFramingDraft();
+  return canMessage() || canChatWithFramingDraft() || canChatWithProjectDraft();
+}
+
+function shouldStartInitialFramingRun() {
+  if (isSessionRunning()) return false;
+  if (hasProjectDraftReady() || hasAutoresearchTrajectory()) return false;
+  const mode = String(sessionState().mode || "").toLowerCase();
+  return !["chat", "command", "goal", "research"].includes(mode);
+}
+
+function messageHistoryBefore(index) {
+  const boundary = Math.max(0, Number(index) || 0);
+  return localMessages.slice(0, boundary);
+}
+
+function hasProjectOrRunContextBefore(index) {
+  return messageHistoryBefore(index).some((item) => (
+    item?.role === "assistant"
+    || isProjectDraftMessage(item)
+    || isControlFramingMessage(item)
+    || isGoalLaunchMessage(item)
+    || Boolean(item?.resumeFromTrial)
+  ));
+}
+
+function isTruePreProjectBriefResend(index) {
+  if (!Number.isInteger(Number(index)) || Number(index) < 0) return false;
+  if (hasProjectDraftReady()) return false;
+  if (hasProjectOrRunContextBefore(index)) return false;
+  if (hasSession()) return false;
+  if (hasAutoresearchTrajectory()) return false;
+  if (visibleTrials().length > 0) return false;
+  if (pendingExpectedTrialIteration() > 0) return false;
+  const trajectory = sessionState().trajectory && typeof sessionState().trajectory === "object" ? sessionState().trajectory : {};
+  if (trajectory.base_trial || trajectory.latest_active_trial || trajectory.next_trial_number) return false;
+  const mode = String(sessionState().mode || "").toLowerCase();
+  return !["framing", "chat", "command", "goal", "research"].includes(mode);
 }
 
 function isLocalSlashControl(text) {
@@ -2559,31 +2656,16 @@ function canSendLocalSlashControl(text) {
   return true;
 }
 
-function isHumanInterventionCandidateText(text) {
-  const value = String(text || "").trim();
-  if (!value) return false;
-  if (/^\s*(human\s+intervention|formal\s+intervention|intervention|人类干预|正式干预|干预)\s*[:：]/i.test(value)) return true;
-  const lower = value.toLowerCase();
-  if (/[?？]\s*$/.test(value) && /\b(status|progress|log|logs|where|summarize|summary|explain|what is|what's|show me|tell me)\b|进度|状态|日志|哪里|在哪|解释|总结|是什么/i.test(value)) return false;
-  return (
-    /\b(stop using|do not use|don't use|avoid|reject|invalidate|prioritize|focus on|use this|use the attached|use attached|pivot to|switch to)\b/i.test(lower) ||
-    /\b(change|switch|set|move|pivot|revise|update)\b.{0,80}\b(target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b/i.test(lower) ||
-    /\b(target venue|venue|claim|method|dataset|resource|priority|focus|direction|plan|scope|constraint)\b.{0,60}\b(to|should be|is now|must|needs to|instead)\b/i.test(lower) ||
-    /(?:改变|更改|修改|调整|换成|改成|转向|聚焦|优先).{0,40}(?:方向|计划|方法|资源|数据集|venue|期刊|目标|claim|主张|范围|约束|优先级)/.test(value) ||
-    /(?:不要|别|停止|避免).{0,40}(?:用|使用|采用|依赖|引用)/.test(value) ||
-    /(?:目标|venue|期刊|claim|主张|方法|资源|数据集|方向|计划|范围|约束|优先级).{0,40}(?:改成|换成|变成|优先|不要|别|停止|必须|需要)/.test(value)
-  );
-}
-
-function canSendInterventionDuringRun(text, attachments, resumeFromTrial) {
+function canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial) {
   const mode = String(sessionState().mode || "").toLowerCase();
-  return (
-    isSessionRunning() &&
-    ["goal", "research", "command"].includes(mode) &&
-    !resumeFromTrial &&
-    Array.isArray(attachments) &&
-    isHumanInterventionCandidateText(text)
-  );
+ return (
+   isSessionRunning() &&
+   ["goal", "research", "command"].includes(mode) &&
+   !resumeFromTrial &&
+    !String(text || "").trim().startsWith("/") &&
+   Array.isArray(attachments) &&
+   (String(text || "").trim() || attachments.length)
+ );
 }
 
 function isUiLocalTranscript(entry) {
@@ -2820,7 +2902,7 @@ function mergePendingLocalFramingMessages(nextMessages) {
   const nextIds = new Set(nextMessages.map((message) => String(message?.id || "")).filter(Boolean));
   const nextKeys = new Set(nextMessages.map(framingMessageDedupeKey));
   const pending = localMessages.filter((message) => {
-    if (!message || message.role !== "user") return false;
+    if (!message || (message.role !== "user" && message.kind !== "intervention-recorded")) return false;
     if (isDefaultBriefTemplate(message.text)) return false;
     const id = String(message.id || "");
     if (id && nextIds.has(id)) return false;
@@ -2975,8 +3057,7 @@ function isGoalLaunchMessage(message) {
     text === "start autoresearch." ||
     text === "start autoresearch" ||
     text === "start autoresearch loop." ||
-    text === "start autoresearch loop" ||
-    text === "/goal"
+    text === "start autoresearch loop"
   );
 }
 
@@ -3169,9 +3250,9 @@ function framingMessageHtml(message) {
     return `
       <article class="framing-message ${role} is-editing" data-framing-id="${escapeHtml(message.id)}">
         <div class="transcript-meta">${title}</div>
-        ${messageAttachmentsHtml(message)}
         <form class="framing-edit-form" data-framing-edit-form="${escapeHtml(message.id)}">
           <textarea name="message" rows="3">${escapeHtml(message.text)}</textarea>
+          ${editAttachmentsHtml(message.id)}
           <div class="framing-actions">
             <button class="secondary-button small-button" type="button" data-framing-cancel="${escapeHtml(message.id)}">Cancel</button>
             <button class="primary-button small-button" type="submit">Resend</button>
@@ -3201,23 +3282,42 @@ function framingThinkingHtml() {
   const showTrialHistory = isAutoresearchActiveRun();
   if (showTrialHistory) return activeTrialHistoryHtml();
 
+  return currentRunLiveStatusHtml();
+}
+
+function currentRunLiveStatusHtml() {
   const status = hasLaunched()
     ? activeRunStatusLabel()
     : isSessionRunning()
       ? "Drafting PROJECT.md"
       : `Starting ${agentLabel(sessionBackend())}`;
+  const entries = currentProgressEntries();
+  const summary = currentRunReadableSummary(entries);
+  const waitNotice = agentWaitStateHtml();
+  const showWaitNotice = Boolean(waitNotice && currentRunReadableEntry(entries));
+  const eventLabel = currentRunActivityEventLabel(entries.length);
   return `
     <article class="framing-message assistant is-thinking" aria-live="polite">
       <div class="transcript-meta">CoAutoResearch</div>
       <div class="transcript-body thinking-bubble">
-        <div class="thinking-status-row">
-          <span class="thinking-dot"></span>
-          <span class="thinking-dot"></span>
-          <span class="thinking-dot"></span>
-          <strong>${escapeHtml(status)}</strong>
-          ${isSessionRunning() ? workingDurationHtml() : ""}
-        </div>
-        ${framingProgressDetailsHtml()}
+        <section class="run-live-status" aria-live="polite">
+          <div class="run-live-status-head">
+            <div class="thinking-status-row run-live-status-title">
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <strong>${escapeHtml(status)}</strong>
+              ${isSessionRunning() ? workingDurationHtml() : ""}
+            </div>
+            <div class="run-live-status-actions">
+              <span>${escapeHtml(eventLabel)}</span>
+              ${runControlButtonsHtml()}
+            </div>
+          </div>
+          <p class="run-live-summary">${escapeHtml(summary)}</p>
+          ${showWaitNotice ? waitNotice : ""}
+          ${currentRunActivityDetailsHtml(entries)}
+        </section>
       </div>
     </article>
   `;
@@ -3257,12 +3357,23 @@ function framingProgressContent(entry) {
 
 function currentProgressStartTime(transcript) {
   const sessionStarted = entryTimeValue({ created_at: sessionState().started_at });
+  const activeRunStarted = entryTimeValue({ created_at: activeRun().started_at });
   const latestRunStart = transcript.reduce((latest, entry) => {
     if (!transcriptRunStart(entry)) return latest;
     return Math.max(latest, entryTimeValue(entry));
   }, 0);
   const pendingSince = Number(framingPendingSince || 0);
-  return Math.max(sessionStarted, latestRunStart, pendingSince);
+  return Math.max(sessionStarted, activeRunStarted, latestRunStart, pendingSince);
+}
+
+function currentRunScopedEntries(entries) {
+  const transcript = Array.isArray(sessionState().transcript) ? sessionState().transcript : [];
+  const progressStart = currentProgressStartTime(transcript);
+  if (!progressStart) return entries || [];
+  return (entries || []).filter((entry) => {
+    const createdAt = entryTimeValue(entry);
+    return !createdAt || createdAt >= progressStart - 1000;
+  });
 }
 
 function currentProgressEntries() {
@@ -3289,6 +3400,24 @@ function currentProgressEntries() {
       return items;
     }, { seen: new Set(), entries: [] }).entries
     .slice(-6);
+}
+
+function currentRunActivityEventLabel(count) {
+  return count ? `${count} event${count === 1 ? "" : "s"}` : "waiting";
+}
+
+function currentRunReadableEntry(entries) {
+  const readableTitles = new Set(["Error", "Done", "Update", "File change"]);
+  return [...(entries || [])].reverse().find((entry) => {
+    const title = framingProgressTitle(entry);
+    return readableTitles.has(title) && framingProgressContent(entry);
+  }) || null;
+}
+
+function currentRunReadableSummary(entries = currentProgressEntries()) {
+  const entry = currentRunReadableEntry(entries);
+  if (entry) return `${framingProgressTitle(entry)}: ${framingProgressContent(entry)}`;
+  return agentWaitStateText() || (isSessionRunning() ? "Waiting for Codex events..." : "Waiting for agent events...");
 }
 
 function framingProgressRowsHtml(entries) {
@@ -3326,30 +3455,23 @@ function framingProgressRowsHtml(entries) {
   `;
 }
 
-function framingProgressDetailsHtml() {
-  const entries = currentProgressEntries();
+function currentRunActivityDetailsHtml(entries = currentProgressEntries()) {
   const count = entries.length;
-  const latestEntry = latestTrialProgressEntry(entries);
-  const latestText = latestEntry
-    ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : agentWaitStateText() || "Waiting for agent events...";
-  const runControls = runControlButtonsHtml();
   const activityKey = activeRunActivityDetailsKey();
+  const eventLabel = currentRunActivityEventLabel(count);
   return `
-    <details class="framing-progress-details" data-run-activity-details="${escapeHtml(activityKey)}"${runActivityOpenAttribute(activityKey)}>
+    <details class="run-live-details" data-run-activity-details="${escapeHtml(activityKey)}"${runActivityOpenAttribute(activityKey)}>
       <summary>
-        <span>Current run activity</span>
-        <span class="current-run-summary">
-          ${isSessionRunning() ? workingDurationHtml() : ""}
-          <span>${escapeHtml(activeRunScopeLabel())}</span>
-          <span>${escapeHtml(compactText(latestText, 180))}</span>
-          <strong>${escapeHtml(count ? `${count} event${count === 1 ? "" : "s"}` : "waiting")}</strong>
-        </span>
-        ${runControls}
+        <span>Run activity</span>
+        <strong>${escapeHtml(eventLabel)}</strong>
       </summary>
       ${framingProgressRowsHtml(entries)}
     </details>
   `;
+}
+
+function framingProgressDetailsHtml() {
+  return currentRunActivityDetailsHtml(currentProgressEntries());
 }
 
 function projectDraftCardHtml(message) {
@@ -3408,13 +3530,17 @@ function renderFramingConversation() {
     framingPendingSince = framingMessageTime(unansweredUser, Date.now());
   }
   const localPending = framingDraftPending || framingReplyPending || inferredReplyPending;
-  const sessionTranscript = !localPending && (hasLaunched() || hasLocalTranscript)
+  const transcriptTrialPanel = !localPending && (hasLaunched() || hasLocalTranscript)
     ? sessionTimelineHtml(transcriptEntries, { omittedEntryIds: activity.omittedEntryIds, omitLocal: true })
     : "";
-  const shouldShowPending = localPending || (isSessionRunning() && !sessionTranscript);
+  const shouldShowPending = localPending || (isSessionRunning() && !transcriptTrialPanel);
   const pending = shouldShowPending ? framingThinkingHtml() : "";
-  const hasThreadContent = Boolean(messages || sessionTranscript || pending);
-  const nextHtml = [messages, pending, sessionTranscript].filter(Boolean).join("");
+  const pendingShowsAutoresearch = shouldShowPending && isAutoresearchActiveRun();
+  const footerAutoresearchPanel = pendingShowsAutoresearch
+    ? ""
+    : (transcriptTrialPanel || persistentAutoresearchPanelHtml(transcriptEntries, { omittedEntryIds: activity.omittedEntryIds, omitLocal: true }));
+  const hasThreadContent = Boolean(messages || pending || footerAutoresearchPanel);
+  const nextHtml = [messages, pending, footerAutoresearchPanel].filter(Boolean).join("");
   if (nextHtml !== lastFramingHtml) {
     const renderedDraft = document.querySelector(".project-rendered");
     if (renderedDraft) projectRenderedScrollTop = renderedDraft.scrollTop;
@@ -4664,9 +4790,40 @@ function visibleTrialReports() {
   return visibleTrials().filter((trial) => String(trial.report_path || "").trim());
 }
 
+function pendingExpectedTrialReport(iteration = pendingExpectedTrialIteration()) {
+  const expected = Number(iteration || 0);
+  if (!expected) return null;
+  const marker = expectedTrialMarker();
+  const interventionIds = Array.isArray(marker.pending_intervention_ids)
+    ? marker.pending_intervention_ids.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const summary = interventionIds.length
+    ? `Pending autoresearch step with ${interventionIds.join(", ")}.`
+    : "Pending autoresearch step.";
+  return {
+    id: `${String(expected).padStart(6, "0")}_pending_autoresearch`,
+    iteration: expected,
+    status: "working",
+    is_closed: false,
+    report_path: "",
+    review_path: "",
+    report_summary: summary,
+    objective: "Resume autoresearch to create or complete this trial boundary.",
+    progress: {
+      stage_index: 1,
+      stage_label: "Planning",
+      summary,
+      detail: "Waiting for Resume autoresearch.",
+      updated_at: marker.updated_at || marker.created_at || "",
+    },
+  };
+}
+
 function reportForIteration(iteration) {
   const target = Number(iteration || 0);
-  return visibleTrialReports().find((trial) => trialIterationValue(trial) === target) || null;
+  const visible = visibleTrialReports().find((trial) => trialIterationValue(trial) === target) || null;
+  if (visible) return visible;
+  return pendingExpectedTrialIteration() === target ? pendingExpectedTrialReport(target) : null;
 }
 
 function currentTrialIndex(trials = visibleTrials()) {
@@ -4798,6 +4955,36 @@ function trialProgressStepperHtml(progress) {
   `;
 }
 
+function trialLifecycleActionButtonsHtml(iteration, report, running) {
+  if (running || !hasAutoresearchTrajectory()) return "";
+  const actions = [];
+  const resumeFromTrial = selectedResumeTrialPayload();
+  if (resumeFromTrial) {
+    actions.push(`<button class="primary-button small-button" type="button" data-resume-trial-submit>Continue from ${escapeHtml(resumeTrialLabel(resumeFromTrial))}</button>`);
+    actions.push('<button class="secondary-button small-button" type="button" data-resume-trial-remove>Cancel</button>');
+  } else if (!isGoalPassed()) {
+    const reportPath = String(report?.report_path || "").trim();
+    const latestBoundary = Number(iteration || 0) > 0
+      && Number(iteration || 0) === latestTrajectoryTrialIteration()
+      && report?.is_closed === true
+      && reportPath;
+    if ((report && report?.is_closed !== true && !reportPath) || latestBoundary) {
+      actions.push('<button class="primary-button small-button" type="button" data-resume-autoresearch>Resume autoresearch</button>');
+    } else if (resumeTrialContextFromReport(iteration, report)) {
+      actions.push(`<button class="secondary-button small-button" type="button" data-trial-continue="${escapeHtml(iteration)}">Continue from this trial</button>`);
+    }
+  }
+  actions.push('<button class="secondary-button small-button trial-danger-button" type="button" data-restart-autoresearch>Restart autoresearch</button>');
+  return actions.join("");
+}
+
+function trialOpenActionButtonsHtml(report) {
+  return [
+    report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : "",
+    report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : "",
+  ].filter(Boolean).join("");
+}
+
 function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const report = reportOverride || reportForIteration(iteration);
   const finalEntry = [...entries].reverse().find((entry) => ["final", "assistant"].includes(transcriptRole(entry)) && String(entry.content || "").trim());
@@ -4818,6 +5005,8 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
     : report
       ? `${escapeHtml(report.id || `Trial ${iteration}`)} / Report pending`
       : "Report pending";
+  const openActions = trialOpenActionButtonsHtml(report);
+  const controlActions = trialLifecycleActionButtonsHtml(iteration, report, running);
   return `
     <article class="trial-report-card ${running ? "is-running" : report?.is_closed === true ? "is-complete" : "is-pending"}" data-trial-panel="${escapeHtml(iteration)}">
       <div class="trial-report-head">
@@ -4833,9 +5022,8 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
       ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
       <p>${escapeHtml(summary)}</p>
       <div class="trial-report-actions">
-        ${report?.report_path && !running ? `<button class="secondary-button small-button" type="button" data-trial-continue="${escapeHtml(iteration)}">Continue from this trial</button>` : ""}
-        ${report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : ""}
-        ${report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : ""}
+        ${openActions ? `<div class="trial-report-open-actions">${openActions}</div>` : ""}
+        ${controlActions ? `<div class="trial-report-control-actions">${controlActions}</div>` : ""}
       </div>
       ${(() => {
         const activity = trialActivityEntries(entries);
@@ -4863,31 +5051,29 @@ function latestTrialProgressEntry(entries) {
     const rawType = String(entry?.raw_type || "").toLowerCase();
     return role !== "user" && rawType !== "turn.completed" && String(entry?.content || "").trim();
   });
-  return candidates.find((entry) => ["Error", "Done", "Update", "File change"].includes(framingProgressTitle(entry))) || candidates[0] || null;
+  return candidates.find((entry) => ["Error", "Done", "Update", "File change"].includes(framingProgressTitle(entry))) || null;
 }
 
 function runningTrialStatusHtml(trial) {
   const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
   if (!iteration || !isTrialLive(iteration)) return "";
   const entries = Array.isArray(trial?.entries) ? trial.entries : [];
+  const liveEntries = currentRunScopedEntries(entries);
   // Trial activity reflects agent/tool work only — never the human's steering messages.
-  const activity = trialActivityEntries(entries);
+  const activity = trialActivityEntries(liveEntries);
   const report = trial?.report || reportForIteration(iteration);
   const reportSummary = cleanText(report?.report_summary, "");
   const progress = trialProgressForIteration(iteration, report);
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
-  const latestEntry = latestTrialProgressEntry(entries);
+  const latestEntry = latestTrialProgressEntry(liveEntries);
   const latestText = latestEntry
     ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : reportSummary || progressSummary || agentWaitStateText() || "Preparing trial progress...";
+    : reportSummary || progressSummary || agentWaitStateText() || "";
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice && (latestEntry || reportSummary || progressSummary));
-  const actions = [
-    report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : "",
-    report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : "",
-  ].filter(Boolean).join("");
+  const openActions = trialOpenActionButtonsHtml(report);
   return `
     <section class="trial-live-status" aria-live="polite">
       <div class="trial-live-status-head">
@@ -4904,10 +5090,10 @@ function runningTrialStatusHtml(trial) {
         </div>
       </div>
       ${trialProgressStepperHtml(progress)}
-      <p>${escapeHtml(compactText(latestText, 240))}</p>
+      ${latestText ? `<p>${escapeHtml(compactText(latestText, 240))}</p>` : ""}
       ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
       ${showWaitNotice ? waitNotice : ""}
-      ${actions ? `<div class="trial-report-actions">${actions}</div>` : ""}
+      ${openActions ? `<div class="trial-report-actions"><div class="trial-report-open-actions">${openActions}</div></div>` : ""}
       ${
         activity.length
           ? `<details class="trial-live-details" data-run-activity-details="trial-live-${escapeHtml(iteration)}"${runActivityOpenAttribute(`trial-live-${iteration}`)}>
@@ -4935,9 +5121,26 @@ function liveTrialStripIteration() {
   return isLiveGoalSession() ? activeRunTrialIteration() : 0;
 }
 
+function continuedBaseTrialId() {
+  const baseTrial = cleanText(appState?.research_session?.trajectory?.base_trial, "");
+  const latestTrial = cleanText(appState?.research_session?.trajectory?.latest_active_trial, "");
+  if (!baseTrial || !latestTrial || baseTrial === latestTrial) return "";
+  return baseTrial;
+}
+
+function isContinuedTrial(iteration, trial) {
+  if (trial?.is_closed !== true) return false;
+  const baseTrial = continuedBaseTrialId();
+  if (!baseTrial) return false;
+  const trialId = cleanText(trial?.id, "");
+  if (trialId && trialId === baseTrial) return true;
+  return trialIterationValue({ id: baseTrial }) === Number(iteration || trialIterationValue(trial));
+}
+
 function trialStatusLabel(iteration, trial) {
   if (isTrialLive(iteration, trial)) return "Running";
   const reportStatus = cleanText(trial?.status, "");
+  if (isContinuedTrial(iteration, trial)) return "Continued";
   if (trial?.is_closed === true) return "Done";
   if (reportStatus === "blocked") return "Blocked";
   if (String(trial?.report_path || "").trim()) return reportStatus === "reported" ? "Reported" : reportStatus || "Reported";
@@ -5253,7 +5456,8 @@ function buildFramingActivityByMessage(messages, entries) {
 }
 
 function trialTimelineContentHtml(entries, options = {}) {
-  if (!entries.length && !visibleTrials().length && !activeRunTrialIteration()) return "";
+  const pendingExpected = pendingExpectedTrialIteration();
+  if (!entries.length && !visibleTrials().length && !activeRunTrialIteration() && !pendingExpected) return "";
   const omittedEntryIds = options.omittedEntryIds || new Set();
   const trialGroups = new Map();
   let currentIteration = 0;
@@ -5272,7 +5476,11 @@ function trialTimelineContentHtml(entries, options = {}) {
     trialGroups.set(currentIteration, group);
   });
 
-  const reports = visibleTrials();
+  const reports = [...visibleTrials()];
+  if (pendingExpected && !reports.some((report) => trialIterationValue(report) === pendingExpected) && !isGoalPassed()) {
+    const pendingReport = pendingExpectedTrialReport(pendingExpected);
+    if (pendingReport) reports.push(pendingReport);
+  }
   const liveIteration = isLiveGoalSession() ? activeRunTrialIteration() : 0;
   const reportByIteration = new Map(reports.map((report) => [trialIterationValue(report), report]));
   const iterationValues = new Set([
@@ -5286,7 +5494,9 @@ function trialTimelineContentHtml(entries, options = {}) {
       entries: trialGroups.get(iteration) || [],
       report: reportByIteration.get(iteration) || null,
     }));
-  const activeTrial = liveIteration || selectedTrial(trials);
+  const selected = selectedTrial(trials);
+  const manuallySelected = Number(selectedTrialIndex || 0) > 0 && trialStripManualActive();
+  const activeTrial = liveIteration || (manuallySelected ? selected : (pendingExpected || selected));
   const activeTrialData = trials.find((trial) => Number(trial.iteration) === Number(activeTrial));
   const runningTrialData = liveIteration ? trials.find((trial) => isTrialLive(trial.iteration)) : null;
   return trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData);
@@ -5304,6 +5514,11 @@ function sessionTimelineHtml(entries, options = {}) {
       ${trialHistory}
     </section>
   `;
+}
+
+function persistentAutoresearchPanelHtml(entries, options = {}) {
+  if (!hasAutoresearchTrajectory()) return "";
+  return sessionTimelineHtml(entries, options);
 }
 
 function isCollapsibleToolEntry(entry) {
@@ -6993,6 +7208,49 @@ function renderManuscriptAuditPanel(manuscript) {
   return legacy || empty("No provenance or secondary audit notes are available yet.");
 }
 
+function renderManuscriptAppendixPanel(manuscript) {
+  manuscript = manuscript || {};
+  const plan = cleanText(manuscript.appendix_plan, "");
+  const files = (manuscript.appendix_files || []).filter((file) => hasRealText(file?.path) || hasRealText(file?.title));
+  if (!hasRealText(plan) && !files.length) return empty("No appendix or supplement plan is available yet.");
+  const fileCards = files.length ? `
+    <div class="appendix-file-list">
+      ${files.map((file) => {
+        const path = repoRelativePath(file.path || "");
+        const title = cleanText(file.title, basename(path || "Appendix file"));
+        const summary = cleanText(file.summary, "");
+        return `
+          <article class="appendix-file-card">
+            <header>
+              <p>Appendix file</p>
+              <h4>${escapeHtml(title)}</h4>
+            </header>
+            ${summary ? `<div class="appendix-file-summary markdown-preview">${markdownToHtml(summary)}</div>` : ""}
+            ${path ? `
+              ${manuscriptActionsHtml([
+                inlineOpenButton(path, "Open appendix"),
+                `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(path)}">Fullscreen</button>`,
+              ])}
+              <p class="figure-source-path"><code>${escapeHtml(path)}</code></p>
+            ` : ""}
+          </article>
+        `;
+      }).join("")}
+    </div>
+  ` : "";
+  return `
+    <div class="manuscript-appendix" id="manuscript-appendix">
+      ${hasRealText(plan) ? `
+        <section class="appendix-plan">
+          <h4>Appendix / supplement plan</h4>
+          <div class="markdown-preview">${markdownToHtml(plan)}</div>
+        </section>
+      ` : ""}
+      ${fileCards}
+    </div>
+  `;
+}
+
 function renderManuscriptReferences(manuscript) {
   manuscript = manuscript || {};
   const references = (manuscript.references || []).filter((ref) => hasRealText(ref?.reference) || hasRealText(ref?.key));
@@ -7037,6 +7295,7 @@ function renderManuscriptPanel() {
   return [
     renderManuscriptExportBar(),
     contextCard("Manuscript story map", renderManuscriptArchitecture(manuscript), "Finished-results paper map in manuscript reading order."),
+    contextCard("Appendix / supplement", renderManuscriptAppendixPanel(manuscript), "Supporting material and supplement files tied to the manuscript deliverable."),
     contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
     contextCard("References", renderManuscriptReferences(manuscript), "Resolved reference list for the current source candidate.", inlineOpenButton("manuscript/references.bib", "Open .bib")),
     contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
@@ -7183,6 +7442,14 @@ function addResourcePath(path, options = {}) {
   if (persist) saveResourceSelections();
   renderSelectedResources();
   if (notify) showToast(`${resourceLabel(category)} selected for launch.`);
+}
+
+function addResourcePathToActiveTarget(path, options = {}) {
+  if (activeEditResourceTargetId) {
+    addEditResourcePath(activeEditResourceTargetId, path, options);
+    return;
+  }
+  addResourcePath(path, options);
 }
 
 function formatBytes(value) {
@@ -7681,6 +7948,7 @@ function setResumeTrialContext(context) {
   selectedResumeTrialContext = normalizeResumeTrialContext(context);
   renderAttachmentTrays();
   renderComposerSuggestions();
+  renderFramingConversation();
   $("#cold-file-editor")?.focus();
   if (selectedResumeTrialContext) showToast(`Ready to continue from ${resumeTrialLabel(selectedResumeTrialContext)}. Add instructions, then send.`);
 }
@@ -7689,6 +7957,7 @@ function clearResumeTrialContext() {
   selectedResumeTrialContext = null;
   renderAttachmentTrays();
   renderComposerSuggestions();
+  renderFramingConversation();
 }
 
 function selectedResumeTrialPayload() {
@@ -7709,7 +7978,7 @@ function messageResumeContextHtml(message) {
 function messageAttachmentChip(item) {
   const isLink = item.kind === "link";
   const name = isLink ? basename(item.path) : item.name;
-  const label = `${resourceLabel(item.category)} · ${isLink ? item.alreadyImported ? "copied" : "linked" : "upload"}`;
+  const label = `${resourceLabel(item.category)} · ${isLink ? item.alreadyImported ? "copied" : "linked" : item.kind === "retained" ? "retained" : "upload"}`;
   return `
     <div class="message-attachment-chip">
       <span class="attachment-icon">${escapeHtml(shortFileType(name, item.type))}</span>
@@ -7719,6 +7988,176 @@ function messageAttachmentChip(item) {
       </span>
     </div>
   `;
+}
+
+function normalizeEditAttachmentDraft(message) {
+  const draft = { resources: [], uploads: [], retained: [] };
+  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+  for (const attachment of attachments) {
+    if (!attachment || typeof attachment !== "object") continue;
+    const category = resourceCategories[attachment.category] ? attachment.category : inferClientResourceCategory(attachment.path || attachment.name || "");
+    if (attachment.kind === "link" && attachment.path) {
+      if (!draft.resources.some((item) => item.path === attachment.path)) {
+        draft.resources.push({
+          path: attachment.path,
+          category,
+          alreadyImported: Boolean(attachment.alreadyImported || isProjectResourcePath(attachment.path)),
+        });
+      }
+      continue;
+    }
+    draft.retained.push({
+      id: attachment.id || `${attachment.kind || "attachment"}_${draft.retained.length}`,
+      kind: "retained",
+      originalKind: attachment.kind || "attachment",
+      name: attachment.name || basename(attachment.path || "attachment"),
+      path: attachment.path || "",
+      category,
+      type: attachment.type || "",
+      size: attachment.size || 0,
+      alreadyImported: Boolean(attachment.alreadyImported),
+    });
+  }
+  return draft;
+}
+
+function editAttachmentDraftForMessage(messageId) {
+  const id = String(messageId || "");
+  if (!id) return { resources: [], uploads: [], retained: [] };
+  if (!editAttachmentDrafts.has(id)) {
+    const message = localMessages.find((item) => item.id === id);
+    editAttachmentDrafts.set(id, normalizeEditAttachmentDraft(message));
+  }
+  return editAttachmentDrafts.get(id);
+}
+
+function editDraftAttachments(id) {
+  const draft = editAttachmentDraftForMessage(id);
+  return [
+    ...draft.resources.map((item) => {
+      const attachment = {
+        kind: "link",
+        path: item.path,
+        name: basename(item.path),
+        category: item.category,
+      };
+      if (item.alreadyImported) attachment.alreadyImported = true;
+      return attachment;
+    }),
+    ...draft.retained.map((item) => ({
+      kind: "retained",
+      name: item.name,
+      path: item.path,
+      category: item.category,
+      type: item.type,
+      size: item.size,
+      originalKind: item.originalKind,
+      alreadyImported: item.alreadyImported,
+    })),
+    ...draft.uploads.map((item) => ({
+      kind: "upload",
+      name: item.name,
+      category: item.category,
+      type: item.type,
+      size: item.size,
+    })),
+  ];
+}
+
+function editAttachmentChip(item, index, group) {
+  const isLink = item.kind === "link";
+  const name = isLink ? basename(item.path) : item.name;
+  const source = isLink ? item.alreadyImported ? "copied" : "linked" : item.kind === "retained" ? "retained" : "upload";
+  return `
+    <div class="message-attachment-chip is-editable">
+      <span class="attachment-icon">${escapeHtml(shortFileType(name, item.type))}</span>
+      <span class="attachment-copy">
+        <strong>${escapeHtml(name || "Attachment")}</strong>
+        <small>${escapeHtml(resourceLabel(item.category))} · ${escapeHtml(source)}</small>
+      </span>
+      <button class="attachment-remove-inline" type="button" data-edit-attachment-remove="${escapeHtml(group)}:${escapeHtml(index)}" aria-label="Remove ${escapeHtml(name || "attachment")}">Remove</button>
+    </div>
+  `;
+}
+
+function editAttachmentsHtml(messageId) {
+  const draft = editAttachmentDraftForMessage(messageId);
+  const chips = [
+    ...draft.resources.map((item, index) => editAttachmentChip({ kind: "link", ...item, name: basename(item.path) }, index, "resources")),
+    ...draft.retained.map((item, index) => editAttachmentChip(item, index, "retained")),
+    ...draft.uploads.map((item, index) => editAttachmentChip({ kind: "upload", ...item }, index, "uploads")),
+  ].join("");
+  return `
+    <div class="framing-edit-attachments">
+      <div class="message-attachments">${chips || `<span class="attachment-empty">No resources attached.</span>`}</div>
+      <div class="framing-edit-attachment-actions">
+        <button class="secondary-button small-button" type="button" data-edit-upload="${escapeHtml(messageId)}">Upload files</button>
+        <button class="secondary-button small-button" type="button" data-edit-link="${escapeHtml(messageId)}">Link files/folders</button>
+      </div>
+    </div>
+  `;
+}
+
+function removeEditAttachment(messageId, token) {
+  const [group, rawIndex] = String(token || "").split(":");
+  const index = Number(rawIndex);
+  const draft = editAttachmentDraftForMessage(messageId);
+  if (!Number.isInteger(index) || index < 0 || !Array.isArray(draft[group])) return;
+  draft[group].splice(index, 1);
+  renderFramingConversation();
+}
+
+function addEditResourcePath(messageId, path, options = {}) {
+  const draft = editAttachmentDraftForMessage(messageId);
+  const value = String(path || "").trim();
+  if (!value || draft.resources.some((item) => item.path === value)) return;
+  const category = resourceCategories[options.category] ? options.category : inferClientResourceCategory(value);
+  draft.resources.push({
+    path: value,
+    category,
+    alreadyImported: Boolean(options.alreadyImported || isProjectResourcePath(value)),
+  });
+  renderFramingConversation();
+  showToast(`${resourceLabel(category)} linked to edited message.`);
+}
+
+function addEditUploadFile(messageId, file, options = {}) {
+  const draft = editAttachmentDraftForMessage(messageId);
+  if (!file || (!file.name && !file.type)) return { accepted: false, error: false, message: "" };
+  const fallbackExt = fileExtensionFromMime(file.type, extension(file.name) || ".bin");
+  const generatedName = `pasted_image_${new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)}${fallbackExt || ".bin"}`;
+  const name = file.name || generatedName;
+  const size = Number(file.size || 0);
+  if (size > MAX_BROWSER_UPLOAD_BYTES) {
+    const message = uploadTooLargeMessage(name, size);
+    showToast(message, true);
+    return { accepted: false, error: true, message };
+  }
+  const duplicate = draft.uploads.some((item) => item.name === name && item.size === file.size && item.lastModified === file.lastModified);
+  if (duplicate) return { accepted: false, error: false, message: `${name} is already attached.` };
+  const category = resourceCategories[options.category] ? options.category : "user_input";
+  draft.uploads.push({
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    file,
+    name,
+    type: file.type || "",
+    size,
+    lastModified: file.lastModified || 0,
+    category,
+  });
+  renderFramingConversation();
+  return { accepted: true, error: false, message: `${name} attached.` };
+}
+
+function addEditFilesFromList(messageId, files, source = "file picker", options = {}) {
+  const list = Array.from(files || []).filter(Boolean);
+  if (!list.length) return 0;
+  const results = list.map((file) => addEditUploadFile(messageId, file, options));
+  const accepted = results.filter((result) => result?.accepted).length;
+  const errors = results.filter((result) => result?.error && result.message);
+  if (accepted) showToast(`${accepted} ${accepted === 1 ? "file" : "files"} attached to edited message from ${source}.`);
+  else if (errors.length === 1) showToast(errors[0].message, true);
+  return accepted;
 }
 
 function messageAttachmentsHtml(message) {
@@ -8182,7 +8621,8 @@ function updateSelectedResourceCategory(index, category) {
   renderSelectedResources();
 }
 
-function showResourceBrowser() {
+function showResourceBrowser(options = {}) {
+  activeEditResourceTargetId = String(options.editMessageId || "");
   const dialog = $("#resource-browser");
   if (!dialog) return;
   if (dialog.showModal) dialog.showModal();
@@ -8192,6 +8632,7 @@ function showResourceBrowser() {
 
 function closeResourceBrowser() {
   const dialog = $("#resource-browser");
+  activeEditResourceTargetId = "";
   if (!dialog) return;
   if (dialog.close) dialog.close();
   else dialog.removeAttribute("open");
@@ -8652,6 +9093,29 @@ function blueprintReferenceItems(manuscript) {
     });
 }
 
+function blueprintAppendixItems(manuscript) {
+  const items = [];
+  if (hasRealText(manuscript?.appendix_plan)) {
+    items.push(blueprintSidebarItemHtml({
+      label: "Appendix / supplement plan",
+      meta: figureSpecExcerpt(manuscript.appendix_plan, 110),
+      anchor: "manuscript-appendix",
+      kind: "appendix",
+    }));
+  }
+  for (const file of manuscript?.appendix_files || []) {
+    const path = repoRelativePath(file.path || "");
+    items.push(blueprintSidebarItemHtml({
+      label: cleanText(file.title, basename(path || "Appendix file")),
+      meta: figureSpecExcerpt(cleanText(file.summary, "") || path, 110),
+      eyebrow: "Appendix file",
+      path,
+      kind: "appendix",
+    }));
+  }
+  return items;
+}
+
 function latestBlueprintReviewSelection(reviews) {
   const visible = (reviews || []).filter(hasVisibleReview);
   const numbered = visible
@@ -8704,6 +9168,7 @@ function blueprintSidebarHtml(manuscript, reviews, sourceText = "") {
       ${blueprintSidebarSectionHtml("Figures", blueprintArtifactItems(manuscript, ["figure"], sourceText), "No inline figures parsed yet.")}
       ${blueprintSidebarSectionHtml("Tables", blueprintTableItems(manuscript, sourceText), "No inline tables parsed yet.")}
       ${blueprintSidebarSectionHtml("Results / Methods", blueprintArtifactItems(manuscript, ["result", "algorithm", "dataset", "benchmark", "method"], sourceText), "No result or method blocks parsed yet.")}
+      ${blueprintSidebarSectionHtml("Appendix", blueprintAppendixItems(manuscript), "No appendix or supplement parsed yet.")}
       ${blueprintSidebarSectionHtml("References", blueprintReferenceItems(manuscript), "No references parsed yet.")}
       ${blueprintSidebarSectionHtml("Reviews", blueprintReviewItems(reviewSelection.reviews), reviewSelection.emptyText)}
     </aside>
@@ -8719,6 +9184,10 @@ function blueprintStructuredBodyHtml(manuscript) {
       <section class="blueprint-render-section">
         <h3>Manuscript story map</h3>
         ${renderManuscriptArchitecture(manuscript)}
+      </section>
+      <section class="blueprint-render-section">
+        <h3>Appendix / supplement</h3>
+        ${renderManuscriptAppendixPanel(manuscript)}
       </section>
       ${(manuscript.references || []).length ? `
       <section class="blueprint-render-section">
@@ -9026,14 +9495,14 @@ function filesFromApiResponse(payload) {
   return payload?.result?.files || payload?.files || payload?.result?.result?.files || {};
 }
 
-function notifyResourceHandlingFromResponse(payload) {
+async function notifyResourceHandlingFromResponse(payload) {
   const files = filesFromApiResponse(payload);
-  const intervention = files && typeof files.intervention === "object" ? files.intervention : null;
-  if (intervention?.path) {
+  const queuedChat = files && typeof files.queued_chat === "object" ? files.queued_chat : null;
+  if (queuedChat?.queued) {
     framingReplyPending = false;
     pendingFramingUserMessageId = "";
     framingPendingSince = 0;
-    showToast(`Human intervention recorded: ${intervention.path}`);
+    showToast("Queued; CoAutoResearch will reply after the current run finishes.");
     return;
   }
   const savedFiles = Array.isArray(files.saved_files) ? files.saved_files : [];
@@ -9053,11 +9522,7 @@ function notifyResourceHandlingFromResponse(payload) {
 }
 
 function collectResourceLinks() {
-  const links = [
-    ...selectedResourceItems,
-    ...sentFramingResourceItems,
-    ...localMessages.flatMap((message) => (message.attachments || []).filter((item) => item.kind === "link")),
-  ];
+  const links = [...selectedResourceItems];
   const seen = new Set();
   return links
     .map((item) => {
@@ -9073,6 +9538,38 @@ function collectResourceLinks() {
     });
 }
 
+function collectEditResourceLinks(messageId) {
+  const draft = editAttachmentDraftForMessage(messageId);
+  const seen = new Set();
+  return draft.resources
+    .map((item) => {
+      const link = { path: item.path, category: item.category };
+      if (item.alreadyImported || isProjectResourcePath(item.path)) link.alreadyImported = true;
+      return link;
+    })
+    .filter((item) => {
+      const key = `${item.category}:${item.path}`;
+      if (!item.path || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function collectEditRetainedAttachments(messageId) {
+  const draft = editAttachmentDraftForMessage(messageId);
+  return draft.retained
+    .map((item) => ({
+      kind: item.originalKind || "attachment",
+      name: item.name || basename(item.path || ""),
+      path: item.path || "",
+      category: item.category || "",
+      type: item.type || "",
+      size: item.size || 0,
+      alreadyImported: Boolean(item.alreadyImported),
+    }))
+    .filter((item) => item.name || item.path);
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -9085,8 +9582,8 @@ function fileToBase64(file) {
   });
 }
 
-async function collectUploadFiles() {
-  const uploads = [...selectedUploadItems, ...sentFramingUploadItems];
+async function collectUploadFiles(items = selectedUploadItems) {
+  const uploads = [...items];
   const seen = new Set();
   return Promise.all(
     uploads
@@ -9246,6 +9743,141 @@ function confirmResumeTrialSend(context, text, attachments) {
   });
 }
 
+function pendingInterventionSummaryItems() {
+  const marker = expectedTrialMarker();
+  const ids = Array.isArray(marker.pending_intervention_ids)
+    ? marker.pending_intervention_ids.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const paths = Array.isArray(marker.pending_intervention_paths)
+    ? marker.pending_intervention_paths.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  return ids.map((id, index) => ({ id, path: paths[index] || "" }));
+}
+
+function resumeAutoresearchSummaryHtml() {
+  const session = sessionState();
+  const trajectory = session.trajectory && typeof session.trajectory === "object" ? session.trajectory : {};
+  const expected = pendingExpectedTrialIteration();
+  const nextTrial = expected || Number(trajectory.next_trial_number || 0) || 0;
+  const trials = visibleTrials();
+  const latest = trials[trials.length - 1] || null;
+  const latestReported = [...trials].reverse().find((trial) => trial?.report_path || trial?.report?.report_path) || null;
+  const latestReportedLabel = cleanText(latestReported?.id || latestReported?.report?.id, "");
+  const latestLabel = cleanText(latest?.id, "");
+  const baseTrial = cleanText(trajectory.base_trial, "");
+  const latestActive = cleanText(trajectory.latest_active_trial, "");
+  const queuedCount = Number(session.queued_chat_count || 0);
+  const queuedAt = cleanText(session.queued_chat_latest_at, "");
+  const pendingItems = pendingInterventionSummaryItems();
+  const pendingHtml = pendingItems.length
+    ? `<ul>${pendingItems.map((item) => `<li><code>${escapeHtml(item.id)}</code>${item.path ? ` · <code>${escapeHtml(item.path)}</code>` : ""}</li>`).join("")}</ul>`
+    : "<p>No pending interventions are currently queued.</p>";
+  const boundaryParts = [];
+  if (latestReportedLabel) boundaryParts.push(`latest reported ${latestReportedLabel}`);
+  if (latestActive && latestActive !== latestReportedLabel) boundaryParts.push(`active boundary ${latestActive}`);
+  if (!boundaryParts.length && latestLabel) boundaryParts.push(`latest visible trial ${latestLabel}`);
+  return `
+    <p>Resume will continue the current autoresearch trajectory. It will not restart, archive, or renumber existing trials.</p>
+    <ul>
+      <li><strong>Next boundary:</strong> ${nextTrial ? `Trial ${escapeHtml(nextTrial)}` : "computed from current project state"}</li>
+      <li><strong>Current boundary:</strong> ${escapeHtml(boundaryParts.join(" · ") || "current closed trajectory boundary")}</li>
+      ${baseTrial ? `<li><strong>Fork base:</strong> ${escapeHtml(baseTrial)}</li>` : ""}
+      <li><strong>Queued chat:</strong> ${queuedCount ? `${escapeHtml(queuedCount)} message${queuedCount === 1 ? "" : "s"}${queuedAt ? `, latest ${escapeHtml(formatTimestamp(queuedAt))}` : ""}` : "none"}</li>
+    </ul>
+    <p><strong>Pending interventions for this resume:</strong></p>
+    ${pendingHtml}
+  `;
+}
+
+function resetResumeAutoresearchDialog() {
+  resumeAutoresearchSubmitting = false;
+  const instruction = $("#resume-autoresearch-instruction");
+  if (instruction) instruction.value = "";
+  const confirm = $("[data-resume-autoresearch-confirm]");
+  if (confirm) {
+    confirm.disabled = false;
+    confirm.textContent = "Resume autoresearch";
+  }
+  $$("[data-resume-autoresearch-cancel]").forEach((button) => {
+    button.disabled = false;
+  });
+}
+
+function setResumeAutoresearchSubmitting(active) {
+  resumeAutoresearchSubmitting = Boolean(active);
+  const confirm = $("[data-resume-autoresearch-confirm]");
+  if (confirm) {
+    confirm.disabled = Boolean(active);
+    confirm.textContent = active ? "Resuming..." : "Resume autoresearch";
+  }
+  $$("[data-resume-autoresearch-cancel]").forEach((button) => {
+    button.disabled = Boolean(active);
+  });
+}
+
+function closeResumeAutoresearchDialog({ clear = true } = {}) {
+  const dialog = $("#resume-autoresearch-dialog");
+  if (dialog) {
+    if (dialog.close) dialog.close();
+    else dialog.removeAttribute("open");
+  }
+  if (clear) resetResumeAutoresearchDialog();
+}
+
+function openResumeAutoresearchDialog() {
+  if (!hasActiveProject()) {
+    openProjectCreateDialog();
+    showToast("Create a project first.", true);
+    return false;
+  }
+  if (isSessionRunning()) {
+    showToast("Autoresearch is already running.", true);
+    return false;
+  }
+  const dialog = $("#resume-autoresearch-dialog");
+  if (!dialog) {
+    handleResumeAutoresearch().catch((error) => showToast(error.message, true));
+    return true;
+  }
+  const summary = $("#resume-autoresearch-summary");
+  if (summary) summary.innerHTML = resumeAutoresearchSummaryHtml();
+  resetResumeAutoresearchDialog();
+  if (dialog.showModal) dialog.showModal();
+  else dialog.setAttribute("open", "");
+  requestAnimationFrame(() => $("#resume-autoresearch-instruction")?.focus());
+  return true;
+}
+
+async function confirmResumeAutoresearch() {
+  if (resumeAutoresearchSubmitting) return false;
+  const resumeInstruction = String($("#resume-autoresearch-instruction")?.value || "").trim();
+  setResumeAutoresearchSubmitting(true);
+  try {
+    const result = await handleResumeAutoresearch({ resumeInstruction });
+    if (result) closeResumeAutoresearchDialog();
+    else setResumeAutoresearchSubmitting(false);
+    return Boolean(result);
+  } catch (error) {
+    showToast(error.message, true);
+    setResumeAutoresearchSubmitting(false);
+    return false;
+  }
+}
+
+function confirmPreProjectFramingResend(messageText, archivedCount) {
+  const summary = compactText(messageText || "edited initial brief", 180);
+  const warning = [
+    "Regenerate the initial PROJECT.md framing from this edited brief?",
+    "",
+    "This will truncate later framing conversation after the edited message and start a new framing run.",
+    "It will not archive or modify trials.",
+    archivedCount ? `Messages to archive from the visible framing thread: ${archivedCount}.` : "",
+    summary ? `Edited brief: ${summary}` : "",
+  ].filter(Boolean).join("\n");
+  if (typeof window.confirm === "function") return Promise.resolve(window.confirm(warning));
+  return Promise.resolve(true);
+}
+
 function closeRestartAutoresearchDialog(confirmed = false) {
   const pending = pendingRestartAutoresearchConfirm;
   pendingRestartAutoresearchConfirm = null;
@@ -9298,8 +9930,31 @@ async function handleRestartAutoresearch(reason = "") {
     body: JSON.stringify({ message: String(reason || "").trim(), settings: settingsFromForm() }),
   });
   mergeSessionFromApiResponse(response);
-  notifyResourceHandlingFromResponse(response);
+  await notifyResourceHandlingFromResponse(response);
   showToast("Restarted autoresearch.");
+  await loadOverview(true);
+  scrollFramingToBottomSoon();
+  return true;
+}
+
+async function handleResumeAutoresearch(options = {}) {
+  if (!hasActiveProject()) {
+    openProjectCreateDialog();
+    showToast("Create a project first.", true);
+    return false;
+  }
+  if (isSessionRunning()) {
+    showToast("Autoresearch is already running.", true);
+    return false;
+  }
+  const resumeInstruction = String(options?.resumeInstruction || "").trim();
+  const response = await api("/api/research/resume", {
+    method: "POST",
+    body: JSON.stringify({ settings: settingsFromForm(), resumeInstruction }),
+  });
+  mergeSessionFromApiResponse(response);
+  await notifyResourceHandlingFromResponse(response);
+  showToast("Resume autoresearch requested.");
   await loadOverview(true);
   scrollFramingToBottomSoon();
   return true;
@@ -9356,62 +10011,9 @@ function composerPromptNextValue(currentValue, prompt) {
 function renderComposerSuggestions() {
   const row = $("#composer-suggestions");
   if (!row) return;
-  const session = sessionState();
-  const show = activeView === "chat" && Boolean(session.session_id);
-  row.hidden = !show;
-  if (!show) return;
-  const running = isSessionRunning();
-  const interrupted = isSessionInterrupted();
-  const loopActive = Boolean(session.loop_active);
-  const gateStatus = String(session.gate?.status || session.gate?.raw_status || "").toLowerCase();
-  const gateOverallStatus = String(session.gate?.overall_status || session.gate?.raw_status || "").toLowerCase();
-  const gateIncompletePass = gateOverallStatus === "pass" && gateStatus !== "pass";
-  const resumeFromTrial = selectedResumeTrialPayload();
-  const chips = [];
-  const addChip = (label, prompt) => chips.push(`<button class="composer-suggestion-chip" type="button" data-composer-prompt="${escapeHtml(prompt)}">${escapeHtml(label)}</button>`);
-  const addActionChip = (label, action) => chips.push(`<button class="composer-suggestion-chip" type="button" ${action}>${escapeHtml(label)}</button>`);
-
-  if (resumeFromTrial) {
-    addActionChip(`Continue from ${resumeTrialLabel(resumeFromTrial)}`, "data-resume-trial-submit");
-    addActionChip("Cancel trial continue", "data-resume-trial-remove");
-  } else if (gateStatus === "pass") {
-    addChip("Show autoresearch", "/goal");
-    addActionChip("Restart autoresearch", "data-restart-autoresearch");
-    addChip("Status", "/status");
-    addChip("Diff", "/diff");
-  } else if (gateIncompletePass) {
-    addChip("Resume autoresearch", sessionGoalResumeCommand());
-    addActionChip("Restart autoresearch", "data-restart-autoresearch");
-    addChip("Show autoresearch", "/goal");
-    addChip("Status", "/status");
-    addChip("Diff", "/diff");
-  } else if (running) {
-    if (canPauseActiveRunAfterCurrentTurn()) addActionChip("Pause after current turn", "data-pause-autoresearch");
-    addActionChip("Stop current run", "data-stop-current-run");
-    addChip("Show autoresearch", "/goal");
-    addChip("Status", "/status");
-    addChip("Processes", "/ps");
-  } else if (interrupted) {
-    addChip("Resume autoresearch", sessionGoalResumeCommand());
-    addChip("Show autoresearch", "/goal");
-    addChip("Status", "/status");
-    addChip("Diff", "/diff");
-  } else {
-    if (loopActive) {
-      addChip("Pause autoresearch", sessionGoalPauseCommand());
-    } else {
-      addChip("Resume autoresearch", sessionGoalResumeCommand());
-    }
-    addActionChip("Restart autoresearch", "data-restart-autoresearch");
-    addChip("Show autoresearch", "/goal");
-    addChip("Status", "/status");
-    if (running) addChip("Processes", "/ps");
-    else addChip("Diff", "/diff");
-  }
-
-  row.classList.toggle("is-running", running);
-  const label = resumeFromTrial ? "Trial continue" : gateStatus === "pass" ? "Autoresearch complete" : gateIncompletePass ? "Gate incomplete" : running ? "Running" : interrupted ? "Goal interrupted" : loopActive ? "Goal active" : "Goal paused";
-  row.innerHTML = `<span>${label}</span>${chips.join("")}`;
+  row.hidden = true;
+  row.classList.remove("is-running");
+  row.innerHTML = "";
   requestAnimationFrame(() => {
     updateBriefDockGeometry();
     updateFramingScrollButton();
@@ -9495,7 +10097,7 @@ async function launchAutoresearch() {
       body: JSON.stringify({ confirmLaunch: true, brief, targetVenue, launchInstruction, fileEdits, resourceLinks: collectResourceLinks(), files, settings }),
     });
     mergeSessionFromApiResponse(response);
-    notifyResourceHandlingFromResponse(response);
+    await notifyResourceHandlingFromResponse(response);
     framingDraftPending = false;
     reconcileFramingPending(localMessages);
     coldDirty = false;
@@ -9531,19 +10133,19 @@ async function sendSessionComposerMessage(message) {
     return false;
   }
   const text = String(message || "").trim();
+  const isCommand = text.startsWith("/");
   const attachments = currentComposerAttachments();
+  const resourceLinksForRequest = isCommand ? [] : collectResourceLinks();
+  const uploadItemsForRequest = isCommand ? [] : copyComposerItems(selectedUploadItems);
   let resumeFromTrial = selectedResumeTrialPayload();
   if (!text && !attachments.length && !resumeFromTrial) return false;
   const localControl = canSendLocalSlashControl(text);
-  const interventionDuringRun = canSendInterventionDuringRun(text, attachments, resumeFromTrial);
-  if (!canSendSessionComposerMessage() && !localControl && !interventionDuringRun) {
+  const queueChatDuringRun = canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial);
+  if (!canSendSessionComposerMessage() && !localControl && !queueChatDuringRun) {
     showToast("Wait for the current agent run to finish before sending another message.", true);
     return false;
   }
-  let isCommand = text.startsWith("/");
-  const normalizedCommand = isCommand ? text.toLowerCase().replace(/\s+/g, " ").trim() : "";
   const commandSettings = isCommand ? settingsFromForm() : null;
-  const isProductRestartCommand = normalizedCommand === "/goal restart";
   let messageText = text;
   if (resumeFromTrial && isCommand) {
     showToast("Remove the Continue from Trial chip before sending a slash command, or send a normal instruction for this fork.", true);
@@ -9551,10 +10153,6 @@ async function sendSessionComposerMessage(message) {
   }
   if (resumeFromTrial) {
     const confirmed = await confirmResumeTrialSend(resumeFromTrial, messageText, attachments);
-    if (!confirmed) return false;
-  }
-  if (isProductRestartCommand) {
-    const confirmed = await confirmRestartAutoresearch(text);
     if (!confirmed) return false;
   }
   const composerSnapshot = snapshotFramingComposerState();
@@ -9578,21 +10176,25 @@ async function sendSessionComposerMessage(message) {
     renderFramingConversation();
     scrollFramingToBottomSoon();
   }
-  const endpoint = isProductRestartCommand
-    ? "/api/research/restart"
-    : isCommand
+  const endpoint = isCommand
       ? "/api/research/command"
       : resumeFromTrial
         ? "/api/research/resume-from-trial"
         : "/api/research/chat";
   let response = null;
   try {
-    const files = await collectUploadFiles();
-    const body = isProductRestartCommand
-      ? { message: text, settings: commandSettings }
-      : isCommand
+    const files = await collectUploadFiles(uploadItemsForRequest);
+    const body = isCommand
       ? { command: text, settings: commandSettings }
-      : { message: messageText || displayText, files, resourceLinks: collectResourceLinks(), resumeFromTrial, settings: settingsFromForm() };
+      : {
+          message: messageText || displayText,
+          clientMessageId: appendedMessage?.id || "",
+          conversationHistory: conversationHistoryForRequest(localMessages),
+          files,
+          resourceLinks: resourceLinksForRequest,
+          resumeFromTrial,
+          settings: settingsFromForm(),
+        };
     if (appendedMessage) await persistFramingMessages();
     response = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
   } catch (error) {
@@ -9608,14 +10210,14 @@ async function sendSessionComposerMessage(message) {
     throw error;
   }
   mergeSessionFromApiResponse(response);
-  notifyResourceHandlingFromResponse(response);
+  await notifyResourceHandlingFromResponse(response);
   reconcileFramingPending(localMessages);
   renderFramingConversation();
   renderSelectedResources();
   return true;
 }
 
-async function startFramingRun(brief) {
+async function startFramingRun(brief, options = {}) {
   if (!ensureResourceImportsReady()) throw new Error(blockingResourceImportMessage());
   if (!hasActiveProject()) throw new Error("Create a project first.");
   const text = String(brief || "").trim();
@@ -9625,14 +10227,15 @@ async function startFramingRun(brief) {
   setColdSaveStatus("Autosaved", "saved");
   const fileEdits = Object.entries(coldFiles).map(([path, value]) => ({ path, text: value }));
   const targetVenue = String($("#target-venue")?.value || "").trim();
-  const files = await collectUploadFiles();
+  const files = Array.isArray(options.files) ? options.files : await collectUploadFiles();
+  const resourceLinks = Array.isArray(options.resourceLinks) ? options.resourceLinks : collectResourceLinks();
   const response = await api("/api/research/framing", {
     method: "POST",
     body: JSON.stringify({
       brief: text,
       targetVenue,
       fileEdits,
-      resourceLinks: collectResourceLinks(),
+      resourceLinks,
       files,
       settings: settingsFromForm(),
     }),
@@ -9640,7 +10243,7 @@ async function startFramingRun(brief) {
   const session = response?.result?.session;
   if (appState && session) appState.research_session = session;
   mergeSessionFromApiResponse(response);
-  notifyResourceHandlingFromResponse(response);
+  await notifyResourceHandlingFromResponse(response);
   return response;
 }
 
@@ -9677,7 +10280,7 @@ async function coldStartFromPrepare() {
       scrollFramingToBottomSoon();
       return;
     }
-    if (hasLaunched() || canChatWithFramingDraft()) {
+    if (!shouldStartInitialFramingRun()) {
       const sent = await sendSessionComposerMessage(input);
       if (!sent) return;
       await loadOverview(true);
@@ -9723,17 +10326,34 @@ async function coldStartFromPrepare() {
   }
 }
 
-async function resendFramingMessage(id, text) {
+async function resendConversationMessage(id, text) {
   const message = localMessages.find((item) => item.id === id && item.role === "user");
   const next = String(text || "").trim();
-  if (!message || !next) return;
+  if (!message) return;
   if (isSessionRunning()) {
     showToast(`${agentLabel(sessionBackend())} is already running. Wait for the current run to finish.`, true);
     return;
   }
   const index = localMessages.findIndex((item) => item.id === id);
-  message.text = next;
+  const useFramingRun = isTruePreProjectBriefResend(index);
+  const editAttachments = editDraftAttachments(id);
+  const displayText = next || attachmentOnlyMessage(editAttachments);
+  if (!displayText) return;
   message.edited_at = new Date().toISOString();
+  const archivedMessages = index >= 0 ? localMessages.slice(index + 1).map(chatHistoryItemForRequest).filter(Boolean) : [];
+  if (useFramingRun) {
+    const confirmed = await confirmPreProjectFramingResend(displayText, archivedMessages.length);
+    if (!confirmed) {
+      showToast("Reframing cancelled.");
+      return;
+    }
+  }
+  const resourceLinks = collectEditResourceLinks(id);
+  const retainedAttachments = collectEditRetainedAttachments(id);
+  const files = await collectUploadFiles(editAttachmentDraftForMessage(id).uploads);
+  message.text = displayText;
+  if (editAttachments.length) message.attachments = editAttachments;
+  else delete message.attachments;
   editingFramingId = "";
   if (index >= 0) {
     localMessages.splice(index + 1, localMessages.length - index - 1);
@@ -9743,20 +10363,48 @@ async function resendFramingMessage(id, text) {
   await persistFramingMessages();
   renderFramingConversation();
   try {
-    framingDraftPending = true;
+    if (useFramingRun) framingDraftPending = true;
+    else framingReplyPending = true;
     beginFramingPending(id);
     renderFramingConversation();
     scrollFramingToBottomSoon();
-    await startFramingRun(next);
+    if (useFramingRun) {
+      await startFramingRun(displayText, { files, resourceLinks });
+    } else {
+      const body = {
+        message: displayText,
+        clientMessageId: message.id,
+        conversationHistory: conversationHistoryForRequest(localMessages),
+        resendContext: {
+          editedMessageId: message.id,
+          archivedCount: archivedMessages.length,
+          archivedMessages,
+          forceFreshSession: true,
+        },
+        settings: settingsFromForm(),
+      };
+      if (files.length) body.files = files;
+      if (resourceLinks.length) body.resourceLinks = resourceLinks;
+      if (retainedAttachments.length) body.retainedAttachments = retainedAttachments;
+      const response = await api("/api/research/chat", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      mergeSessionFromApiResponse(response);
+      await notifyResourceHandlingFromResponse(response);
+    }
+    editAttachmentDrafts.delete(id);
     framingDraftPending = false;
+    if (!useFramingRun && !isSessionRunning()) framingReplyPending = false;
     reconcileFramingPending(localMessages);
     renderFramingConversation();
     scrollFramingToBottomSoon();
-    showToast(`${agentLabel(sessionBackend())} is reframing PROJECT.md.`);
+    showToast(useFramingRun ? `${agentLabel(sessionBackend())} is reframing PROJECT.md.` : "Regenerating reply.");
     await loadOverview(true);
     scrollFramingToBottomSoon();
   } catch (error) {
     framingDraftPending = false;
+    framingReplyPending = false;
     reconcileFramingPending(localMessages);
     renderFramingConversation();
     showToast(error.message, true);
@@ -9846,7 +10494,17 @@ async function resendTranscriptMessage(id, message) {
   try {
     const response = await api("/api/research/chat", {
       method: "POST",
-      body: JSON.stringify({ message: text, settings: settingsFromForm() }),
+      body: JSON.stringify({
+        message: text,
+        conversationHistory: conversationHistoryForRequest(localMessages),
+        resendContext: {
+          editedMessageId: id,
+          archivedCount: 0,
+          archivedMessages: [],
+          forceFreshSession: true,
+        },
+        settings: settingsFromForm(),
+      }),
     });
     mergeSessionFromApiResponse(response);
     editingTranscriptId = "";
@@ -9855,15 +10513,6 @@ async function resendTranscriptMessage(id, message) {
   } catch (error) {
     showToast(error.message, true);
   }
-}
-
-async function handleGoal(event) {
-  event.preventDefault();
-  const input = event.currentTarget.elements.goal;
-  const goal = String(input.value || "").trim();
-  if (!goal) return;
-  input.value = "";
-  await sendCommand(`/goal ${goal}`);
 }
 
 async function handleStopSession() {
@@ -9878,7 +10527,17 @@ async function handleStopSession() {
 }
 
 async function handlePauseAutoresearch() {
-  await sendCommand(sessionGoalPauseCommand());
+  try {
+    const response = await api("/api/research/pause", {
+      method: "POST",
+      body: JSON.stringify({ settings: settingsFromForm() }),
+    });
+    mergeSessionFromApiResponse(response);
+    showToast("Autoresearch will pause after the current turn.");
+    await loadOverview(true);
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 function resizeComposer() {
@@ -9979,6 +10638,13 @@ function bindEvents() {
   $("#resume-trial-dialog")?.addEventListener("close", () => {
     if (pendingResumeTrialConfirm) closeResumeTrialDialog(false);
   });
+  $("#resume-autoresearch-dialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeResumeAutoresearchDialog();
+  });
+  $("#resume-autoresearch-dialog")?.addEventListener("close", () => {
+    if (!resumeAutoresearchSubmitting) resetResumeAutoresearchDialog();
+  });
   $("#restart-autoresearch-dialog")?.addEventListener("cancel", (event) => {
     event.preventDefault();
     closeRestartAutoresearchDialog(false);
@@ -10019,7 +10685,6 @@ function bindEvents() {
   $("#continue-research").addEventListener("click", handleContinue);
   $("#stop-session").addEventListener("click", handleStopSession);
   $("#chat-form").addEventListener("submit", handleChat);
-  $("#goal-form").addEventListener("submit", handleGoal);
   $("#session-settings-form").addEventListener("input", () => settingsFromForm());
   $("#session-settings-form")?.elements?.backend?.addEventListener("change", (event) => switchSessionBackend(event.target.value));
   $("#session-settings-form")?.elements?.model?.addEventListener("change", () => {
@@ -10087,8 +10752,11 @@ function bindEvents() {
   });
   $("#composer-file-input")?.addEventListener("change", (event) => {
     const category = resourceCategories[event.target.dataset.resourceCategory] ? event.target.dataset.resourceCategory : "user_input";
-    addFilesFromList(event.target.files, "file picker", { category });
+    const editMessageId = String(event.target.dataset.editMessageId || "");
+    if (editMessageId) addEditFilesFromList(editMessageId, event.target.files, "file picker", { category });
+    else addFilesFromList(event.target.files, "file picker", { category });
     delete event.target.dataset.resourceCategory;
+    delete event.target.dataset.editMessageId;
     event.target.value = "";
   });
   $("#large-import-category")?.addEventListener("change", (event) => {
@@ -10199,7 +10867,7 @@ function bindEvents() {
     }
     const addResource = event.target.closest("[data-resource-add-path]");
     if (addResource) {
-      addResourcePath(addResource.dataset.resourceAddPath);
+      addResourcePathToActiveTarget(addResource.dataset.resourceAddPath);
       return;
     }
     const removeResource = event.target.closest("[data-resource-remove]");
@@ -10305,6 +10973,27 @@ function bindEvents() {
       handlePauseAutoresearch();
       return;
     }
+    const resumeAutoresearch = event.target.closest("[data-resume-autoresearch]");
+    if (resumeAutoresearch) {
+      event.preventDefault();
+      event.stopPropagation();
+      openResumeAutoresearchDialog();
+      return;
+    }
+    const resumeAutoresearchConfirm = event.target.closest("[data-resume-autoresearch-confirm]");
+    if (resumeAutoresearchConfirm) {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmResumeAutoresearch();
+      return;
+    }
+    const resumeAutoresearchCancel = event.target.closest("[data-resume-autoresearch-cancel]");
+    if (resumeAutoresearchCancel) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeResumeAutoresearchDialog();
+      return;
+    }
     const restartAutoresearch = event.target.closest("[data-restart-autoresearch]");
     if (restartAutoresearch) {
       event.preventDefault();
@@ -10340,7 +11029,7 @@ function bindEvents() {
     const browserOpen = event.target.closest("[data-browser-open]");
     if (browserOpen) {
       if (browserOpen.dataset.browserType === "directory") loadLocalBrowser(browserOpen.dataset.browserOpen);
-      else addResourcePath(browserOpen.dataset.browserOpen);
+      else addResourcePathToActiveTarget(browserOpen.dataset.browserOpen);
       return;
     }
     const save = event.target.closest("[data-inline-save]");
@@ -10474,14 +11163,39 @@ function bindEvents() {
     const framingEdit = event.target.closest("[data-framing-edit]");
     if (framingEdit) {
       editingFramingId = framingEdit.dataset.framingEdit;
+      editAttachmentDraftForMessage(editingFramingId);
       renderFramingConversation();
       requestAnimationFrame(() => document.querySelector(`[data-framing-edit-form="${CSS.escape(editingFramingId)}"] textarea`)?.focus());
       return;
     }
     const framingCancel = event.target.closest("[data-framing-cancel]");
     if (framingCancel) {
+      editAttachmentDrafts.delete(framingCancel.dataset.framingCancel || editingFramingId);
       editingFramingId = "";
       renderFramingConversation();
+      return;
+    }
+    const editUpload = event.target.closest("[data-edit-upload]");
+    if (editUpload) {
+      activeEditResourceTargetId = editUpload.dataset.editUpload || "";
+      const input = $("#composer-file-input");
+      if (input) {
+        input.dataset.resourceCategory = "user_input";
+        input.dataset.editMessageId = activeEditResourceTargetId;
+        input.click();
+      }
+      return;
+    }
+    const editLink = event.target.closest("[data-edit-link]");
+    if (editLink) {
+      activeEditResourceTargetId = editLink.dataset.editLink || "";
+      setResourceCategory("ongoing_work");
+      showResourceBrowser({ editMessageId: activeEditResourceTargetId });
+      return;
+    }
+    const editAttachmentRemove = event.target.closest("[data-edit-attachment-remove]");
+    if (editAttachmentRemove) {
+      removeEditAttachment(editingFramingId, editAttachmentRemove.dataset.editAttachmentRemove);
       return;
     }
     const projectEdit = event.target.closest("[data-project-edit]");
@@ -10556,12 +11270,15 @@ function bindEvents() {
     fileViewerReturnPath = "";
     updateFileViewerReturnAction("");
   });
+  $("#resource-browser")?.addEventListener("close", () => {
+    activeEditResourceTargetId = "";
+  });
 
   document.body.addEventListener("submit", (event) => {
     const framingForm = event.target.closest("[data-framing-edit-form]");
     if (framingForm) {
       event.preventDefault();
-      resendFramingMessage(framingForm.dataset.framingEditForm, framingForm.elements.message.value);
+      resendConversationMessage(framingForm.dataset.framingEditForm, framingForm.elements.message.value);
       return;
     }
     const form = event.target.closest("[data-transcript-edit-form]");

@@ -34,10 +34,15 @@ Check whether the plan:
 - records what outputs should update `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/`, or knowledge notes;
 - includes the required `Resource Scout Brief`;
 - uses `Scout: required` by default for substantive trials;
+- gives a concrete `Decision reason:` grounded in the overall research goal and
+  current trial objective;
 - gives a concrete `Skip reason:` if `Scout: skipped`;
+- does not skip Resource Scout merely because the trial is small, search may
+  take time, the resource type is unclear, or current resources look probably
+  sufficient;
 - gives enough search scope, resource types, disciplines/domains, download
-  policy, expected destinations, and stop criteria for the scout step to be
-  auditable;
+  policy, known resource clues, freshness/date sensitivity, expected
+  destinations, and stop criteria for the scout step to be auditable;
 - declares possible knowledge-capture outputs when the plan may produce reusable
   resource, method, negative-result, manuscript, process, or preference lessons.
 

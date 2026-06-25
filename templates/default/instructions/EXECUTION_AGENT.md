@@ -58,7 +58,7 @@ Use this contract whenever deciding where to read, write, move, or summarize inf
 |---|---|---|---|---|
 | `PROJECT.md` | Canonical research proposal and target definition | before substantive work | cold start, conversion, or true project-definition change | trial logs, raw outputs, temporary thoughts |
 | `resources/` | Raw inputs and external materials | when grounding, converting, acquiring resources, or checking provenance | when adding user brief, prior work, literature, seed papers, data-source notes | accepted current truth unless promoted elsewhere |
-| `workspace/` | Live executable workspace | when executing, debugging, analyzing, generating outputs | when adding or modifying code, notebooks, configs, working data, generated outputs | authoritative claims without trial/report traceability |
+| `workspace/` | Live workbench for concrete implementation, execution, analysis, and evaluation artifacts | when building, running, debugging, prototyping, analyzing, evaluating, or inspecting concrete work products | when adding or modifying models, methods, frameworks, system designs, prototypes, code, notebooks, scripts, pipelines, simulations, configs, prompts, schemas, evaluation harnesses, working/derived data, generated outputs, logs, checkpoints, weights, or caches | authoritative claims, accepted conclusions, or current method status without trial/report traceability |
 | `research_trajectory/STATE.md` | Current control state | before every trial and after human intervention | when objective, plan, method status, constraints, blockers, active resources, or next step changes | raw logs, full artifacts, literature dumps |
 | `research_trajectory/CURRENT_FINDINGS.md` | Latest global synthesis of findings/results/claims/evidence | before interpreting results or updating manuscript | when accepted/tentative/rejected findings, active claims, limitations, or evidence map changes | raw outputs, command logs, full notebooks |
 | `research_trajectory/trials/` | Audit trail of planned work packages | before continuing, reviewing, or synthesizing recent work | for every substantive planned work package | global-only summaries without a concrete work package |
@@ -101,13 +101,13 @@ It contains:
 - limitations and caveats;
 - open questions.
 
-Do not duplicate full method implementation in `CURRENT_FINDINGS.md`. Method implementation lives in `workspace/`; method status and rationale live in `STATE.md`.
+Do not duplicate full method implementation in `CURRENT_FINDINGS.md`. Concrete method, model, framework, system, prototype, and implementation artifacts live in `workspace/`; their current status, rationale, constraints, and next action live in `STATE.md`.
 
 ---
 
 ## Workspace-to-Trial Artifact Rule
 
-`workspace/` is the live working area, not the canonical record.
+`workspace/` is the live workbench for concrete, inspectable work products, not the canonical research record.
 
 If a file in `workspace/` is used as evidence for a trial, then the trial `REPORT.md` must cite its path and explain how it was produced.
 
@@ -118,13 +118,15 @@ If the file is stable and small enough, copy it into:
 If the file is large, generated, external, or should remain in `workspace/`, keep it there but record in `REPORT.md`:
 
 - exact path;
-- command or notebook used;
-- config;
-- data source;
-- relevant commit hash if available;
+- command, notebook, procedure, or manual workflow used;
+- config, prompt, schema, protocol, or design version;
+- data, resource, benchmark, or input source;
+- checkpoint, weight, log, cache, or generated-output path if relevant;
+- evaluation harness, metric, acceptance criterion, or inspection method;
+- relevant commit hash, version, or environment details if available;
 - whether it is accepted, tentative, rejected, or only exploratory.
 
-A result is not accepted merely because it exists in `workspace/`.
+A model, method, framework, system design, implementation, or result is not accepted merely because it exists in `workspace/`.
 
 ---
 
@@ -163,7 +165,7 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 5. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
 6. Write `PLAN.md` before execution, including the required `Resource Scout Brief`.
 7. Create `reviews/` and run the Plan reviewer into `reviews/PLAN_REVIEW.md`; revise `PLAN.md` if the review requires it.
-8. If the plan says `Scout: required`, spawn a Resource Scout subagent to search, file, and report external resources for this trial after `PLAN_REVIEW.md` and before main execution. Save its report to `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and file small public artifacts under `resources/`.
+8. If the plan says `Scout: required`, after `PLAN_REVIEW.md` and before main execution, spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources. Save its report to `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and file small public artifacts under `resources/`.
 9. If the Resource Scout changes assumptions, required resources, risks, or success criteria, revise `PLAN.md` and rerun the Plan reviewer before execution. If the plan says `Scout: skipped`, the skip reason must be concrete.
 10. Execute mainly in `workspace/` or another clearly justified location.
 11. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
@@ -204,10 +206,13 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 ```markdown
 ## Resource Scout Brief
 Scout: required | skipped
+Decision reason:
 Skip reason:
 Search scope:
 Resource types:
 Disciplines/domains:
+Known resource clues:
+Freshness / date sensitivity:
 Download policy:
 Expected destinations:
 Stop criteria:

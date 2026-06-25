@@ -2,90 +2,102 @@
 
 ## Purpose
 
-This protocol handles formal human interventions during research execution.
+This protocol tells chat and autoresearch agents how to recognize and record formal human interventions.
 
-A formal human intervention is a user message that changes or constrains what the research system should believe, do, avoid, prioritize, or target.
+A formal human intervention is a user message that changes or constrains what the research system should believe, do, avoid, prioritize, or target. Ordinary interaction is not an intervention.
 
-Formal interventions are recorded under:
+The server does not classify messages semantically. The agent must decide from the user message, the current project context, and this protocol.
 
-`research_trajectory/human_interventions/`
+## What Is Not A Human Intervention
 
-Ordinary interaction is not recorded as an intervention.
+Do not create or update an intervention for ordinary interaction, including:
 
----
+- progress, status, or log questions;
+- requests to explain, summarize, or locate files;
+- clarification questions that do not change research direction;
+- temporary pause or stop requests;
+- ordinary discussion that does not change what future autoresearch should do.
 
-## What Is Not a Human Intervention
+Answer ordinary interaction directly. Do not mention intervention handling when no intervention was recorded or updated.
 
-Do not create a human intervention file for ordinary interaction, such as:
+## What Counts As A Human Intervention
 
-- asking for progress;
-- asking for clarification;
-- asking where a file is;
-- asking the agent to summarize current status;
-- asking the agent to pause temporarily;
-- asking the agent to show logs;
-- asking a factual question about the current run;
-- asking for a non-direction-changing explanation.
-
-These messages may be answered directly.
-
-If useful, update no files. If the answer reveals reusable knowledge, a
-resource-use lesson, or a recurring user preference that does not belong in
-canonical state, apply the Knowledge Capture Contract in
-`instructions/EXECUTION_AGENT.md` and update a topic note plus
-`research_trajectory/notes/index.md`.
-
----
-
-## What Counts as a Human Intervention
-
-Create an intervention when the user message changes or constrains the research process.
-
-Examples:
+Create or update a pending intervention when the user message changes or constrains the research process, for example:
 
 - correcting the research direction;
-- changing the current plan;
-- rejecting a method;
-- adding a constraint;
-- changing target venue;
-- changing contribution framing;
-- invalidating a result or claim;
-- telling the agent to stop using a resource, method, dataset, or assumption;
+- changing the current plan, method, resource priority, target venue, contribution framing, or scope;
+- rejecting a method, resource, dataset, claim, assumption, or result;
+- adding a constraint or priority for the next autoresearch step;
 - requesting a major pivot.
 
-Decision test:
+Decision test: does this message change what future autoresearch should believe, do, avoid, prioritize, or target? If yes, record it as a formal human intervention. If no, treat it as ordinary chat.
 
-Does this message change what the research system should believe, do, avoid, prioritize, or target?
+## Chat-Stage Recording Rules
 
-If yes, it is a formal human intervention.
-If no, it is ordinary interaction.
+Chat is not an autoresearch run. In chat mode:
 
----
+- answer the user first;
+- do not start, continue, resume, or plan a trial;
+- do not update `research_trajectory/STATE.md`, `research_trajectory/CURRENT_FINDINGS.md`, `research_trajectory/TRAJECTORY.json`, `research_trajectory/NEXT_TRIAL.json`, checkpoints, trials, reviewer files, or manuscript gate files;
+- if the message is a formal intervention, create or update a pending intervention file under `research_trajectory/human_interventions/`;
+- update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json` only for intervention bookkeeping;
+- if you recorded or updated an intervention, add one final sentence to your response naming the path.
 
-## Intervention Handling Steps
+The UI/server will synchronize pending intervention ids into `NEXT_TRIAL.json` after chat completes.
 
-When a formal intervention arrives:
+## Pending Intervention File Format
 
-1. Pause the current research action if safe.
-2. Create a new file under `research_trajectory/human_interventions/` with the next ID, such as `I0001_change_target_venue.md`.
-3. Update `research_trajectory/human_interventions/INDEX.md`.
-4. Update `research_trajectory/STATE.md` with the current effective consequence.
-5. Update the active trial `PLAN.md`, `REPORT.md`, or relevant `reviews/*_REVIEW.md` file if the intervention affects it.
-6. Update `research_trajectory/CURRENT_FINDINGS.md` if any finding, claim, evidence status, or limitation changes.
-7. Update `manuscript/BLUEPRINT.md` or `manuscript/figures/FIGURE_SPECS.md` if manuscript-facing implications changed.
-8. Continue only under the updated state.
+Use this structure for pending intervention files:
 
-Do not delete old intervention files. They are an audit trail.
+```markdown
+# I0001 Short Intervention Title
 
----
+Created: <ISO timestamp>
+Source: UI chat
+Status: pending
 
-## Pending Human Interventions
+## Current Effective Instruction
 
-External tools or a UI may write pending intervention drafts to:
+<The latest version of what future autoresearch must follow.>
 
-`research_trajectory/human_interventions/pending/`
+## Rationale / User Intent
 
-Before major steps, the execution agent should check this folder.
+<Why the user is steering this direction.>
 
-If a pending message is a formal human intervention, process it into the official intervention index.
-If it is ordinary interaction, answer it without creating an intervention file.
+## Expected Autoresearch Consequence
+
+<How the next Start/Resume autoresearch should apply it.>
+
+## Scope / Non-goals
+
+<What this does not require or should not change.>
+
+## Open Questions
+
+- <None, or concrete questions.>
+
+## Amendment History
+
+- <timestamp> Initial intervention from chat turn `<message id or summary>`.
+
+## Source Chat Turns
+
+- <timestamp> User: <short quote or summary>
+```
+
+If a later user message clarifies the same pending intervention, update the same file's `Current Effective Instruction` and append to `Amendment History` / `Source Chat Turns`. Create a new intervention ID only for a distinct topic.
+
+Do not rewrite interventions whose `INDEX.json` status is `applied` or `superseded`; create a new intervention if the user changes an already-applied direction.
+
+## Autoresearch-Stage Application
+
+When Start/Resume autoresearch is clicked, the execution agent must read every pending intervention before selecting or executing the next objective.
+
+During autoresearch, apply pending interventions to canonical state only when warranted by the actual trial work:
+
+- `PLAN.md` must include `## Human Interventions` explaining how pending interventions affect the trial.
+- `REPORT.md` must state which pending interventions were applied, deferred, blocked, or superseded, with reasons.
+- Update `STATE.md`, `CURRENT_FINDINGS.md`, manuscript files, or resource notes only when the completed trial genuinely changes them.
+- Do not mark an intervention obsolete unless a newer explicit human intervention supersedes it.
+
+The server marks pending interventions as applied only after a valid trial boundary is completed.

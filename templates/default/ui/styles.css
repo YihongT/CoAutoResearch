@@ -2630,6 +2630,43 @@ textarea:focus {
   background: color-mix(in srgb, var(--surface) 94%, var(--panel-bg) 6%);
 }
 
+.manuscript-appendix {
+  display: grid;
+  gap: 14px;
+}
+
+.appendix-plan,
+.appendix-file-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.appendix-plan h4,
+.appendix-file-card h4 {
+  margin: 0;
+}
+
+.appendix-file-list {
+  display: grid;
+  gap: 12px;
+}
+
+.appendix-file-card header p {
+  margin: 0 0 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--soft);
+  text-transform: uppercase;
+}
+
+.appendix-file-summary {
+  color: var(--muted);
+}
+
 .table-card-head {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
@@ -4646,6 +4683,33 @@ body.is-dragging-file .composer {
   white-space: nowrap;
 }
 
+.message-attachment-chip.is-editable {
+  padding-right: 8px;
+}
+
+.attachment-remove-inline {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid rgba(32, 31, 27, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 253, 247, 0.88);
+  color: rgba(32, 31, 27, 0.62);
+  font: 600 0.72rem/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.attachment-remove-inline:hover,
+.attachment-remove-inline:focus-visible {
+  border-color: rgba(128, 62, 39, 0.28);
+  color: var(--accent);
+  outline: none;
+}
+
+.attachment-empty {
+  color: var(--muted);
+  font: 600 0.72rem/1.4 var(--font-sans);
+}
+
 .framing-actions {
   display: flex;
   justify-content: flex-end;
@@ -4734,6 +4798,22 @@ body.is-dragging-file .composer {
   font: inherit;
   line-height: 1.5;
   resize: vertical;
+}
+
+.framing-edit-attachments {
+  display: grid;
+  gap: 8px;
+}
+
+.framing-edit-attachments .message-attachments {
+  margin-bottom: 0;
+}
+
+.framing-edit-attachment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .thinking-bubble {
@@ -5231,29 +5311,35 @@ body.is-dragging-file .composer {
   }
 }
 
-.resume-trial-body {
+.resume-trial-body,
+.resume-autoresearch-body {
   display: grid;
   gap: 14px;
   padding: 22px 28px;
 }
 
-.resume-trial-dialog {
+.resume-trial-dialog,
+.resume-autoresearch-dialog {
   width: min(720px, calc(100vw - 42px));
   max-height: min(760px, calc(100vh - 42px));
 }
 
 .resume-trial-summary p,
-.resume-trial-summary ul {
+.resume-trial-summary ul,
+.resume-autoresearch-summary p,
+.resume-autoresearch-summary ul {
   margin: 0 0 12px;
   color: rgba(32, 31, 27, 0.74);
   line-height: 1.55;
 }
 
-.resume-trial-summary ul {
+.resume-trial-summary ul,
+.resume-autoresearch-summary ul {
   padding-left: 20px;
 }
 
-.resume-trial-summary li + li {
+.resume-trial-summary li + li,
+.resume-autoresearch-summary li + li {
   margin-top: 6px;
 }
 
@@ -5265,6 +5351,10 @@ body.is-dragging-file .composer {
   color: #7a4e18;
   font-size: 14px;
   line-height: 1.45;
+}
+
+.resume-autoresearch-summary code {
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 980px) {
@@ -9085,6 +9175,42 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   white-space: nowrap;
 }
 
+.tree-file-node > .inline-file {
+  width: calc(100% - 28px);
+  max-width: calc(100% - 28px);
+}
+
+.inline-file,
+.card-inline-file,
+.inline-editor-shell,
+.inline-editor-head,
+.inline-editor-grid,
+.inline-preview,
+.markdown-preview,
+.markdown-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.inline-editor-head > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-editor-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.markdown-preview :where(p, li, td, th, code, a) {
+  overflow-wrap: anywhere;
+}
+
 /* Align checkbox toggles with the control row beside labeled fields. */
 .settings-grid > .toggle-field {
   align-self: end;
@@ -9422,6 +9548,60 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   overflow-wrap: anywhere;
 }
 
+.run-live-status {
+  display: grid;
+  gap: 12px;
+  width: min(900px, 100%);
+  justify-self: start;
+  padding: 4px 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.run-live-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.run-live-status-title {
+  min-width: 0;
+}
+
+.run-live-status-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-live-status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.run-live-status-actions > span {
+  flex: 0 0 auto;
+  color: rgba(32, 31, 27, 0.48);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.run-live-status p {
+  min-width: 0;
+  margin: 0;
+  color: rgba(32, 31, 27, 0.64);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .trial-progress-stepper {
   display: flex;
   flex-wrap: wrap;
@@ -9566,6 +9746,63 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   letter-spacing: 0.04em;
 }
 
+.run-live-details {
+  overflow: hidden;
+  border: none;
+  border-top: 1px solid rgba(32, 31, 27, 0.06);
+  border-radius: 0;
+  background: transparent;
+  margin-top: 4px;
+}
+
+.run-live-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 8px 2px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-live-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.run-live-details > summary::before {
+  content: "›";
+  flex: 0 0 auto;
+  color: rgba(32, 31, 27, 0.5);
+  font-size: 20px;
+  line-height: 0.8;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+.run-live-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.run-live-details > summary span {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  color: rgba(32, 31, 27, 0.46);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.run-live-details > summary strong {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  color: rgba(32, 31, 27, 0.5);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
 .trial-report-card {
   width: min(900px, 100%);
   justify-self: start;
@@ -9659,8 +9896,38 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 .trial-report-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  width: 100%;
+}
+
+.trial-report-open-actions,
+.trial-report-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+.trial-report-open-actions {
+  justify-content: flex-start;
+  margin-right: auto;
+}
+
+.trial-report-control-actions {
   justify-content: flex-end;
+  margin-left: auto;
+}
+
+.trial-danger-button {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+  color: var(--danger);
+}
+
+.trial-danger-button:hover {
+  border-color: color-mix(in srgb, var(--danger) 54%, var(--line));
+  color: var(--danger-hover);
 }
 
 .trial-detail-activity {
@@ -12581,7 +12848,25 @@ html[data-theme] .file-manager-head p {
     white-space: nowrap;
   }
 
-  html[data-theme] :is(.trial-report-actions, .trial-live-actions) {
+  html[data-theme] .trial-report-actions {
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  html[data-theme] :is(.trial-report-open-actions, .trial-report-control-actions) {
+    flex: 1 1 auto;
+  }
+
+  html[data-theme] .trial-report-open-actions {
+    justify-content: flex-start;
+  }
+
+  html[data-theme] .trial-report-control-actions {
+    justify-content: flex-end;
+  }
+
+  html[data-theme] .trial-live-actions {
     flex-wrap: wrap;
     justify-content: stretch;
   }
@@ -13787,7 +14072,6 @@ html[data-theme] .trial-history-body {
   padding: 26px 0 0 !important;
   gap: 36px;
 }
-
 /* completion tag → a quiet hairline mark, the tint only as a small dot */
 html[data-theme] .autoresearch-complete-tag {
   border: none;
@@ -14048,9 +14332,153 @@ html[data-theme] .trial-detail-activity > summary strong {
 }
 html[data-theme] .trial-detail-events { padding: 12px 0 0; }
 
+/* ordinary chat live status mirrors trial live status without trial stages */
+html[data-theme] .run-live-status {
+  display: grid;
+  gap: 12px;
+  width: min(900px, 100%);
+  justify-self: start;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-theme] .run-live-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+html[data-theme] .run-live-status-title { min-width: 0; }
+html[data-theme] .run-live-status-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-theme] .run-live-status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+html[data-theme] .run-live-status-actions > span {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+html[data-theme] .run-live-status p {
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--reader);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+html[data-theme] :is(.run-live-details, .framing-progress-details) {
+  margin-top: 2px;
+  overflow: visible;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-theme] :is(.run-live-details, .framing-progress-details) > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 12px 0 0;
+  list-style: none;
+}
+html[data-theme] :is(.run-live-details, .framing-progress-details) > summary::before {
+  content: "›";
+  flex: 0 0 auto;
+  color: var(--soft);
+  font-size: 20px;
+  line-height: 0.8;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+html[data-theme] :is(.run-live-details, .framing-progress-details)[open] > summary::before {
+  content: "›";
+  transform: rotate(90deg);
+}
+html[data-theme] :is(.run-live-details, .framing-progress-details) > summary span {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  color: var(--soft);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+html[data-theme] :is(.run-live-details, .framing-progress-details) > summary strong {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+html[data-theme] .run-live-details > .framing-progress {
+  padding: 12px 0 0;
+}
+html[data-theme] .run-live-details .framing-progress-row {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  grid-template-columns: 96px minmax(0, 1fr);
+  padding: 8px 0;
+}
+html[data-theme] .run-live-details .framing-progress-row > summary {
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+html[data-theme] .run-live-details .framing-progress-row span {
+  color: var(--soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+}
+html[data-theme] .run-live-details .framing-progress-row p,
+html[data-theme] .run-live-details .framing-progress-row pre,
+html[data-theme] .run-live-details .framing-progress.is-empty {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+html[data-theme] .run-live-details .framing-progress-row.is-collapsible pre {
+  border-top: 1px solid var(--line);
+  background: transparent;
+  padding: 8px 0 0;
+}
+
 /* the inline command/status message at the top reads as a quiet note,
    not a boxed pill */
 html[data-theme] .trial-report-actions .small-button { box-shadow: none; }
+html[data-theme] .trial-danger-button {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--line));
+  color: var(--danger);
+}
+html[data-theme] .trial-danger-button:hover {
+  border-color: color-mix(in srgb, var(--danger) 56%, var(--line));
+  color: var(--danger-hover);
+}
 
 /* ---- assistant message + chat thread: bare paper, never a faint box ----
    The earlier atelier rule paints every .transcript-body with --assistant-bg

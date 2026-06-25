@@ -94,7 +94,7 @@ Generated projects keep the pieces that make research usable, separate and legib
 - **`PROJECT.md`** — your canonical research direction.
 - **`research_trajectory/`** — current state, findings, and a trial-by-trial audit trail.
 - **`resources/`** — papers, data, prior work, and target-venue materials.
-- **`workspace/`** — the live, executable working area.
+- **`workspace/`** — the live workbench for concrete implementations, analyses, prototypes, outputs, and other inspectable work products.
 - **`manuscript/`** — blueprint, figure specs, reviews, and deliverables.
 
 ## Documentation
