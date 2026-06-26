@@ -31,6 +31,7 @@ Source-checkout development commands are covered in the contributor guide.
 | `ui` | Start the local web UI. |
 | `ui --projects-dir <dir>` | Start a dashboard over several generated projects. |
 | `install-cloudflared` | Install the Cloudflare tunnel CLI into the user directory on Linux, without sudo. |
+| `install-graftcp` | Install the Linux proxy helper used when `--remote` runs behind an HTTP proxy. |
 | `doctor` | Check local prerequisites and port availability. |
 | `upgrade` | Print installed version, detected project template version, and npm update command. |
 | `upgrade-project` | Sync core reviewer and trial-protocol instructions in an existing project, with backup. |
@@ -140,6 +141,7 @@ prints the actual URL.
 
 ```bash
 co-auto-research ui --remote
+co-auto-research ui --remote --proxy http://10.21.11.21:8888
 ```
 
 Remote mode is for SSH-accessible servers. It keeps browser launch disabled on
@@ -149,6 +151,12 @@ server for this one-command browser access.
 If `cloudflared` is missing, the command prints a short Cloudflare CLI setup
 guide with install, run, and check commands. Keep the terminal open while using
 the link.
+
+On Linux servers that require an HTTP proxy for internet access, CoAutoResearch
+detects `COAUTO_REMOTE_PROXY`, `HTTPS_PROXY`, or `HTTP_PROXY` and runs
+`cloudflared` through `graftcp` with `--protocol http2`. If the proxy helper is
+missing, the CLI prints `co-auto-research install-graftcp` before starting the
+UI server.
 
 If Cloudflare is blocked on the server, set `COAUTO_REMOTE_MODE=ssh` to force
 SSH-only remote mode. In that fallback path, the command uses
@@ -168,5 +176,9 @@ hostnames are often not valid SSH aliases from your laptop.
 | `COAUTO_NO_OPEN` | Disable automatic browser launch. |
 | `COAUTO_CLOUDFLARED` | Explicit `cloudflared` executable path for `--remote`. |
 | `COAUTO_CLOUDFLARED_DOWNLOAD_URL` | Override the standalone `cloudflared` download URL used by `install-cloudflared`. |
+| `COAUTO_GRAFTCP` | Explicit `graftcp` executable path for proxy-aware `--remote`. |
+| `COAUTO_GRAFTCP_DOWNLOAD_URL` | Override the standalone `graftcp` archive URL used by `install-graftcp`. |
+| `COAUTO_REMOTE_PROXY` | HTTP proxy used for proxy-aware `--remote`, for example `http://10.21.11.21:8888`. |
+| `COAUTO_REMOTE_PROXY_MODE` | Set to `off` to disable automatic `graftcp` wrapping even when proxy variables are present. |
 | `COAUTO_REMOTE_MODE` | Set to `ssh` to disable the default Cloudflare Quick Tunnel link and print SSH tunnel instructions instead. |
 | `COAUTO_REMOTE_TARGET` | Override the SSH target printed by the SSH fallback path, for example `yihong@login.example.edu`. |

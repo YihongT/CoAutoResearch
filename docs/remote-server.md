@@ -50,6 +50,20 @@ winget install -e --id Cloudflare.cloudflared
 System packages and other platforms:
 <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>.
 
+If the Linux server can reach the internet only through an HTTP proxy, keep
+using the same `--remote` command. CoAutoResearch detects
+`COAUTO_REMOTE_PROXY`, `HTTPS_PROXY`, or `HTTP_PROXY` and routes `cloudflared`
+through `graftcp` when the helper is installed.
+
+Install the proxy helper without sudo:
+
+```bash
+npx --yes co-auto-research install-graftcp
+```
+
+This installs `graftcp` into the CoAutoResearch user tool directory. The CLI
+checks that location automatically, so you do not need to change `PATH`.
+
 ### 2. Run
 
 ```bash
@@ -68,6 +82,9 @@ co-auto-research doctor
 
 If `cloudflared` is installed in a non-standard location, set
 `COAUTO_CLOUDFLARED=/path/to/cloudflared`.
+
+If `graftcp` is installed in a non-standard location, set
+`COAUTO_GRAFTCP=/path/to/graftcp`.
 
 Equivalent explicit command:
 
@@ -92,6 +109,44 @@ co-auto-research ui --projects-dir . --remote
 Cloudflare Quick Tunnels are intended for development and personal temporary
 access. The printed link is a temporary public URL while the terminal process is
 running. Do not share it broadly or use it as a long-running public service.
+
+## HTTP proxy servers
+
+Some remote servers cannot reach the internet directly and must use an
+HTTP(S) proxy such as `http://10.21.11.21:8888`. In that environment,
+`cloudflared` may bypass proxy environment variables. On Linux, CoAutoResearch
+uses `graftcp` to route `cloudflared` connections through the proxy while still
+keeping the user command simple:
+
+```bash
+co-auto-research ui --remote
+```
+
+Proxy detection order:
+
+```text
+COAUTO_REMOTE_PROXY
+HTTPS_PROXY / https_proxy
+HTTP_PROXY / http_proxy
+```
+
+To pass a proxy explicitly for one run:
+
+```bash
+co-auto-research ui --remote --proxy http://10.21.11.21:8888
+```
+
+Equivalent manual command for debugging:
+
+```bash
+graftcp --select_proxy_mode only_http_proxy \
+  --http_proxy 10.21.11.21:8888 \
+  cloudflared tunnel --url http://127.0.0.1:8765 --protocol http2
+```
+
+Use `COAUTO_REMOTE_PROXY_MODE=off` to disable automatic proxy-helper wrapping.
+When proxy mode is enabled, CoAutoResearch forces `cloudflared --protocol http2`
+because HTTP proxies do not carry QUIC/UDP reliably.
 
 ## SSH Fallback
 

@@ -79,7 +79,10 @@ On a remote server, `co-auto-research ui --remote` uses `cloudflared` to print
 a temporary Cloudflare browser link, so you can open the UI without SSH port
 forwarding. If `cloudflared` is not installed yet, the CLI prints a short
 Cloudflare CLI setup guide with install, run, and check commands — see
-[Remote servers](docs/remote-server.md).
+[Remote servers](docs/remote-server.md). On Linux servers that require an
+HTTP proxy for internet access, the same command can automatically route
+`cloudflared` through `graftcp`; if the helper is missing, the CLI prints the
+one-command `install-graftcp` setup step.
 
 ## Why it's different
 

@@ -192,6 +192,7 @@ async function writeFakeCodexBin(directory) {
   const cmdCodex = path.join(directory, "codex.cmd");
   const cmdClaude = path.join(directory, "claude.cmd");
   const cmdCloudflared = path.join(directory, "cloudflared.cmd");
+  const cmdGraftcp = path.join(directory, "graftcp.cmd");
   await fsp.writeFile(
     cmdCodex,
     "@echo off\r\nif \"%1\"==\"login\" if \"%2\"==\"status\" (echo Logged in& exit /b 0)\r\necho codex fake 0.0.0\r\n",
@@ -203,10 +204,12 @@ async function writeFakeCodexBin(directory) {
     "utf8"
   );
   await fsp.writeFile(cmdCloudflared, "@echo off\r\necho cloudflared fake 0.0.0\r\n", "utf8");
+  await fsp.writeFile(cmdGraftcp, "@echo off\r\necho graftcp fake 0.0.0\r\n", "utf8");
   if (process.platform !== "win32") {
     const shellCodex = path.join(directory, "codex");
     const shellClaude = path.join(directory, "claude");
     const shellCloudflared = path.join(directory, "cloudflared");
+    const shellGraftcp = path.join(directory, "graftcp");
     await fsp.writeFile(
       shellCodex,
       "#!/bin/sh\nif [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then echo Logged in; exit 0; fi\necho codex fake 0.0.0\n",
@@ -218,25 +221,28 @@ async function writeFakeCodexBin(directory) {
       "utf8"
     );
     await fsp.writeFile(shellCloudflared, "#!/bin/sh\necho cloudflared fake 0.0.0\n", "utf8");
+    await fsp.writeFile(shellGraftcp, "#!/bin/sh\necho graftcp fake 0.0.0\n", "utf8");
     await fsp.chmod(shellCodex, 0o755);
     await fsp.chmod(shellClaude, 0o755);
     await fsp.chmod(shellCloudflared, 0o755);
+    await fsp.chmod(shellGraftcp, 0o755);
     await fsp.chmod(cmdCodex, 0o755);
     await fsp.chmod(cmdClaude, 0o755);
     await fsp.chmod(cmdCloudflared, 0o755);
+    await fsp.chmod(cmdGraftcp, 0o755);
   }
 }
 
-async function runRemoteCliSmoke(extraEnv, expected) {
+async function runRemoteCliSmoke(extraEnv, expected, extraArgs = []) {
   const port = await freePort();
-  const proc = spawn("node", [cli, "ui", "--project", projectDir, "--remote", "--port", String(port)], {
+  const proc = spawn("node", [cli, "ui", "--project", projectDir, "--remote", "--port", String(port), ...extraArgs], {
     cwd: root,
-    env: { ...process.env, ...extraEnv },
+    env: { ...process.env, COAUTO_REMOTE_PROXY_MODE: "off", ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"]
   });
   try {
     const output = await waitForProcessOutput(proc, expected.waitFor, 15000);
-    expected.assert(output);
+    await expected.assert(output);
   } finally {
     await terminateProcess(proc);
   }
@@ -327,6 +333,159 @@ async function smokeRemoteCloudflareTimeoutSummary() {
   );
 }
 
+async function smokeRemoteCloudflareTimeoutSuggestsGraftcp() {
+  if (process.platform === "win32") return;
+  const fakeCloudflared = path.join(tempRoot, "fake-cloudflared-timeout-proxy");
+  await fsp.writeFile(
+    fakeCloudflared,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"--version\" ]; then echo cloudflared fake timeout proxy 0.0.0; exit 0; fi",
+      "printf '%s\\n' 'failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)' >&2",
+      "exit 1"
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.chmod(fakeCloudflared, 0o755);
+  await runRemoteCliSmoke(
+    {
+      COAUTO_CLOUDFLARED: fakeCloudflared,
+      COAUTO_REMOTE_PROXY_MODE: "off",
+      HTTPS_PROXY: "http://10.21.11.21:8888",
+      npm_command: "exec",
+      npm_lifecycle_event: "npx"
+    },
+    {
+      waitFor: (output) => output.includes("cloudflared may bypass proxy environment variables") && output.includes("COAUTO_REMOTE_PROXY_MODE=off"),
+      assert: (output) => {
+        if (!output.includes("cloudflared may bypass proxy environment variables") || !output.includes("COAUTO_REMOTE_PROXY_MODE=off")) {
+          throw new Error(`Cloudflare timeout with proxy env should explain proxy bypass and disabled helper mode:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
+async function writeFakeCloudflaredTunnel(target, url) {
+  await fsp.writeFile(
+    target,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"--version\" ]; then echo cloudflared fake tunnel 0.0.0; exit 0; fi",
+      `printf '%s\\n' 'quick tunnel ${url} ready' >&2`,
+      "while true; do /bin/sleep 1; done"
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.chmod(target, 0o755);
+}
+
+async function writeFakeGraftcpTunnel(target, recordPath, url) {
+  await fsp.writeFile(
+    target,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"--help\" ]; then echo graftcp fake tunnel 0.0.0; exit 0; fi",
+      `printf '%s\\n' "$*" > ${JSON.stringify(recordPath)}`,
+      `printf '%s\\n' 'quick tunnel ${url} ready' >&2`,
+      "while true; do /bin/sleep 1; done"
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.chmod(target, 0o755);
+}
+
+async function smokeRemoteProxyUsesGraftcp() {
+  if (process.platform !== "linux") return;
+  const fakeCloudflared = path.join(tempRoot, "fake-cloudflared-proxy");
+  const fakeGraftcp = path.join(tempRoot, "fake-graftcp-proxy");
+  const recordPath = path.join(tempRoot, "graftcp-proxy.args");
+  await writeFakeCloudflaredTunnel(fakeCloudflared, "https://proxy-good.trycloudflare.com");
+  await writeFakeGraftcpTunnel(fakeGraftcp, recordPath, "https://proxy-good.trycloudflare.com");
+  await runRemoteCliSmoke(
+    {
+      COAUTO_CLOUDFLARED: fakeCloudflared,
+      COAUTO_GRAFTCP: fakeGraftcp,
+      COAUTO_REMOTE_PROXY_MODE: "",
+      HTTPS_PROXY: "http://10.21.11.21:8888"
+    },
+    {
+      waitFor: (output) => output.includes("https://proxy-good.trycloudflare.com") && output.includes("Keep this terminal open."),
+      assert: async (output) => {
+        const args = await fsp.readFile(recordPath, "utf8");
+        if (!output.includes("https://proxy-good.trycloudflare.com")) {
+          throw new Error(`proxy remote should print the graftcp tunnel URL:\n${output}`);
+        }
+        if (!args.includes("--select_proxy_mode only_http_proxy") || !args.includes("--http_proxy 10.21.11.21:8888") || !args.includes("--protocol http2")) {
+          throw new Error(`proxy remote should wrap cloudflared with graftcp and force http2:\n${args}`);
+        }
+      }
+    }
+  );
+}
+
+async function smokeRemoteProxyOptionOverridesEnv() {
+  if (process.platform !== "linux") return;
+  const fakeCloudflared = path.join(tempRoot, "fake-cloudflared-proxy-override");
+  const fakeGraftcp = path.join(tempRoot, "fake-graftcp-proxy-override");
+  const recordPath = path.join(tempRoot, "graftcp-proxy-override.args");
+  await writeFakeCloudflaredTunnel(fakeCloudflared, "https://proxy-override.trycloudflare.com");
+  await writeFakeGraftcpTunnel(fakeGraftcp, recordPath, "https://proxy-override.trycloudflare.com");
+  await runRemoteCliSmoke(
+    {
+      COAUTO_CLOUDFLARED: fakeCloudflared,
+      COAUTO_GRAFTCP: fakeGraftcp,
+      COAUTO_REMOTE_PROXY_MODE: "",
+      HTTPS_PROXY: "http://wrong.proxy:1111"
+    },
+    {
+      waitFor: (output) => output.includes("https://proxy-override.trycloudflare.com") && output.includes("Keep this terminal open."),
+      assert: async () => {
+        const args = await fsp.readFile(recordPath, "utf8");
+        if (!args.includes("--http_proxy right.proxy:9999") || args.includes("wrong.proxy")) {
+          throw new Error(`--proxy should override proxy environment variables:\n${args}`);
+        }
+      }
+    },
+    ["--proxy", "http://right.proxy:9999"]
+  );
+}
+
+async function smokeRemoteProxyModeOffDisablesGraftcp() {
+  if (process.platform === "win32") return;
+  const fakeCloudflared = path.join(tempRoot, "fake-cloudflared-proxy-off");
+  const fakeGraftcp = path.join(tempRoot, "fake-graftcp-proxy-off");
+  const recordPath = path.join(tempRoot, "graftcp-proxy-off.args");
+  await writeFakeCloudflaredTunnel(fakeCloudflared, "https://proxy-off.trycloudflare.com");
+  await writeFakeGraftcpTunnel(fakeGraftcp, recordPath, "https://should-not-use-graftcp.trycloudflare.com");
+  await runRemoteCliSmoke(
+    {
+      COAUTO_CLOUDFLARED: fakeCloudflared,
+      COAUTO_GRAFTCP: fakeGraftcp,
+      COAUTO_REMOTE_PROXY_MODE: "off",
+      HTTPS_PROXY: "http://10.21.11.21:8888"
+    },
+    {
+      waitFor: (output) => output.includes("https://proxy-off.trycloudflare.com") && output.includes("Keep this terminal open."),
+      assert: async (output) => {
+        if (!output.includes("https://proxy-off.trycloudflare.com")) {
+          throw new Error(`proxy mode off should use direct cloudflared output:\n${output}`);
+        }
+        let usedGraftcp = false;
+        try {
+          await fsp.access(recordPath);
+          usedGraftcp = true;
+        } catch {
+          usedGraftcp = false;
+        }
+        if (usedGraftcp) {
+          throw new Error("COAUTO_REMOTE_PROXY_MODE=off should not invoke graftcp");
+        }
+      }
+    }
+  );
+}
+
 async function smokeRemoteCloudflaredMissing() {
   await runRemoteCliSmoke(
     { COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared"), npm_command: "exec", npm_lifecycle_event: "npx" },
@@ -356,6 +515,33 @@ async function smokeRemoteCloudflaredMissing() {
         }
         if (output.includes("ssh -N -L")) {
           throw new Error(`missing cloudflared should not default to SSH tunnel instructions:\n${output}`);
+        }
+      }
+    }
+  );
+}
+
+async function smokeRemoteGraftcpMissing() {
+  if (process.platform !== "linux") return;
+  const fakeCloudflared = path.join(tempRoot, "fake-cloudflared-graftcp-missing");
+  await writeFakeCloudflaredTunnel(fakeCloudflared, "https://should-not-start.trycloudflare.com");
+  await runRemoteCliSmoke(
+    {
+      COAUTO_CLOUDFLARED: fakeCloudflared,
+      COAUTO_GRAFTCP: path.join(tempRoot, "missing-graftcp"),
+      COAUTO_REMOTE_PROXY_MODE: "",
+      HTTPS_PROXY: "http://10.21.11.21:8888",
+      npm_command: "exec",
+      npm_lifecycle_event: "npx"
+    },
+    {
+      waitFor: (output) => output.includes("This server uses an HTTP proxy for internet access.") && output.includes("install-graftcp"),
+      assert: (output) => {
+        if (!output.includes("npx --yes co-auto-research install-graftcp") || !output.includes("npx --yes co-auto-research ui --remote")) {
+          throw new Error(`missing graftcp output should include setup and rerun commands:\n${output}`);
+        }
+        if (output.includes("CoAutoResearch UI serving") || output.includes("ssh -N -L")) {
+          throw new Error(`missing graftcp should be detected before starting the UI and should not print SSH as primary output:\n${output}`);
         }
       }
     }
@@ -478,6 +664,35 @@ async function smokeInstallCloudflaredUsesCurl() {
   });
   if (!output.includes("Downloading https://example.invalid/cloudflared") || !output.includes("Installed cloudflared: cloudflared fake curl 0.0.0")) {
     throw new Error(`install-cloudflared should prefer curl before fetch:\n${output}`);
+  }
+}
+
+async function smokeInstallGraftcpCommand() {
+  if (process.platform === "win32") return;
+  const installDir = path.join(tempRoot, "graftcp-install");
+  const output = execFileSync(process.execPath, [cli, "install-graftcp"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      PATH: "",
+      COAUTO_GRAFTCP_INSTALL_DIR: installDir,
+      COAUTO_GRAFTCP_INSTALL_MOCK: "1"
+    },
+    encoding: "utf8"
+  });
+  const installedPath = path.join(installDir, "graftcp");
+  let installed = false;
+  try {
+    await fsp.access(installedPath);
+    installed = true;
+  } catch {
+    installed = false;
+  }
+  if (!installed || !output.includes(`Installing graftcp to ${installedPath}`) || !output.includes("Installed graftcp: graftcp fake installed 0.0.0")) {
+    throw new Error(`install-graftcp should install into the user install directory:\n${output}`);
+  }
+  if (!output.includes("npx --yes co-auto-research ui --remote")) {
+    throw new Error(`install-graftcp should print the npx remote command when no global CLI is on PATH:\n${output}`);
   }
 }
 
@@ -916,10 +1131,16 @@ Confidence: medium
     !cliSource.includes("function printRemoteAccessHint") ||
     !cliSource.includes("async function startRemoteTunnel") ||
     !cliSource.includes("function findCloudflaredCommand") ||
+    !cliSource.includes("function findGraftcpCommand") ||
+    !cliSource.includes("function remoteProxy") ||
+    !cliSource.includes("install-graftcp") ||
     !cliSource.includes('["tunnel", "--url", localUrl]') ||
+    !cliSource.includes('"--protocol", "http2"') ||
     !cliSource.includes("COAUTO_REMOTE_TUNNEL_MOCK_URL") ||
     !cliSource.includes("COAUTO_REMOTE_TUNNEL_MOCK_FAIL") ||
     !cliSource.includes("COAUTO_CLOUDFLARED") ||
+    !cliSource.includes("COAUTO_GRAFTCP") ||
+    !cliSource.includes("COAUTO_REMOTE_PROXY") ||
     cliSource.includes("coauto_token") ||
     !cliSource.includes("ssh -N -L") ||
     !cliSource.includes("user}@<ssh-host>") ||
@@ -933,6 +1154,10 @@ Confidence: medium
     !remoteDocs.includes("Cloudflare CLI setup") ||
     !remoteDocs.includes("Linux without sudo") ||
     !remoteDocs.includes("npx --yes co-auto-research install-cloudflared") ||
+    !remoteDocs.includes("npx --yes co-auto-research install-graftcp") ||
+    !remoteDocs.includes("HTTP proxy servers") ||
+    !remoteDocs.includes("COAUTO_REMOTE_PROXY") ||
+    !remoteDocs.includes("COAUTO_GRAFTCP") ||
     remoteDocs.includes("cloudflared-linux-${arch}") ||
     remoteDocs.includes("sudo apt-get install cloudflared") ||
     !remoteDocs.includes("brew install cloudflared") ||
@@ -989,6 +1214,8 @@ Confidence: medium
     !gettingStartedDocs.includes("cloudflared") ||
     !gettingStartedDocs.includes("co-auto-research ui") ||
     !cliDocs.includes("COAUTO_CLOUDFLARED") ||
+    !cliDocs.includes("COAUTO_GRAFTCP") ||
+    !cliDocs.includes("COAUTO_REMOTE_PROXY") ||
     !cliDocs.includes("COAUTO_REMOTE_MODE") ||
     !cliDocs.includes("COAUTO_REMOTE_TARGET") ||
     !helpOutput.includes("co-auto-research attach") ||
@@ -1751,10 +1978,16 @@ Confidence: medium
   await smokeRemoteCloudflareLink();
   await smokeRemoteCloudflareParserIgnoresApiUrl();
   await smokeRemoteCloudflareTimeoutSummary();
+  await smokeRemoteCloudflareTimeoutSuggestsGraftcp();
+  await smokeRemoteProxyUsesGraftcp();
+  await smokeRemoteProxyOptionOverridesEnv();
+  await smokeRemoteProxyModeOffDisablesGraftcp();
   await smokeInstallCloudflaredCommand();
   await smokeInstallCloudflaredGlobalCommandHint();
   await smokeInstallCloudflaredUsesCurl();
+  await smokeInstallGraftcpCommand();
   await smokeRemoteCloudflaredMissing();
+  await smokeRemoteGraftcpMissing();
   await smokeRemoteSshMode();
   await smokeRemoteCloudflareFallback();
   await smokeRemoteAuth();
@@ -1763,7 +1996,7 @@ Confidence: medium
   await writeFakeCodexBin(fakeBin);
   const doctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
     cwd: root,
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    env: { ...process.env, COAUTO_REMOTE_PROXY_MODE: "off", PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
     encoding: "utf8"
   });
   if (!doctorOutput.includes("codex fake 0.0.0")) {
@@ -1775,20 +2008,39 @@ Confidence: medium
   if (!doctorOutput.includes("cloudflared fake 0.0.0")) {
     throw new Error("doctor did not resolve fake cloudflared executable from PATH");
   }
+  if (!doctorOutput.includes("graftcp fake 0.0.0")) {
+    throw new Error("doctor did not resolve fake graftcp executable from PATH");
+  }
   if (!doctorOutput.includes("package-managed runtime") || !doctorOutput.includes("legacy project ui/server.py")) {
     throw new Error(`doctor should report package-managed UI runtime and legacy project UI fallback:\n${doctorOutput}`);
   }
   const missingCloudflaredDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
     cwd: root,
-    env: { ...process.env, COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared"), PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    env: { ...process.env, COAUTO_REMOTE_PROXY_MODE: "off", COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared"), PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
     encoding: "utf8"
   });
   if (!missingCloudflaredDoctorOutput.includes("warn    cloudflared") || !missingCloudflaredDoctorOutput.includes("required for best --remote experience")) {
     throw new Error(`doctor should warn when cloudflared is missing:\n${missingCloudflaredDoctorOutput}`);
   }
+  if (process.platform === "linux") {
+    const missingGraftcpDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
+      cwd: root,
+      env: {
+        ...process.env,
+        COAUTO_GRAFTCP: path.join(tempRoot, "missing-graftcp-doctor"),
+        HTTPS_PROXY: "http://10.21.11.21:8888",
+        COAUTO_REMOTE_PROXY_MODE: "",
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`
+      },
+      encoding: "utf8"
+    });
+    if (!missingGraftcpDoctorOutput.includes("warn    graftcp") || !missingGraftcpDoctorOutput.includes("remote proxy - detected http://10.21.11.21:8888")) {
+      throw new Error(`doctor should warn when graftcp is missing behind an HTTP proxy:\n${missingGraftcpDoctorOutput}`);
+    }
+  }
   const invalidBackendDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
     cwd: root,
-    env: { ...process.env, COAUTO_AGENT_BACKEND: "not-a-backend", PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    env: { ...process.env, COAUTO_REMOTE_PROXY_MODE: "off", COAUTO_AGENT_BACKEND: "not-a-backend", PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
     encoding: "utf8"
   });
   if (!invalidBackendDoctorOutput.includes("invalid value") || !invalidBackendDoctorOutput.includes("COAUTO_AGENT_BACKEND")) {

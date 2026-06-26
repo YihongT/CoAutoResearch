@@ -6,6 +6,9 @@
   for a temporary Cloudflare browser link.
 - Added `co-auto-research install-cloudflared` for no-sudo Linux setup into the
   user directory used automatically by `--remote`.
+- Added proxy-aware `--remote` support through `graftcp`, plus
+  `co-auto-research install-graftcp` for Linux servers that reach the internet
+  through an HTTP proxy.
 - Fixed Claude Code `/goal` handling so Claude backend commands follow Claude
   Code native goal semantics.
 - Passed Claude `/goal` clear aliases through correctly: `clear`, `stop`,

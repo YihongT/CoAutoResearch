@@ -204,4 +204,6 @@ co-auto-research ui --remote
 With `cloudflared` installed on the server, the CLI prints a temporary
 Cloudflare browser link after the server starts. Keep the terminal open while
 you use the link. If `cloudflared` is missing, the same command prints the
-minimal setup steps first.
+minimal setup steps first. On Linux servers that need an HTTP proxy for
+internet access, the CLI can route `cloudflared` through `graftcp` and prints
+the one-command `install-graftcp` setup step when that helper is missing.

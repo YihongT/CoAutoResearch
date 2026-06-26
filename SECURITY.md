@@ -22,6 +22,9 @@ public interface without an authenticated tunnel or other access control.
 
 `co-auto-research ui --remote` uses the official `cloudflared` CLI to create a
 temporary Cloudflare Quick Tunnel URL for browser access from another machine.
+On Linux servers that require an HTTP proxy, CoAutoResearch may run
+`cloudflared` through `graftcp` so the same temporary tunnel can reach
+Cloudflare.
 That URL is publicly reachable while the terminal process is running. Treat it
 as temporary personal access, do not share it broadly, and do not use it as a
 long-running shared service. For stronger access control, put the tunnel behind

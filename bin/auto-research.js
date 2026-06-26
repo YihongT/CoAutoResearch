@@ -19,6 +19,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = "8765";
 const DEFAULT_PROJECTS_DIR = "co-autoresearch-projects";
 const LEGACY_PROJECTS_DIR = "local-projects";
+const DEFAULT_GRAFTCP_VERSION = "v0.8.1";
 const REVIEWER_BASELINE_VERSION = "2026-06-publication-ready-tables";
 const CORE_REVIEWER_FILES = [
   "REVIEW_TAXONOMY.md",
@@ -57,10 +58,11 @@ function usage() {
 Usage:
   co-auto-research init <dir>
   co-auto-research ls [--projects-dir <dir>]
-  co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
-  co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
-  co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]
+  co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote] [--proxy <host:port>]
+  co-auto-research ui [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote] [--proxy <host:port>]
+  co-auto-research ui --projects-dir <dir> [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote] [--proxy <host:port>]
   co-auto-research install-cloudflared
+  co-auto-research install-graftcp
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
   co-auto-research upgrade
   co-auto-research upgrade-project [project-name-or-path] [--all] [--projects-dir <dir>] [--dry-run]
@@ -77,7 +79,7 @@ function parseOptions(args) {
   const rest = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--host" || arg === "--port" || arg === "--projects-dir" || arg === "--project") {
+    if (arg === "--host" || arg === "--port" || arg === "--projects-dir" || arg === "--project" || arg === "--proxy") {
       const value = args[index + 1];
       if (!value || value.startsWith("--")) {
         throw new Error(`${arg} requires a value.`);
@@ -972,12 +974,12 @@ function resolveAttachProject(targetArg, options) {
 function commandAttach(args) {
   const { options, rest } = parseOptions(args);
   if (rest.length > 1) {
-    throw new Error("Usage: co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote]");
+    throw new Error("Usage: co-auto-research attach [project-name-or-path] [--projects-dir <dir>] [--host 127.0.0.1] [--port 8765] [--open] [--no-open] [--remote] [--proxy <host:port>]");
   }
   const project = resolveAttachProject(rest[0] || options.project || "", options);
   console.log(`Attaching to ${project.name} (${project.relativePath})`);
   const uiArgs = ["--project", project.path];
-  for (const name of ["host", "port"]) {
+  for (const name of ["host", "port", "proxy"]) {
     if (options[name]) uiArgs.push(`--${name}`, options[name]);
   }
   for (const name of ["open", "no-open", "remote"]) {
@@ -1098,6 +1100,19 @@ function defaultCloudflaredPath(env = process.env) {
   return path.join(defaultCloudflaredInstallDir(env), process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
 }
 
+function defaultGraftcpInstallDir(env = process.env) {
+  const configured = String(env.COAUTO_GRAFTCP_INSTALL_DIR || "").trim();
+  if (configured) return path.resolve(configured.replace(/^~(?=$|[\\/])/, userHomeDir(env)));
+  if (process.platform === "win32") {
+    return path.join(env.LOCALAPPDATA || path.join(userHomeDir(env), "AppData", "Local"), "CoAutoResearch", "graftcp");
+  }
+  return path.join(userHomeDir(env), ".local", "co-auto-research", "graftcp");
+}
+
+function defaultGraftcpPath(env = process.env) {
+  return path.join(defaultGraftcpInstallDir(env), process.platform === "win32" ? "graftcp.exe" : "graftcp");
+}
+
 function findCodexCommand(env = process.env) {
   return findAgentCommand("codex", env);
 }
@@ -1136,6 +1151,22 @@ function findCloudflaredCommand(env = process.env) {
   return "cloudflared";
 }
 
+function findGraftcpCommand(env = process.env) {
+  const configured = (env.COAUTO_GRAFTCP || "").trim().replace(/^"|"$/g, "");
+  if (configured) {
+    const expanded = configured.replace(/^~(?=$|[\\/])/, process.env.HOME || process.env.USERPROFILE || "~");
+    if (fs.existsSync(expanded)) return expanded;
+    const configuredOnPath = findOnPath(expanded, env);
+    if (configuredOnPath) return configuredOnPath;
+    return expanded;
+  }
+  const defaultLocal = defaultGraftcpPath(env);
+  if (fs.existsSync(defaultLocal)) return defaultLocal;
+  const onPath = findOnPath("graftcp", env);
+  if (onPath) return onPath;
+  return "graftcp";
+}
+
 function codexAvailable() {
   return agentAvailable("codex");
 }
@@ -1166,6 +1197,19 @@ function cloudflaredAvailable(env = process.env) {
     status: result.status,
     command,
     output: output.split(/\r?\n/)[0] || "required for best --remote experience"
+  };
+}
+
+function graftcpAvailable(env = process.env) {
+  const command = findGraftcpCommand(env);
+  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  const result = spawnSync(command, ["--help"], { encoding: "utf8", shell });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
+  return {
+    ok: result.status === 0 || Boolean(output),
+    status: result.status,
+    command,
+    output: output.split(/\r?\n/)[0] || "required when --remote uses an HTTP proxy"
   };
 }
 
@@ -1232,6 +1276,64 @@ function remoteSshTarget() {
 
 function remoteMode() {
   return String(process.env.COAUTO_REMOTE_MODE || "cloudflare").trim().toLowerCase();
+}
+
+function remoteProxyMode(env = process.env) {
+  return String(env.COAUTO_REMOTE_PROXY_MODE || "auto").trim().toLowerCase();
+}
+
+function configuredRemoteProxy(options = {}, env = process.env) {
+  return String(
+    options.proxy ||
+    env.COAUTO_REMOTE_PROXY ||
+    env.HTTPS_PROXY ||
+    env.https_proxy ||
+    env.HTTP_PROXY ||
+    env.http_proxy ||
+    ""
+  ).trim();
+}
+
+function normalizeRemoteProxy(value) {
+  const text = String(value || "").trim().replace(/^"|"$/g, "");
+  if (!text) return "";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    try {
+      const parsed = new URL(text);
+      return parsed.host || "";
+    } catch {
+      return text.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/\/.*$/, "");
+    }
+  }
+  return text.replace(/\/.*$/, "");
+}
+
+function displayRemoteProxy(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    try {
+      const parsed = new URL(text);
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      return text.replace(/\/\/[^@/\s]+@/, "//");
+    }
+  }
+  return `http://${text}`;
+}
+
+function remoteProxy(options = {}, env = process.env) {
+  if (remoteProxyMode(env) === "off") {
+    return { ok: false, value: "", raw: "", display: "", disabled: true };
+  }
+  const raw = configuredRemoteProxy(options, env);
+  const value = normalizeRemoteProxy(raw);
+  return { ok: Boolean(value), value, raw, display: displayRemoteProxy(raw || value), disabled: false };
+}
+
+function shouldUseGraftcpProxy(options = {}, env = process.env) {
+  const proxy = remoteProxy(options, env);
+  return Boolean(proxy.ok && process.platform === "linux");
 }
 
 function remoteTunnelMockConfigured() {
@@ -1322,7 +1424,12 @@ function closeChildProcess(child) {
   });
 }
 
-function printCloudflaredInstallInstructions() {
+function remoteUiCommand(options = {}) {
+  const command = `${coAutoResearchCommand()} ui --remote`;
+  return options.proxy ? `${command} --proxy ${shellQuote(options.proxy)}` : command;
+}
+
+function printCloudflaredInstallInstructions(options = {}) {
   const cli = coAutoResearchCommand();
   console.log("");
   console.log("Remote mode needs cloudflared to create a browser link.");
@@ -1340,13 +1447,31 @@ function printCloudflaredInstallInstructions() {
   console.log("     winget install -e --id Cloudflare.cloudflared");
   console.log("");
   console.log("2. Run");
-  console.log(`   ${cli} ui --remote`);
+  console.log(`   ${remoteUiCommand(options)}`);
   console.log("");
   console.log("3. Check");
   console.log(`   ${cli} doctor`);
   console.log("");
   console.log("Other platforms:");
   console.log("  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/");
+}
+
+function printGraftcpInstallInstructions(options = {}) {
+  console.log("");
+  console.log("This server uses an HTTP proxy for internet access.");
+  console.log("");
+  if (process.platform === "linux") {
+    console.log("Install the proxy helper:");
+    console.log(`  ${coAutoResearchCommand()} install-graftcp`);
+    console.log("");
+    console.log("Then rerun:");
+    console.log(`  ${remoteUiCommand(options)}`);
+  } else {
+    console.log("The automatic proxy helper is currently supported on Linux servers.");
+    console.log("");
+    console.log("Advanced SSH fallback:");
+    console.log(`  COAUTO_REMOTE_MODE=ssh ${remoteUiCommand(options)}`);
+  }
 }
 
 function cloudflaredLinuxAssetArch() {
@@ -1396,7 +1521,7 @@ async function downloadWithFetch(target, url) {
   await fsp.writeFile(target, bytes);
 }
 
-async function downloadCloudflared(target, url) {
+async function downloadFile(target, url, label = "file") {
   const attempts = [];
   const curl = findOnPath("curl");
   if (curl) {
@@ -1422,7 +1547,42 @@ async function downloadCloudflared(target, url) {
   } catch (error) {
     attempts.push(`fetch: ${error.message}`);
   }
-  throw new Error(`Could not download cloudflared from ${url}\n${attempts.map((line) => `  ${line}`).join("\n")}`);
+  throw new Error(`Could not download ${label} from ${url}\n${attempts.map((line) => `  ${line}`).join("\n")}`);
+}
+
+function graftcpLinuxAssetArch() {
+  const arch = process.arch;
+  if (arch === "x64") return "amd64";
+  if (arch === "arm64") return "arm64";
+  if (arch === "ia32") return "386";
+  if (arch === "arm") return "armv7";
+  throw new Error(`graftcp standalone install is not available for ${process.platform}/${arch}. See https://github.com/hmgle/graftcp/releases`);
+}
+
+function graftcpStandaloneDownloadUrl(env = process.env) {
+  const configured = String(env.COAUTO_GRAFTCP_DOWNLOAD_URL || "").trim();
+  if (configured) return configured;
+  if (process.platform !== "linux") {
+    throw new Error("The built-in graftcp installer currently supports Linux servers.");
+  }
+  return `https://github.com/hmgle/graftcp/releases/download/${DEFAULT_GRAFTCP_VERSION}/graftcp_${DEFAULT_GRAFTCP_VERSION}_linux-${graftcpLinuxAssetArch()}.tar.gz`;
+}
+
+async function writeMockGraftcp(target) {
+  const body = "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then echo graftcp fake installed 0.0.0; exit 0; fi\necho graftcp fake installed 0.0.0\n";
+  await fsp.writeFile(target, body, "utf8");
+}
+
+async function extractGraftcpArchive(archivePath, target) {
+  const extractDir = `${archivePath}.extract`;
+  await fsp.rm(extractDir, { recursive: true, force: true });
+  await fsp.mkdir(extractDir, { recursive: true });
+  try {
+    await runDownloadTool("tar", ["-xzf", archivePath, "-C", extractDir, "./usr/bin/graftcp"]);
+    await fsp.copyFile(path.join(extractDir, "usr", "bin", "graftcp"), target);
+  } finally {
+    await fsp.rm(extractDir, { recursive: true, force: true });
+  }
 }
 
 async function commandInstallCloudflared(args) {
@@ -1448,7 +1608,7 @@ async function commandInstallCloudflared(args) {
     const spinner = startSpinner(`Downloading ${url}`);
     await fsp.rm(tempTarget, { force: true });
     try {
-      await downloadCloudflared(tempTarget, url);
+      await downloadFile(tempTarget, url, "cloudflared");
       await fsp.rename(tempTarget, target);
     } catch (error) {
       spinner.stop();
@@ -1469,7 +1629,102 @@ async function commandInstallCloudflared(args) {
   console.log(`  ${coAutoResearchCommand()} ui --remote`);
 }
 
-async function startRemoteTunnel(localUrl) {
+async function commandInstallGraftcp(args) {
+  const { rest } = parseOptions(args);
+  if (rest.length > 0) {
+    throw new Error("Usage: co-auto-research install-graftcp");
+  }
+  const available = graftcpAvailable();
+  if (available.ok) {
+    console.log(`graftcp is already available: ${available.output}`);
+    console.log(`Using: ${available.command}`);
+    return;
+  }
+  const target = defaultGraftcpPath();
+  const installDir = path.dirname(target);
+  const url = process.env.COAUTO_GRAFTCP_INSTALL_MOCK ? "" : graftcpStandaloneDownloadUrl();
+  const tempArchive = `${target}.tar.gz.download`;
+  await fsp.mkdir(installDir, { recursive: true });
+  console.log(`Installing graftcp to ${target}`);
+  if (process.env.COAUTO_GRAFTCP_INSTALL_MOCK) {
+    await writeMockGraftcp(target);
+  } else {
+    const spinner = startSpinner(`Downloading ${url}`);
+    await fsp.rm(tempArchive, { force: true });
+    try {
+      await downloadFile(tempArchive, url, "graftcp");
+      await extractGraftcpArchive(tempArchive, target);
+    } catch (error) {
+      spinner.stop();
+      await fsp.rm(tempArchive, { force: true });
+      throw error;
+    }
+    spinner.stop();
+    await fsp.rm(tempArchive, { force: true });
+  }
+  await fsp.chmod(target, 0o755);
+  const result = spawnSync(target, ["--help"], { encoding: "utf8" });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("").trim().split(/\r?\n/)[0] || "";
+  if (result.status !== 0 && !output) {
+    throw new Error(`Installed graftcp but could not run it. Try: COAUTO_GRAFTCP=${target} co-auto-research doctor`);
+  }
+  console.log(`Installed graftcp: ${output || "ok"}`);
+  console.log("");
+  console.log("Run:");
+  console.log(`  ${coAutoResearchCommand()} ui --remote`);
+}
+
+function remoteTunnelCommand(localUrl, options = {}, env = process.env) {
+  const cloudflared = cloudflaredAvailable(env);
+  if (!cloudflared.ok) {
+    throw remoteSetupError("cloudflared_missing", `cloudflared was not found (${cloudflared.command}).`);
+  }
+  const proxy = remoteProxy(options, env);
+  if (proxy.ok && process.platform === "linux") {
+    const graftcp = graftcpAvailable(env);
+    if (!graftcp.ok) {
+      throw remoteSetupError("graftcp_missing", `graftcp was not found (${graftcp.command}).`);
+    }
+    return {
+      command: graftcp.command,
+      args: [
+        "--select_proxy_mode", "only_http_proxy",
+        "--http_proxy", proxy.value,
+        cloudflared.command,
+        "tunnel", "--url", localUrl,
+        "--protocol", "http2"
+      ],
+      shell: false,
+      viaProxy: true,
+      proxy
+    };
+  }
+  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(cloudflared.command);
+  return {
+    command: cloudflared.command,
+    args: ["tunnel", "--url", localUrl],
+    shell,
+    viaProxy: false,
+    proxy
+  };
+}
+
+function tunnelChildEnv(commandInfo, env = process.env) {
+  if (!commandInfo.viaProxy) return env;
+  const childEnv = { ...env };
+  for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]) {
+    delete childEnv[key];
+  }
+  return childEnv;
+}
+
+function annotateRemoteTunnelError(error, commandInfo) {
+  if (commandInfo?.viaProxy) error.viaProxy = true;
+  if (commandInfo?.proxy?.raw || commandInfo?.proxy?.value) error.remoteProxy = commandInfo.proxy.raw || commandInfo.proxy.value;
+  return error;
+}
+
+async function startRemoteTunnel(localUrl, options = {}) {
   const mockUrl = String(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || "").trim();
   if (mockUrl) {
     return { url: mockUrl, close: async () => {} };
@@ -1477,15 +1732,12 @@ async function startRemoteTunnel(localUrl) {
   if (process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL) {
     throw remoteSetupError("cloudflared_failed", "Mock cloudflared failure.");
   }
-  const cloudflared = cloudflaredAvailable();
-  if (!cloudflared.ok) {
-    throw remoteSetupError("cloudflared_missing", `cloudflared was not found (${cloudflared.command}).`);
-  }
+  const commandInfo = remoteTunnelCommand(localUrl, options);
   return new Promise((resolve, reject) => {
-    const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(cloudflared.command);
-    const child = spawn(cloudflared.command, ["tunnel", "--url", localUrl], {
+    const child = spawn(commandInfo.command, commandInfo.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      shell
+      shell: commandInfo.shell,
+      env: tunnelChildEnv(commandInfo)
     });
     let settled = false;
     let output = "";
@@ -1493,7 +1745,7 @@ async function startRemoteTunnel(localUrl) {
       if (settled) return;
       settled = true;
       void closeChildProcess(child);
-      reject(remoteSetupError("cloudflared_failed", `Timed out waiting for cloudflared URL.${output ? `\n${output}` : ""}`));
+      reject(annotateRemoteTunnelError(remoteSetupError("cloudflared_failed", `Timed out waiting for cloudflared URL.${output ? `\n${output}` : ""}`), commandInfo));
     }, 60000);
     timeout.unref?.();
     const fail = (error) => {
@@ -1501,7 +1753,7 @@ async function startRemoteTunnel(localUrl) {
       settled = true;
       clearTimeout(timeout);
       void closeChildProcess(child);
-      reject(error);
+      reject(annotateRemoteTunnelError(error, commandInfo));
     };
     const handleChunk = (chunk) => {
       output += chunk.toString();
@@ -1523,7 +1775,8 @@ async function startRemoteTunnel(localUrl) {
     });
     child.once("exit", (code, signal) => {
       if (settled) return;
-      fail(remoteSetupError("cloudflared_failed", `cloudflared exited before creating a URL (code=${code}, signal=${signal}).${output ? `\n${output}` : ""}`));
+      const label = commandInfo.viaProxy ? "graftcp/cloudflared" : "cloudflared";
+      fail(remoteSetupError("cloudflared_failed", `${label} exited before creating a URL (code=${code}, signal=${signal}).${output ? `\n${output}` : ""}`));
     });
   });
 }
@@ -1581,7 +1834,7 @@ async function printRemoteAccessHint(url, options) {
   console.log("");
   const spinner = startSpinner("Creating Cloudflare link...");
   try {
-    const tunnel = await startRemoteTunnel(url);
+    const tunnel = await startRemoteTunnel(url, options);
     spinner.stop();
     console.log("");
     console.log("Open:");
@@ -1593,17 +1846,35 @@ async function printRemoteAccessHint(url, options) {
     spinner.stop();
     console.log("");
     if (error.code === "cloudflared_missing") {
-      printCloudflaredInstallInstructions();
+      printCloudflaredInstallInstructions(options);
+    } else if (error.code === "graftcp_missing") {
+      printGraftcpInstallInstructions(options);
     } else {
       const failure = summarizeCloudflaredFailure(error.message);
       console.log(`Cloudflare link failed: ${failure.summary}`);
       if (failure.detail) console.log(`Details: ${failure.detail}`);
       console.log("");
+      const rawProxy = configuredRemoteProxy(options);
+      if (rawProxy && !error.viaProxy) {
+        console.log("This server has an HTTP proxy configured, but cloudflared may bypass proxy environment variables.");
+        if (process.platform === "linux" && remoteProxyMode() !== "off") {
+          console.log("Install the proxy helper, then rerun:");
+          console.log(`  ${coAutoResearchCommand()} install-graftcp`);
+          console.log(`  ${remoteUiCommand(options)}`);
+        } else if (remoteProxyMode() === "off") {
+          console.log("Proxy helper mode is disabled by COAUTO_REMOTE_PROXY_MODE=off.");
+        }
+        console.log("");
+      }
+      if (error.viaProxy && /ptrace|operation not permitted|permission denied|not permitted/i.test(error.message)) {
+        console.log("The proxy helper could not trace cloudflared on this server.");
+        console.log("");
+      }
       console.log("Check that cloudflared can reach Cloudflare, then rerun:");
-      console.log(`  ${coAutoResearchCommand()} ui --remote`);
+      console.log(`  ${remoteUiCommand(options)}`);
       console.log("");
       console.log("Advanced SSH fallback:");
-      console.log(`  COAUTO_REMOTE_MODE=ssh ${coAutoResearchCommand()} ui --remote`);
+      console.log(`  COAUTO_REMOTE_MODE=ssh ${remoteUiCommand(options)}`);
     }
     return null;
   }
@@ -1681,6 +1952,8 @@ async function commandDoctor(args) {
   const port = options.port || DEFAULT_PORT;
   const python = findPythonCommand();
   const cloudflared = cloudflaredAvailable();
+  const graftcp = graftcpAvailable();
+  const proxy = remoteProxy(options);
   const selectedBackend = selectedAgentBackend();
   const codex = codexAvailable();
   const claude = claudeAvailable();
@@ -1690,6 +1963,7 @@ async function commandDoctor(args) {
     ["python", { ok: python.ok, output: python.output || python.label }],
     ["git", commandAvailable("git")],
     ["cloudflared", cloudflared],
+    ["graftcp", graftcp],
     ["codex", codex],
     ["claude", claude]
   ];
@@ -1697,10 +1971,13 @@ async function commandDoctor(args) {
   for (const [name, result] of checks) {
     const selectedMissing = name === selectedBackend && !result.ok;
     const cloudflaredMissing = name === "cloudflared" && !result.ok;
+    const graftcpMissing = name === "graftcp" && !result.ok && proxy.ok && process.platform === "linux";
     const agentMissing = (name === "codex" || name === "claude") && !result.ok;
-    const label = result.ok ? "ok" : cloudflaredMissing || selectedMissing || !anyAgent && agentMissing ? "warn" : agentMissing ? "optional" : "missing";
+    const label = result.ok ? "ok" : cloudflaredMissing || graftcpMissing || selectedMissing || !anyAgent && agentMissing ? "warn" : name === "graftcp" || agentMissing ? "optional" : "missing";
     console.log(`${label.padEnd(7)} ${name}${result.output ? ` - ${result.output}` : ""}`);
   }
+  const proxyLabel = proxy.ok ? "ok" : "optional";
+  console.log(`${proxyLabel}      remote proxy - ${proxy.ok ? `detected ${proxy.display}` : proxy.disabled ? "disabled by COAUTO_REMOTE_PROXY_MODE=off" : "not detected"}`);
   const selectedAgent = selectedBackend === "claude" ? claude : codex;
   console.log(`${selectedAgent.ok ? "ok" : "warn"}      selected agent - ${selectedBackend}${!selectedAgent.ok && anyAgent ? " (selected backend missing; another agent is available)" : ""}`);
   if (invalidAgentBackendEnv()) {
@@ -1743,8 +2020,15 @@ async function commandUi(args) {
   if (useCloudflareRemote && !remoteTunnelMockConfigured()) {
     const cloudflared = cloudflaredAvailable();
     if (!cloudflared.ok) {
-      printCloudflaredInstallInstructions();
+      printCloudflaredInstallInstructions(options);
       return;
+    }
+    if (shouldUseGraftcpProxy(options)) {
+      const graftcp = graftcpAvailable();
+      if (!graftcp.ok) {
+        printGraftcpInstallInstructions(options);
+        return;
+      }
     }
   }
   const python = findPythonCommand();
@@ -1941,6 +2225,7 @@ async function main() {
   if (command === "attach") return commandAttach(args);
   if (command === "ui") return commandUi(args);
   if (command === "install-cloudflared") return commandInstallCloudflared(args);
+  if (command === "install-graftcp") return commandInstallGraftcp(args);
   if (command === "doctor") return commandDoctor(args);
   if (command === "upgrade") return commandUpgrade(args);
   if (command === "upgrade-project") return commandUpgradeProject(args);
