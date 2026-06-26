@@ -932,38 +932,97 @@ h3 {
   flex-wrap: wrap;
 }
 
-.composer-mode-toggle {
+.plan-mode-chip {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  min-height: 32px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-soft);
-}
-
-.composer-mode-toggle button {
-  min-height: 28px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 6px;
+  flex: 0 0 auto;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 10px 0 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
-  font: inherit;
+  font-family: var(--mono);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
-.composer-mode-toggle button:hover {
+.plan-mode-chip:hover,
+.plan-mode-chip:focus-visible {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
   color: var(--ink);
 }
 
-.composer-mode-toggle button.is-active {
-  background: var(--surface);
+.plan-mode-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  outline-offset: 2px;
+}
+
+.plan-mode-chip.is-active {
+  border-color: color-mix(in srgb, var(--ink) 8%, transparent);
+  background: color-mix(in srgb, var(--ink) 11%, var(--surface));
   color: var(--ink);
-  box-shadow: 0 1px 3px rgba(17, 20, 17, 0.08);
+  box-shadow: 0 1px 4px rgba(17, 20, 17, 0.08);
+}
+
+.plan-mode-chip.is-active:hover,
+.plan-mode-chip.is-active:focus-visible {
+  background: color-mix(in srgb, var(--ink) 15%, var(--surface));
+}
+
+.plan-mode-chip-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: currentColor;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.plan-mode-chip.is-active .plan-mode-chip-icon {
+  background: color-mix(in srgb, var(--surface) 68%, var(--ink));
+}
+
+.plan-mode-chip svg {
+  grid-area: 1 / 1;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.plan-mode-chip-close-icon {
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+.plan-mode-chip.is-active .plan-mode-chip-plan-icon {
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+.plan-mode-chip.is-active .plan-mode-chip-close-icon {
+  opacity: 0.7;
+  transform: scale(0.88);
+}
+
+.plan-mode-chip.is-active:hover .plan-mode-chip-close-icon,
+.plan-mode-chip.is-active:focus-visible .plan-mode-chip-close-icon {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .pill {

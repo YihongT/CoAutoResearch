@@ -1487,10 +1487,14 @@ Confidence: medium
     !appJs.includes("function planCardHtml") ||
     !appJs.includes("data-plan-approve") ||
     !appJs.includes("data-plan-revise") ||
-    !appJs.includes("[data-composer-mode]") ||
-    !indexHtml.includes('data-composer-mode="plan"')
+    !appJs.includes("[data-plan-mode-toggle]") ||
+    !indexHtml.includes("data-plan-mode-toggle") ||
+    indexHtml.includes("data-composer-mode") ||
+    indexHtml.includes(">Chat</button>") ||
+    !stylesCss.includes(".plan-mode-chip.is-active") ||
+    stylesCss.includes(".composer-mode-toggle")
   ) {
-    throw new Error("real Plan Mode must use dedicated plan APIs, Codex app-server, Claude ExitPlanMode capture, and plan cards without forwarding /plan");
+    throw new Error("real Plan Mode must use dedicated plan APIs, Codex app-server, Claude ExitPlanMode capture, and a single Plan chip without forwarding /plan");
   }
   if (
     !indexHtml.includes('id="composer-attach-button"') ||

@@ -96,6 +96,16 @@ function loadAppContext() {
       return selector === "#composer-attach-button" ? this : null;
     },
   });
+  const planModeChip = element({
+    click() {
+      this.dispatchEvent({ type: "click", target: this });
+    },
+  });
+  const chatPlanModeChip = element({
+    click() {
+      this.dispatchEvent({ type: "click", target: this });
+    },
+  });
   const attachmentMenu = element({ hidden: true, offsetHeight: 114 });
   const resumeCommandBar = element({ hidden: true });
   const resumeCommandLabel = element();
@@ -270,6 +280,7 @@ function loadAppContext() {
     ["#chat-attachment-tray", element()],
     ["#composer-file-input", composerFileInput],
     ["#composer-attach-button", composerAttachButton],
+    ["[data-plan-mode-toggle]", planModeChip],
     ["#attachment-menu", attachmentMenu],
     ["#resource-browser-title", resourceBrowserTitle],
     [".local-browser-head .eyebrow", resourceBrowserEyebrow],
@@ -415,6 +426,7 @@ function loadAppContext() {
       },
       querySelectorAll(selector) {
         if (selector === ".rail-action") return railActions;
+        if (selector === "[data-plan-mode-toggle]") return [planModeChip, chatPlanModeChip];
         if (selector === "[data-codex-provider-field]") return [codexProviderField];
         if (selector === "[data-claude-provider-field]") return [claudeProviderField];
         return [];
@@ -1383,8 +1395,12 @@ async function testPlanComposerModeUsesPlanEndpoint() {
     appState.framing.project_ready = false;
     appState.trials = [];
     __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
-    setComposerMode("plan");
   `);
+  assert.equal(app.run('document.querySelector("[data-composer-mode]") === null'), true, "Plan mode should not render a Chat/Plan segmented control");
+  assert.equal(app.run('document.querySelectorAll("[data-plan-mode-toggle]").length >= 1'), true, "Plan mode should render a single Plan chip");
+  app.run("togglePlanComposerMode()");
+  assert.equal(app.run('isPlanComposerMode()'), true, "using the Plan chip should enable plan mode");
+  assert.equal(app.run('document.querySelector("[data-plan-mode-toggle]").classList.contains("is-active")'), true, "enabled Plan chip should show active state");
   app.coldEditor.value = "Plan the first implementation pass.";
   await app.run("coldStartFromPrepare()");
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan", "Plan mode should use the real plan endpoint");
@@ -1392,6 +1408,24 @@ async function testPlanComposerModeUsesPlanEndpoint() {
   assert.equal(app.context.__apiCalls[0].body.conversationHistory.length >= 1, true, "plan requests should send conversation history");
   assert.equal(app.context.__startedFramingBrief, undefined, "Plan mode must not start the framing helper");
   assert.equal(app.context.__messages()[0].mode, "plan", "visible plan request should remember its mode for resend");
+}
+
+async function testPlanChipCanReturnToChat() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    setComposerMode("plan");
+    togglePlanComposerMode();
+  `);
+  assert.equal(app.run('isPlanComposerMode()'), false, "using the active Plan chip should return to chat mode");
+  app.coldEditor.value = "Continue the normal discussion.";
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "after turning Plan off, normal messages should use chat");
 }
 
 async function testTypedPlanSlashIsConvertedLocally() {
@@ -1410,6 +1444,7 @@ async function testTypedPlanSlashIsConvertedLocally() {
   assert.equal(app.context.__apiCalls[0].body.message, "fix the upload flow", "typed /plan prefix should be stripped");
   assert.equal(app.context.__messages()[0].kind, "text", "typed /plan should render as a normal user request, not a command row");
   assert.equal(app.context.__messages()[0].text, "fix the upload flow");
+  assert.equal(app.run('isPlanComposerMode()'), true, "typed /plan should activate the Plan chip locally");
 }
 
 async function testPlanRequestBlockedDuringActiveRun() {
@@ -1456,6 +1491,7 @@ async function testPlanCardApproveReviseAndResend() {
   await app.run('approvePlan("P_ready")');
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan/approve", "approve should call the plan approve endpoint");
   assert.equal(app.context.__apiCalls[0].body.planId, "P_ready");
+  assert.equal(app.run('isPlanComposerMode()'), false, "approving a plan should return the composer to chat mode");
 }
 
 async function testFreshRemoteProjectFirstMessageSends() {
@@ -5338,6 +5374,7 @@ await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
 await testPlanComposerModeUsesPlanEndpoint();
+await testPlanChipCanReturnToChat();
 await testTypedPlanSlashIsConvertedLocally();
 await testPlanRequestBlockedDuringActiveRun();
 await testPlanCardApproveReviseAndResend();

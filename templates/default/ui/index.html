@@ -196,10 +196,17 @@
                             </div>
 	                          <textarea id="cold-file-editor" rows="1" wrap="soft" spellcheck="false" aria-label="Research brief" placeholder="Research topic, problem, scope, and data or materials to use..."></textarea>
 	                          <div class="brief-run-controls">
-                              <div class="composer-mode-toggle" role="group" aria-label="Composer mode">
-                                <button class="is-active" type="button" data-composer-mode="chat" aria-pressed="true">Chat</button>
-                                <button type="button" data-composer-mode="plan" aria-pressed="false">Plan</button>
-                              </div>
+                              <button class="plan-mode-chip" type="button" data-plan-mode-toggle aria-pressed="false" aria-label="Use Plan mode" title="Plan mode">
+                                <span class="plan-mode-chip-icon" aria-hidden="true">
+                                  <svg class="plan-mode-chip-plan-icon" viewBox="0 0 24 24" focusable="false">
+                                    <path d="m5 7 1.4 1.4L9 5.8M12 7h7M5 13h.01M12 13h7M5 19h.01M12 19h7" />
+                                  </svg>
+                                  <svg class="plan-mode-chip-close-icon" viewBox="0 0 24 24" focusable="false">
+                                    <path d="M7 7l10 10M17 7 7 17" />
+                                  </svg>
+                                </span>
+                                <span>Plan</span>
+                              </button>
 	                            <label>
 	                              <span>Model</span>
 	                              <select id="composer-model" aria-label="Agent model">
@@ -327,10 +334,17 @@
                   <div class="attachment-tray" id="chat-attachment-tray" aria-live="polite"></div>
                   <textarea name="message" rows="1" placeholder="Message the current agent session..." disabled></textarea>
                   <div class="composer-actions">
-                    <div class="composer-mode-toggle" role="group" aria-label="Composer mode">
-                      <button class="is-active" type="button" data-composer-mode="chat" aria-pressed="true">Chat</button>
-                      <button type="button" data-composer-mode="plan" aria-pressed="false">Plan</button>
-                    </div>
+                    <button class="plan-mode-chip" type="button" data-plan-mode-toggle aria-pressed="false" aria-label="Use Plan mode" title="Plan mode">
+                      <span class="plan-mode-chip-icon" aria-hidden="true">
+                        <svg class="plan-mode-chip-plan-icon" viewBox="0 0 24 24" focusable="false">
+                          <path d="m5 7 1.4 1.4L9 5.8M12 7h7M5 13h.01M12 13h7M5 19h.01M12 19h7" />
+                        </svg>
+                        <svg class="plan-mode-chip-close-icon" viewBox="0 0 24 24" focusable="false">
+                          <path d="M7 7l10 10M17 7 7 17" />
+                        </svg>
+                      </span>
+                      <span>Plan</span>
+                    </button>
                     <button class="secondary-button" id="continue-research" type="button" disabled>Continue</button>
                     <button class="send-button" type="submit" aria-label="Send" disabled>Send</button>
                   </div>

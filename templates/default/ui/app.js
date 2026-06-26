@@ -1007,11 +1007,12 @@ function isPlanComposerMode() {
 }
 
 function renderComposerModeControls() {
-  $$("[data-composer-mode]").forEach((button) => {
-    const mode = normalizeComposerMode(button.dataset.composerMode);
-    const active = mode === composerMode;
+  $$("[data-plan-mode-toggle]").forEach((button) => {
+    const active = isPlanComposerMode();
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.setAttribute("aria-label", active ? "Turn off Plan mode" : "Use Plan mode");
+    button.title = active ? "Turn off Plan mode" : "Plan mode";
   });
 }
 
@@ -1022,6 +1023,10 @@ function setComposerMode(mode, options = {}) {
   if (next !== "plan") pendingPlanRevisionId = "";
   renderComposerModeControls();
   renderComposerActionButtons();
+}
+
+function togglePlanComposerMode() {
+  setComposerMode(isPlanComposerMode() ? "chat" : "plan");
 }
 
 function scopedJsonGet(key, fallback = {}) {
@@ -11351,6 +11356,7 @@ async function sendSessionComposerMessage(message) {
     throw error;
   }
   mergeSessionFromApiResponse(response);
+  if (planSlashMessage !== null) setComposerMode("plan");
   if (isPlanRequest) pendingPlanRevisionId = "";
   await notifyResourceHandlingFromResponse(response);
   reconcileFramingPending(localMessages);
@@ -11436,6 +11442,7 @@ async function approvePlan(planId) {
       body: JSON.stringify({ planId: id, settings: settingsFromForm() }),
     });
     mergeSessionFromApiResponse(response);
+    setComposerMode("chat");
     showToast("Started implementation run.");
     await loadOverview(true);
     scrollFramingToBottomSoon();
@@ -11755,8 +11762,8 @@ function bindEvents() {
   $$(".stage-pill").forEach((button) => {
     button.addEventListener("click", () => setStage(button.dataset.stage));
   });
-  $$("[data-composer-mode]").forEach((button) => {
-    button.addEventListener("click", () => setComposerMode(button.dataset.composerMode));
+  $$("[data-plan-mode-toggle]").forEach((button) => {
+    button.addEventListener("click", togglePlanComposerMode);
   });
 
   $("#launch-autoresearch").addEventListener("click", launchAutoresearch);
