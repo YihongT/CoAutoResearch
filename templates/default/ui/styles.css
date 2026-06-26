@@ -5484,6 +5484,10 @@ body.is-dragging-file .composer {
 .settings-dialog {
   width: min(1180px, calc(100vw - 70px));
   height: min(820px, calc(100vh - 70px));
+  min-width: min(760px, calc(100vw - 70px));
+  min-height: min(520px, calc(100vh - 70px));
+  max-width: calc(100vw - 70px);
+  max-height: calc(100vh - 70px);
   padding: 0;
   border: 1px solid rgba(23, 23, 19, 0.14);
   border-radius: 16px;
@@ -5499,10 +5503,49 @@ body.is-dragging-file .composer {
 }
 
 .settings-shell {
+  position: relative;
   display: grid;
   grid-template-columns: 310px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+}
+
+.settings-resize-zone {
+  position: absolute;
+  z-index: 8;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.settings-resize-handle {
+  right: 10px;
+  bottom: 10px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(0, 93, 88, 0.18);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, transparent 46%, rgba(0, 93, 88, 0.62) 47%, rgba(0, 93, 88, 0.62) 53%, transparent 54%) 7px 11px / 12px 12px no-repeat,
+    linear-gradient(135deg, transparent 46%, rgba(0, 93, 88, 0.4) 47%, rgba(0, 93, 88, 0.4) 53%, transparent 54%) 12px 13px / 8px 8px no-repeat,
+    rgba(255, 253, 247, 0.86);
+  box-shadow: 0 8px 22px rgba(17, 20, 17, 0.12);
+  cursor: nwse-resize;
+}
+
+.settings-resize-handle:hover {
+  border-color: rgba(0, 93, 88, 0.34);
+  background-color: rgba(242, 250, 247, 0.95);
+}
+
+body.is-resizing-settings-dialog {
+  cursor: nwse-resize;
+  user-select: none;
+}
+
+body.is-resizing-settings-dialog .settings-content {
+  pointer-events: none;
 }
 
 .settings-sidebar {
@@ -14065,7 +14108,8 @@ html[data-theme] #cold-start-workspace:not(.has-framing-thread) .brief-editor-sh
 .inline-editor-head { border-bottom-color: var(--line); color: var(--muted); }
 .inline-editor { background: var(--code-block-bg); color: var(--code-block-ink); }
 .blueprint-inspector-sidebar { border-color: var(--line); background: var(--surface); border-radius: var(--radius-md); box-shadow: none; }
-.file-viewer-resize-handle { border-color: var(--line); }
+.file-viewer-resize-handle,
+.settings-resize-handle { border-color: var(--line); }
 
 /* ===================================================================
    ATELIER — Part C10: all other dialogs. Fraunces title, hairline

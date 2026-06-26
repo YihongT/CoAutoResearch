@@ -900,13 +900,13 @@
                     <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
                     <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
                   </select>
-	                </label>
-	                <label class="field">
-	                  <span>Credential</span>
-	                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
-	                  <small id="settings-claude-credential-status">Empty</small>
-	                  <button class="settings-clear-button" id="settings-claude-credential-clear" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
-	                </label>
+                </label>
+                <label class="field">
+                  <span>Credential</span>
+                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                  <small id="settings-claude-credential-status">Empty</small>
+                  <button class="settings-clear-button" id="settings-claude-credential-clear" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
+                </label>
                 <label class="field">
                   <span>Sonnet model mapping</span>
                   <input name="settingsClaudeSonnetModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
@@ -924,6 +924,7 @@
             <div class="agent-status-note" id="settings-agent-status"></div>
           </section>
         </form>
+        <div class="settings-resize-zone settings-resize-handle" data-settings-resize="corner" role="separator" aria-orientation="horizontal" aria-label="Resize settings" title="Drag to resize"></div>
       </section>
     </dialog>
 

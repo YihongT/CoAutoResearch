@@ -161,6 +161,17 @@ function loadAppContext() {
     close() { this.closed = true; this.open = false; },
     showModal() { this.open = true; this.closed = false; },
   });
+  const settingsDialog = element({
+    _rect: { width: 1180, height: 820 },
+    close() { this.closed = true; this.open = false; },
+    showModal() { this.open = true; this.closed = false; },
+    getBoundingClientRect() {
+      return {
+        width: Number.parseFloat(this.style.width) || this._rect.width,
+        height: Number.parseFloat(this.style.height) || this._rect.height,
+      };
+    },
+  });
   const fileViewerDialog = element({
     _rect: { width: 900, height: 680 },
     close() { this.closed = true; this.open = false; },
@@ -310,6 +321,7 @@ function loadAppContext() {
     ["#export-confirm-dialog", exportConfirmDialog],
     ["#export-confirm-title", element()],
     ["#export-confirm-summary", element()],
+    ["#settings-dialog", settingsDialog],
     ["#file-viewer-dialog", fileViewerDialog],
     ["#file-viewer-body", fileViewerBody],
     ["#file-viewer-title", element()],
@@ -1090,6 +1102,46 @@ function loadAppContext() {
         persisted: localStorage.getItem(FILE_VIEWER_SIZE_KEY),
         activeAxis: document.body.dataset.fileViewerResizeAxis || "",
         resizing: document.body.classList.contains("is-resizing-file-viewer"),
+      };
+    };
+    globalThis.__settingsDialogResizeProbe = (dx, dy, startWidth = 1180, startHeight = 820) => {
+      const dialog = document.querySelector("#settings-dialog");
+      dialog._rect = { width: startWidth, height: startHeight };
+      dialog.style.removeProperty("width");
+      dialog.style.removeProperty("height");
+      const handle = {
+        dataset: { settingsResize: "corner" },
+        captured: null,
+        released: null,
+        setPointerCapture(pointerId) { this.captured = pointerId; },
+        releasePointerCapture(pointerId) { this.released = pointerId; },
+      };
+      const target = { closest(selector) { return selector === "[data-settings-resize]" ? handle : null; } };
+      const baseEvent = {
+        target,
+        pointerId: 87,
+        clientX: 200,
+        clientY: 220,
+        preventDefault() { this.prevented = true; },
+        stopPropagation() { this.stopped = true; },
+      };
+      startSettingsDialogResize(baseEvent);
+      updateSettingsDialogResize({
+        clientX: 200 + dx,
+        clientY: 220 + dy,
+        preventDefault() { this.prevented = true; },
+      });
+      const during = {
+        width: dialog.style.width,
+        height: dialog.style.height,
+      };
+      finishSettingsDialogResize({ target });
+      return {
+        ...during,
+        captured: handle.captured,
+        released: handle.released,
+        persisted: localStorage.getItem(SETTINGS_DIALOG_SIZE_KEY),
+        resizing: document.body.classList.contains("is-resizing-settings-dialog"),
       };
     };
     globalThis.__treeHtmlProbe = (tree) => renderTree(tree);
@@ -3937,6 +3989,9 @@ function testSettingsLayoutAndLinkContracts() {
   assert.ok(mobileSettingsGrid, "settings form should collapse to one column on narrow screens");
   assert.equal(styles.includes(".settings-content .modal-settings-grid > .toggle-field"), true, "toggle rows need explicit vertical alignment in the settings grid");
   assert.equal(styles.includes("[data-codex-provider-field][hidden]"), true, "Codex provider field should hide cleanly when Claude settings are active");
+  assert.equal(indexHtml.includes('data-settings-resize="corner"'), true, "settings dialog should expose a bottom-right resize handle");
+  assert.equal(styles.includes(".settings-resize-handle"), true, "settings resize handle should be styled");
+  assert.equal(appJs.includes("function startSettingsDialogResize"), true, "settings dialog resize should be wired in app code");
 }
 
 function testProjectScopedComposerDraftAndTargetVenueRestore() {
@@ -4585,6 +4640,22 @@ function testFileViewerResizeZonesRespectDragAxis() {
   assert.deepEqual(JSON.parse(state.persisted), { width: 1020, height: 770 });
 }
 
+function testSettingsDialogResizeHandlePersistsSize() {
+  const app = loadAppContext();
+  let state = app.run("__settingsDialogResizeProbe(120, 80, 1180, 820)");
+  assert.equal(state.width, "1300px", "settings resize handle should change width");
+  assert.equal(state.height, "830px", "settings resize handle should clamp height to the viewport");
+  assert.equal(state.captured, 87);
+  assert.equal(state.released, 87);
+  assert.equal(state.resizing, false, "settings resize class should be cleared after pointerup");
+  assert.deepEqual(JSON.parse(state.persisted), { width: 1300, height: 830 });
+
+  state = app.run("__settingsDialogResizeProbe(-600, -500, 900, 650)");
+  assert.equal(state.width, "760px", "settings resize should clamp to minimum width");
+  assert.equal(state.height, "520px", "settings resize should clamp to minimum height");
+  assert.deepEqual(JSON.parse(state.persisted), { width: 760, height: 520 });
+}
+
 function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   const app = loadAppContext();
   const payload = {
@@ -4927,6 +4998,7 @@ await testCopyTextHelperWritesClipboard();
 await testExportBundleFlow();
 testBlueprintInspectorRendersSidebarForLatestManuscriptOnly();
 testFileViewerResizeZonesRespectDragAxis();
+testSettingsDialogResizeHandlePersistsSize();
 testManuscriptPanelRendersPaperFiguresTablesAndTraceability();
 
 console.log("UI flow test passed.");

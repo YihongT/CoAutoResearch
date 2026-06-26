@@ -92,6 +92,7 @@ let exportPollTimer = null;
 let pendingExportEstimate = null;
 let optimisticResearchSession = null;
 let fileViewerResizeState = null;
+let settingsResizeState = null;
 let fileViewerReturnPath = "";
 let viewScrollPersistTimer = null;
 let suppressViewScrollPersistence = false;
@@ -112,6 +113,7 @@ const COLD_AUTOSAVE_DELAY = 900;
 const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024;
 const LARGE_RESOURCE_CHUNK_BYTES = 8 * 1024 * 1024;
 const FILE_VIEWER_SIZE_KEY = "coAutoResearchFileViewerSize";
+const SETTINGS_DIALOG_SIZE_KEY = "coAutoResearchSettingsDialogSize";
 const INITIAL_PREFLIGHT_DISMISSED_KEY = "coAutoResearchInitialPreflightDismissed";
 const LATEST_MANUSCRIPT_PATH = "manuscript/BLUEPRINT.md";
 
@@ -1394,10 +1396,12 @@ function openSettingsDialog(tab = "") {
   if (typeof loadUiSettings === "function") {
     Promise.resolve(loadUiSettings()).finally(() => {
       if (tab) switchSettingsTab(tab);
+      applySettingsDialogSize(dialog);
       try { dialog.showModal(); } catch (_) { /* already open */ }
     });
   } else {
     if (tab) switchSettingsTab(tab);
+    applySettingsDialogSize(dialog);
     try { dialog.showModal(); } catch (_) { /* already open */ }
   }
 }
@@ -9890,6 +9894,95 @@ async function saveInlineFile(path, root = document) {
   }
 }
 
+function clampSettingsDialogSize(width, height) {
+  const maxWidth = Math.max(360, Number(window.innerWidth || 0) - 70);
+  const maxHeight = Math.max(320, Number(window.innerHeight || 0) - 70);
+  const minWidth = Math.min(760, maxWidth);
+  const minHeight = Math.min(520, maxHeight);
+  return {
+    width: Math.min(maxWidth, Math.max(minWidth, Math.round(Number(width) || maxWidth))),
+    height: Math.min(maxHeight, Math.max(minHeight, Math.round(Number(height) || maxHeight))),
+  };
+}
+
+function storedSettingsDialogSize() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SETTINGS_DIALOG_SIZE_KEY) || "{}");
+    if (!parsed || typeof parsed !== "object") return null;
+    const width = Number(parsed.width || 0);
+    const height = Number(parsed.height || 0);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    return clampSettingsDialogSize(width, height);
+  } catch (error) {
+    return null;
+  }
+}
+
+function applySettingsDialogSize(dialog = $("#settings-dialog")) {
+  if (!dialog) return;
+  const size = storedSettingsDialogSize();
+  if (!size) {
+    dialog.style.removeProperty("width");
+    dialog.style.removeProperty("height");
+    return;
+  }
+  dialog.style.width = `${size.width}px`;
+  dialog.style.height = `${size.height}px`;
+}
+
+function persistSettingsDialogSize(dialog = $("#settings-dialog")) {
+  if (!dialog) return;
+  const rect = dialog.getBoundingClientRect();
+  const size = clampSettingsDialogSize(rect.width, rect.height);
+  localStorage.setItem(SETTINGS_DIALOG_SIZE_KEY, JSON.stringify(size));
+}
+
+function startSettingsDialogResize(event) {
+  const handle = event.target?.closest?.("[data-settings-resize]");
+  if (!handle) return;
+  const dialog = $("#settings-dialog");
+  if (!dialog) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = dialog.getBoundingClientRect();
+  settingsResizeState = {
+    handle,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    width: rect.width,
+    height: rect.height,
+  };
+  handle.setPointerCapture?.(event.pointerId);
+  document.body.classList.add("is-resizing-settings-dialog");
+}
+
+function updateSettingsDialogResize(event) {
+  if (!settingsResizeState) return;
+  event.preventDefault();
+  const dialog = $("#settings-dialog");
+  if (!dialog) return;
+  const deltaX = event.clientX - settingsResizeState.startX;
+  const deltaY = event.clientY - settingsResizeState.startY;
+  const size = clampSettingsDialogSize(settingsResizeState.width + deltaX, settingsResizeState.height + deltaY);
+  dialog.style.width = `${size.width}px`;
+  dialog.style.height = `${size.height}px`;
+}
+
+function finishSettingsDialogResize(event) {
+  if (!settingsResizeState) return;
+  const dialog = $("#settings-dialog");
+  const handle = settingsResizeState.handle || event?.target?.closest?.("[data-settings-resize]") || document.querySelector("[data-settings-resize]");
+  try {
+    handle?.releasePointerCapture?.(settingsResizeState.pointerId);
+  } catch (error) {
+    // Pointer capture may already be gone if the drag ended outside the dialog.
+  }
+  settingsResizeState = null;
+  document.body.classList.remove("is-resizing-settings-dialog");
+  if (dialog) persistSettingsDialogSize(dialog);
+}
+
 function clampFileViewerSize(width, height) {
   const maxWidth = Math.max(320, Number(window.innerWidth || 0) - 36);
   const maxHeight = Math.max(280, Number(window.innerHeight || 0) - 36);
@@ -11142,7 +11235,9 @@ function bindEvents() {
   $("#open-settings").addEventListener("click", async () => {
     await loadUiSettings();
     switchSettingsTab("general");
-    $("#settings-dialog").showModal();
+    const dialog = $("#settings-dialog");
+    applySettingsDialogSize(dialog);
+    dialog.showModal();
   });
   $$("dialog").forEach((dialog) => {
     dialog.addEventListener("click", (event) => {
@@ -11307,6 +11402,7 @@ function bindEvents() {
     updateBriefDockGeometry();
     updateFramingScrollButton();
     fitComposerSelectWidths();
+    if ($("#settings-dialog")?.open) applySettingsDialogSize();
   });
   window.addEventListener("scroll", () => {
     updateFramingScrollButton();
@@ -11842,6 +11938,13 @@ function bindEvents() {
   document.addEventListener("pointermove", updateFileViewerResize);
   document.addEventListener("pointerup", finishFileViewerResize);
   document.addEventListener("pointercancel", finishFileViewerResize);
+  $("#settings-dialog")?.addEventListener("pointerdown", startSettingsDialogResize);
+  document.addEventListener("pointermove", updateSettingsDialogResize);
+  document.addEventListener("pointerup", finishSettingsDialogResize);
+  document.addEventListener("pointercancel", finishSettingsDialogResize);
+  $("#settings-dialog")?.addEventListener("close", () => {
+    if (settingsResizeState) finishSettingsDialogResize();
+  });
   $("#file-viewer-dialog")?.addEventListener("close", () => {
     if (fileViewerResizeState) finishFileViewerResize();
     const body = $("#file-viewer-body");
