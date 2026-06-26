@@ -188,6 +188,17 @@ const modelOptionsByBackend = {
     ["glm-4.7", "GLM-4.7"],
   ],
 };
+const codexModelValues = new Set(modelOptionsByBackend.codex.map(([value]) => value));
+const discoveredModelsByBackend = {};
+const modelDiscoveryInflight = {};
+
+function isKnownCodexModel(value) {
+  const model = String(value || "").trim().toLowerCase();
+  if (!model) return false;
+  if (codexModelValues.has(model)) return true;
+  const discovered = discoveredModelsByBackend.codex;
+  return Array.isArray(discovered) && discovered.some(([candidate]) => String(candidate || "").trim().toLowerCase() === model);
+}
 
 const codexProviderLabels = {
   cli: "Use existing Codex CLI login",
@@ -1061,7 +1072,8 @@ function normalizeClaudeProvider(value) {
 }
 
 function isValidCustomClaudeModel(value) {
-  return /^[A-Za-z0-9][A-Za-z0-9._:/+\-[\]]{1,140}$/.test(String(value || "").trim());
+  const model = String(value || "").trim();
+  return Boolean(model) && !isKnownCodexModel(model) && /^[A-Za-z0-9][A-Za-z0-9._:/+\-[\]]{1,140}$/.test(model);
 }
 
 function claudeModelFamily(model) {
@@ -2741,9 +2753,7 @@ async function copyTextToClipboard(text, successMessage = "Copied.") {
 }
 
 function hasLaunched() {
-  const session = sessionState();
-  const mode = String(session.mode || "").toLowerCase();
-  return ["goal", "chat", "research", "command"].includes(mode);
+  return hasAutoresearchTrajectory();
 }
 
 function hasGoalStarted() {
@@ -2958,44 +2968,24 @@ function canChatWithFramingDraft() {
   return mode === "framing" && hasProjectDraftReady() && hasSession() && !isSessionRunning();
 }
 
-function canSendSessionComposerMessage() {
-  return canMessage() || canChatWithFramingDraft() || canChatWithProjectDraft();
-}
-
-function shouldStartInitialFramingRun() {
-  if (isSessionRunning()) return false;
-  if (hasProjectDraftReady() || hasAutoresearchTrajectory()) return false;
+function canChatBeforeProjectDraft() {
   const mode = String(sessionState().mode || "").toLowerCase();
-  return !["chat", "command", "goal", "research"].includes(mode);
+  return (
+    !isSessionRunning() &&
+    !hasProjectDraftReady() &&
+    !hasAutoresearchTrajectory() &&
+    !["goal", "research", "command"].includes(mode)
+  );
 }
 
-function messageHistoryBefore(index) {
-  const boundary = Math.max(0, Number(index) || 0);
-  return localMessages.slice(0, boundary);
-}
-
-function hasProjectOrRunContextBefore(index) {
-  return messageHistoryBefore(index).some((item) => (
-    item?.role === "assistant"
-    || isProjectDraftMessage(item)
-    || isControlFramingMessage(item)
-    || isGoalLaunchMessage(item)
-    || Boolean(item?.resumeFromTrial)
-  ));
+function canSendSessionComposerMessage() {
+  return canMessage() || canChatWithFramingDraft() || canChatWithProjectDraft() || canChatBeforeProjectDraft();
 }
 
 function isTruePreProjectBriefResend(index) {
   if (!Number.isInteger(Number(index)) || Number(index) < 0) return false;
-  if (hasProjectDraftReady()) return false;
-  if (hasProjectOrRunContextBefore(index)) return false;
-  if (hasSession()) return false;
-  if (hasAutoresearchTrajectory()) return false;
-  if (visibleTrials().length > 0) return false;
-  if (pendingExpectedTrialIteration() > 0) return false;
-  const trajectory = sessionState().trajectory && typeof sessionState().trajectory === "object" ? sessionState().trajectory : {};
-  if (trajectory.base_trial || trajectory.latest_active_trial || trajectory.next_trial_number) return false;
-  const mode = String(sessionState().mode || "").toLowerCase();
-  return !["framing", "chat", "command", "goal", "research"].includes(mode);
+  const message = localMessages[Number(index)];
+  return Boolean(message?.kind === "project-brief");
 }
 
 function isLocalSlashControl(text) {
@@ -3046,7 +3036,7 @@ function restorePrepareSaved() {
 function canOpenStage(stage) {
   const target = String(stage || "1");
   if (target === "1") return true;
-  if (target === "2") return prepareSaved || hasLaunched();
+  if (target === "2") return prepareSaved || hasProjectDraftReady() || hasLaunched();
   if (target === "3") return hasLaunched();
   return false;
 }
@@ -3640,7 +3630,8 @@ function framingThinkingHtml() {
 }
 
 function currentRunLiveStatusHtml() {
-  const status = hasLaunched()
+  const mode = String(sessionState().mode || "").toLowerCase();
+  const status = hasLaunched() || ["chat", "command"].includes(mode)
     ? activeRunStatusLabel()
     : isSessionRunning()
       ? "Drafting PROJECT.md"
@@ -4032,9 +4023,6 @@ function scrollFramingToBottomSoon() {
   });
 }
 
-const discoveredModelsByBackend = {};
-const modelDiscoveryInflight = {};
-
 function mergeModelOptionsLists(...lists) {
   const seen = new Set();
   const merged = [];
@@ -4060,7 +4048,7 @@ function modelOptionsForBackend(backend) {
   if (normalized !== "claude") return merged;
   return merged.filter(([value, label]) => {
     const text = `${value} ${label}`.toLowerCase();
-    return !text.includes("fable");
+    return !text.includes("fable") && !isKnownCodexModel(value);
   });
 }
 
@@ -4344,7 +4332,10 @@ function normalizeSessionSettings(settings = {}) {
     // A claude model is valid if it is a known alias/discovered option, or a full
     // Claude/custom gateway model ID. Anything else (e.g. a leftover codex
     // "gpt-5.5") is rejected.
-    const validClaudeModel = Boolean(claudeModel) && (allowedModels.has(claudeModel) || isValidCustomClaudeModel(claudeModel));
+    const validClaudeModel =
+      Boolean(claudeModel) &&
+      !isKnownCodexModel(claudeModel) &&
+      (allowedModels.has(claudeModel) || isValidCustomClaudeModel(claudeModel));
     if (!validClaudeModel) merged.model = defaults.model;
     merged.provider = normalizeClaudeProvider(merged.provider);
   } else {
@@ -4946,10 +4937,11 @@ function renderStage() {
     const draft = currentProjectDraft();
     const locked = !prepareSaved && (!draft.trim() || isPlaceholderProject(draft));
     const gatePassed = sessionState()?.gate?.status === "pass";
+    const goalStarted = hasGoalStarted() || visibleTrials().length > 0;
     const resourceBlocked = hasBlockingResourceImports();
     const blockedAgent = launchBlockingStatus();
     launchButton.disabled = locked || isSessionRunning() || gatePassed || resourceBlocked || Boolean(blockedAgent);
-    launchButton.textContent = gatePassed ? "Reviewer gates passed" : launched ? "Continue autoresearch" : "Start autoresearch";
+    launchButton.textContent = gatePassed ? "Reviewer gates passed" : goalStarted ? "Continue autoresearch" : "Start autoresearch";
     launchButton.title = resourceBlocked
       ? blockingResourceImportMessage()
       : gatePassed
@@ -5011,9 +5003,12 @@ function coldComposerPlaceholder(hasFramingThread) {
   if (hasLaunched()) {
     return "Message the agent about the current research, ask for status, attach resources, or steer the next step...";
   }
+  if (hasProjectDraftReady()) {
+    return "Ask the agent to revise PROJECT.md, narrow the scope, change the target venue, or add constraints...";
+  }
   return hasFramingThread
-    ? "Ask the agent to revise PROJECT.md, narrow the scope, change the target venue, or add constraints..."
-    : "Research topic, problem, scope, and data or materials to use...";
+    ? "Ask a follow-up, describe the project, attach materials, or ask to draft PROJECT.md..."
+    : "Ask a question, describe the project, attach materials, or ask to draft PROJECT.md...";
 }
 
 function renderColdStartEditor() {
@@ -10795,7 +10790,7 @@ async function launchAutoresearch() {
     return;
   }
   const brief = currentBriefText().trim();
-  if (!brief && !hasLaunched()) {
+  if (!brief && !hasProjectDraftReady() && !hasLaunched()) {
     showToast("Write a brief before launching.", true);
     return;
   }
@@ -10985,69 +10980,22 @@ async function coldStartFromPrepare() {
   const attachments = currentComposerAttachments();
   const resumeFromTrial = selectedResumeTrialPayload();
   if (!input && !attachments.length && !resumeFromTrial) {
-    showToast(hasProjectDraftReady() ? "Write a message to refine the project." : "Write a research brief before framing.", true);
+    showToast(hasProjectDraftReady() ? "Write a message to refine the project." : "Write a message or ask to draft PROJECT.md before launch.", true);
     setColdViewMode("source");
     $("#cold-file-editor")?.focus();
     return;
   }
-  if (resumeFromTrial) {
+  try {
     const sent = await sendSessionComposerMessage(input);
     if (!sent) return;
-    await loadOverview(true);
-    scrollFramingToBottomSoon();
-    return;
-  }
-  const displayInput = input || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
-  let composerSnapshot = null;
-  try {
-    if (canSendLocalSlashControl(input)) {
-      const sent = await sendSessionComposerMessage(input);
-      if (!sent) return;
-      await loadOverview(true);
-      scrollFramingToBottomSoon();
-      return;
-    }
-    if (!shouldStartInitialFramingRun()) {
-      const sent = await sendSessionComposerMessage(input);
-      if (!sent) return;
-      await loadOverview(true);
-      scrollFramingToBottomSoon();
-      return;
-    }
-    if (isSessionRunning()) {
-      showToast(`${agentLabel(sessionBackend())} is already running. Wait for the current run to finish.`, true);
-      return;
-    }
-    const attachments = currentComposerAttachments();
-    composerSnapshot = snapshotFramingComposerState();
-    framingDraftPending = true;
-    const message = appendFramingMessage("user", displayInput, { attachments });
-    beginFramingPending(message?.id || "");
-    $("#cold-file-editor").value = "";
-    clearFramingComposerAttachments();
-    resizeColdEditor();
-    renderFramingConversation();
-    scrollFramingToBottomSoon();
-    await persistFramingMessages();
-    await startFramingRun(displayInput);
-    clearComposerDraft();
-    framingDraftPending = false;
-    reconcileFramingPending(localMessages);
-    renderFramingConversation();
-    scrollFramingToBottomSoon();
-    markPrepareSaved(true);
-    $("#cold-file-editor").placeholder = "Ask for a change to PROJECT.md, or add a new constraint before launch...";
     resizeColdEditor();
     activeStage = "1";
     renderStage();
     renderChatState();
-    showToast(`${agentLabel(sessionBackend())} is framing PROJECT.md.`);
     await loadOverview(true);
     scrollFramingToBottomSoon();
   } catch (error) {
-    framingDraftPending = false;
     reconcileFramingPending(localMessages);
-    if (composerSnapshot) restoreFramingComposerState(composerSnapshot);
     renderFramingConversation();
     showToast(error.message, true);
   }

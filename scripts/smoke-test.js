@@ -1394,12 +1394,15 @@ Confidence: medium
     !serverPy.includes("create or update a pending intervention file") ||
     !serverPy.includes("If it clarifies an existing pending intervention, update that same pending intervention") ||
     !serverPy.includes("The final response must first answer the user's current question or discussion request with substantive analysis") ||
+    !serverPy.includes("Update `PROJECT.md` only when the user explicitly asks you to draft or revise the project") ||
+    !serverPy.includes("Do not update `PROJECT.md` for greetings, product/how-to questions, status questions") ||
     !serverPy.includes('Do not use a file-update summary such as "Updated PROJECT.md" as a substitute for answering the user') ||
     serverPy.includes("def intervention_chat_prompt") ||
     serverPy.includes("is_human_intervention_candidate") ||
     serverPy.includes("INTERVENTION_EN_PATTERNS") ||
     serverPy.includes("INTERVENTION_ZH_PATTERNS") ||
-    !appJs.includes("function shouldStartInitialFramingRun") ||
+    !appJs.includes("function canChatBeforeProjectDraft") ||
+    !appJs.includes("canChatWithProjectDraft() || canChatBeforeProjectDraft()") ||
     !appJs.includes("function isTruePreProjectBriefResend") ||
     !appJs.includes("async function resendConversationMessage") ||
     !appJs.includes("function confirmPreProjectFramingResend") ||
@@ -2425,6 +2428,10 @@ Confidence: medium
       "assert pathlib.Path(codex_new_cmd[0]).name.startswith('codex'), codex_new_cmd",
       "assert codex_new_cmd[1] == 'exec' and '--json' in codex_new_cmd and codex_new_cmd[-1] == '-', codex_new_cmd",
       "assert codex_resume_cmd[1:3] == ['exec', 'resume'] and '00000000-0000-0000-0000-000000000111' in codex_resume_cmd and codex_resume_cmd[-1] == '-', codex_resume_cmd",
+      "stale_claude_codex_settings = module.normalize_research_settings({'backend': 'codex', 'model': 'sonnet', 'reasoningEffort': 'medium'})",
+      "assert stale_claude_codex_settings['model'] == 'gpt-5.5', stale_claude_codex_settings",
+      "direct_codex_args = module.settings_to_codex_args({'model': 'sonnet'}, False)",
+      "assert 'sonnet' not in direct_codex_args and 'gpt-5.5' in direct_codex_args, direct_codex_args",
       "settings = module.normalize_research_settings({'backend': 'claude', 'model': 'sonnet', 'reasoningEffort': 'high', 'permissionPreset': 'bypassPermissions', 'webSearch': False, 'reviewCheckpointInterval': '25'})",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000123', 'backend': 'claude', 'settings': settings, 'logs': [], 'raw_logs': [], 'transcript': []})",
       "new_cmd = module.agent_command_for_prompt(False, settings)",
@@ -2447,6 +2454,8 @@ Confidence: medium
       "assert default_effort['reasoningEffort'] == '', default_effort",
       "default_cmd = module.settings_to_claude_args(default_effort, False)",
       "assert not ('--model' in default_cmd and default_cmd[default_cmd.index('--model') + 1] == 'default'), default_cmd",
+      "stale_codex_model = module.normalize_research_settings({'backend': 'claude', 'model': 'gpt-5.5', 'reasoningEffort': 'medium'})",
+      "assert stale_codex_model['model'] == 'sonnet' and 'gpt-5.5' not in module.settings_to_claude_args(stale_codex_model, False), stale_codex_model",
       "glm_settings = module.normalize_research_settings({'backend': 'claude', 'model': 'glm-5.2[1m]', 'reasoningEffort': 'high'})",
       "glm_cmd = module.settings_to_claude_args(glm_settings, False)",
       "assert glm_settings['model'] == 'glm-5.2[1m]' and glm_settings['reasoningEffort'] == '', glm_settings",

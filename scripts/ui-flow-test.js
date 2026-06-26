@@ -1247,6 +1247,14 @@ function testButtonInventoryHasHandlers() {
 
 async function testImmediateUserMessage() {
   const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+  `);
   app.coldEditor.value = "Can you explain the project?";
   app.run("__installBlockingCollect()");
   const pending = app.run('sendSessionComposerMessage("Can you explain the project?")');
@@ -1266,6 +1274,8 @@ async function testImmediateUserMessage() {
   await pending;
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat");
   assert.equal(app.context.__apiCalls[0].body.message, "Can you explain the project?");
+  assert.equal(app.context.__startedFramingBrief, undefined, "pre-project chat must not start a PROJECT.md framing run");
+  assert.equal(app.context.__messages().some((message) => message.kind === "project"), false, "ordinary pre-project chat should not create a draft card by itself");
 }
 
 async function testExistingProjectComposerUsesChatEndpoint() {
@@ -1275,6 +1285,24 @@ async function testExistingProjectComposerUsesChatEndpoint() {
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "existing PROJECT.md composer messages should use chat, not framing");
   assert.equal(app.context.__apiCalls[0].body.message, "Let's discuss the analysis method.");
   assert.equal(app.context.__startedFramingBrief, undefined, "existing project chat must not start a framing run");
+}
+
+async function testEmptyProjectPrepareUsesChatEndpoint() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+  `);
+  app.coldEditor.value = "How should I use this tool?";
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "empty project first message should use chat, not framing");
+  assert.equal(app.context.__apiCalls[0].body.message, "How should I use this tool?");
+  assert.equal(app.context.__startedFramingBrief, undefined, "empty project first message must not start the framing helper");
+  assert.equal(app.context.__confirmMessageLog().length, 0, "ordinary empty-project chat should not ask for a regenerate confirmation");
 }
 
 async function testRunningChatMessageIsQueued() {
@@ -1737,7 +1765,7 @@ async function testLegacyRecordedInterventionMessageStillRenders() {
   assert.equal(app.context.__messages()[1].text.includes("I0011_ui_intervention.md"), true, "legacy acknowledgement should retain the recorded path");
 }
 
-async function testEditInitialBriefConfirmsThenUsesFraming() {
+async function testEditPreProjectMessageUsesChat() {
   const app = loadAppContext();
   app.run(`
     document.querySelector("#project-draft-editor").value = "";
@@ -1751,12 +1779,14 @@ async function testEditInitialBriefConfirmsThenUsesFraming() {
     ]);
   `);
   await app.run('resendConversationMessage("u-initial", "edited initial brief")');
-  assert.equal(app.context.__startedFramingBrief, "edited initial brief", "editing a true pre-project brief should still re-run framing");
-  assert.equal(app.context.__confirmMessageLog().length, 1, "pre-project framing resend should require confirmation");
-  assert.equal(app.context.__apiCalls.length, 0, "initial brief resend should use the framing helper, not chat API directly");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "editing a pre-project message should regenerate a chat reply");
+  assert.equal(app.context.__apiCalls[0].body.message, "edited initial brief");
+  assert.equal(app.context.__apiCalls[0].body.clientMessageId, "u-initial");
+  assert.equal(app.context.__startedFramingBrief, undefined, "editing a pre-project message must not start the framing helper");
+  assert.equal(app.context.__confirmMessageLog().length, 0, "pre-project chat resend should not require regenerate confirmation");
 }
 
-async function testEditInitialBriefCancelDoesNotTruncate() {
+async function testEditPreProjectMessageDoesNotUseRegenerateConfirmation() {
   const app = loadAppContext();
   app.run(`
     document.querySelector("#project-draft-editor").value = "";
@@ -1773,10 +1803,12 @@ async function testEditInitialBriefCancelDoesNotTruncate() {
   `);
   await app.run('resendConversationMessage("u-initial", "edited initial brief")');
   const messages = app.context.__messages();
-  assert.equal(messages.length, 2, "cancelled pre-project framing edit must not truncate history");
-  assert.equal(messages[0].text, "old initial brief", "cancelled pre-project framing edit must not mutate message text");
-  assert.equal(Boolean(messages[0].edited_at), false, "cancelled pre-project framing edit must not mark the message edited");
-  assert.equal(app.context.__apiCalls.length, 0, "cancelled pre-project framing edit must not call backend");
+  assert.equal(messages.length, 1, "pre-project chat resend should truncate stale later messages and wait for a fresh answer");
+  assert.equal(messages[0].text, "edited initial brief");
+  assert.ok(messages[0].edited_at, "pre-project chat resend should mark the edited message");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat");
+  assert.equal(app.context.__confirmMessageLog().length, 0, "pre-project chat resend should not show the framing confirmation");
+  assert.equal(app.context.__startedFramingBrief, undefined);
 }
 
 async function testEditAttachmentsCanRemoveRetainAndAdd() {
@@ -1869,6 +1901,30 @@ function testStartAutoresearchOnlyAppearsOnProjectDraftCard() {
   assert.equal(projectHtml.includes('data-inline-fullscreen="PROJECT.md"'), true, "project draft card should expose the canonical fullscreen preview");
   assert.equal(projectHtml.includes("inline-fullscreen-button"), true);
   assert.equal(projectHtml.includes("Open full view"), false);
+}
+
+function testChatGeneratedProjectDraftIsSurfaced() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "# Project\\n\\nReady from chat.";
+    appState.framing.project_ready = true;
+    __setSession({ id: "s-chat", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "Please draft PROJECT.md for this study.", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "I drafted a project frame after answering the request.", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    __restore();
+  `);
+  const messages = app.context.__messages();
+  const project = messages.find((message) => message.kind === "project");
+  assert.ok(project, "ready PROJECT.md from chat should be surfaced as a draft card");
+  assert.equal(project.artifact.path, "PROJECT.md");
+  assert.equal(project.artifact.text, "# Project\n\nReady from chat.");
+  const html = app.run(`__messageHtml(${messages.findIndex((message) => message.kind === "project")})`);
+  assert.equal(html.includes("data-project-launch"), true, "chat-generated PROJECT.md card should keep the canonical launch button");
+  assert.equal(html.includes('data-inline-fullscreen="PROJECT.md"'), true, "chat-generated PROJECT.md card should expose fullscreen preview");
 }
 
 function testMessagesExposeCopyButtons() {
@@ -3087,6 +3143,45 @@ function testAgentBackendSelectorPersistsProviderSettings() {
   assert.equal(state.formBackend, "codex");
   assert.equal(state.composerModel, "gpt-5.5");
   assert.equal(stored.agent.backend, "codex");
+
+  state = app.run(`
+    localStorage.setItem(scopedStorageKey("autoResearchSessionSettings"), JSON.stringify({
+      agent: { backend: "codex" },
+      codex: { model: "gpt-5.2", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "auto", webSearch: true, reviewCheckpointInterval: 100 }
+    }));
+    switchSessionBackend("claude");
+    __sessionSettingsState();
+  `);
+  stored = JSON.parse(state.stored);
+  assert.equal(state.formBackend, "claude", "switching to Claude should update the session backend");
+  assert.equal(state.composerModel, "sonnet", "switching to Claude must not keep a stale GPT model");
+  assert.equal(state.formModel, "sonnet");
+  assert.equal(stored.agent.backend, "claude");
+  assert.equal(stored.claude.model, "sonnet", "persisted Claude session settings must not keep a stale GPT model");
+}
+
+function testSettingsBackendSwitchNormalizesModelFamily() {
+  const app = loadAppContext();
+  const state = app.run(`
+    uiSettings = {
+      agent: { backend: "codex" },
+      codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "auto", provider: "external", webSearch: true, reviewCheckpointInterval: 100 }
+    };
+    switchSettingsBackend("claude");
+    const payload = settingsPayloadFromModal();
+    ({
+      settingsBackend: document.querySelector("#settings-form").elements.settingsBackend.value,
+      settingsModel: document.querySelector("#settings-form").elements.settingsModel.value,
+      payloadClaudeModel: payload.claude.model,
+      payloadCodexModel: payload.codex.model
+    });
+  `);
+  assert.equal(state.settingsBackend, "claude");
+  assert.equal(state.settingsModel, "sonnet", "Settings backend switch to Claude must normalize stale GPT defaults");
+  assert.equal(state.payloadClaudeModel, "sonnet");
+  assert.equal(state.payloadCodexModel, "gpt-5.5", "Codex defaults should remain provider-specific");
 }
 
 function testReasoningOptionsFollowBackendModel() {
@@ -3110,6 +3205,15 @@ function testReasoningOptionsFollowBackendModel() {
     syncModelSelectOptions(modelSelect, "claude", "z-ai/glm-4.7");
     const customModelValue = modelSelect.value;
     const customModelHtml = modelSelect.innerHTML;
+    syncModelSelectOptions(modelSelect, "claude", "gpt-5.5");
+    const leftoverCodexModelValue = modelSelect.value;
+    const leftoverCodexModelHtml = modelSelect.innerHTML;
+    const leftoverCodexSettings = normalizeSessionSettings({ backend: "claude", model: "gpt-5.5", reasoningEffort: "medium" });
+    discoveredModelsByBackend.codex = [["gpt-6-codex", "GPT-6 Codex"]];
+    syncModelSelectOptions(modelSelect, "claude", "gpt-6-codex");
+    const discoveredCodexModelValue = modelSelect.value;
+    const discoveredCodexModelHtml = modelSelect.innerHTML;
+    const discoveredCodexSettings = normalizeSessionSettings({ backend: "claude", model: "gpt-6-codex", reasoningEffort: "medium" });
     const permissionSelect = document.querySelector("#session-settings-form").elements.permissionPreset;
     const optionValuesFromHtml = (html) => Array.from(String(html || "").matchAll(/<option value="([^"]*)"/g)).map((match) => match[1]);
     const optionLabelsFromHtml = (html) => Array.from(String(html || "").matchAll(/<option value="[^"]*">([^<]*)<\\/option>/g)).map((match) => match[1]);
@@ -3135,6 +3239,12 @@ function testReasoningOptionsFollowBackendModel() {
       glmOption: modelOptionsForBackend("claude").some(([value]) => value === "glm-5.2[1m]"),
       customModelValue,
       customModelHtml,
+      leftoverCodexModelValue,
+      leftoverCodexModelHtml,
+      leftoverCodexSettings,
+      discoveredCodexModelValue,
+      discoveredCodexModelHtml,
+      discoveredCodexSettings,
       normalizedSonnetXhigh: normalizeReasoningEffort("xhigh", "claude", "sonnet"),
       normalizedSonnetMax: normalizeReasoningEffort("max", "claude", "sonnet"),
       normalizedOpusXhigh: normalizeReasoningEffort("xhigh", "claude", "opus"),
@@ -3168,6 +3278,12 @@ function testReasoningOptionsFollowBackendModel() {
   assert.equal(state.glmOption, true, "Common GLM model should be present in Claude options");
   assert.equal(state.customModelValue, "z-ai/glm-4.7", "custom Claude gateway model IDs should be preserved");
   assert.equal(state.customModelHtml.includes("Custom: z-ai/glm-4.7"), true, "custom model option should be inserted dynamically");
+  assert.equal(state.leftoverCodexModelValue, "sonnet", "Claude model select must not preserve a stale Codex/GPT model");
+  assert.equal(state.leftoverCodexModelHtml.includes("gpt-5.5"), false, "Claude model select must not render Codex/GPT options");
+  assert.equal(state.leftoverCodexSettings.model, "sonnet", "Claude settings must normalize stale Codex/GPT models back to Claude defaults");
+  assert.equal(state.discoveredCodexModelValue, "sonnet", "Claude model select must reject dynamically discovered Codex models");
+  assert.equal(state.discoveredCodexModelHtml.includes("gpt-6-codex"), false, "Claude model select must not render dynamically discovered Codex options");
+  assert.equal(state.discoveredCodexSettings.model, "sonnet", "Claude settings must normalize dynamically discovered Codex models back to Claude defaults");
   assert.equal(state.normalizedSonnetXhigh, "high", "Sonnet xhigh should normalize down to high");
   assert.equal(state.normalizedSonnetMax, "max", "Sonnet max should be accepted");
   assert.equal(state.normalizedOpusXhigh, "xhigh", "Opus xhigh should be accepted");
@@ -3217,6 +3333,10 @@ async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
       const form = document.querySelector("#project-create-form");
       form.elements.projectName.value = "Claude Project";
       form.elements.agentBackend.value = "claude";
+      localStorage.setItem(projectScopedStorageKey("p2", "autoResearchSessionSettings"), JSON.stringify({
+        agent: { backend: "claude" },
+        claude: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "auto", webSearch: true, reviewCheckpointInterval: 100 }
+      }));
       await createProjectFromDialog({ preventDefault() {}, currentTarget: form });
       return {
         calls: globalThis.__apiCalls,
@@ -3234,6 +3354,7 @@ async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
   assert.equal(result.activeProjectId, "p2");
   assert.equal(result.state.formBackend, "claude", "new project should load with its seeded backend default");
   assert.equal(result.state.composerModel, "sonnet");
+  assert.equal(result.state.formModel, "sonnet");
 }
 
 async function testProjectAliasCanonicalizesBeforeAvailability() {
@@ -4950,6 +5071,7 @@ testButtonInventoryHasHandlers();
 testNavigationStatePersistsPanelAndScroll();
 await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
+await testEmptyProjectPrepareUsesChatEndpoint();
 await testRunningChatMessageIsQueued();
 await testRunningSteeringLookingMessageIsQueuedTheSameWay();
 await testAttachmentOnlyMessage();
@@ -4971,11 +5093,12 @@ await testEditTruncatesLaterConversationBeforeResend();
 await testEditAfterAutoresearchFirstMessageUsesChat();
 await testSteeringResendStartsVisibleNormalChatRun();
 await testLegacyRecordedInterventionMessageStillRenders();
-await testEditInitialBriefConfirmsThenUsesFraming();
-await testEditInitialBriefCancelDoesNotTruncate();
+await testEditPreProjectMessageUsesChat();
+await testEditPreProjectMessageDoesNotUseRegenerateConfirmation();
 await testEditAttachmentsCanRemoveRetainAndAdd();
 await testLaunchGoalMessageBeforeBackendWork();
 testStartAutoresearchOnlyAppearsOnProjectDraftCard();
+testChatGeneratedProjectDraftIsSurfaced();
 testMessagesExposeCopyButtons();
 testFileTreePdfPreviewControls();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
@@ -5008,6 +5131,7 @@ testSettingsRenderPreservesComposerDraft();
 testProjectScopedSessionSettingsOverrideServerDefaults();
 testComposerModelReasoningChangesPersistProjectScoped();
 testAgentBackendSelectorPersistsProviderSettings();
+testSettingsBackendSwitchNormalizesModelFamily();
 testReasoningOptionsFollowBackendModel();
 await testProjectCreateSendsBackendAndLoadsProjectDefault();
 await testProjectAliasCanonicalizesBeforeAvailability();

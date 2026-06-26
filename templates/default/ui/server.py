@@ -1904,12 +1904,22 @@ def apply_claude_permission_preset(settings: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def normalize_codex_model(value: Any, fallback: str | None = None) -> str:
+    model = str(value or "").strip()
+    default = fallback or DEFAULT_CODEX_SETTINGS["model"]
+    if not model:
+        return default
+    return model if model in ALLOWED_CODEX_MODELS else default
+
+
 def normalize_claude_model(value: Any, fallback: str | None = None) -> str:
     model = str(value or "").strip()
     default = fallback or DEFAULT_CLAUDE_SETTINGS["model"]
     if not model:
         return default
     lowered = model.lower()
+    if lowered in ALLOWED_CODEX_MODELS:
+        return default
     if any(marker in lowered for marker in DISABLED_CLAUDE_MODEL_MARKERS):
         return default
     if model in ALLOWED_CLAUDE_MODEL_ALIASES:
@@ -1970,8 +1980,7 @@ def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -
         if key not in values:
             continue
         if key == "model":
-            model = str(values[key]).strip()
-            settings[key] = model if model in ALLOWED_CODEX_MODELS else settings.get("model") or DEFAULT_CODEX_SETTINGS["model"]
+            settings[key] = normalize_codex_model(values[key], settings.get("model"))
         elif key == "provider":
             settings[key] = normalize_codex_provider(values[key])
         elif key == "approvalPolicy":
@@ -8132,7 +8141,8 @@ def extra_config_args(extra_config: str) -> list[str]:
 
 def settings_to_codex_args(settings: dict[str, Any], resume: bool) -> list[str]:
     args: list[str] = []
-    model = str(settings.get("model") or "").strip()
+    raw_model = str(settings.get("model") or "").strip()
+    model = normalize_codex_model(raw_model) if raw_model else ""
     if model:
         args.extend(["--model", model])
 
@@ -9792,6 +9802,9 @@ Hard boundary:
 
 Allowed behavior:
 - Answer questions from current project files and the supplied UI conversation history.
+- Always answer the user's latest message or discussion request first. Treat file updates as optional follow-through, not the answer itself.
+- Update `PROJECT.md` only when the user explicitly asks you to draft or revise the project, or when the message clearly changes the project definition: topic, objective, scope, target venue or audience, required resources, constraints, contribution type, or success criteria.
+- Do not update `PROJECT.md` for greetings, product/how-to questions, status questions, ordinary discussion, unclear early ideas, or resource/file/repo/paper/dataset references that need Resource Intake before they can be treated as project evidence.
 - If the message clearly changes the project framing, you may update framing-level files such as `PROJECT.md` or resource intake notes.
 - Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you.
 - If it is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
