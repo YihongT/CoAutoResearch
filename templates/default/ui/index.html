@@ -810,6 +810,71 @@
                 </select>
                 <small>Aliases and shell functions are not used here; CoAutoResearch starts the real Claude Code executable.</small>
               </label>
+              <section class="provider-secret-card wide" id="codex-api-key-settings" hidden>
+                <div class="provider-secret-head">
+                  <div>
+                    <h4>OpenAI API key</h4>
+                    <p>Injected only into Codex runs from this UI.</p>
+                  </div>
+                  <small class="provider-secret-status" id="settings-codex-api-key-status">Missing key</small>
+                </div>
+                <label class="field provider-secret-input">
+                  <span>Key</span>
+                  <input name="settingsCodexApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                </label>
+                <button class="settings-clear-button" id="settings-codex-api-key-clear" type="button" data-clear-codex-secret hidden>Clear saved key</button>
+              </section>
+              <section class="provider-secret-card wide" id="claude-api-key-settings" hidden>
+                <div class="provider-secret-head">
+                  <div>
+                    <h4>Anthropic API key</h4>
+                    <p>Injected only into Claude Code runs from this UI, without gateway routing variables.</p>
+                  </div>
+                  <small class="provider-secret-status" id="settings-claude-api-key-status">Missing key</small>
+                </div>
+                <label class="field provider-secret-input">
+                  <span>Key</span>
+                  <input name="settingsClaudeApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                </label>
+                <button class="settings-clear-button" id="settings-claude-api-key-clear" type="button" data-clear-claude-secret hidden>Clear saved key</button>
+              </section>
+              <section class="provider-secret-card provider-secret-card-grid wide" id="claude-gateway-settings" hidden>
+                <div class="provider-secret-head">
+                  <div>
+                    <h4>Claude gateway</h4>
+                    <p>Injected only into Claude Code runs from this UI.</p>
+                  </div>
+                  <small class="provider-secret-status" id="settings-claude-credential-status">Missing credential</small>
+                </div>
+                <label class="field">
+                  <span>Gateway base URL</span>
+                  <input name="settingsClaudeBaseUrl" type="url" autocomplete="off" placeholder="https://api.z.ai/api/anthropic" />
+                </label>
+                <label class="field">
+                  <span>Credential type</span>
+                  <select name="settingsClaudeAuthMethod">
+                    <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
+                    <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Credential</span>
+                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                </label>
+                <button class="settings-clear-button" id="settings-claude-credential-clear" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
+                <label class="field">
+                  <span>Sonnet model mapping</span>
+                  <input name="settingsClaudeSonnetModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
+                </label>
+                <label class="field">
+                  <span>Opus model mapping</span>
+                  <input name="settingsClaudeOpusModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
+                </label>
+                <label class="field">
+                  <span>Haiku model mapping</span>
+                  <input name="settingsClaudeHaikuModel" type="text" autocomplete="off" placeholder="glm-4.5-air" />
+                </label>
+              </section>
               <label class="field">
                 <span>Default model</span>
                 <select name="settingsModel">
@@ -866,60 +931,10 @@
                 <input name="settingsWebSearch" type="checkbox" />
                 <span>Live web search</span>
               </label>
-              <label class="field wide">
+              <label class="field wide settings-advanced-config">
                 <span>Advanced config</span>
-                <textarea name="settingsExtraConfig" rows="4" placeholder='model_verbosity="low"'></textarea>
+                <textarea name="settingsExtraConfig" rows="2" placeholder='model_verbosity="low"'></textarea>
               </label>
-              <section class="claude-gateway-settings wide" id="codex-api-key-settings" hidden>
-                <div class="settings-note">OpenAI API key is injected only into Codex runs from this UI.</div>
-                <label class="field">
-                  <span>OpenAI API key</span>
-                  <input name="settingsCodexApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
-                  <small id="settings-codex-api-key-status">Empty</small>
-                  <button class="settings-clear-button" id="settings-codex-api-key-clear" type="button" data-clear-codex-secret hidden>Clear saved key</button>
-                </label>
-              </section>
-              <section class="claude-gateway-settings wide" id="claude-api-key-settings" hidden>
-                <div class="settings-note">Anthropic API key is injected only into Claude Code runs from this UI, without gateway routing variables.</div>
-                <label class="field">
-                  <span>Anthropic API key</span>
-                  <input name="settingsClaudeApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
-                  <small id="settings-claude-api-key-status">Empty</small>
-                  <button class="settings-clear-button" id="settings-claude-api-key-clear" type="button" data-clear-claude-secret hidden>Clear saved key</button>
-                </label>
-              </section>
-              <section class="claude-gateway-settings wide" id="claude-gateway-settings" hidden>
-                <div class="settings-note">Claude Code gateway settings are injected only into Claude Code runs from this UI.</div>
-                <label class="field">
-                  <span>Gateway base URL</span>
-                  <input name="settingsClaudeBaseUrl" type="url" autocomplete="off" placeholder="https://api.z.ai/api/anthropic" />
-                </label>
-                <label class="field">
-                  <span>Credential type</span>
-                  <select name="settingsClaudeAuthMethod">
-                    <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
-                    <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Credential</span>
-                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
-                  <small id="settings-claude-credential-status">Empty</small>
-                  <button class="settings-clear-button" id="settings-claude-credential-clear" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
-                </label>
-                <label class="field">
-                  <span>Sonnet model mapping</span>
-                  <input name="settingsClaudeSonnetModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
-                </label>
-                <label class="field">
-                  <span>Opus model mapping</span>
-                  <input name="settingsClaudeOpusModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
-                </label>
-                <label class="field">
-                  <span>Haiku model mapping</span>
-                  <input name="settingsClaudeHaikuModel" type="text" autocomplete="off" placeholder="glm-4.5-air" />
-                </label>
-              </section>
             </div>
             <div class="agent-status-note" id="settings-agent-status"></div>
           </section>

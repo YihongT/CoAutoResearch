@@ -3655,7 +3655,16 @@ async function testApiKeyProviderSettingsPayloads() {
       form.elements.settingsBackend.value = "codex";
       form.elements.settingsCodexProvider.value = "openai_api_key";
       hydrateCodexProviderSettings(uiSettings, "codex", "openai_api_key");
+      const codexMissingStatus = {
+        text: document.querySelector("#settings-codex-api-key-status").textContent,
+        state: document.querySelector("#settings-codex-api-key-status").dataset.state || ""
+      };
       form.elements.settingsCodexApiKey.value = "sk-openai-test";
+      refreshCodexApiKeyDraftStatus();
+      const codexPendingStatus = {
+        text: document.querySelector("#settings-codex-api-key-status").textContent,
+        state: document.querySelector("#settings-codex-api-key-status").dataset.state || ""
+      };
       globalThis.__apiResponse = {
         settings: {
           ...uiSettings,
@@ -3667,6 +3676,7 @@ async function testApiKeyProviderSettingsPayloads() {
       await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
       const codexCall = globalThis.__apiCalls[0];
       const codexStatus = document.querySelector("#settings-codex-api-key-status").textContent;
+      const codexStatusState = document.querySelector("#settings-codex-api-key-status").dataset.state || "";
       const codexInputAfterSave = form.elements.settingsCodexApiKey.value;
       const codexClearHidden = document.querySelector("#settings-codex-api-key-clear").hidden;
 
@@ -3674,7 +3684,16 @@ async function testApiKeyProviderSettingsPayloads() {
       switchSettingsBackend("claude");
       form.elements.settingsClaudeProvider.value = "anthropic_api_key";
       hydrateClaudeProviderSettings(uiSettings, "claude", "anthropic_api_key");
+      const claudeMissingStatus = {
+        text: document.querySelector("#settings-claude-api-key-status").textContent,
+        state: document.querySelector("#settings-claude-api-key-status").dataset.state || ""
+      };
       form.elements.settingsClaudeApiKey.value = "sk-ant-test";
+      refreshClaudeApiKeyDraftStatus();
+      const claudePendingStatus = {
+        text: document.querySelector("#settings-claude-api-key-status").textContent,
+        state: document.querySelector("#settings-claude-api-key-status").dataset.state || ""
+      };
       globalThis.__apiResponse = {
         settings: {
           ...uiSettings,
@@ -3689,6 +3708,7 @@ async function testApiKeyProviderSettingsPayloads() {
       await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
       const claudeCall = globalThis.__apiCalls[1];
       const claudeStatus = document.querySelector("#settings-claude-api-key-status").textContent;
+      const claudeStatusState = document.querySelector("#settings-claude-api-key-status").dataset.state || "";
       const claudeInputAfterSave = form.elements.settingsClaudeApiKey.value;
       const gatewayHidden = document.querySelector("#claude-gateway-settings").hidden;
       const apiPanelHidden = document.querySelector("#claude-api-key-settings").hidden;
@@ -3705,11 +3725,17 @@ async function testApiKeyProviderSettingsPayloads() {
       const clearCall = globalThis.__apiCalls[2];
       return {
         codexCall,
+        codexMissingStatus,
+        codexPendingStatus,
         codexStatus,
+        codexStatusState,
         codexInputAfterSave,
         codexClearHidden,
         claudeCall,
+        claudeMissingStatus,
+        claudePendingStatus,
         claudeStatus,
+        claudeStatusState,
         claudeInputAfterSave,
         gatewayHidden,
         apiPanelHidden,
@@ -3719,13 +3745,19 @@ async function testApiKeyProviderSettingsPayloads() {
   `);
   assert.equal(state.codexCall.body.codex.provider, "openai_api_key");
   assert.equal(state.codexCall.body.codex_env.OPENAI_API_KEY, "sk-openai-test");
-  assert.equal(state.codexStatus, "OpenAI API key saved");
+  assertJsonEqual(state.codexMissingStatus, { text: "Missing key", state: "missing" });
+  assertJsonEqual(state.codexPendingStatus, { text: "Unsaved key", state: "pending" });
+  assert.equal(state.codexStatus, "Saved");
+  assert.equal(state.codexStatusState, "saved");
   assert.equal(state.codexInputAfterSave, "", "saved Codex API key must not be echoed into the input");
   assert.equal(state.codexClearHidden, false, "saved Codex API key should expose a clear action");
   assert.equal(state.claudeCall.body.claude.provider, "anthropic_api_key");
   assert.equal(state.claudeCall.body.claude_env.ANTHROPIC_API_KEY, "sk-ant-test");
   assert.equal(state.claudeCall.body.claude_env.ANTHROPIC_BASE_URL, undefined);
-  assert.equal(state.claudeStatus, "Anthropic API key saved");
+  assertJsonEqual(state.claudeMissingStatus, { text: "Missing key", state: "missing" });
+  assertJsonEqual(state.claudePendingStatus, { text: "Unsaved key", state: "pending" });
+  assert.equal(state.claudeStatus, "Saved");
+  assert.equal(state.claudeStatusState, "saved");
   assert.equal(state.claudeInputAfterSave, "", "saved Claude API key must not be echoed into the input");
   assert.equal(state.gatewayHidden, true, "official Anthropic API key provider should not show gateway fields");
   assert.equal(state.apiPanelHidden, false, "official Anthropic API key provider should show API key field");
@@ -3973,6 +4005,8 @@ function testSettingsLayoutAndLinkContracts() {
   const settingsSmallRule = styles.match(/\.settings-content \.field small\s*\{[^}]+\}/)?.[0] || "";
   const settingsGridRule = styles.match(/\.modal-settings-grid\s*\{[^}]+\}/)?.[0] || "";
   const mobileSettingsGrid = styles.match(/@media \(max-width: 900px\)[\s\S]+?\.modal-settings-grid\s*\{[^}]+grid-template-columns: 1fr;[\s\S]+?\}/)?.[0] || "";
+  const codexKeyIndex = indexHtml.indexOf('id="codex-api-key-settings"');
+  const advancedConfigIndex = indexHtml.indexOf('name="settingsExtraConfig"');
 
   assert.equal(indexHtml.includes('id="settings-doc-links"'), true, "settings header should expose a docs link region");
   assert.equal(appJs.includes("function syncBackendDocLinks"), true, "settings docs links should be updated from the active backend");
@@ -3989,6 +4023,9 @@ function testSettingsLayoutAndLinkContracts() {
   assert.ok(mobileSettingsGrid, "settings form should collapse to one column on narrow screens");
   assert.equal(styles.includes(".settings-content .modal-settings-grid > .toggle-field"), true, "toggle rows need explicit vertical alignment in the settings grid");
   assert.equal(styles.includes("[data-codex-provider-field][hidden]"), true, "Codex provider field should hide cleanly when Claude settings are active");
+  assert.equal(codexKeyIndex > 0 && advancedConfigIndex > codexKeyIndex, true, "API key settings should appear before advanced config");
+  assert.equal(styles.includes('.provider-secret-status[data-state="missing"]'), true, "missing provider secrets should have a distinct warning style");
+  assert.equal(styles.includes(".settings-advanced-config textarea"), true, "advanced config should have a compact settings-specific textarea height");
   assert.equal(indexHtml.includes('data-settings-resize="corner"'), true, "settings dialog should expose a bottom-right resize handle");
   assert.equal(styles.includes(".settings-resize-handle"), true, "settings resize handle should be styled");
   assert.equal(appJs.includes("function startSettingsDialogResize"), true, "settings dialog resize should be wired in app code");

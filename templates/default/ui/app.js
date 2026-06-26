@@ -4646,7 +4646,7 @@ function hydrateCodexProviderSettings(settings = uiSettings || {}, backend = act
     form.elements.settingsCodexApiKey.placeholder = saved ? "Saved - leave blank to keep" : "Paste OpenAI API key";
   }
   const status = $("#settings-codex-api-key-status");
-  if (status) status.textContent = saved ? "OpenAI API key saved" : "Empty";
+  setProviderSecretStatus(status, saved ? "Saved" : "Missing key", saved ? "saved" : "missing");
   const clearButton = $("#settings-codex-api-key-clear");
   if (clearButton) {
     clearButton.hidden = !saved;
@@ -4687,7 +4687,7 @@ function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = ac
     form.elements.settingsClaudeApiKey.placeholder = apiKeySaved ? "Saved - leave blank to keep" : "Paste Anthropic API key";
   }
   const apiKeyStatus = $("#settings-claude-api-key-status");
-  if (apiKeyStatus) apiKeyStatus.textContent = apiKeySaved ? "Anthropic API key saved" : "Empty";
+  setProviderSecretStatus(apiKeyStatus, apiKeySaved ? "Saved" : "Missing key", apiKeySaved ? "saved" : "missing");
   const apiKeyClearButton = $("#settings-claude-api-key-clear");
   if (apiKeyClearButton) {
     apiKeyClearButton.hidden = !apiKeySaved;
@@ -4696,17 +4696,62 @@ function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = ac
   const status = $("#settings-claude-credential-status");
   const clearButton = $("#settings-claude-credential-clear");
   const savedCredentialKey = authTokenSaved ? "ANTHROPIC_AUTH_TOKEN" : apiKeySaved ? "ANTHROPIC_API_KEY" : "";
-  if (status) {
-    status.textContent = authTokenSaved
-      ? "ANTHROPIC_AUTH_TOKEN saved"
-      : apiKeySaved
-        ? "ANTHROPIC_API_KEY saved"
-        : "Empty";
-  }
+  setProviderSecretStatus(status, savedCredentialKey ? `${savedCredentialKey} saved` : "Missing credential", savedCredentialKey ? "saved" : "missing");
   if (clearButton) {
     clearButton.hidden = !savedCredentialKey;
     clearButton.dataset.clearClaudeSecret = savedCredentialKey;
   }
+}
+
+function setProviderSecretStatus(node, text, state) {
+  if (!node) return;
+  node.textContent = text;
+  node.dataset.state = state || "";
+}
+
+function setProviderSecretDraftStatus(input, status, saved, savedText, missingText, pendingText = "Unsaved key") {
+  const hasDraft = Boolean(String(input?.value || "").trim());
+  if (hasDraft) {
+    setProviderSecretStatus(status, pendingText, "pending");
+    return;
+  }
+  setProviderSecretStatus(status, saved ? savedText : missingText, saved ? "saved" : "missing");
+}
+
+function refreshCodexApiKeyDraftStatus() {
+  const form = $("#settings-form");
+  setProviderSecretDraftStatus(
+    form?.elements?.settingsCodexApiKey,
+    $("#settings-codex-api-key-status"),
+    Boolean(publicCodexEnvPresent(uiSettings || {}).OPENAI_API_KEY),
+    "Saved",
+    "Missing key"
+  );
+}
+
+function refreshClaudeApiKeyDraftStatus() {
+  const form = $("#settings-form");
+  setProviderSecretDraftStatus(
+    form?.elements?.settingsClaudeApiKey,
+    $("#settings-claude-api-key-status"),
+    Boolean(publicClaudeEnvPresent(uiSettings || {}).ANTHROPIC_API_KEY),
+    "Saved",
+    "Missing key"
+  );
+}
+
+function refreshClaudeCredentialDraftStatus() {
+  const form = $("#settings-form");
+  const present = publicClaudeEnvPresent(uiSettings || {});
+  const savedKey = present.ANTHROPIC_AUTH_TOKEN ? "ANTHROPIC_AUTH_TOKEN" : present.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : "";
+  setProviderSecretDraftStatus(
+    form?.elements?.settingsClaudeCredential,
+    $("#settings-claude-credential-status"),
+    Boolean(savedKey),
+    savedKey ? `${savedKey} saved` : "Saved",
+    "Missing credential",
+    "Unsaved credential"
+  );
 }
 
 function switchSettingsBackend(backend) {
@@ -11375,6 +11420,9 @@ function bindEvents() {
     hydrateClaudeProviderSettings(uiSettings || {}, "claude", provider);
     renderAgentStatusNote("#settings-agent-status", "claude", "settings");
   });
+  $("#settings-form")?.elements?.settingsCodexApiKey?.addEventListener("input", refreshCodexApiKeyDraftStatus);
+  $("#settings-form")?.elements?.settingsClaudeApiKey?.addEventListener("input", refreshClaudeApiKeyDraftStatus);
+  $("#settings-form")?.elements?.settingsClaudeCredential?.addEventListener("input", refreshClaudeCredentialDraftStatus);
   $("#settings-form")?.elements?.settingsModel?.addEventListener("change", () => {
     const form = $("#settings-form");
     const backend = normalizeAgentBackend(form?.elements?.settingsBackend?.value || activeSettingsBackend());
