@@ -2493,6 +2493,9 @@ async function loadOverview(silent = false) {
       framingDraftPending = false;
       reconcileFramingPending(localMessages);
     }
+    if (!["running", "stopping"].includes(String(session.status || "").toLowerCase())) {
+      reconcileFramingPending(localMessages);
+    }
     $("#sync-state").textContent = `Synced ${new Date(appState.generated_at).toLocaleTimeString()}`;
     renderProjectList();
     renderRailVisibility();
@@ -3267,6 +3270,13 @@ function latestUnansweredUserMessage(messages = localMessages) {
 }
 
 function reconcileFramingPending(messages = localMessages) {
+  const session = sessionState();
+  const terminalStatus = ["completed", "failed", "interrupted", "idle"].includes(String(session.status || "").toLowerCase());
+  if (!isSessionRunning() && terminalStatus) {
+    framingDraftPending = false;
+    framingReplyPending = false;
+    pendingFramingUserMessageId = "";
+  }
   if (framingReplyPending && pendingFramingUserMessageId && messageHasAssistantAfter(pendingFramingUserMessageId, messages)) {
     framingReplyPending = false;
     pendingFramingUserMessageId = "";
@@ -3924,6 +3934,7 @@ function projectDraftCardHtml(message) {
 function renderFramingConversation() {
   const thread = $("#framing-thread");
   if (!thread) return;
+  reconcileFramingPending(localMessages);
   const wasNearBottom = isPageNearBottom();
   const visibleMessages = collapseProjectDraftMessages(localMessages);
   const transcriptEntries = sessionTranscriptEntries();
