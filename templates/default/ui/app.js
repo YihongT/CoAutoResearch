@@ -2802,7 +2802,7 @@ function hasAutoresearchTrajectory() {
   return hasGoalStarted()
     || visibleTrials().length > 0
     || pendingExpectedTrialIteration() > 0
-    || Boolean(trajectory.base_trial || trajectory.latest_active_trial || trajectory.next_trial_number);
+    || Boolean(trajectory.base_trial || trajectory.latest_active_trial);
 }
 
 function isGoalPassed() {

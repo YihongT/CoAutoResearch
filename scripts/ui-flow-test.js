@@ -1361,8 +1361,9 @@ async function testFreshRemoteProjectFirstMessageSends() {
     appState.files.project.text = "";
     appState.framing.project_ready = false;
     appState.trials = [];
-    __setSession({ id: "", session_id: "", status: "idle", mode: "", active_run: { running: false }, transcript: [] });
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", active_run: { running: false }, trajectory: { next_trial_number: 1 }, transcript: [] });
   `);
+  assert.equal(app.run("hasAutoresearchTrajectory()"), false, "default next trial number alone is not an existing trajectory");
   app.coldEditor.value = "nihao";
   await app.run("coldStartFromPrepare()");
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "fresh remote project first message should reach chat endpoint");
@@ -1389,9 +1390,11 @@ async function testFreshRemoteProjectStaleRunningSnapshotStillSends() {
       status: "running",
       mode: "framing",
       active_run: { running: false },
+      trajectory: { next_trial_number: 1 },
       transcript: []
     });
   `);
+  assert.equal(app.run("hasAutoresearchTrajectory()"), false, "stale default next trial number alone is not an existing trajectory");
   app.coldEditor.value = "nihao";
   await app.run("coldStartFromPrepare()");
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "stale remote running snapshot should not block the first message");

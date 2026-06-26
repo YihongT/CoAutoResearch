@@ -1465,8 +1465,8 @@ Confidence: medium
     !indexHtml.includes('id="composer-attach-button"') ||
     !indexHtml.includes('id="composer-file-input"') ||
     !indexHtml.includes('type="file" multiple hidden') ||
-    !indexHtml.includes('/styles.css?v=20260625-resume-dialog-2') ||
-    !indexHtml.includes('/app.js?v=20260625-resume-dialog-2') ||
+    !indexHtml.includes('/styles.css?v=20260626-remote-first-message') ||
+    !indexHtml.includes('/app.js?v=20260626-remote-first-message') ||
     indexHtml.includes("Claude Fable") ||
     !indexHtml.includes('id="attachment-menu"') ||
     !indexHtml.includes('data-attachment-action="upload-files"') ||
