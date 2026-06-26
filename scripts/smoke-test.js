@@ -1465,8 +1465,8 @@ Confidence: medium
     !indexHtml.includes('id="composer-attach-button"') ||
     !indexHtml.includes('id="composer-file-input"') ||
     !indexHtml.includes('type="file" multiple hidden') ||
-    !indexHtml.includes('/styles.css?v=20260626-remote-first-message') ||
-    !indexHtml.includes('/app.js?v=20260626-remote-first-message') ||
+    !indexHtml.includes('/styles.css?v=20260626-stop-preexec') ||
+    !indexHtml.includes('/app.js?v=20260626-stop-preexec') ||
     indexHtml.includes("Claude Fable") ||
     !indexHtml.includes('id="attachment-menu"') ||
     !indexHtml.includes('data-attachment-action="upload-files"') ||
@@ -1519,6 +1519,24 @@ Confidence: medium
     !gettingStartedDocs.includes("resources/user_input/RESOURCE_MANIFEST.md")
   ) {
     throw new Error("composer must expose a local file attach button and document project-local attachment storage");
+  }
+  if (
+    !indexHtml.includes('name="settingsCodexPreExecScript"') ||
+    !indexHtml.includes('name="settingsClaudePreExecScript"') ||
+    !appJs.includes("function renderComposerActionButtons") ||
+    !appJs.includes("Stop answering") ||
+    !appJs.includes("stopRequestPending") ||
+    !stylesCss.includes(".composer-stop-square") ||
+    !serverPy.includes('"preExecScript": ""') ||
+    !serverPy.includes("def create_agent_pre_exec_wrapper") ||
+    !serverPy.includes("def agent_settings_for_probe") ||
+    !serverPy.includes("run_agent_probe(backend: str") ||
+    !serverPy.includes("popen_command, use_shell, wrapper_path = popen_command_for_agent(command, agent_settings_for_probe(backend, settings), process_env)") ||
+    !serverPy.includes("agent-shell-setup") ||
+    !serverPy.includes("start_new_session=os.name != \"nt\"") ||
+    !serverPy.includes("def signal_research_process")
+  ) {
+    throw new Error("composer stop mode and per-agent shell setup must stay wired through UI and server launch");
   }
   if (
     !appJs.includes("function uploadTooLargeMessage") ||
@@ -2324,7 +2342,7 @@ Confidence: medium
       "old_probe = module.run_agent_probe",
       "try:",
       "    module.resolve_agent_executable = lambda backend, process_env=None: 'codex'",
-      "    def unknown_probe(executable, args, env=None, timeout=6.0):",
+      "    def unknown_probe(backend, executable, args, env=None, timeout=6.0, settings=None):",
       "        if args == ['--version']:",
       "            return {'ok': True, 'returncode': 0, 'output': 'codex fake 0.0.0', 'error': '', 'timeout': False}",
       "        return {'ok': False, 'returncode': 2, 'output': 'unknown subcommand login status', 'error': '', 'timeout': False}",
@@ -2339,7 +2357,7 @@ Confidence: medium
       "try:",
       "    module.resolve_agent_executable = lambda backend, *args, **kwargs: backend",
       "    api_probe_calls = []",
-      "    def api_provider_probe(executable, args, env=None, timeout=6.0):",
+      "    def api_provider_probe(backend, executable, args, env=None, timeout=6.0, settings=None):",
       "        api_probe_calls.append(tuple(args))",
       "        if args == ['--version']:",
       "            return {'ok': True, 'returncode': 0, 'output': f'{executable} 1.0.0', 'error': '', 'timeout': False}",

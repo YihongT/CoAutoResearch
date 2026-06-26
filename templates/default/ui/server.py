@@ -14,6 +14,7 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -34,6 +35,7 @@ DEFAULT_PROJECT_ROOT = UI_DIR.parent
 PACKAGE_TEMPLATE_ROOT = Path(os.path.expanduser(os.environ.get("COAUTO_TEMPLATE_ROOT", ""))).resolve() if os.environ.get("COAUTO_TEMPLATE_ROOT") else None
 DEFAULT_REVIEW_CHECKPOINT_INTERVAL = 100
 AUTORESEARCH_MAX_ITERATIONS = DEFAULT_REVIEW_CHECKPOINT_INTERVAL
+PRE_EXEC_SCRIPT_MAX_CHARS = 4000
 PORT_FALLBACK_ATTEMPTS = 50
 FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection"
 MAX_TEXT_BYTES = 500_000
@@ -1682,6 +1684,7 @@ DEFAULT_CODEX_SETTINGS = {
     "webSearch": True,
     "fastMode": False,
     "extraConfig": "",
+    "preExecScript": "",
     "reviewCheckpointInterval": DEFAULT_REVIEW_CHECKPOINT_INTERVAL,
 }
 DEFAULT_CLAUDE_SETTINGS = {
@@ -1693,6 +1696,7 @@ DEFAULT_CLAUDE_SETTINGS = {
     "webSearch": True,
     "fastMode": False,
     "extraConfig": "",
+    "preExecScript": "",
     "reviewCheckpointInterval": DEFAULT_REVIEW_CHECKPOINT_INTERVAL,
 }
 DEFAULT_AGENT_SETTINGS = {"backend": "codex"}
@@ -1841,6 +1845,11 @@ def claude_env_for_provider(provider: Any, values: Any = None) -> dict[str, str]
     if normalized_provider == "custom_anthropic":
         return env
     return {}
+
+
+def normalize_pre_exec_script(value: Any) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
+    return text.strip()[:PRE_EXEC_SCRIPT_MAX_CHARS]
 
 
 def raw_agent_backend_from_env(env: dict[str, str] | None = None) -> str:
@@ -2001,6 +2010,8 @@ def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -
             settings[key] = bool(values[key])
         elif key == "extraConfig":
             settings[key] = str(values[key] or "").strip()[:4000]
+        elif key == "preExecScript":
+            settings[key] = normalize_pre_exec_script(values[key])
         elif key == "sandbox":
             sandbox = str(values[key]).strip()
             if sandbox in ALLOWED_SANDBOXES:
@@ -2041,6 +2052,8 @@ def normalize_claude_settings(payload: Any, base: dict[str, Any] | None = None) 
             settings[key] = bool(values[key])
         elif key == "extraConfig":
             settings[key] = str(values[key] or "").strip()[:4000]
+        elif key == "preExecScript":
+            settings[key] = normalize_pre_exec_script(values[key])
     settings["model"] = normalize_claude_model(settings.get("model"))
     settings["reasoningEffort"] = normalize_reasoning_effort(settings.get("reasoningEffort"), "claude", settings.get("model"))
     settings["reviewCheckpointInterval"] = normalize_review_checkpoint_interval(settings.get("reviewCheckpointInterval"))
@@ -2784,36 +2797,66 @@ def agent_env_hint(backend: str) -> str:
     return f"{primary}/{fallback}"
 
 
-def run_agent_probe(executable: str, args: list[str], env: dict[str, str] | None = None, timeout: float = 6.0) -> dict[str, Any]:
+def agent_settings_for_probe(backend: str, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    backend = normalize_agent_backend(backend)
+    saved = load_ui_settings()
+    values = settings if isinstance(settings, dict) and normalize_agent_backend(settings.get("backend") or backend) == backend else {}
+    if backend == "claude":
+        normalized = normalize_claude_settings(values, saved.get("claude", {}))
+    else:
+        normalized = normalize_codex_settings(values, saved.get("codex", {}))
+    normalized["backend"] = backend
+    return normalized
+
+
+def run_agent_probe(backend: str, executable: str, args: list[str], env: dict[str, str] | None = None, timeout: float = 6.0, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    backend = normalize_agent_backend(backend)
     command = [executable, *args]
+    process_env = env if env is not None else os.environ
+    wrapper_path: Path | None = None
+    proc: subprocess.Popen[str] | None = None
     try:
-        use_shell = executable_requires_windows_shell(executable)
-        popen_command: str | list[str] = subprocess.list2cmdline(command) if use_shell else command
-        completed = subprocess.run(
+        popen_command, use_shell, wrapper_path = popen_command_for_agent(command, agent_settings_for_probe(backend, settings), process_env)
+        proc = subprocess.Popen(
             popen_command,
-            env=env if env is not None else os.environ,
+            env=process_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             shell=use_shell,
-            check=False,
+            start_new_session=os.name != "nt",
         )
+        stdout, stderr = proc.communicate(timeout=timeout)
     except FileNotFoundError as exc:
         return {"ok": False, "returncode": 127, "output": str(exc), "error": str(exc), "timeout": False}
     except subprocess.TimeoutExpired as exc:
+        if proc is not None:
+            try:
+                signal_research_process(proc, force=True)
+            except OSError:
+                pass
+            try:
+                stdout, stderr = proc.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = exc.stdout or "", exc.stderr or ""
+        else:
+            stdout, stderr = exc.stdout or "", exc.stderr or ""
         output = "\n".join(filter(None, [str(exc.stdout or ""), str(exc.stderr or "")])).strip()
+        if not output:
+            output = "\n".join(filter(None, [str(stdout or ""), str(stderr or "")])).strip()
         return {"ok": False, "returncode": None, "output": output or "Command timed out.", "error": "timeout", "timeout": True}
     except OSError as exc:
         return {"ok": False, "returncode": 126, "output": str(exc), "error": str(exc), "timeout": False}
-    output = "\n".join(filter(None, [completed.stdout, completed.stderr])).strip()
-    return {
-        "ok": completed.returncode == 0,
-        "returncode": completed.returncode,
-        "output": output,
-        "error": "",
-        "timeout": False,
-    }
+    except ValueError as exc:
+        return {"ok": False, "returncode": 126, "output": str(exc), "error": str(exc), "timeout": False}
+    finally:
+        if wrapper_path:
+            try:
+                wrapper_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    output = "\n".join(filter(None, [stdout, stderr])).strip()
+    return {"ok": proc.returncode == 0 if proc is not None else False, "returncode": proc.returncode if proc is not None else None, "output": output, "error": "", "timeout": False}
 
 
 def claude_gateway_status_from_env(env: dict[str, str] | None = None) -> dict[str, Any]:
@@ -2949,15 +2992,15 @@ def agent_setup_instruction(backend: str, reason: str) -> str:
     return f"{label} readiness could not be determined."
 
 
-def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+def agent_setup_status(backend: str, env: dict[str, str] | None = None, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     backend = normalize_agent_backend(backend)
     label = agent_display_name(backend)
     process_env = env if env is not None else agent_process_env(backend)
-    settings = load_ui_settings()
+    probe_settings = agent_settings_for_probe(backend, settings)
     provider = (
-        normalize_claude_provider(settings.get("claude", {}).get("provider"))
+        normalize_claude_provider(probe_settings.get("provider"))
         if backend == "claude"
-        else normalize_codex_provider(settings.get("codex", {}).get("provider"))
+        else normalize_codex_provider(probe_settings.get("provider"))
     )
     gateway_status = claude_gateway_status_from_env(process_env) if backend == "claude" else {}
     base: dict[str, Any] = {
@@ -2989,7 +3032,7 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
         return base
 
     base["executable"] = executable
-    version_probe = run_agent_probe(executable, agent_version_command(backend), process_env)
+    version_probe = run_agent_probe(backend, executable, agent_version_command(backend), process_env, settings=probe_settings)
     if not version_probe.get("ok"):
         base.update({
             "blocking": True,
@@ -3061,7 +3104,7 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
         })
         return base
 
-    auth_probe = run_agent_probe(executable, agent_auth_command(backend), process_env)
+    auth_probe = run_agent_probe(backend, executable, agent_auth_command(backend), process_env, settings=probe_settings)
     auth = auth_probe_status(backend, auth_probe)
     base["auth"] = auth
     if backend == "claude" and gateway_status.get("base_url") and not gateway_status.get("has_credential"):
@@ -3190,9 +3233,10 @@ def _codex_model_sort_key(item: tuple[str, str]) -> tuple[int, int, str]:
     return (99, 0, value)
 
 
-def agent_available_models(backend: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+def agent_available_models(backend: str, env: dict[str, str] | None = None, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     backend = normalize_agent_backend(backend)
     process_env = env if env is not None else agent_process_env(backend)
+    probe_settings = agent_settings_for_probe(backend, settings)
     try:
         executable = resolve_agent_executable(backend, process_env)
     except FileNotFoundError as exc:
@@ -3203,11 +3247,12 @@ def agent_available_models(backend: str, env: dict[str, str] | None = None) -> d
             "probe_error": str(exc),
             "executable": "",
         }
-    cache_key = f"{backend}::{executable}"
+    pre_exec_hash = hashlib.sha1(pre_exec_script_for_settings(probe_settings).encode("utf-8")).hexdigest()[:12]
+    cache_key = f"{backend}::{executable}::{pre_exec_hash}"
     cached = _AGENT_MODELS_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    help_probe = run_agent_probe(executable, ["--help"], process_env, timeout=6.0)
+    help_probe = run_agent_probe(backend, executable, ["--help"], process_env, timeout=6.0, settings=probe_settings)
     if not help_probe.get("ok"):
         result = {
             "backend": backend,
@@ -3294,11 +3339,12 @@ def claude_permission_modes_from_help(help_text: str) -> set[str]:
 def claude_permission_mode_status(settings: dict[str, Any] | None = None, env: dict[str, str] | None = None) -> dict[str, Any]:
     mode = claude_permission_mode_from_settings(settings)
     process_env = env if env is not None else agent_process_env("claude")
+    probe_settings = agent_settings_for_probe("claude", settings)
     try:
         executable = resolve_agent_executable("claude", process_env)
     except FileNotFoundError as exc:
         return {"ok": False, "blocking": True, "mode": mode, "message": str(exc)}
-    help_probe = run_agent_probe(executable, ["--help"], process_env)
+    help_probe = run_agent_probe("claude", executable, ["--help"], process_env, settings=probe_settings)
     if not help_probe.get("ok"):
         return {
             "ok": True,
@@ -3324,7 +3370,10 @@ def claude_permission_mode_status(settings: dict[str, Any] | None = None, env: d
 
 def ensure_agent_ready(backend: str, env: dict[str, str] | None = None, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     backend = normalize_agent_backend(backend)
-    statuses = {name: agent_setup_status(name, env) for name in sorted(ALLOWED_AGENT_BACKENDS)}
+    statuses = {
+        name: agent_setup_status(name, env, settings if normalize_agent_backend(name) == backend else None)
+        for name in sorted(ALLOWED_AGENT_BACKENDS)
+    }
     selected = statuses[backend]
     if selected.get("blocking"):
         raise ValueError(agent_unavailable_message(selected, statuses))
@@ -9094,7 +9143,8 @@ def append_research_log(line: str) -> None:
 
 def finish_research_run(returncode: int | None) -> None:
     with RESEARCH_LOCK:
-        RESEARCH_SESSION["status"] = "completed" if returncode == 0 else "failed"
+        stopped_by_user = str(RESEARCH_SESSION.get("loop_stop_reason") or "") == "stopped_by_user"
+        RESEARCH_SESSION["status"] = "completed" if returncode == 0 else "interrupted" if stopped_by_user else "failed"
         RESEARCH_SESSION["returncode"] = returncode
         RESEARCH_SESSION["ended_at"] = now_iso()
         RESEARCH_SESSION["process"] = None
@@ -9382,7 +9432,16 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
     except Exception as exc:  # pragma: no cover - defensive process handling
         append_research_log(f"UI session error: {exc}")
         returncode = proc.poll()
+    finally:
+        wrapper_path = getattr(proc, "_coauto_pre_exec_wrapper", None)
+        if wrapper_path:
+            try:
+                Path(wrapper_path).unlink(missing_ok=True)
+            except OSError:
+                pass
     with RESEARCH_LOCK:
+        if RESEARCH_SESSION.get("process") is not proc:
+            return
         mode = str(RESEARCH_SESSION.get("mode") or "")
         protected_snapshot = RESEARCH_SESSION.get("protected_snapshot")
     finish_research_run(returncode)
@@ -9429,6 +9488,60 @@ def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str
     codex_settings = dict(settings)
     codex_settings["backend"] = "codex"
     return agent_command_for_prompt(resume, codex_settings)
+
+
+def pre_exec_script_for_settings(settings: dict[str, Any]) -> str:
+    return normalize_pre_exec_script(settings.get("preExecScript"))
+
+
+def create_agent_pre_exec_wrapper(settings: dict[str, Any]) -> Path | None:
+    script = pre_exec_script_for_settings(settings)
+    if not script:
+        return None
+    if os.name == "nt":
+        backend = normalize_agent_backend(settings.get("backend"))
+        raise ValueError(
+            f"Shell setup before {agent_display_name(backend)} is supported on macOS/Linux UI servers. "
+            "On Windows, use Settings environment fields or start CoAutoResearch from a configured shell."
+        )
+    wrapper_dir = Path(os.fspath(RUNTIME_DIR)) / "agent-shell-setup"
+    wrapper_dir.mkdir(parents=True, exist_ok=True)
+    wrapper_path = wrapper_dir / f"agent_setup_{now_id()}_{uuid.uuid4().hex[:8]}.sh"
+    wrapper_path.write_text(f"set -e\n{script}\nexec \"$@\"\n", encoding="utf-8")
+    wrapper_path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    return wrapper_path
+
+
+def shell_for_pre_exec(env: dict[str, str]) -> str:
+    path = env.get("PATH") or os.environ.get("PATH") or None
+    return shutil.which("bash", path=path) or shutil.which("sh", path=path) or "/bin/sh"
+
+
+def popen_command_for_agent(command: list[str], settings: dict[str, Any], env: dict[str, str]) -> tuple[str | list[str], bool, Path | None]:
+    wrapper_path = create_agent_pre_exec_wrapper(settings)
+    if wrapper_path:
+        return [shell_for_pre_exec(env), str(wrapper_path), *command], False, wrapper_path
+    use_shell = executable_requires_windows_shell(command[0])
+    return subprocess.list2cmdline(command) if use_shell else command, use_shell, None
+
+
+def signal_research_process(proc: subprocess.Popen[str], force: bool = False) -> None:
+    if os.name == "nt":
+        if force:
+            proc.kill()
+        else:
+            proc.terminate()
+        return
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    try:
+        os.killpg(proc.pid, sig)
+    except ProcessLookupError:
+        return
+    except OSError:
+        if force:
+            proc.kill()
+        else:
+            proc.terminate()
 
 
 def should_resume_research_session(settings_payload: Any | None = None) -> bool:
@@ -9536,32 +9649,47 @@ def start_research_run(
         RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
     persist_research_session()
 
+    wrapper_path: Path | None = None
     try:
-        use_shell = executable_requires_windows_shell(command[0])
-        popen_command: str | list[str] = subprocess.list2cmdline(command) if use_shell else command
+        process_env = agent_process_env(backend)
+        popen_command, use_shell, wrapper_path = popen_command_for_agent(command, settings, process_env)
         proc = subprocess.Popen(
             popen_command,
             cwd=REPO_ROOT,
-            env=agent_process_env(backend),
+            env=process_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
             shell=use_shell,
+            start_new_session=os.name != "nt",
         )
+        if wrapper_path:
+            setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
         assert proc.stdin is not None
         proc.stdin.write(prompt)
         proc.stdin.write("\n")
         proc.stdin.close()
-    except OSError as exc:
-        append_research_log(agent_start_error_message(exc, command, backend))
+    except (OSError, ValueError) as exc:
+        if wrapper_path:
+            try:
+                wrapper_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if isinstance(exc, OSError):
+            append_research_log(agent_start_error_message(exc, command, backend))
+        else:
+            append_research_log(str(exc))
         finish_research_run(127)
         return research_session_snapshot()
 
     with RESEARCH_LOCK:
         RESEARCH_SESSION["process"] = proc
+        RESEARCH_SESSION["pre_exec_script_applied"] = bool(wrapper_path)
     append_research_log(f"Started: {' '.join(command)}")
+    if wrapper_path:
+        append_research_log(f"Applied shell setup before starting {agent_display_name(backend)}.")
     context = current_project_context()
     thread = threading.Thread(target=run_in_project, args=(context, process_research_run, proc), daemon=True)
     with RESEARCH_LOCK:
@@ -11005,17 +11133,46 @@ def start_research_command(payload: dict[str, Any]) -> dict[str, Any]:
     return {"session": start_research_run(command, "command", resume=should_resume_research_session(settings_payload), settings_payload=settings_payload)}
 
 
+def force_kill_research_process_after_delay(proc: subprocess.Popen[str], delay_seconds: float = 3.0) -> None:
+    time.sleep(delay_seconds)
+    with RESEARCH_LOCK:
+        if RESEARCH_SESSION.get("process") is not proc:
+            return
+    returncode = proc.poll()
+    try:
+        if returncode is None:
+            signal_research_process(proc, force=True)
+            append_research_log("Force-stopped agent process after stop request.")
+            returncode = proc.wait(timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    try:
+        if proc.stdout:
+            proc.stdout.close()
+    except OSError:
+        pass
+    with RESEARCH_LOCK:
+        should_finish = RESEARCH_SESSION.get("process") is proc and str(RESEARCH_SESSION.get("status") or "") == "stopping"
+    if should_finish:
+        finish_research_run(returncode)
+
+
 def stop_research_session() -> dict[str, Any]:
     reconcile_research_process_state()
+    context = current_project_context()
     with RESEARCH_LOCK:
         RESEARCH_SESSION["loop_active"] = False
         RESEARCH_SESSION["loop_stop_reason"] = "stopped_by_user"
         proc = RESEARCH_SESSION.get("process")
-    if proc and proc.poll() is None:
-        proc.terminate()
+        live = bool(proc and proc.poll() is None)
+        if live:
+            RESEARCH_SESSION["status"] = "stopping"
+    if live and proc:
+        signal_research_process(proc)
+        killer = threading.Thread(target=run_in_project, args=(context, force_kill_research_process_after_delay, proc), daemon=True)
+        killer.start()
         append_research_log("Stop requested from UI.")
         with RESEARCH_LOCK:
-            RESEARCH_SESSION["status"] = "stopping"
             RESEARCH_SESSION["loop_active"] = False
             RESEARCH_SESSION["loop_stop_reason"] = "stopped_by_user"
         persist_research_session()

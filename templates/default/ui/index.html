@@ -28,7 +28,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png" />
     <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260626-remote-first-message" />
+    <link rel="stylesheet" href="/styles.css?v=20260626-stop-preexec" />
   </head>
   <body>
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
@@ -935,6 +935,16 @@
                 <span>Advanced config</span>
                 <textarea name="settingsExtraConfig" rows="2" placeholder='model_verbosity="low"'></textarea>
               </label>
+              <label class="field wide settings-preexec-config" data-codex-provider-field>
+                <span>Shell setup before Codex</span>
+                <textarea name="settingsCodexPreExecScript" rows="4" spellcheck="false" placeholder="export HTTPS_PROXY=http://127.0.0.1:7890&#10;export HTTP_PROXY=http://127.0.0.1:7890"></textarea>
+                <small>Runs in the same shell before the Codex command. Stored locally for this project.</small>
+              </label>
+              <label class="field wide settings-preexec-config" data-claude-provider-field>
+                <span>Shell setup before Claude Code</span>
+                <textarea name="settingsClaudePreExecScript" rows="4" spellcheck="false" placeholder="export HTTPS_PROXY=http://127.0.0.1:7890&#10;export HTTP_PROXY=http://127.0.0.1:7890"></textarea>
+                <small>Runs in the same shell before the Claude Code command. Stored locally for this project.</small>
+              </label>
             </div>
             <div class="agent-status-note" id="settings-agent-status"></div>
           </section>
@@ -989,6 +999,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260626-remote-first-message"></script>
+    <script src="/app.js?v=20260626-stop-preexec"></script>
   </body>
 </html>

@@ -5963,6 +5963,13 @@ body.is-resizing-settings-dialog .settings-content {
   min-height: 82px;
 }
 
+.settings-preexec-config textarea {
+  min-height: 112px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .settings-content .field span,
 .settings-content .toggle-field span {
   line-height: 1.2;
@@ -15163,6 +15170,53 @@ html[data-theme] .launch-dialog-shell {
 html[data-theme] .launch-settings-form {
   min-height: 0;
   max-height: none;
+}
+
+html[data-theme] :is(.send-button, .brief-cold-start).is-stop-mode {
+  display: grid !important;
+  place-items: center !important;
+  flex: 0 0 42px !important;
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  border-color: #050505 !important;
+  background: #050505 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+html[data-theme] .brief-editor-shell.is-framing-dock .brief-cold-start.is-stop-mode {
+  flex-basis: 34px !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+html[data-theme] :is(.send-button, .brief-cold-start).is-stop-mode:hover:not(:disabled) {
+  border-color: #1f1f1f !important;
+  background: #1f1f1f !important;
+}
+
+html[data-theme] :is(.send-button, .brief-cold-start).is-stop-mode:disabled {
+  opacity: 0.72 !important;
+  cursor: wait !important;
+}
+
+.composer-stop-square {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
+  width: 9px;
+  height: 9px;
 }
 
 @media (max-width: 760px) {

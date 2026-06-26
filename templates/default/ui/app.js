@@ -60,6 +60,7 @@ let settingsSecretKeys = [];
 let projectDraftDirty = false;
 let framingDraftPending = false;
 let framingReplyPending = false;
+let stopRequestPending = false;
 let pendingFramingUserMessageId = "";
 let framingPendingSince = 0;
 let projectDraftEditMode = false;
@@ -149,6 +150,7 @@ const defaultCodexSessionSettings = {
   webSearch: true,
   fastMode: false,
   extraConfig: "",
+  preExecScript: "",
   reviewCheckpointInterval: 100,
 };
 const defaultClaudeSessionSettings = {
@@ -160,6 +162,7 @@ const defaultClaudeSessionSettings = {
   webSearch: true,
   fastMode: false,
   extraConfig: "",
+  preExecScript: "",
   reviewCheckpointInterval: 100,
 };
 const defaultSessionSettings = defaultCodexSessionSettings;
@@ -2043,6 +2046,7 @@ function renderProjectAvailability() {
     button.setAttribute("aria-disabled", noProject ? "true" : "false");
   });
   updateResourceImportActionState();
+  renderComposerActionButtons();
   if (!noProject) return;
   const editor = $("#cold-file-editor");
   if (editor) {
@@ -2661,6 +2665,14 @@ function isSessionRunning() {
   return true;
 }
 
+function canStopCurrentRun() {
+  return isSessionRunning();
+}
+
+function isStopCurrentRunPending() {
+  return stopRequestPending || String(sessionState().status || "").toLowerCase() === "stopping";
+}
+
 function isSessionInterrupted() {
   return String(sessionState().status || "").toLowerCase() === "interrupted";
 }
@@ -2960,6 +2972,49 @@ function runControlButtonsHtml() {
     ${canPauseActiveRunAfterCurrentTurn() ? `<button class="secondary-button small-button current-run-control-button" type="button" data-pause-autoresearch>Pause after current turn</button>` : ""}
     <button class="secondary-button small-button current-run-control-button" type="button" data-stop-current-run>Stop current run</button>
   `;
+}
+
+function composerSendIconHtml() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>';
+}
+
+function composerStopIconHtml() {
+  return '<span class="composer-stop-square" aria-hidden="true"></span>';
+}
+
+function syncComposerActionButton(button, { stopMode, disabled, sendHtml, sendLabel = "Send" } = {}) {
+  if (!button) return;
+  const stopping = isStopCurrentRunPending();
+  button.classList.toggle("is-stop-mode", Boolean(stopMode));
+  button.dataset.stopMode = stopMode ? "true" : "false";
+  button.disabled = stopMode ? stopping : Boolean(disabled);
+  button.setAttribute("aria-label", stopMode ? "Stop answering" : sendLabel);
+  button.title = stopMode ? (stopping ? "Stopping..." : "Stop answering") : sendLabel;
+  button.innerHTML = stopMode ? composerStopIconHtml() : sendHtml;
+}
+
+function renderComposerActionButtons() {
+  const stopMode = canStopCurrentRun();
+  const resourceBlocked = hasBlockingResourceImports();
+  const blockedMessage = blockingResourceImportMessage();
+  syncComposerActionButton($("#prepare-cold-start"), {
+    stopMode,
+    disabled: hasNoProject() || resourceBlocked,
+    sendHtml: composerSendIconHtml(),
+  });
+  const coldButton = $("#prepare-cold-start");
+  if (coldButton && !stopMode && resourceBlocked) coldButton.title = blockedMessage;
+
+  const send = $("#chat-form .send-button");
+  syncComposerActionButton(send, {
+    stopMode,
+    disabled: !canMessage() || resourceBlocked || hasNoProject(),
+    sendHtml: "Send",
+  });
+  if (send) {
+    send.type = stopMode ? "button" : "submit";
+    if (!stopMode && resourceBlocked) send.title = blockedMessage;
+  }
 }
 
 function canMessage() {
@@ -4252,6 +4307,7 @@ function settingsFromForm() {
   const backend = normalizeAgentBackend(data.get("backend") || form?.elements?.backend?.value || activeSettingsBackend());
   const permissionPreset = normalizePermissionPreset(data.get("permissionPreset"), { backend });
   const settings = normalizeSessionSettings({
+    ...providerSettingsFromUi(backend),
     backend,
     model: String(data.get("model") || "").trim(),
     reasoningEffort: normalizeReasoningEffort(data.get("reasoningEffort"), backend, String(data.get("model") || "").trim()),
@@ -4352,6 +4408,7 @@ function normalizeSessionSettings(settings = {}) {
   merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend, merged.model);
   merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
   merged.fastMode = Boolean(merged.fastMode);
+  merged.preExecScript = String(merged.preExecScript || "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").replaceAll("\0", "").trim().slice(0, 4000);
   merged.permissionPreset = normalizePermissionPreset(merged.permissionPreset, merged);
   if (backend === "claude") {
     merged.permissionMode = permissionPresetForBackend(backend, merged.permissionPreset).permissionMode || defaultClaudeSessionSettings.permissionMode;
@@ -4556,6 +4613,7 @@ function settingsProviderFromModal(backend) {
     ...permissionPresetForBackend(normalizedBackend, permissionPreset),
     webSearch: Boolean(data.get("settingsWebSearch")),
     extraConfig: String(data.get("settingsExtraConfig") || "").trim(),
+    preExecScript: String(data.get(normalizedBackend === "claude" ? "settingsClaudePreExecScript" : "settingsCodexPreExecScript") || ""),
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("settingsReviewCheckpointInterval")),
     provider: normalizedBackend === "claude"
       ? normalizeClaudeProvider(data.get("settingsClaudeProvider") || claudeProviderFromSettings())
@@ -4593,6 +4651,10 @@ function hydrateSettingsDialog(settings) {
   form.elements.settingsPermissionPreset.value = provider.permissionPreset;
   form.elements.settingsWebSearch.checked = Boolean(provider.webSearch);
   form.elements.settingsExtraConfig.value = provider.extraConfig || "";
+  const codexProvider = normalizeSessionSettings({ ...(settings?.codex || defaultCodexSessionSettings), backend: "codex" });
+  const claudeProvider = normalizeSessionSettings({ ...(settings?.claude || defaultClaudeSessionSettings), backend: "claude" });
+  if (form.elements.settingsCodexPreExecScript) form.elements.settingsCodexPreExecScript.value = codexProvider.preExecScript || "";
+  if (form.elements.settingsClaudePreExecScript) form.elements.settingsClaudePreExecScript.value = claudeProvider.preExecScript || "";
   if (form.elements.settingsReviewCheckpointInterval) form.elements.settingsReviewCheckpointInterval.value = provider.reviewCheckpointInterval;
   hydrateCodexProviderSettings(settings, backend, provider.provider);
   hydrateClaudeProviderSettings(settings, backend, provider.provider);
@@ -5003,6 +5065,7 @@ function renderChatState() {
   send.disabled = !canMessage() || resourceBlocked;
   cont.disabled = !canMessage() || resourceBlocked;
   textarea.placeholder = canMessage() ? "Message the current agent session..." : "Run cold start before messaging...";
+  renderComposerActionButtons();
   renderComposerSuggestions();
   renderChatSummary();
 }
@@ -5050,6 +5113,7 @@ function renderColdStartEditor() {
   setColdSaveStatus(coldDirty ? "Unsaved changes" : "Autosaved", coldDirty ? "pending" : "saved");
   renderColdPreview();
   setColdViewMode("source", { persist: false });
+  renderComposerActionButtons();
   renderFramingConversation();
 }
 
@@ -8477,6 +8541,7 @@ function updateResourceImportActionState() {
     if (send) send.disabled = true;
     if (cont) cont.disabled = true;
   }
+  renderComposerActionButtons();
 }
 
 function resourceImportProgressPercent(item) {
@@ -11264,6 +11329,13 @@ async function sendCommand(command) {
 }
 
 async function handleStopSession() {
+  if (stopRequestPending) return;
+  if (!canStopCurrentRun()) {
+    showToast("No active agent run to stop.", true);
+    return;
+  }
+  stopRequestPending = true;
+  renderComposerActionButtons();
   try {
     const response = await api("/api/research/stop", { method: "POST", body: JSON.stringify({}) });
     mergeSessionFromApiResponse(response);
@@ -11271,6 +11343,9 @@ async function handleStopSession() {
     await loadOverview(true);
   } catch (error) {
     showToast(error.message, true);
+  } finally {
+    stopRequestPending = false;
+    renderComposerActionButtons();
   }
 }
 
@@ -11417,7 +11492,14 @@ function bindEvents() {
   $("#restart-autoresearch-dialog")?.addEventListener("close", () => {
     if (pendingRestartAutoresearchConfirm) closeRestartAutoresearchDialog(false);
   });
-  $("#prepare-cold-start").addEventListener("click", coldStartFromPrepare);
+  $("#prepare-cold-start").addEventListener("click", (event) => {
+    if (event.currentTarget?.dataset?.stopMode === "true") {
+      event.preventDefault();
+      handleStopSession();
+      return;
+    }
+    coldStartFromPrepare();
+  });
   $("#save-project-draft").addEventListener("click", (event) => {
     withButtonFeedback(event.currentTarget, () => saveProjectDraft(), { saved: "Draft saved" })
       .catch((error) => showToast(error.message, true));
@@ -11449,6 +11531,12 @@ function bindEvents() {
   });
   $("#continue-research").addEventListener("click", handleContinue);
   $("#stop-session").addEventListener("click", handleStopSession);
+  $("#chat-form .send-button").addEventListener("click", (event) => {
+    if (event.currentTarget?.dataset?.stopMode !== "true") return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleStopSession();
+  });
   $("#chat-form").addEventListener("submit", handleChat);
   $("#session-settings-form").addEventListener("input", () => settingsFromForm());
   $("#session-settings-form")?.elements?.backend?.addEventListener("change", (event) => switchSessionBackend(event.target.value));
