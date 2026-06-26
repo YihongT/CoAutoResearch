@@ -1877,6 +1877,14 @@ Confidence: medium
     !appJs.includes("Provenance / audit index") ||
     !appJs.includes("Secondary figure specs") ||
     !appJs.includes("data-copy-text") ||
+    !appJs.includes("https://developers.openai.com/codex/cli") ||
+    !appJs.includes("https://developers.openai.com/codex/auth") ||
+    !appJs.includes("curl -fsSL https://chatgpt.com/codex/install.sh | sh") ||
+    !appJs.includes("https://code.claude.com/docs/en/quickstart") ||
+    !appJs.includes("https://code.claude.com/docs/en/iam") ||
+    !appJs.includes("curl -fsSL https://claude.ai/install.sh | bash") ||
+    !appJs.includes("agentSetupCommandRowsHtml") ||
+    !stylesCss.includes(".agent-setup-command-row") ||
     !appJs.includes("Copy description") ||
     !appJs.includes("Copy caption") ||
     !appJs.includes("markdownFileButtonHtml") ||

@@ -611,11 +611,11 @@ function loadAppContext() {
       };
     };
     globalThis.__agentStatusState = () => ({
-      settingsNote: document.querySelector("#settings-agent-status")?.textContent || "",
+      settingsNote: document.querySelector("#settings-agent-status")?.innerHTML || document.querySelector("#settings-agent-status")?.textContent || "",
       settingsTone: document.querySelector("#settings-agent-status")?.dataset?.tone || "",
-      launchNote: document.querySelector("#launch-agent-status")?.textContent || "",
+      launchNote: document.querySelector("#launch-agent-status")?.innerHTML || document.querySelector("#launch-agent-status")?.textContent || "",
       launchTone: document.querySelector("#launch-agent-status")?.dataset?.tone || "",
-      projectNote: document.querySelector("#project-agent-backend-note")?.textContent || "",
+      projectNote: document.querySelector("#project-agent-backend-note")?.innerHTML || document.querySelector("#project-agent-backend-note")?.textContent || "",
       projectTone: document.querySelector("#project-agent-backend-note")?.dataset?.tone || "",
       launchDisabled: Boolean(document.querySelector("#launch-autoresearch")?.disabled),
       launchTitle: document.querySelector("#launch-autoresearch")?.title || "",
@@ -3211,7 +3211,10 @@ function testAgentReadinessStatusBlocksLaunchUi() {
           claude: {
             ok: false,
             blocking: true,
+            installed: true,
             auth: "missing",
+            login_command: "claude auth login",
+            auth_status_command: "claude auth status",
             message: "Claude Code is not authenticated. Run claude auth login and verify claude auth status before starting a run."
           }
         }

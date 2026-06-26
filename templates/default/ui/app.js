@@ -205,10 +205,14 @@ const claudeGatewaySecretKeys = new Set(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_
 
 const backendDocLinks = {
   codex: [
+    { label: "Setup", href: "https://developers.openai.com/codex/cli" },
+    { label: "Login", href: "https://developers.openai.com/codex/auth" },
     { label: "Models", href: "https://developers.openai.com/api/docs/models" },
     { label: "Latest model guide", href: "https://developers.openai.com/api/docs/guides/latest-model" },
   ],
   claude: [
+    { label: "Setup", href: "https://code.claude.com/docs/en/quickstart" },
+    { label: "Login", href: "https://code.claude.com/docs/en/iam" },
     { label: "Models", href: "https://docs.claude.com/en/docs/about-claude/models/overview" },
     { label: "Pick a model", href: "https://docs.claude.com/en/docs/about-claude/models/choosing-a-model" },
   ],
@@ -1164,7 +1168,7 @@ function renderAgentStatusNote(selector, backend, scope = "settings") {
   const effective = effectiveBackend(backend);
   const status = statusForBackend(effective);
   const message = agentStatusText(backend, scope);
-  note.textContent = message;
+  note.innerHTML = agentStatusNoteHtml(effective, status, message, scope);
   const tone = agentStatusEnvelope().env_warning ? "warning" : statusTone(status);
   if (tone) note.dataset.tone = tone;
   else delete note.dataset.tone;
@@ -1180,20 +1184,98 @@ function renderAllAgentStatusNotes() {
 const agentInstallGuides = {
   claude: {
     label: "Claude Code",
-    install: "npm install -g @anthropic-ai/claude-code",
-    docs: "https://docs.claude.com/en/docs/claude-code/quickstart",
+    install: "curl -fsSL https://claude.ai/install.sh | bash",
+    login: "claude auth login",
+    run: "claude",
+    verify: "claude --version",
+    authStatus: "claude auth status",
+    docs: "https://code.claude.com/docs/en/quickstart",
+    authDocs: "https://code.claude.com/docs/en/iam",
     description: "Anthropic's CLI for driving Claude (Opus / Sonnet / Haiku) inside a terminal session.",
   },
   codex: {
-    label: "Codex",
-    install: "npm install -g @openai/codex",
+    label: "Codex CLI",
+    install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+    login: "codex login",
+    run: "codex",
+    verify: "codex --version",
+    authStatus: "codex login status",
     docs: "https://developers.openai.com/codex/cli",
+    authDocs: "https://developers.openai.com/codex/auth",
     description: "OpenAI's CLI for GPT-5 family coding sessions.",
   },
 };
 
 function backendInstallGuide(backend) {
   return agentInstallGuides[normalizeAgentBackend(backend)] || agentInstallGuides.claude;
+}
+
+function agentSetupCommands(backend, status = {}) {
+  const normalized = normalizeAgentBackend(backend);
+  const guide = backendInstallGuide(normalized);
+  const installed = Boolean(status.installed);
+  const auth = String(status.auth || "unknown");
+  const commands = [];
+  if (!installed) {
+    commands.push({ label: "Install", command: guide.install, copy: `${guide.label} install command copied.` });
+    commands.push({ label: "Verify", command: status.version_command || guide.verify, copy: `${guide.label} verify command copied.` });
+    commands.push({ label: "Log in", command: guide.login || guide.run, copy: `${guide.label} login command copied.` });
+    return commands;
+  }
+  if (auth === "missing") {
+    commands.push({ label: "Log in", command: status.login_command || guide.login || guide.run, copy: `${guide.label} login command copied.` });
+    commands.push({ label: "Check", command: status.auth_status_command || guide.authStatus, copy: `${guide.label} auth check copied.` });
+    return commands;
+  }
+  if (auth === "unknown") {
+    commands.push({ label: "Check", command: status.auth_status_command || guide.authStatus, copy: `${guide.label} auth check copied.` });
+  }
+  return commands;
+}
+
+function agentSetupCommandRowsHtml(commands, variant = "") {
+  if (!commands.length) return "";
+  const className = variant ? ` agent-setup-command-list--${escapeHtml(variant)}` : "";
+  return `
+    <div class="agent-setup-command-list${className}">
+      ${commands.map(({ label, command, copy }) => `
+        <div class="agent-setup-command-row">
+          <span>${escapeHtml(label)}</span>
+          <code>${escapeHtml(command)}</code>
+          ${copyButton(command, "Copy", copy)}
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function agentSetupLinksHtml(backend, { compact = false } = {}) {
+  const guide = backendInstallGuide(backend);
+  const links = [
+    { label: compact ? "Setup" : "Setup guide", href: guide.docs },
+    { label: compact ? "Login" : "Login guide", href: guide.authDocs || guide.docs },
+  ];
+  return `
+    <span class="agent-setup-links">
+      ${links.map(({ label, href }) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`).join("")}
+    </span>
+  `;
+}
+
+function agentStatusNoteHtml(backend, status = {}, message = "", scope = "settings") {
+  const safeMessage = escapeHtml(message || "");
+  if (!message && !status?.blocking) return "";
+  if (!status?.blocking) return safeMessage;
+  const commands = agentSetupCommands(backend, status);
+  if (!commands.length) return safeMessage;
+  const label = escapeHtml(agentLabel(backend));
+  const links = agentSetupLinksHtml(backend, { compact: true });
+  const commandRows = agentSetupCommandRowsHtml(commands, scope === "project" ? "compact" : "note");
+  return `
+    <span class="agent-status-note-main">${safeMessage}</span>
+    <span class="agent-status-note-help">${label} setup: ${links}</span>
+    ${commandRows}
+  `;
 }
 
 function renderAgentStatusBanner() {
@@ -1528,6 +1610,8 @@ function renderAgentSetupCards() {
       const forcedNote = forced && backend !== forced
         ? `<p class="agent-setup-card-note">${escapeHtml(envWarning || `COAUTO_AGENT_BACKEND forces ${agentLabel(forced)} while active.`)}</p>`
         : "";
+      const commands = agentSetupCommands(backend, status);
+      const commandRows = agentSetupCommandRowsHtml(commands, "card");
       return `
         <article class="agent-setup-card" data-agent-setup-card="${escapeHtml(backend)}">
           <div class="agent-setup-card-head">
@@ -1539,9 +1623,9 @@ function renderAgentSetupCards() {
             ${detailLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}
           </ul>
           ${forcedNote}
-          <pre><code>${escapeHtml(guide.install)}</code></pre>
+          ${commandRows}
           <div class="agent-setup-card-actions">
-            <a href="${escapeHtml(guide.docs)}" target="_blank" rel="noopener noreferrer">Open docs</a>
+            ${agentSetupLinksHtml(backend)}
             ${switchAction}
           </div>
         </article>

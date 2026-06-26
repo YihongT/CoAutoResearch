@@ -6125,6 +6125,8 @@ body.is-dragging-file .composer {
 }
 
 .agent-status-note {
+  display: grid;
+  gap: 8px;
   margin: 0;
   padding: 10px 12px;
   border: 1px solid rgba(32, 31, 27, 0.12);
@@ -6137,6 +6139,32 @@ body.is-dragging-file .composer {
 
 .agent-status-note:empty {
   display: none;
+}
+
+.agent-status-note-main,
+.agent-status-note-help {
+  display: block;
+  min-width: 0;
+}
+
+.agent-status-note-help {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.agent-status-note a,
+.agent-setup-links a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.agent-status-note .agent-setup-command-list {
+  margin-top: 0;
 }
 
 .agent-status-note[data-tone="error"] {
@@ -14825,11 +14853,61 @@ html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
   overflow-x: auto;
   white-space: pre;
 }
+.agent-setup-command-list {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.agent-setup-command-row {
+  display: grid;
+  grid-template-columns: minmax(48px, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  border-radius: 8px;
+  background: var(--panel-bg-strong);
+}
+.agent-setup-command-row > span {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink) 58%, transparent);
+}
+.agent-setup-command-row code {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.agent-status-note[data-tone="error"] .agent-setup-command-row,
+.agent-status-note[data-tone="warning"] .agent-setup-command-row {
+  border-color: color-mix(in srgb, currentColor 22%, transparent);
+  background: color-mix(in srgb, var(--paper) 78%, transparent);
+}
+.agent-status-note[data-tone="error"] .agent-setup-command-row code,
+.agent-status-note[data-tone="warning"] .agent-setup-command-row code {
+  color: var(--ink);
+}
 .agent-setup-card a {
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--ink);
+}
+.agent-setup-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .agent-setup-card-actions {
   display: flex;
@@ -14837,6 +14915,15 @@ html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+@media (max-width: 680px) {
+  .agent-setup-command-row {
+    grid-template-columns: 1fr auto;
+  }
+  .agent-setup-command-row > span {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Final shell centering guard: the rail is fixed, so the main stage owns the
