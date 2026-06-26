@@ -49,6 +49,10 @@ let localBrowserPath = "";
 let localBrowserPayload = null;
 let browserSearchQuery = "";
 let browserSearchTimer = null;
+let browserSelectionMode = "default";
+let uploadSourceMenu = null;
+let uploadSourceMenuAnchor = null;
+let pendingUploadSourceEditMessageId = "";
 let prepareSaved = false;
 let coldViewMode = "source";
 let uiSettings = null;
@@ -2650,7 +2654,11 @@ function sessionState() {
 
 function isSessionRunning() {
   if (isGoalPassed()) return false;
-  return ["running", "stopping"].includes(sessionState().status);
+  const session = sessionState();
+  const status = String(session.status || "").toLowerCase();
+  if (!["running", "stopping"].includes(status)) return false;
+  if (session.active_run && session.active_run.running === false) return false;
+  return true;
 }
 
 function isSessionInterrupted() {
@@ -9158,10 +9166,16 @@ function setResourceCategory(category) {
   if (note) note.textContent = `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Folders are symlinked when possible; files are copied into this repo.`;
 }
 
-function openComposerFilePicker(category = "user_input") {
+function isRemoteUi() {
+  return Boolean(appState?.runtime?.remote);
+}
+
+function openComposerFilePicker(category = "user_input", editMessageId = "") {
   const input = $("#composer-file-input");
   if (!input) return;
   input.dataset.resourceCategory = resourceCategories[category] ? category : "user_input";
+  if (editMessageId) input.dataset.editMessageId = String(editMessageId);
+  else delete input.dataset.editMessageId;
   input.click();
 }
 
@@ -9200,7 +9214,7 @@ function ensureAttachmentMenu() {
 }
 
 function positionAttachmentMenu(menu = $("#attachment-menu"), button = $("#composer-attach-button")) {
-  if (!menu || !button || menu.hidden) return;
+  if (!menu || !button || menu.hidden || typeof button.getBoundingClientRect !== "function") return;
   const buttonRect = button.getBoundingClientRect();
   const menuWidth = Math.min(260, Math.max(220, window.innerWidth - 40));
   menu.style.width = `${menuWidth}px`;
@@ -9226,17 +9240,88 @@ function setAttachmentMenuOpen(open) {
   if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+function ensureUploadSourceMenu() {
+  if (uploadSourceMenu) return uploadSourceMenu;
+  const menu = document.createElement("div");
+  menu.className = "attachment-menu upload-source-menu";
+  menu.id = "upload-source-menu";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "Choose file source");
+  menu.hidden = true;
+  menu.innerHTML = `
+    <button type="button" role="menuitem" data-upload-source="computer">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8A2.5 2.5 0 0 1 17.5 17h-11A2.5 2.5 0 0 1 4 14.5v-8ZM9 20h6m-3-3v3"/></svg>
+      <span class="attachment-choice-copy"><strong>From this computer</strong><small>Upload browser-selected files to the remote project.</small></span>
+    </button>
+    <button type="button" role="menuitem" data-upload-source="server">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 6.5C5 5.1 8.1 4 12 4s7 1.1 7 2.5S15.9 9 12 9 5 7.9 5 6.5Zm0 0v5c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-5M5 11.5v5C5 17.9 8.1 19 12 19s7-1.1 7-2.5v-5"/></svg>
+      <span class="attachment-choice-copy"><strong>From server</strong><small>Select an existing file on the remote server.</small></span>
+    </button>
+  `;
+  document.body.appendChild(menu);
+  uploadSourceMenu = menu;
+  return menu;
+}
+
+function positionUploadSourceMenu() {
+  positionAttachmentMenu(ensureUploadSourceMenu(), uploadSourceMenuAnchor || $("#composer-attach-button"));
+}
+
+function setUploadSourceMenuOpen(open, anchor = null) {
+  const menu = ensureUploadSourceMenu();
+  if (!menu) return;
+  uploadSourceMenuAnchor = open ? (anchor || $("#composer-attach-button")) : null;
+  menu.hidden = !open;
+  if (open) positionUploadSourceMenu();
+}
+
+function showUploadSourcePicker(options = {}) {
+  pendingUploadSourceEditMessageId = String(options.editMessageId || "");
+  setAttachmentMenuOpen(false);
+  setUploadSourceMenuOpen(true, options.anchor || null);
+}
+
+function closeUploadSourcePicker() {
+  pendingUploadSourceEditMessageId = "";
+  setUploadSourceMenuOpen(false);
+}
+
+function handleUploadSourceChoice(source) {
+  const editMessageId = pendingUploadSourceEditMessageId;
+  setUploadSourceMenuOpen(false);
+  pendingUploadSourceEditMessageId = "";
+  if (source === "computer") {
+    openComposerFilePicker("user_input", editMessageId);
+    return;
+  }
+  if (source === "server") {
+    setResourceCategory("user_input");
+    showResourceBrowser({ mode: "server-file", editMessageId });
+  }
+}
+
 function toggleAttachmentMenu() {
   const menu = ensureAttachmentMenu();
+  closeUploadSourcePicker();
   setAttachmentMenuOpen(Boolean(menu?.hidden));
 }
 
-window.addEventListener("resize", () => positionAttachmentMenu());
-window.addEventListener("scroll", () => positionAttachmentMenu(), true);
+window.addEventListener("resize", () => {
+  positionAttachmentMenu();
+  positionUploadSourceMenu();
+});
+window.addEventListener("scroll", () => {
+  positionAttachmentMenu();
+  positionUploadSourceMenu();
+}, true);
 
 function handleAttachmentMenuAction(action) {
   setAttachmentMenuOpen(false);
   if (action === "upload-files") {
+    if (isRemoteUi()) {
+      showUploadSourcePicker();
+      return;
+    }
     openComposerFilePicker("user_input");
     return;
   }
@@ -9256,6 +9341,7 @@ function updateSelectedResourceCategory(index, category) {
 
 function showResourceBrowser(options = {}) {
   activeEditResourceTargetId = String(options.editMessageId || "");
+  browserSelectionMode = options.mode === "server-file" ? "server-file" : "default";
   const dialog = $("#resource-browser");
   if (!dialog) return;
   if (dialog.showModal) dialog.showModal();
@@ -9266,6 +9352,7 @@ function showResourceBrowser(options = {}) {
 function closeResourceBrowser() {
   const dialog = $("#resource-browser");
   activeEditResourceTargetId = "";
+  browserSelectionMode = "default";
   if (!dialog) return;
   if (dialog.close) dialog.close();
   else dialog.removeAttribute("open");
@@ -9280,15 +9367,29 @@ function renderBrowserRoots(roots) {
 
 function renderBrowserEntries(payload) {
   localBrowserPayload = payload;
+  const serverFileMode = browserSelectionMode === "server-file";
+  const eyebrow = document.querySelector(".local-browser-head .eyebrow");
+  if (eyebrow) eyebrow.textContent = serverFileMode ? "Server files" : "Local browser";
+  const title = $("#resource-browser-title");
+  if (title) title.textContent = serverFileMode ? "Choose a server file." : "Choose files or folders.";
   renderBrowserRoots(payload.roots || []);
   localBrowserPath = payload.path || "";
   $("#browser-current-path").textContent = localBrowserPath;
   $("#browser-up").disabled = !payload.parent;
   $("#browser-up").dataset.browserParent = payload.parent || "";
-  $("#browser-add-current").dataset.resourceAddPath = localBrowserPath;
-  $("#browser-note").textContent = payload.truncated
-    ? "Showing the first files in this folder. Choose a more specific folder if needed."
-    : `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Folders are symlinked when possible; files are copied into this repo.`;
+  const addCurrent = $("#browser-add-current");
+  if (addCurrent) {
+    addCurrent.hidden = serverFileMode;
+    addCurrent.disabled = serverFileMode;
+    addCurrent.dataset.resourceAddPath = serverFileMode ? "" : localBrowserPath;
+  }
+  $("#browser-note").textContent = serverFileMode
+    ? (payload.truncated
+      ? "Showing the first server files in this folder. Choose a more specific folder if needed."
+      : "Choose a file that already exists on the server. Folders can be opened here but only files can be attached from Upload files.")
+    : (payload.truncated
+      ? "Showing the first files in this folder. Choose a more specific folder if needed."
+      : `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Folders are symlinked when possible; files are copied into this repo.`);
 
   const query = browserSearchQuery.trim().toLowerCase();
   const entries = (payload.entries || []).filter((entry) => {
@@ -9303,6 +9404,9 @@ function renderBrowserEntries(payload) {
   $("#browser-entries").innerHTML = entries
     .map((entry) => {
       const isDir = entry.type === "directory";
+      const useButton = serverFileMode && isDir
+        ? ""
+        : `<button class="mini-button" type="button" data-resource-add-path="${escapeHtml(entry.path)}">Use</button>`;
       return `
         <div class="browser-entry-row">
           <button class="browser-entry-main" type="button" data-browser-open="${escapeHtml(entry.path)}" data-browser-type="${escapeHtml(entry.type)}">
@@ -9312,7 +9416,7 @@ function renderBrowserEntries(payload) {
               <small>${escapeHtml(entry.path)}</small>
             </span>
           </button>
-          <button class="mini-button" type="button" data-resource-add-path="${escapeHtml(entry.path)}">Use</button>
+          ${useButton}
         </div>
       `;
     })
@@ -9365,7 +9469,7 @@ function handleBrowserSearchInput(value) {
 async function loadLocalBrowser(path = "", options = {}) {
   const { keepSearch = false } = options;
   const entries = $("#browser-entries");
-  entries.innerHTML = `<div class="tree-empty">Loading local files...</div>`;
+  entries.innerHTML = `<div class="tree-empty">${browserSelectionMode === "server-file" ? "Loading server files..." : "Loading local files..."}</div>`;
   try {
     const params = new URLSearchParams({ path: path || "" });
     if (keepSearch && browserSearchQuery.trim()) params.set("q", browserSearchQuery.trim());
@@ -11423,7 +11527,10 @@ function bindEvents() {
   $("#cold-file-editor").addEventListener("paste", handleAttachmentPaste);
   $("#chat-form textarea").addEventListener("paste", handleAttachmentPaste);
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") setAttachmentMenuOpen(false);
+    if (event.key === "Escape") {
+      setAttachmentMenuOpen(false);
+      closeUploadSourcePicker();
+    }
   });
   $("#composer-file-input")?.addEventListener("change", (event) => {
     const category = resourceCategories[event.target.dataset.resourceCategory] ? event.target.dataset.resourceCategory : "user_input";
@@ -11502,8 +11609,16 @@ function bindEvents() {
       handleAttachmentMenuAction(attachmentAction.dataset.attachmentAction);
       return;
     }
+    const uploadSourceAction = event.target.closest("[data-upload-source]");
+    if (uploadSourceAction) {
+      handleUploadSourceChoice(uploadSourceAction.dataset.uploadSource);
+      return;
+    }
     if (!$("#attachment-menu")?.hidden && !event.target.closest("#attachment-menu") && !event.target.closest("#composer-attach-button")) {
       setAttachmentMenuOpen(false);
+    }
+    if (uploadSourceMenu && !uploadSourceMenu.hidden && !event.target.closest("#upload-source-menu") && !event.target.closest("#composer-attach-button") && !event.target.closest("[data-edit-upload]")) {
+      closeUploadSourcePicker();
     }
     const projectSwitch = event.target.closest("[data-project-switch]");
     if (projectSwitch) {
@@ -11863,11 +11978,10 @@ function bindEvents() {
     const editUpload = event.target.closest("[data-edit-upload]");
     if (editUpload) {
       activeEditResourceTargetId = editUpload.dataset.editUpload || "";
-      const input = $("#composer-file-input");
-      if (input) {
-        input.dataset.resourceCategory = "user_input";
-        input.dataset.editMessageId = activeEditResourceTargetId;
-        input.click();
+      if (isRemoteUi()) {
+        showUploadSourcePicker({ editMessageId: activeEditResourceTargetId, anchor: editUpload });
+      } else {
+        openComposerFilePicker("user_input", activeEditResourceTargetId);
       }
       return;
     }

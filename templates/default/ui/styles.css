@@ -4083,6 +4083,19 @@ textarea:focus {
   outline: none;
 }
 
+.attachment-choice-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.attachment-choice-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.25;
+}
+
 .attachment-menu svg {
   flex: 0 0 auto;
   width: 20px;

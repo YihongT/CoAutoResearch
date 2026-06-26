@@ -700,7 +700,7 @@ async function smokeRemoteAuth() {
   const python = findPython();
   const port = await freePort();
   const serverPath = path.join(root, "templates", "default", "ui", "server.py");
-  const proc = spawn(python.command, [...python.args, serverPath, "--host", "127.0.0.1", "--port", String(port), "--project-root", projectDir], {
+  const proc = spawn(python.command, [...python.args, serverPath, "--host", "127.0.0.1", "--port", String(port), "--project-root", projectDir, "--remote"], {
     cwd: projectDir,
     env: { ...process.env, COAUTO_TEMPLATE_ROOT: path.join(root, "templates", "default"), COAUTO_REMOTE_AUTH_TOKEN: "test-token" },
     stdio: ["ignore", "pipe", "pipe"]
@@ -721,6 +721,11 @@ async function smokeRemoteAuth() {
     const authorized = await fetch(`${baseUrl}/api/health`, { headers: { Cookie: cookie } });
     if (authorized.status !== 200) {
       throw new Error(`remote auth should accept cookie, got ${authorized.status}`);
+    }
+    const overview = await fetch(`${baseUrl}/api/overview`, { headers: { Cookie: cookie } });
+    const overviewPayload = await overview.json();
+    if (overview.status !== 200 || overviewPayload.runtime?.remote !== true) {
+      throw new Error(`remote overview should report remote runtime, got ${overview.status} ${JSON.stringify(overviewPayload.runtime)}`);
     }
     const badToken = await fetch(`${baseUrl}/api/health`, { headers: { Authorization: "Bearer wrong-token" } });
     if (badToken.status !== 401) {
@@ -895,9 +900,19 @@ try {
   if (
     projectUiProbe.serverPath !== packageServerPath ||
     projectUiProbeProjectRoot !== realProjectDir ||
-    projectUiProbe.usingPackageServer !== true
+    projectUiProbe.usingPackageServer !== true ||
+    projectUiProbe.serverArgs.includes("--remote")
   ) {
     throw new Error(`ui from a project directory should use the package-managed UI server:\n${projectUiProbeOutput}`);
+  }
+  const remoteUiProbeOutput = execFileSync("node", [cli, "ui", "--project", projectDir, "--remote", "--no-open"], {
+    cwd: root,
+    env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
+    encoding: "utf8"
+  }).trim();
+  const remoteUiProbe = JSON.parse(remoteUiProbeOutput.split(/\r?\n/).at(-1));
+  if (!Array.isArray(remoteUiProbe.serverArgs) || !remoteUiProbe.serverArgs.includes("--remote")) {
+    throw new Error(`remote UI should pass --remote to the package-managed server:\n${remoteUiProbeOutput}`);
   }
   const defaultDashboardRoot = path.join(tempRoot, "default-dashboard-root");
   await fsp.mkdir(defaultDashboardRoot, { recursive: true });
@@ -1330,9 +1345,16 @@ Confidence: medium
     !serverPy.includes("REMOTE_AUTH_TOKEN") ||
     !serverPy.includes("authorize_remote_request") ||
     !serverPy.includes("Set-Cookie") ||
-    !serverPy.includes("coauto_remote_auth")
+    !serverPy.includes("coauto_remote_auth") ||
+    !serverPy.includes("def reconcile_research_process_state") ||
+    !serverPy.includes("SESSION_STARTUP_GRACE_SECONDS") ||
+    !serverPy.includes('"--remote"') ||
+    !serverPy.includes("UI_REMOTE_MODE = bool(args.remote)")
   ) {
-    throw new Error("server must keep the optional centralized remote token auth gate");
+    throw new Error("server must keep remote auth, remote metadata, and stale run reconciliation");
+  }
+  if (!appJs.includes("session.active_run && session.active_run.running === false")) {
+    throw new Error("UI running-state checks must not lock the composer when the server reports no active run");
   }
   const blueprintTemplate = await fsp.readFile(path.join(root, "templates", "default", "manuscript", "BLUEPRINT.md"), "utf8");
   const manuscriptInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "MANUSCRIPT.md"), "utf8");
@@ -1455,6 +1477,10 @@ Confidence: medium
     !appJs.includes('event.target.closest("#composer-attach-button")') ||
     !appJs.includes('$("#composer-file-input")?.addEventListener("change"') ||
     !appJs.includes("function openComposerFilePicker") ||
+    !appJs.includes("function isRemoteUi") ||
+    !appJs.includes("function showUploadSourcePicker") ||
+    !appJs.includes('data-upload-source="computer"') ||
+    !appJs.includes('data-upload-source="server"') ||
     !appJs.includes("function ensureAttachmentMenu") ||
     !appJs.includes("document.body.appendChild(menu)") ||
     !appJs.includes("function positionAttachmentMenu") ||
@@ -1465,6 +1491,8 @@ Confidence: medium
     appJs.includes("Claude Fable") ||
     !appJs.includes("function toggleAttachmentMenu") ||
     !appJs.includes("function handleAttachmentMenuAction") ||
+    !appJs.includes('showResourceBrowser({ mode: "server-file", editMessageId })') ||
+    !appJs.includes('browserSelectionMode === "server-file"') ||
     !appJs.includes("function resolveProjectIdAlias") ||
     !appJs.includes("const resolvedProjectId = resolveProjectIdAlias(projects, activeProjectId)") ||
     appJs.includes("function chooseMaterialType") ||
@@ -1476,9 +1504,13 @@ Confidence: medium
     !appJs.includes('addFilesFromList(event.target.files, "file picker", { category })') ||
     !appJs.includes('user_input: "User input"') ||
     !serverPy.includes('"user_input": "resources/user_input/attachments"') ||
+    !serverPy.includes("UI_REMOTE_MODE = False") ||
+    !serverPy.includes('"remote": UI_REMOTE_MODE') ||
+    !serverPy.includes('help="Expose UI runtime metadata for a browser connected to a remote server."') ||
     !stylesCss.includes(".composer-attach-button") ||
     !stylesCss.includes(".composer-file-input") ||
     !stylesCss.includes(".attachment-menu") ||
+    !stylesCss.includes(".attachment-choice-copy") ||
     !stylesCss.includes("position: fixed;") ||
     !stylesCss.includes("z-index: 1400;") ||
     !readme.includes("composer `+` button") ||
@@ -3054,7 +3086,12 @@ Confidence: medium
     "assert completed_marker['status'] == 'pending', completed_marker",
     "assert 'completion_blocked_reason' in completed_marker, completed_marker",
     "assert 'Server repair:' not in (root / 'research_trajectory' / 'STATE.md').read_text(encoding='utf-8')",
-    "print(json.dumps({'complete_marker': complete_snapshot['active_run']['trial_iteration'], 'pending_marker': pending_snapshot['active_run']['trial_iteration'], 'completed_gate': completed_snapshot['gate']['status'], 'completed_marker_status': completed_marker['status'], 'blocked': bool(completed_marker.get('completion_blocked_reason'))}))"
+    "context.session.update({'process': None, 'process_thread': object(), 'status': 'running', 'mode': 'framing', 'started_at': '2000-01-01T00:00:00+00:00', 'ended_at': '', 'loop_active': False})",
+    "stale_snapshot = module.research_session_snapshot()",
+    "assert stale_snapshot['status'] == 'interrupted', stale_snapshot",
+    "assert stale_snapshot['active_run']['running'] is False, stale_snapshot['active_run']",
+    "assert context.session.get('process_thread') is None, context.session",
+    "print(json.dumps({'complete_marker': complete_snapshot['active_run']['trial_iteration'], 'pending_marker': pending_snapshot['active_run']['trial_iteration'], 'completed_gate': completed_snapshot['gate']['status'], 'completed_marker_status': completed_marker['status'], 'blocked': bool(completed_marker.get('completion_blocked_reason')), 'stale_status': stale_snapshot['status'], 'stale_running': stale_snapshot['active_run']['running']}))"
   ].join("\n");
   const activeTrialMarkerOutput = execFileSync(python.command, [
     ...python.args,
@@ -3073,7 +3110,9 @@ Confidence: medium
     !activeTrialMarkerOutput.includes('"pending_marker": 12') ||
     !activeTrialMarkerOutput.includes('"completed_gate": "pass"') ||
     !activeTrialMarkerOutput.includes('"completed_marker_status": "pending"') ||
-    !activeTrialMarkerOutput.includes('"blocked": true')
+    !activeTrialMarkerOutput.includes('"blocked": true') ||
+    !activeTrialMarkerOutput.includes('"stale_status": "interrupted"') ||
+    !activeTrialMarkerOutput.includes('"stale_running": false')
   ) {
     throw new Error(`active trial marker smoke test returned unexpected output: ${activeTrialMarkerOutput}`);
   }

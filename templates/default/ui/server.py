@@ -1533,6 +1533,7 @@ class ProjectRegistry:
 
 
 PROJECT_REGISTRY: ProjectRegistry | None = None
+UI_REMOTE_MODE = False
 _BOOTSTRAP_CONTEXT: ProjectContext | None = None
 _CONTEXT = threading.local()
 
@@ -1656,6 +1657,7 @@ RESEARCH_SESSION = DynamicDict(lambda: current_project_context().session)
 RESEARCH_LOCK = DynamicLock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_LOCK = threading.Lock()
+SESSION_STARTUP_GRACE_SECONDS = 5
 
 
 def dashboard_runtime_dir() -> Path:
@@ -2217,6 +2219,41 @@ def persist_research_session() -> None:
     with RESEARCH_LOCK:
         payload = {key: value for key, value in RESEARCH_SESSION.items() if key not in {"process", "process_thread"}}
     SESSION_STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def session_startup_without_process(status: Any, started_at: Any) -> bool:
+    normalized = str(status or "").strip().lower()
+    if normalized not in {"running", "stopping"}:
+        return False
+    age = seconds_since_iso(started_at)
+    return age is not None and age < SESSION_STARTUP_GRACE_SECONDS
+
+
+def reconcile_research_process_state() -> None:
+    changed = False
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        status = str(RESEARCH_SESSION.get("status") or "").strip().lower()
+        if proc is not None:
+            returncode = proc.poll()
+            if returncode is None:
+                return
+            RESEARCH_SESSION["returncode"] = returncode
+            if status in {"running", "stopping"}:
+                RESEARCH_SESSION["status"] = "completed" if returncode == 0 else "failed"
+            RESEARCH_SESSION["ended_at"] = RESEARCH_SESSION.get("ended_at") or now_iso()
+            RESEARCH_SESSION["process"] = None
+            RESEARCH_SESSION["process_thread"] = None
+            changed = True
+        elif status in {"running", "stopping"}:
+            if session_startup_without_process(status, RESEARCH_SESSION.get("started_at")):
+                return
+            RESEARCH_SESSION["status"] = "interrupted"
+            RESEARCH_SESSION["ended_at"] = RESEARCH_SESSION.get("ended_at") or now_iso()
+            RESEARCH_SESSION["process_thread"] = None
+            changed = True
+    if changed:
+        persist_research_session()
 
 
 def load_research_session_runtime() -> None:
@@ -7044,6 +7081,7 @@ def cancel_export(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_overview() -> dict[str, Any]:
+    reconcile_research_process_state()
     if PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project:
         PROJECT_REGISTRY.refresh()
     context = current_project_context()
@@ -7066,6 +7104,9 @@ def build_overview() -> dict[str, Any]:
         "multi_project": bool(PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project),
         "repo_root": str(REPO_ROOT),
         "generated_at": now_iso(),
+        "runtime": {
+            "remote": UI_REMOTE_MODE,
+        },
         "trajectory": trajectory,
         "files": {
             "project": project,
@@ -8876,11 +8917,15 @@ def ensure_autoresearch_gate_for_loop() -> None:
 
 
 def research_session_snapshot() -> dict[str, Any]:
+    reconcile_research_process_state()
     with RESEARCH_LOCK:
         current_mode = str(RESEARCH_SESSION.get("mode", "") or "")
         current_proc = RESEARCH_SESSION.get("process")
-        current_running = bool(current_proc and current_proc.poll() is None)
         current_status = str(RESEARCH_SESSION.get("status", "") or "")
+        current_running = bool(current_proc and current_proc.poll() is None) or session_startup_without_process(
+            current_status,
+            RESEARCH_SESSION.get("started_at"),
+        )
     chat_guard_active = current_mode == "chat" and current_running
     completed_goal_snapshot = current_status == "completed" and current_mode in {"goal", "research"} and not current_running
     gate = read_autoresearch_gate(enforce_consistency=False) if chat_guard_active or completed_goal_snapshot else repair_autoresearch_gate_if_needed()
@@ -8891,8 +8936,9 @@ def research_session_snapshot() -> dict[str, Any]:
         loop_stop_reason = RESEARCH_SESSION.get("loop_stop_reason", "")
         loop_iteration = int(RESEARCH_SESSION.get("loop_iteration") or 0)
         proc = RESEARCH_SESSION.get("process")
-        running = bool(proc and proc.poll() is None)
         mode = str(RESEARCH_SESSION.get("mode", "") or "")
+        status = str(RESEARCH_SESSION.get("status") or "")
+        running = bool(proc and proc.poll() is None) or session_startup_without_process(status, RESEARCH_SESSION.get("started_at"))
         latest_iteration = 0 if mode == "chat" and running else latest_active_trial_iteration()
         if not running and latest_iteration > 0:
             loop_iteration = latest_iteration
@@ -9413,16 +9459,19 @@ def start_research_run(
     prompt = prompt.strip()
     if not prompt:
         raise ValueError("Prompt is required.")
+    reconcile_research_process_state()
     settings = normalize_research_settings(settings_payload)
     backend = normalize_agent_backend(settings.get("backend"))
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
-        if proc and proc.poll() is None:
+        status = str(RESEARCH_SESSION.get("status") or "")
+        if (proc and proc.poll() is None) or session_startup_without_process(status, RESEARCH_SESSION.get("started_at")):
             raise ValueError(f"A {agent_display_name(backend)} run is already active.")
     ensure_agent_ready(backend, settings=settings)
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
-        if proc and proc.poll() is None:
+        status = str(RESEARCH_SESSION.get("status") or "")
+        if (proc and proc.poll() is None) or session_startup_without_process(status, RESEARCH_SESSION.get("started_at")):
             raise ValueError(f"A {agent_display_name(backend)} run is already active.")
         previous_session_id = str(RESEARCH_SESSION.get("session_id") or "")
         command = agent_command_for_prompt(resume, settings)
@@ -10504,9 +10553,11 @@ def archive_resend_context(resend_context: Any) -> str:
 
 
 def active_process_mode() -> tuple[bool, str]:
+    reconcile_research_process_state()
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
-        running = bool(proc and proc.poll() is None)
+        status = str(RESEARCH_SESSION.get("status") or "")
+        running = bool(proc and proc.poll() is None) or session_startup_without_process(status, RESEARCH_SESSION.get("started_at"))
         mode = str(RESEARCH_SESSION.get("mode") or "").strip().lower()
     return running, mode
 
@@ -10955,6 +11006,7 @@ def start_research_command(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def stop_research_session() -> dict[str, Any]:
+    reconcile_research_process_state()
     with RESEARCH_LOCK:
         RESEARCH_SESSION["loop_active"] = False
         RESEARCH_SESSION["loop_stop_reason"] = "stopped_by_user"
@@ -11403,13 +11455,20 @@ def bind_http_server(host: str, requested_port: int) -> tuple[ThreadingHTTPServe
 
 
 def main() -> None:
-    global PROJECT_REGISTRY
+    global PROJECT_REGISTRY, UI_REMOTE_MODE
     parser = argparse.ArgumentParser(description="Run the CoAutoResearch local web UI.")
     parser.add_argument("--host", default=os.environ.get("AUTO_RESEARCH_UI_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("AUTO_RESEARCH_UI_PORT", "8765")))
     parser.add_argument("--project-root", default=os.environ.get("COAUTO_PROJECT_ROOT", ""))
     parser.add_argument("--projects-dir", default=os.environ.get("COAUTO_PROJECTS_DIR", ""))
+    parser.add_argument(
+        "--remote",
+        action="store_true",
+        default=os.environ.get("COAUTO_UI_REMOTE", "").strip().lower() in {"1", "true", "yes"},
+        help="Expose UI runtime metadata for a browser connected to a remote server.",
+    )
     args = parser.parse_args()
+    UI_REMOTE_MODE = bool(args.remote)
 
     project_root = Path(os.path.expanduser(args.project_root)).resolve() if args.project_root else DEFAULT_PROJECT_ROOT
     projects_dir = Path(os.path.expanduser(args.projects_dir)).resolve() if args.projects_dir else None

@@ -237,6 +237,8 @@ function loadAppContext() {
   });
   const composerModel = sessionForm.elements.model;
   const composerReasoning = sessionForm.elements.reasoningEffort;
+  const resourceBrowserEyebrow = element();
+  const resourceBrowserTitle = element();
   const codexProviderField = element();
   const codexApiKeySettings = element({ hidden: true });
   const codexApiKeyStatus = element();
@@ -269,6 +271,8 @@ function loadAppContext() {
     ["#composer-file-input", composerFileInput],
     ["#composer-attach-button", composerAttachButton],
     ["#attachment-menu", attachmentMenu],
+    ["#resource-browser-title", resourceBrowserTitle],
+    [".local-browser-head .eyebrow", resourceBrowserEyebrow],
     [".trial-strip-scroll", trialStripScroll],
     ["#project-draft-editor", projectEditor],
     ["#target-venue", element()],
@@ -459,6 +463,8 @@ function loadAppContext() {
     globalThis.__scrollCount = 0;
     globalThis.__browserOpenCount = 0;
     globalThis.__browserOpenCategory = "";
+    globalThis.__browserOpenMode = "";
+    globalThis.__browserOpenEditMessageId = "";
     globalThis.__collectSeen = null;
     globalThis.__toastMessages = [];
     activeProjectId = "p1";
@@ -467,6 +473,7 @@ function loadAppContext() {
       project: { id: "p1", display_name: "project" },
       projects: [{ id: "p1", display_name: "project" }],
       active_project_id: "p1",
+      runtime: { remote: false },
       files: { project: { text: "# Project\\n\\nReady." } },
       framing: { messages: [], project_ready: true },
       trials: [],
@@ -507,9 +514,11 @@ function loadAppContext() {
     resizeComposer = () => {};
     scrollFramingToBottomSoon = () => { globalThis.__scrollCount += 1; };
     scrollThread = () => { globalThis.__scrollCount += 1; };
-    showResourceBrowser = () => {
+    showResourceBrowser = (options = {}) => {
       globalThis.__browserOpenCount += 1;
       globalThis.__browserOpenCategory = activeResourceCategory;
+      globalThis.__browserOpenMode = options.mode || "default";
+      globalThis.__browserOpenEditMessageId = options.editMessageId || "";
     };
     showToast = (message, error = false) => { globalThis.__toastMessages.push({ message, error }); };
     openProjectCreateDialog = () => {};
@@ -681,6 +690,7 @@ function loadAppContext() {
       return {
         activeCategory: activeResourceCategory,
         pendingCategory: input?.dataset?.resourceCategory || "",
+        pendingEditMessageId: input?.dataset?.editMessageId || "",
         clicks: input?.clickCount || 0,
       };
     };
@@ -695,9 +705,14 @@ function loadAppContext() {
         top: menu?.style?.top || "",
         bottom: menu?.style?.bottom || "",
         width: menu?.style?.width || "",
+        uploadSourceHidden: uploadSourceMenu?.hidden ?? true,
+        uploadSourceLeft: uploadSourceMenu?.style?.left || "",
+        uploadSourceTop: uploadSourceMenu?.style?.top || "",
         expanded: button?.getAttribute?.("aria-expanded") || button?.["aria-expanded"] || "",
         browserOpenCount: globalThis.__browserOpenCount,
         browserOpenCategory: globalThis.__browserOpenCategory,
+        browserOpenMode: globalThis.__browserOpenMode,
+        browserOpenEditMessageId: globalThis.__browserOpenEditMessageId,
       };
     };
     globalThis.__toggleAttachmentMenuProbe = () => {
@@ -718,9 +733,41 @@ function loadAppContext() {
       handleAttachmentMenuAction(action);
       return globalThis.__attachmentMenuState();
     };
+    globalThis.__uploadSourceChoiceProbe = (source) => {
+      handleUploadSourceChoice(source);
+      return globalThis.__attachmentMenuState();
+    };
+    globalThis.__editUploadSourceProbe = (messageId, source) => {
+      showUploadSourcePicker({ editMessageId: messageId });
+      if (source) handleUploadSourceChoice(source);
+      return globalThis.__attachmentMenuState();
+    };
     globalThis.__closeAttachmentMenuProbe = () => {
       setAttachmentMenuOpen(false);
       return globalThis.__attachmentMenuState();
+    };
+    globalThis.__renderBrowserModeProbe = (mode = "default") => {
+      browserSelectionMode = mode;
+      renderBrowserEntries({
+        path: "/remote",
+        parent: "/",
+        truncated: false,
+        roots: [],
+        entries: [
+          { name: "data", path: "/remote/data", type: "directory" },
+          { name: "paper.pdf", path: "/remote/paper.pdf", type: "file" }
+        ]
+      });
+      return {
+        mode: browserSelectionMode,
+        title: document.querySelector("#resource-browser-title")?.textContent || "",
+        eyebrow: document.querySelector(".local-browser-head .eyebrow")?.textContent || "",
+        note: document.querySelector("#browser-note")?.textContent || "",
+        addCurrentHidden: Boolean(document.querySelector("#browser-add-current")?.hidden),
+        addCurrentDisabled: Boolean(document.querySelector("#browser-add-current")?.disabled),
+        addCurrentPath: document.querySelector("#browser-add-current")?.dataset?.resourceAddPath || "",
+        entriesHtml: document.querySelector("#browser-entries")?.innerHTML || "",
+      };
     };
     globalThis.__browserPathClassificationProbe = (values) => values.map((value) => [value, isBrowserPathInput(value)]);
     globalThis.__browserInputProbe = async (value) => {
@@ -1303,6 +1350,57 @@ async function testEmptyProjectPrepareUsesChatEndpoint() {
   assert.equal(app.context.__apiCalls[0].body.message, "How should I use this tool?");
   assert.equal(app.context.__startedFramingBrief, undefined, "empty project first message must not start the framing helper");
   assert.equal(app.context.__confirmMessageLog().length, 0, "ordinary empty-project chat should not ask for a regenerate confirmation");
+}
+
+async function testFreshRemoteProjectFirstMessageSends() {
+  const app = loadAppContext();
+  app.run(`
+    appState.runtime = { remote: true };
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", active_run: { running: false }, transcript: [] });
+  `);
+  app.coldEditor.value = "nihao";
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "fresh remote project first message should reach chat endpoint");
+  assert.equal(app.context.__apiCalls[0].body.message, "nihao");
+  assert.equal(
+    app.context.__toastMessages.some((item) => item.message.includes("Wait for the current agent run")),
+    false,
+    "fresh remote project first message must not be blocked by the current-run toast"
+  );
+}
+
+async function testFreshRemoteProjectStaleRunningSnapshotStillSends() {
+  const app = loadAppContext();
+  app.run(`
+    appState.runtime = { remote: true };
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({
+      id: "stale",
+      session_id: "",
+      status: "running",
+      mode: "framing",
+      active_run: { running: false },
+      transcript: []
+    });
+  `);
+  app.coldEditor.value = "nihao";
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "stale remote running snapshot should not block the first message");
+  assert.equal(app.context.__apiCalls[0].body.message, "nihao");
+  assert.equal(
+    app.context.__toastMessages.some((item) => item.message.includes("Wait for the current agent run")),
+    false,
+    "stale remote running snapshot must not trigger the current-run toast"
+  );
 }
 
 async function testRunningChatMessageIsQueued() {
@@ -4301,11 +4399,69 @@ function testAttachmentMenuRoutesUploadAndLinkActions() {
   assert.equal(state.activeCategory, "ongoing_work", "linked folders/files should default to ongoing work");
   assert.equal(state.browserOpenCount, 1, "link folders/files should open the server local browser");
   assert.equal(state.browserOpenCategory, "ongoing_work", "local browser should inherit the linked-resource category");
+  assert.equal(state.browserOpenMode, "default", "link folders/files should keep the default server browser mode");
   assert.equal(state.clicks, 1, "link folders/files should not trigger the native file picker");
+
+  state = app.run('appState.runtime = { remote: true }; __attachmentActionProbe("upload-files")');
+  assert.equal(state.hidden, true, "remote upload should still close the main attachment menu");
+  assert.equal(state.uploadSourceHidden, false, "remote upload should ask where files come from");
+  assert.equal(state.clicks, 1, "remote upload should not immediately open the native file picker");
+  assert.equal(state.browserOpenCount, 1, "remote upload source choice should not open the server browser yet");
+
+  state = app.run('__uploadSourceChoiceProbe("computer")');
+  assert.equal(state.uploadSourceHidden, true, "choosing this computer should close the upload source menu");
+  assert.equal(state.pendingCategory, "user_input", "local remote uploads should attach as user input");
+  assert.equal(state.pendingEditMessageId, "", "composer local uploads should not target an edit by default");
+  assert.equal(state.clicks, 2, "choosing this computer should open the native file picker");
+
+  state = app.run('appState.runtime = { remote: true }; __attachmentActionProbe("upload-files"); __uploadSourceChoiceProbe("server")');
+  assert.equal(state.uploadSourceHidden, true, "choosing server should close the upload source menu");
+  assert.equal(state.activeCategory, "user_input", "server upload choice should attach selected files as user input");
+  assert.equal(state.browserOpenCount, 2, "choosing server should open the server file browser");
+  assert.equal(state.browserOpenCategory, "user_input", "server upload choice should set user-input resource category");
+  assert.equal(state.browserOpenMode, "server-file", "server upload choice should use file-only browser mode");
+  assert.equal(state.clicks, 2, "choosing server should not trigger the native file picker");
+
+  state = app.run('appState.runtime = { remote: true }; __attachmentActionProbe("link-folders")');
+  assert.equal(state.browserOpenCount, 3, "remote link folders/files should still open the server browser");
+  assert.equal(state.browserOpenCategory, "ongoing_work", "remote link folders/files should keep ongoing-work category");
+  assert.equal(state.browserOpenMode, "default", "remote link folders/files should not use file-only upload mode");
+
+  state = app.run('appState.runtime = { remote: true }; __editUploadSourceProbe("message-1", "computer")');
+  assert.equal(state.pendingEditMessageId, "message-1", "edit uploads from this computer should target the edited message");
+  assert.equal(state.clicks, 3, "edit upload from this computer should open the native file picker");
+
+  state = app.run('appState.runtime = { remote: true }; __editUploadSourceProbe("message-2", "server")');
+  assert.equal(state.browserOpenCount, 4, "edit upload from server should open the server browser");
+  assert.equal(state.browserOpenMode, "server-file", "edit upload from server should use file-only mode");
+  assert.equal(state.browserOpenEditMessageId, "message-2", "server files selected while editing should attach to that edit draft");
 
   state = app.run("__toggleAttachmentMenuProbe(); __closeAttachmentMenuProbe();");
   assert.equal(state.hidden, true, "attachment menu should support explicit close");
   assert.equal(state.expanded, "false", "explicit close should collapse menu state");
+}
+
+function testServerFileBrowserModeRestrictsFolders() {
+  const app = loadAppContext();
+  let state = app.run('__renderBrowserModeProbe("server-file")');
+  assert.equal(state.title, "Choose a server file.");
+  assert.equal(state.eyebrow, "Server files");
+  assert.equal(state.addCurrentHidden, true, "server-file mode should hide Add current folder");
+  assert.equal(state.addCurrentDisabled, true, "server-file mode should disable Add current folder");
+  assert.equal(state.addCurrentPath, "", "server-file mode should not expose current folder as a resource link");
+  assert.equal(state.entriesHtml.includes('data-browser-open="/remote/data"'), true, "server-file mode should still allow browsing into folders");
+  assert.equal(state.entriesHtml.includes('data-resource-add-path="/remote/data"'), false, "server-file mode should not allow using folders");
+  assert.equal(state.entriesHtml.includes('data-resource-add-path="/remote/paper.pdf"'), true, "server-file mode should allow using files");
+  assert.equal(state.note.includes("only files can be attached"), true, "server-file mode should explain that only files can be attached");
+
+  state = app.run('__renderBrowserModeProbe("default")');
+  assert.equal(state.title, "Choose files or folders.");
+  assert.equal(state.eyebrow, "Local browser");
+  assert.equal(state.addCurrentHidden, false, "default browser mode should show Add current folder");
+  assert.equal(state.addCurrentDisabled, false, "default browser mode should enable Add current folder");
+  assert.equal(state.addCurrentPath, "/remote", "default browser mode should allow the current folder");
+  assert.equal(state.entriesHtml.includes('data-resource-add-path="/remote/data"'), true, "default browser mode should allow using folders");
+  assert.equal(state.entriesHtml.includes('data-resource-add-path="/remote/paper.pdf"'), true, "default browser mode should allow using files");
 }
 
 async function testLocalBrowserSearchAcceptsPaths() {
@@ -5072,6 +5228,8 @@ testNavigationStatePersistsPanelAndScroll();
 await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
+await testFreshRemoteProjectFirstMessageSends();
+await testFreshRemoteProjectStaleRunningSnapshotStillSends();
 await testRunningChatMessageIsQueued();
 await testRunningSteeringLookingMessageIsQueuedTheSameWay();
 await testAttachmentOnlyMessage();
@@ -5151,6 +5309,7 @@ testProjectScopedComposerDraftAndTargetVenueRestore();
 testThemeModePersistsAndApplies();
 testTargetVenueUsesOnlyProjectScopedDraft();
 testAttachmentMenuRoutesUploadAndLinkActions();
+testServerFileBrowserModeRestrictsFolders();
 await testLocalBrowserSearchAcceptsPaths();
 await testLargeBrowserUploadsUseResourceCopyFlow();
 testCompactComposerAutosizesFromCenteredBase();

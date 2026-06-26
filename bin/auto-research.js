@@ -2071,9 +2071,11 @@ async function commandUi(args) {
   const serverArgs = [serverPath, "--host", host, "--port", String(port)];
   if (projectsDir) serverArgs.push("--projects-dir", projectsDir);
   else if (projectMode) serverArgs.push("--project-root", projectRoot);
+  if (options.remote) serverArgs.push("--remote");
   if (process.env.COAUTO_PRINT_UI_INVOCATION) {
     console.log(JSON.stringify({
       serverPath,
+      serverArgs,
       projectRoot: projectMode ? projectRoot : "",
       projectsDir,
       usingPackageServer,
