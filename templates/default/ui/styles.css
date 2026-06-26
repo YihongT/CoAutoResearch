@@ -5802,6 +5802,8 @@ body.is-dragging-file .composer {
 
 .modal-settings-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 18px 22px;
   padding: 26px 0 0;
 }
 
@@ -5809,13 +5811,55 @@ body.is-dragging-file .composer {
   grid-column: 1 / -1;
 }
 
+.modal-settings-grid > .field,
+.modal-settings-grid > .toggle-field {
+  min-width: 0;
+}
+
+.modal-settings-grid > .field {
+  align-content: start;
+  gap: 8px;
+}
+
+.modal-settings-grid input,
+.modal-settings-grid select {
+  min-height: 46px;
+  padding: 10px 12px;
+}
+
+.modal-settings-grid textarea {
+  min-height: 150px;
+  padding: 12px 14px;
+}
+
+.settings-content .field span,
+.settings-content .toggle-field span {
+  line-height: 1.2;
+}
+
+.settings-content .field small {
+  max-width: 46rem;
+  font-family: var(--font);
+  font-size: 12.5px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+}
+
+.settings-content .toggle-field {
+  align-self: start;
+  min-height: 46px;
+  padding-top: 24px;
+}
+
 .settings-doc-callout {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 24px;
   margin-top: 22px;
-  padding: 17px 18px;
+  padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--panel-bg-soft);
@@ -5837,25 +5881,24 @@ body.is-dragging-file .composer {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 8px 16px;
+  max-width: 420px;
 }
 
 .settings-doc-links a {
-  min-height: 34px;
-  padding: 6px 13px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--secondary-bg);
-  color: var(--ink);
+  display: inline-block;
+  color: var(--muted);
   font-size: 13px;
-  font-weight: 720;
-  text-decoration: none;
+  font-weight: 560;
+  line-height: 1.45;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .settings-doc-links a:hover {
-  border-color: var(--primary-bg);
-  background: var(--primary-bg);
-  color: var(--primary-text);
+  color: var(--ink);
 }
 
 @media (max-width: 900px) {
@@ -5901,11 +5944,12 @@ body.is-dragging-file .composer {
 
   .settings-doc-callout {
     align-items: flex-start;
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .settings-doc-links {
     justify-content: flex-start;
+    max-width: none;
   }
 }
 
@@ -12445,8 +12489,7 @@ html[data-theme] .brief-editor-shell.is-framing-dock :is(.brief-submit-button, .
   color: var(--primary-text) !important;
 }
 
-html[data-theme] .brief-editor-shell.is-framing-dock .composer-suggestion-chip,
-html[data-theme] .settings-doc-links a {
+html[data-theme] .brief-editor-shell.is-framing-dock .composer-suggestion-chip {
   border-color: var(--control-border) !important;
   background: var(--secondary-bg) !important;
   color: var(--secondary-text) !important;
@@ -13984,15 +14027,28 @@ html[data-theme] #cold-start-workspace:not(.has-framing-thread) .brief-editor-sh
 .settings-row h3 { font-weight: 400; letter-spacing: -0.01em; }
 .settings-value { color: var(--muted); }
 .settings-doc-callout { border-radius: var(--radius-md); }
-.settings-doc-links a {
-  border-color: var(--line);
-  background: transparent;
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.04em;
+.settings-content .field small {
+  font-family: var(--font);
+  font-size: 12.5px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
 }
-.settings-doc-links a:hover { border-color: var(--ink); }
+.settings-content .modal-settings-grid > .toggle-field {
+  align-self: start;
+  height: auto;
+  min-height: 46px;
+  padding-top: 24px;
+}
+.settings-doc-links a {
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: 0;
+}
+.settings-doc-links a:hover { color: var(--ink); }
 .settings-secret-card { border-radius: var(--radius-md); }
 .settings-secret-head em { color: var(--soft); }
 .secret-status { border-color: var(--line); }
