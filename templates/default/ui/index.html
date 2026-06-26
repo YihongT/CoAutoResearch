@@ -792,10 +792,19 @@
                   <option value="claude">Claude Code</option>
                 </select>
               </label>
+              <label class="field" data-codex-provider-field>
+                <span>Codex provider</span>
+                <select name="settingsCodexProvider">
+                  <option value="cli">Use existing Codex CLI login</option>
+                  <option value="openai_api_key">OpenAI API key</option>
+                </select>
+                <small>API keys are used only for Codex runs started from this UI.</small>
+              </label>
               <label class="field" data-claude-provider-field>
                 <span>Claude provider</span>
                 <select name="settingsClaudeProvider">
                   <option value="external">Use existing Claude Code configuration</option>
+                  <option value="anthropic_api_key">Anthropic API key</option>
                   <option value="zai_glm">Z.AI GLM Coding Plan</option>
                   <option value="custom_anthropic">Custom Anthropic-compatible gateway</option>
                 </select>
@@ -861,6 +870,24 @@
                 <span>Advanced config</span>
                 <textarea name="settingsExtraConfig" rows="4" placeholder='model_verbosity="low"'></textarea>
               </label>
+              <section class="claude-gateway-settings wide" id="codex-api-key-settings" hidden>
+                <div class="settings-note">OpenAI API key is injected only into Codex runs from this UI.</div>
+                <label class="field">
+                  <span>OpenAI API key</span>
+                  <input name="settingsCodexApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                  <small id="settings-codex-api-key-status">Empty</small>
+                  <button class="settings-clear-button" id="settings-codex-api-key-clear" type="button" data-clear-codex-secret hidden>Clear saved key</button>
+                </label>
+              </section>
+              <section class="claude-gateway-settings wide" id="claude-api-key-settings" hidden>
+                <div class="settings-note">Anthropic API key is injected only into Claude Code runs from this UI, without gateway routing variables.</div>
+                <label class="field">
+                  <span>Anthropic API key</span>
+                  <input name="settingsClaudeApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                  <small id="settings-claude-api-key-status">Empty</small>
+                  <button class="settings-clear-button" id="settings-claude-api-key-clear" type="button" data-clear-claude-secret hidden>Clear saved key</button>
+                </label>
+              </section>
               <section class="claude-gateway-settings wide" id="claude-gateway-settings" hidden>
                 <div class="settings-note">Claude Code gateway settings are injected only into Claude Code runs from this UI.</div>
                 <label class="field">
@@ -873,13 +900,13 @@
                     <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
                     <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
                   </select>
-                </label>
-                <label class="field">
-                  <span>Credential</span>
-                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
-                  <small id="settings-claude-credential-status">Empty</small>
-                  <button class="settings-clear-button" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
-                </label>
+	                </label>
+	                <label class="field">
+	                  <span>Credential</span>
+	                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+	                  <small id="settings-claude-credential-status">Empty</small>
+	                  <button class="settings-clear-button" id="settings-claude-credential-clear" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
+	                </label>
                 <label class="field">
                   <span>Sonnet model mapping</span>
                   <input name="settingsClaudeSonnetModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />

@@ -195,7 +195,10 @@ function loadAppContext() {
       settingsWebSearch: field("", { checked: true }),
       settingsExtraConfig: field(""),
       settingsReviewCheckpointInterval: field("100"),
+      settingsCodexProvider: field("cli"),
+      settingsCodexApiKey: field(""),
       settingsClaudeProvider: field("external"),
+      settingsClaudeApiKey: field(""),
       settingsClaudeBaseUrl: field(""),
       settingsClaudeAuthMethod: field("ANTHROPIC_AUTH_TOKEN"),
       settingsClaudeCredential: field(""),
@@ -223,7 +226,14 @@ function loadAppContext() {
   });
   const composerModel = sessionForm.elements.model;
   const composerReasoning = sessionForm.elements.reasoningEffort;
+  const codexProviderField = element();
+  const codexApiKeySettings = element({ hidden: true });
+  const codexApiKeyStatus = element();
+  const codexApiKeyClear = element({ hidden: true, dataset: {} });
   const claudeProviderField = element();
+  const claudeApiKeySettings = element({ hidden: true });
+  const claudeApiKeyStatus = element();
+  const claudeApiKeyClear = element({ hidden: true, dataset: {} });
   const claudeGatewaySettings = element({ hidden: true });
   const claudeCredentialStatus = element();
   const claudeCredentialClear = element({ hidden: true, dataset: {} });
@@ -236,7 +246,9 @@ function loadAppContext() {
     ["#cold-save-status", element()],
     ["#cold-file-preview", element()],
     ["#cold-editor-workbench", element()],
+    ["#project-list", element()],
     [".main-stage", mainStage],
+    [".chat-header", element()],
     ["#chat-view", chatView],
     ["#material-view", materialView],
     ["#material-title", element()],
@@ -255,6 +267,13 @@ function loadAppContext() {
     ["#framing-scroll-bottom", element()],
     ["#cold-start-workspace", element()],
     ["#framing-project-panel", element()],
+    ["#chat-eyebrow", element()],
+    ["#chat-title", element()],
+    ["#session-pill", element()],
+    ["#chat-form textarea", element()],
+    ["#chat-form .send-button", element()],
+    ["#continue-research", element()],
+    ["#prepare-cold-start", element()],
     ["#open-launch-dialog", element()],
     ["#open-launch-dialog-inline", element()],
     ["#composer-suggestions", element()],
@@ -315,9 +334,15 @@ function loadAppContext() {
     ["#browser-entries", element()],
     ["#settings-secret-grid", element()],
     ["#settings-agent-status", element()],
+    ["#codex-api-key-settings", codexApiKeySettings],
+    ["#settings-codex-api-key-status", codexApiKeyStatus],
+    ["#settings-codex-api-key-clear", codexApiKeyClear],
+    ["#claude-api-key-settings", claudeApiKeySettings],
+    ["#settings-claude-api-key-status", claudeApiKeyStatus],
+    ["#settings-claude-api-key-clear", claudeApiKeyClear],
     ["#claude-gateway-settings", claudeGatewaySettings],
     ["#settings-claude-credential-status", claudeCredentialStatus],
-    ["[data-clear-claude-secret]", claudeCredentialClear],
+    ["#settings-claude-credential-clear", claudeCredentialClear],
   ].forEach(([selector, value]) => elements.set(selector, value));
 
   const context = {
@@ -374,6 +399,7 @@ function loadAppContext() {
       },
       querySelectorAll(selector) {
         if (selector === ".rail-action") return railActions;
+        if (selector === "[data-codex-provider-field]") return [codexProviderField];
         if (selector === "[data-claude-provider-field]") return [claudeProviderField];
         return [];
       },
@@ -3197,6 +3223,51 @@ async function testProjectAliasCanonicalizesBeforeAvailability() {
   assert.equal(result.menuActionDisabled, false, "attachment menu actions should stay enabled after alias resolution");
 }
 
+function testEmptyDashboardStateSurvivesStaleActiveProject() {
+  const app = loadAppContext();
+  const state = app.run(`
+    activeProjectId = "stale-project";
+    localStorage.setItem("coAutoResearchActiveProject", "stale-project");
+    appState = {
+      projects: [],
+      active_project_id: "stale-project",
+      multi_project: true,
+      files: { project: { text: "# Project\\n\\nReady." } },
+      framing: { messages: [], project_ready: false },
+      research_session: { id: "", session_id: "", status: "", mode: "", transcript: [] }
+    };
+    renderProjectList();
+    ({
+      noProjectsDashboard: noProjectsDashboard(),
+      hasNoProject: hasNoProject(),
+      projectList: document.querySelector("#project-list")?.innerHTML || "",
+      coldDisabled: Boolean(document.querySelector("#cold-file-editor")?.disabled),
+      coldValue: document.querySelector("#cold-file-editor")?.value || "",
+      coldPlaceholder: document.querySelector("#cold-file-editor")?.placeholder || "",
+      modelDisabled: Boolean(document.querySelector("#composer-model")?.disabled),
+      reasoningDisabled: Boolean(document.querySelector("#composer-reasoning")?.disabled),
+      title: document.querySelector("#chat-title")?.textContent || "",
+      eyebrow: document.querySelector("#chat-eyebrow")?.textContent || "",
+      sessionHidden: Boolean(document.querySelector("#session-pill")?.hidden),
+      storedActive: localStorage.getItem("coAutoResearchActiveProject")
+    });
+  `);
+  assert.equal(state.noProjectsDashboard, true, "empty multi-project dashboard should be recognized even with a stale active project id");
+  assert.equal(state.hasNoProject, true, "stale active project id should not count as an active project");
+  assert.equal(state.projectList.includes("data-create-first-project"), true, "empty sidebar must expose a first-project action");
+  assert.equal(state.projectList.includes("No projects yet."), true, "empty sidebar should explain the empty state");
+  assert.equal(state.projectList.includes("Create project"), true, "empty sidebar should make project creation obvious");
+  assert.equal(state.coldDisabled, true, "brief composer should be disabled until a project exists");
+  assert.equal(state.modelDisabled, true, "composer model should be disabled until a project exists");
+  assert.equal(state.reasoningDisabled, true, "composer reasoning should be disabled until a project exists");
+  assert.equal(state.coldValue, "", "stale project data must be cleared from the no-project composer");
+  assert.equal(state.coldPlaceholder, "Create a project first...");
+  assert.equal(state.title, "Create your first research project.");
+  assert.equal(state.eyebrow, "Projects");
+  assert.equal(state.sessionHidden, true);
+  assert.equal(state.storedActive, "stale-project", "rendering the empty dashboard should not rewrite user storage by itself");
+}
+
 function testAgentReadinessStatusBlocksLaunchUi() {
   const app = loadAppContext();
   const state = app.run(`
@@ -3230,6 +3301,165 @@ function testAgentReadinessStatusBlocksLaunchUi() {
   assert.equal(state.launchTone, "error");
   assert.equal(state.launchNote.includes("claude auth login"), true, "launch status should include Claude setup guidance");
   assert.equal(state.launchTitle.includes("claude auth login"), true, "disabled launch title should include provider-specific guidance");
+}
+
+function testAgentReadinessMatrixShowsActionableSetup() {
+  const app = loadAppContext();
+  const state = app.run(`
+    (() => {
+    const missingCodex = {
+      ok: false,
+      blocking: true,
+      installed: false,
+      auth: "missing",
+      message: "Codex CLI is not available. Install Codex CLI, verify codex --version, or set COAUTO_CODEX."
+    };
+    const codexAuthMissing = {
+      ok: false,
+      blocking: true,
+      installed: true,
+      auth: "missing",
+      login_command: "codex login",
+      auth_status_command: "codex login status",
+      message: "Codex is not authenticated."
+    };
+    const claudeAuthUnknown = {
+      ok: false,
+      blocking: true,
+      installed: true,
+      auth: "unknown",
+      auth_status_command: "claude auth status",
+      version: "claude 2.0.0",
+      message: "Claude Code authentication status could not be verified. Run claude auth status or update Claude Code CLI, then try again."
+    };
+    const readyClaude = {
+      ok: true,
+      blocking: false,
+      installed: true,
+      auth: "ok",
+      version: "claude 2.0.0",
+      message: "Claude Code CLI is installed and authenticated."
+    };
+    uiSettings = {
+      agent: { backend: "codex" },
+      codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "sonnet", reasoningEffort: "high", permissionPreset: "auto", provider: "external", webSearch: true, reviewCheckpointInterval: 100 },
+      agent_status: { selected: "codex", backends: { codex: missingCodex, claude: claudeAuthUnknown } }
+    };
+    renderAgentSetupCards();
+    renderAgentStatusNote("#project-agent-backend-note", "codex", "project");
+    const blockingGrid = document.querySelector("#agent-setup-grid")?.innerHTML || "";
+    const projectState = __agentStatusState();
+    const commands = {
+      missingCodex: agentSetupCommands("codex", missingCodex).map((item) => item.command),
+      codexAuthMissing: agentSetupCommands("codex", codexAuthMissing).map((item) => item.command),
+      claudeAuthUnknown: agentSetupCommands("claude", claudeAuthUnknown).map((item) => item.command),
+      readyClaude: agentSetupCommands("claude", readyClaude).map((item) => item.command),
+    };
+    const gateway = {
+      external: agentSetupGatewayText("claude", {}),
+      missing: agentSetupGatewayText("claude", { gateway: { base_url: "https://api.z.ai/api/anthropic", has_credential: false } }),
+      ready: agentSetupGatewayText("claude", { auth: "gateway", gateway: { complete: true, credential_key: "ANTHROPIC_AUTH_TOKEN" } }),
+    };
+
+    uiSettings = { ...uiSettings, agent_status: { selected: "codex", backends: { codex: codexAuthMissing, claude: readyClaude } } };
+    renderAgentSetupCards();
+    const authMissingGrid = document.querySelector("#agent-setup-grid")?.innerHTML || "";
+
+    return { blockingGrid, authMissingGrid, projectState, commands, gateway };
+    })()
+  `);
+  assertJsonEqual(state.commands.missingCodex, [
+    "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+    "codex --version",
+    "codex login",
+  ], "missing Codex should show install, verify, and login commands");
+  assertJsonEqual(state.commands.codexAuthMissing, ["codex login", "codex login status"], "auth-missing Codex should show login and auth check commands");
+  assertJsonEqual(state.commands.claudeAuthUnknown, ["claude auth status"], "auth-unknown Claude should only ask the user to check auth");
+  assertJsonEqual(state.commands.readyClaude, [], "ready backends should not show setup command rows");
+  assert.equal(state.blockingGrid.includes("Not detected"), true, "missing CLI should render a clear missing state");
+  assert.equal(state.blockingGrid.includes("Setup needed"), true, "auth-unknown CLI should block launch until the official status command works");
+  assert.equal(state.blockingGrid.includes("Auth: status check failed."), true, "auth-unknown CLI should tell the user the official status check failed");
+  assert.equal(state.blockingGrid.includes("https://developers.openai.com/codex/cli"), true, "Codex setup link should point at the official setup page");
+  assert.equal(state.blockingGrid.includes("https://code.claude.com/docs/en/iam"), true, "Claude login link should point at the official auth page");
+  assert.equal(state.authMissingGrid.includes("Use Claude Code"), true, "ready alternate backend should be directly selectable");
+  assert.equal(state.projectState.projectTone, "error", "blocked project backend note should use an error tone");
+  assert.equal(state.projectState.projectNote.includes("You can create the project"), true, "project creation should remain allowed while first run is blocked");
+  assert.equal(state.projectState.projectNote.includes("codex --version"), true, "project create note should show a verify command when the CLI is missing");
+  assert.equal(state.gateway.external, "Using existing Claude Code auth.");
+  assert.equal(state.gateway.missing, "Gateway missing credential.");
+  assert.equal(state.gateway.ready, "Gateway configured via ANTHROPIC_AUTH_TOKEN.");
+}
+
+function testLaunchBlockingStateMatrix() {
+  const app = loadAppContext();
+  const state = app.run(`
+    (() => {
+    const readyCodex = { ok: true, blocking: false, installed: true, auth: "ok", message: "Codex CLI is installed and authenticated." };
+    const blockedCodex = {
+      ok: false,
+      blocking: true,
+      installed: true,
+      auth: "missing",
+      message: "Codex is not authenticated. Run codex login and verify codex login status before starting a run.",
+      login_command: "codex login",
+      auth_status_command: "codex login status"
+    };
+    uiSettings = {
+      agent: { backend: "codex" },
+      codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+      claude: { model: "sonnet", reasoningEffort: "high", permissionPreset: "auto", provider: "external", webSearch: true, reviewCheckpointInterval: 100 },
+      agent_status: { selected: "codex", backends: { codex: readyCodex } }
+    };
+    applySessionSettings(uiSettings.codex, true);
+    prepareSaved = true;
+    appState.files.project.text = "# Project\\n\\nReady.";
+    const capture = () => ({
+      disabled: Boolean(document.querySelector("#launch-autoresearch")?.disabled),
+      title: document.querySelector("#launch-autoresearch")?.title || "",
+      text: document.querySelector("#launch-autoresearch")?.textContent || "",
+      note: document.querySelector("#launch-agent-status")?.innerHTML || "",
+      tone: document.querySelector("#launch-agent-status")?.dataset?.tone || ""
+    });
+
+    __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "framing", started_at: "2026-06-17T10:00:00.000Z", gate: { status: "continue" }, transcript: [] });
+    __renderStageImpl();
+    const ready = capture();
+
+    __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "goal", started_at: "2026-06-17T10:00:00.000Z", gate: { status: "pass" }, transcript: [] });
+    __renderStageImpl();
+    const gatePassed = capture();
+
+    __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "framing", started_at: "2026-06-17T10:00:00.000Z", gate: { status: "continue" }, transcript: [] });
+    pendingResourceImports.splice(0, pendingResourceImports.length, { id: "copy-1", name: "large.pdf", status: "copying", category: "papers" });
+    __renderStageImpl();
+    const resourceCopying = capture();
+
+    pendingResourceImports.splice(0, pendingResourceImports.length);
+    uiSettings = { ...uiSettings, agent_status: { selected: "codex", backends: { codex: blockedCodex } } };
+    __renderStageImpl();
+    const blockedAgent = capture();
+
+    __setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", gate: { status: "continue" }, transcript: [] });
+    uiSettings = { ...uiSettings, agent_status: { selected: "codex", backends: { codex: readyCodex } } };
+    __renderStageImpl();
+    const running = capture();
+
+    return { ready, gatePassed, resourceCopying, blockedAgent, running };
+    })()
+  `);
+  assert.equal(state.ready.disabled, false, "ready prepared project should enable launch");
+  assert.equal(state.ready.title, "Run the autoresearch loop until strict reviewer gates pass.");
+  assert.equal(state.gatePassed.disabled, true, "passed final gate should disable launch");
+  assert.equal(state.gatePassed.text, "Reviewer gates passed");
+  assert.equal(state.gatePassed.title, "All reviewer gates have passed.");
+  assert.equal(state.resourceCopying.disabled, true, "resource import should block launch");
+  assert.equal(state.resourceCopying.title, "Wait for resource copy to finish before continuing.");
+  assert.equal(state.blockedAgent.disabled, true, "agent readiness should block launch");
+  assert.equal(state.blockedAgent.tone, "error");
+  assert.equal(state.blockedAgent.title.includes("codex login"), true, "blocked launch title should be actionable");
+  assert.equal(state.blockedAgent.note.includes("codex login status"), true, "blocked launch note should include auth check guidance");
+  assert.equal(state.running.disabled, true, "running sessions should block starting another launch");
 }
 
 function testEnvForcedBackendStatusMessage() {
@@ -3352,6 +3582,102 @@ async function testSettingsModalSaveSyncsScopedSessionSettings() {
   assert.equal(state.composerReasoning, "low", "Settings save should sync the composer reasoning");
   assert.equal(state.formPermission, "full-access", "Settings save should sync launch/session form values");
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/settings");
+}
+
+async function testApiKeyProviderSettingsPayloads() {
+  const app = loadAppContext();
+  const state = await app.run(`
+    (async () => {
+      uiSettings = {
+        agent: { backend: "codex" },
+        codex: { provider: "cli", model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
+        claude: { model: "sonnet", reasoningEffort: "high", permissionPreset: "auto", provider: "external", webSearch: true, reviewCheckpointInterval: 100 },
+        codex_env: { present: {}, values: {} },
+        claude_env: { present: {}, values: {} },
+        agent_status: { selected: "codex", backends: {} }
+      };
+      const form = document.querySelector("#settings-form");
+      form.querySelector = () => null;
+      hydrateSettingsDialog(uiSettings);
+
+      form.elements.settingsBackend.value = "codex";
+      form.elements.settingsCodexProvider.value = "openai_api_key";
+      hydrateCodexProviderSettings(uiSettings, "codex", "openai_api_key");
+      form.elements.settingsCodexApiKey.value = "sk-openai-test";
+      globalThis.__apiResponse = {
+        settings: {
+          ...uiSettings,
+          codex: { ...uiSettings.codex, provider: "openai_api_key" },
+          codex_env: { present: { OPENAI_API_KEY: true }, masked: { OPENAI_API_KEY: "Saved" }, values: {} }
+        },
+        secret_keys: []
+      };
+      await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
+      const codexCall = globalThis.__apiCalls[0];
+      const codexStatus = document.querySelector("#settings-codex-api-key-status").textContent;
+      const codexInputAfterSave = form.elements.settingsCodexApiKey.value;
+      const codexClearHidden = document.querySelector("#settings-codex-api-key-clear").hidden;
+
+      form.elements.settingsBackend.value = "claude";
+      switchSettingsBackend("claude");
+      form.elements.settingsClaudeProvider.value = "anthropic_api_key";
+      hydrateClaudeProviderSettings(uiSettings, "claude", "anthropic_api_key");
+      form.elements.settingsClaudeApiKey.value = "sk-ant-test";
+      globalThis.__apiResponse = {
+        settings: {
+          ...uiSettings,
+          agent: { backend: "claude" },
+          codex: { ...uiSettings.codex, provider: "openai_api_key" },
+          codex_env: { present: { OPENAI_API_KEY: true }, masked: { OPENAI_API_KEY: "Saved" }, values: {} },
+          claude: { ...uiSettings.claude, provider: "anthropic_api_key" },
+          claude_env: { present: { ANTHROPIC_API_KEY: true }, masked: { ANTHROPIC_API_KEY: "Saved" }, values: {} }
+        },
+        secret_keys: []
+      };
+      await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
+      const claudeCall = globalThis.__apiCalls[1];
+      const claudeStatus = document.querySelector("#settings-claude-api-key-status").textContent;
+      const claudeInputAfterSave = form.elements.settingsClaudeApiKey.value;
+      const gatewayHidden = document.querySelector("#claude-gateway-settings").hidden;
+      const apiPanelHidden = document.querySelector("#claude-api-key-settings").hidden;
+
+      globalThis.__apiResponse = {
+        settings: {
+          ...uiSettings,
+          codex: { ...uiSettings.codex, provider: "openai_api_key" },
+          codex_env: { present: {}, masked: {}, values: {} }
+        },
+        secret_keys: []
+      };
+      await clearSavedCodexSecret("OPENAI_API_KEY");
+      const clearCall = globalThis.__apiCalls[2];
+      return {
+        codexCall,
+        codexStatus,
+        codexInputAfterSave,
+        codexClearHidden,
+        claudeCall,
+        claudeStatus,
+        claudeInputAfterSave,
+        gatewayHidden,
+        apiPanelHidden,
+        clearCall
+      };
+    })()
+  `);
+  assert.equal(state.codexCall.body.codex.provider, "openai_api_key");
+  assert.equal(state.codexCall.body.codex_env.OPENAI_API_KEY, "sk-openai-test");
+  assert.equal(state.codexStatus, "OpenAI API key saved");
+  assert.equal(state.codexInputAfterSave, "", "saved Codex API key must not be echoed into the input");
+  assert.equal(state.codexClearHidden, false, "saved Codex API key should expose a clear action");
+  assert.equal(state.claudeCall.body.claude.provider, "anthropic_api_key");
+  assert.equal(state.claudeCall.body.claude_env.ANTHROPIC_API_KEY, "sk-ant-test");
+  assert.equal(state.claudeCall.body.claude_env.ANTHROPIC_BASE_URL, undefined);
+  assert.equal(state.claudeStatus, "Anthropic API key saved");
+  assert.equal(state.claudeInputAfterSave, "", "saved Claude API key must not be echoed into the input");
+  assert.equal(state.gatewayHidden, true, "official Anthropic API key provider should not show gateway fields");
+  assert.equal(state.apiPanelHidden, false, "official Anthropic API key provider should show API key field");
+  assert.equal(JSON.stringify(state.clearCall.body.clear_codex_env), JSON.stringify(["OPENAI_API_KEY"]));
 }
 
 async function testClaudeGatewaySettingsPayload() {
@@ -3585,6 +3911,32 @@ async function testInitialRuntimePreflightFlow() {
   assert.equal(state.existingProject.projectOpenCount, 0, "existing projects should not trigger first-run create dialog");
   assert.equal(state.existingProject.setupOpen, false);
   assert.equal(state.gatewayReady, true, "Claude gateway-ready status should be rendered");
+}
+
+function testSettingsLayoutAndLinkContracts() {
+  const styles = sourceText("templates/default/ui/styles.css");
+  const appJs = sourceText("templates/default/ui/app.js");
+  const indexHtml = sourceText("templates/default/ui/index.html");
+  const docLinkRule = styles.match(/\.settings-doc-links a\s*\{[^}]+\}/)?.[0] || "";
+  const settingsSmallRule = styles.match(/\.settings-content \.field small\s*\{[^}]+\}/)?.[0] || "";
+  const settingsGridRule = styles.match(/\.modal-settings-grid\s*\{[^}]+\}/)?.[0] || "";
+  const mobileSettingsGrid = styles.match(/@media \(max-width: 900px\)[\s\S]+?\.modal-settings-grid\s*\{[^}]+grid-template-columns: 1fr;[\s\S]+?\}/)?.[0] || "";
+
+  assert.equal(indexHtml.includes('id="settings-doc-links"'), true, "settings header should expose a docs link region");
+  assert.equal(appJs.includes("function syncBackendDocLinks"), true, "settings docs links should be updated from the active backend");
+  assert.equal(appJs.includes("https://developers.openai.com/codex/cli"), true, "Codex setup link should remain available");
+  assert.equal(appJs.includes("https://code.claude.com/docs/en/quickstart"), true, "Claude setup link should remain available");
+  assert.equal(docLinkRule.includes("text-decoration: underline"), true, "settings doc actions should look like plain links");
+  assert.equal(docLinkRule.includes("border"), false, "settings doc links must not be styled as buttons");
+  assert.equal(docLinkRule.includes("border-radius"), false, "settings doc links must not be rounded button chips");
+  assert.equal(docLinkRule.includes("min-height"), false, "settings doc links should not reserve button-like height");
+  assert.equal(settingsGridRule.includes("grid-template-columns: repeat(2, minmax(0, 1fr))"), true, "desktop settings form should use an aligned two-column grid");
+  assert.equal(settingsGridRule.includes("align-items: start"), true, "settings form controls should top-align across columns");
+  assert.equal(settingsSmallRule.includes("text-transform: none"), true, "settings help text should stay readable sentence text");
+  assert.equal(settingsSmallRule.includes("letter-spacing: 0"), true, "settings help text should not use spaced-out labels");
+  assert.ok(mobileSettingsGrid, "settings form should collapse to one column on narrow screens");
+  assert.equal(styles.includes(".settings-content .modal-settings-grid > .toggle-field"), true, "toggle rows need explicit vertical alignment in the settings grid");
+  assert.equal(styles.includes("[data-codex-provider-field][hidden]"), true, "Codex provider field should hide cleanly when Claude settings are active");
 }
 
 function testProjectScopedComposerDraftAndTargetVenueRestore() {
@@ -4551,13 +4903,18 @@ testAgentBackendSelectorPersistsProviderSettings();
 testReasoningOptionsFollowBackendModel();
 await testProjectCreateSendsBackendAndLoadsProjectDefault();
 await testProjectAliasCanonicalizesBeforeAvailability();
+testEmptyDashboardStateSurvivesStaleActiveProject();
 testAgentReadinessStatusBlocksLaunchUi();
+testAgentReadinessMatrixShowsActionableSetup();
+testLaunchBlockingStateMatrix();
 testEnvForcedBackendStatusMessage();
 testInvalidEnvBackendStatusWarning();
 testProviderSpecificResumeCommand();
 await testSettingsModalSaveSyncsScopedSessionSettings();
+await testApiKeyProviderSettingsPayloads();
 await testClaudeGatewaySettingsPayload();
 await testInitialRuntimePreflightFlow();
+testSettingsLayoutAndLinkContracts();
 testProjectScopedComposerDraftAndTargetVenueRestore();
 testThemeModePersistsAndApplies();
 testTargetVenueUsesOnlyProjectScopedDraft();

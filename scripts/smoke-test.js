@@ -200,7 +200,7 @@ async function writeFakeCodexBin(directory) {
   );
   await fsp.writeFile(
     cmdClaude,
-    "@echo off\r\nif \"%1\"==\"auth\" if \"%2\"==\"status\" (echo Authenticated& exit /b 0)\r\necho claude fake 0.0.0\r\n",
+    "@echo off\r\nif \"%1\"==\"auth\" if \"%2\"==\"status\" (echo {\"authenticated\":true}& exit /b 0)\r\necho claude fake 0.0.0\r\n",
     "utf8"
   );
   await fsp.writeFile(cmdCloudflared, "@echo off\r\necho cloudflared fake 0.0.0\r\n", "utf8");
@@ -217,7 +217,7 @@ async function writeFakeCodexBin(directory) {
     );
     await fsp.writeFile(
       shellClaude,
-      "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then echo Authenticated; exit 0; fi\necho claude fake 0.0.0\n",
+      "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then printf '%s\\n' '{\"authenticated\":true}'; exit 0; fi\necho claude fake 0.0.0\n",
       "utf8"
     );
     await fsp.writeFile(shellCloudflared, "#!/bin/sh\necho cloudflared fake 0.0.0\n", "utf8");
@@ -781,13 +781,15 @@ async function writeFakeAuthFailureBin(directory, backend) {
   const name = backend === "claude" ? "claude" : "codex";
   const cmd = path.join(directory, `${name}.cmd`);
   const authArgs = backend === "claude" ? 'if "%1"=="auth" if "%2"=="status"' : 'if "%1"=="login" if "%2"=="status"';
-  await fsp.writeFile(cmd, `@echo off\r\n${authArgs} (echo Not authenticated& exit /b 1)\r\necho ${name} fake 0.0.0\r\n`, "utf8");
+  const authFailureOutput = backend === "claude" ? "{\"authenticated\":false}" : "No credentials";
+  await fsp.writeFile(cmd, `@echo off\r\n${authArgs} (echo ${authFailureOutput}& exit /b 1)\r\necho ${name} fake 0.0.0\r\n`, "utf8");
   if (process.platform !== "win32") {
     const shell = path.join(directory, name);
     const authTest = backend === "claude"
       ? '[ "$1" = "auth" ] && [ "$2" = "status" ]'
       : '[ "$1" = "login" ] && [ "$2" = "status" ]';
-    await fsp.writeFile(shell, `#!/bin/sh\nif ${authTest}; then echo Not authenticated; exit 1; fi\necho ${name} fake 0.0.0\n`, "utf8");
+    const shellAuthFailureOutput = backend === "claude" ? "printf '%s\\n' '{\"authenticated\":false}'" : "echo No credentials";
+    await fsp.writeFile(shell, `#!/bin/sh\nif ${authTest}; then ${shellAuthFailureOutput}; exit 1; fi\necho ${name} fake 0.0.0\n`, "utf8");
     await fsp.chmod(shell, 0o755);
     await fsp.chmod(cmd, 0o755);
   }
@@ -802,7 +804,7 @@ async function writeFakeClaudePermissionBin(directory, modes) {
     cmd,
     [
       "@echo off",
-      "if \"%1\"==\"auth\" if \"%2\"==\"status\" (echo Authenticated& exit /b 0)",
+      "if \"%1\"==\"auth\" if \"%2\"==\"status\" (echo {\"authenticated\":true}& exit /b 0)",
       "if \"%1\"==\"--help\" goto help",
       "echo claude fake 0.0.0",
       "exit /b 0",
@@ -820,7 +822,7 @@ async function writeFakeClaudePermissionBin(directory, modes) {
       shell,
       [
         "#!/bin/sh",
-        "if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then echo Authenticated; exit 0; fi",
+        "if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then printf '%s\\n' '{\"authenticated\":true}'; exit 0; fi",
         `if [ "$1" = "--help" ]; then printf '%s\\n' ${JSON.stringify(help)}; exit 0; fi`,
         "echo claude fake 0.0.0",
         "",
@@ -1930,6 +1932,40 @@ Confidence: medium
   ) {
     throw new Error("manuscript panel must render a self-contained architecture blueprint with inline artifact blocks, provenance, and copy/open controls");
   }
+  const settingsDocLinkRule = stylesCss.match(/\.settings-doc-links a\s*\{[^}]+\}/)?.[0] || "";
+  const settingsSmallRule = stylesCss.match(/\.settings-content \.field small\s*\{[^}]+\}/)?.[0] || "";
+  const settingsGridRule = stylesCss.match(/\.modal-settings-grid\s*\{[^}]+\}/)?.[0] || "";
+  if (
+    !indexHtml.includes('id="agent-setup-dialog"') ||
+    !indexHtml.includes('id="project-agent-backend-note"') ||
+    !indexHtml.includes('id="settings-doc-links"') ||
+    !appJs.includes("function runInitialPreflightFlow") ||
+    !appJs.includes("function maybeShowAgentSetupDialog") ||
+    !appJs.includes("function agentSetupCommands") ||
+    !appJs.includes("function agentSetupCommandRowsHtml") ||
+    !appJs.includes("function syncBackendDocLinks") ||
+    !appJs.includes("function launchBlockingStatus") ||
+    !appJs.includes("function startOptimisticAutoresearchSession") ||
+    !appJs.includes("function openResumeAutoresearchDialog") ||
+    !appJs.includes("function confirmRestartAutoresearch") ||
+    !appJs.includes("Remove the Continue from Trial chip before sending a slash command") ||
+    !appJs.includes("https://developers.openai.com/codex/cli") ||
+    !appJs.includes("https://code.claude.com/docs/en/quickstart") ||
+    !stylesCss.includes(".agent-setup-command-row") ||
+    !stylesCss.includes(".modal-settings-grid") ||
+    !stylesCss.includes(".settings-doc-callout") ||
+    !settingsGridRule.includes("grid-template-columns: repeat(2, minmax(0, 1fr))") ||
+    !settingsGridRule.includes("align-items: start") ||
+    !settingsSmallRule.includes("text-transform: none") ||
+    !settingsSmallRule.includes("letter-spacing: 0") ||
+    !settingsDocLinkRule.includes("text-decoration: underline") ||
+    settingsDocLinkRule.includes("border") ||
+    settingsDocLinkRule.includes("border-radius") ||
+    settingsDocLinkRule.includes("min-height") ||
+    !/@media \(max-width: 900px\)[\s\S]+?\.modal-settings-grid\s*\{[^}]+grid-template-columns: 1fr;/.test(stylesCss)
+  ) {
+    throw new Error("UI setup/readiness, settings layout, and autoresearch lifecycle controls must keep their checklist coverage contracts");
+  }
   if (
     !blueprintTemplate.includes("Section brief:") ||
     !blueprintTemplate.includes("Reader takeaway:") ||
@@ -2216,6 +2252,13 @@ Confidence: medium
       "claude_ok = module.agent_setup_status('claude', ok_env)",
       "assert codex_ok['ok'] and codex_ok['auth'] == 'ok', codex_ok",
       "assert claude_ok['ok'] and claude_ok['auth'] == 'ok', claude_ok",
+      "assert module.auth_probe_status('codex', {'ok': True, 'returncode': 0, 'output': 'API key'}) == 'ok'",
+      "assert module.auth_probe_status('codex', {'ok': False, 'returncode': 1, 'output': 'No credentials'}) == 'missing'",
+      "assert module.auth_probe_status('codex', {'ok': False, 'returncode': 2, 'output': 'unknown subcommand login status'}) == 'unknown'",
+      "assert module.auth_probe_status('claude', {'ok': True, 'returncode': 0, 'output': '{\"authenticated\": true}'}) == 'ok'",
+      "assert module.auth_probe_status('claude', {'ok': False, 'returncode': 1, 'output': '{\"authenticated\": false}'}) == 'missing'",
+      "assert module.auth_probe_status('claude', {'ok': True, 'returncode': 0, 'output': '{\"status\": \"unauthenticated\"}'}) == 'missing'",
+      "assert module.auth_probe_status('claude', {'ok': True, 'returncode': 0, 'output': '{\"status\": \"authenticated\"}'}) == 'ok'",
       "no_auto_env = dict(os.environ, PATH=os.environ['COAUTO_CLAUDE_NO_AUTO_PATH'], COAUTO_CLAUDE='', CLAUDE_BIN='')",
       "no_auto = module.claude_permission_mode_status({'permissionPreset': 'auto-review'}, no_auto_env)",
       "assert no_auto['blocking'] and no_auto['mode'] == 'auto', no_auto",
@@ -2230,10 +2273,62 @@ Confidence: medium
       "    assert 'permission mode `auto`' in str(exc), str(exc)",
       "missing = module.agent_setup_status('codex', dict(os.environ, PATH='', COAUTO_CODEX='', CODEX_BIN=''))",
       "assert missing['blocking'] and 'COAUTO_CODEX' in missing['message'], missing",
+      "assert missing['version_command'] == 'codex --version', missing",
+      "assert missing['login_command'] == 'codex login', missing",
+      "assert missing['auth_status_command'] == 'codex login status', missing",
+      "assert 'COAUTO_CODEX' in missing['env_vars'] and 'CODEX_BIN' in missing['env_vars'], missing",
       "codex_auth = module.agent_setup_status('codex', dict(os.environ, PATH=os.environ['COAUTO_CODEX_FAIL_PATH'], COAUTO_CODEX='', CODEX_BIN=''))",
       "assert codex_auth['blocking'] and 'codex login' in codex_auth['message'], codex_auth",
+      "assert codex_auth['login_command'] == 'codex login' and codex_auth['auth_status_command'] == 'codex login status', codex_auth",
       "claude_auth = module.agent_setup_status('claude', dict(os.environ, PATH=os.environ['COAUTO_CLAUDE_FAIL_PATH'], COAUTO_CLAUDE='', CLAUDE_BIN=''))",
       "assert claude_auth['blocking'] and 'claude auth login' in claude_auth['message'], claude_auth",
+      "assert claude_auth['version_command'] == 'claude --version', claude_auth",
+      "assert claude_auth['login_command'] == 'claude auth login' and claude_auth['auth_status_command'] == 'claude auth status', claude_auth",
+      "assert 'COAUTO_CLAUDE' in claude_auth['env_vars'] and 'CLAUDE_BIN' in claude_auth['env_vars'], claude_auth",
+      "old_resolve = module.resolve_agent_executable",
+      "old_probe = module.run_agent_probe",
+      "try:",
+      "    module.resolve_agent_executable = lambda backend, process_env=None: 'codex'",
+      "    def unknown_probe(executable, args, env=None, timeout=6.0):",
+      "        if args == ['--version']:",
+      "            return {'ok': True, 'returncode': 0, 'output': 'codex fake 0.0.0', 'error': '', 'timeout': False}",
+      "        return {'ok': False, 'returncode': 2, 'output': 'unknown subcommand login status', 'error': '', 'timeout': False}",
+      "    module.run_agent_probe = unknown_probe",
+      "    codex_unknown = module.agent_setup_status('codex', dict(os.environ, PATH=os.environ['COAUTO_FAKE_PATH'], COAUTO_CODEX='', CODEX_BIN=''))",
+      "    assert codex_unknown['blocking'] and codex_unknown['auth'] == 'unknown' and 'could not be verified' in codex_unknown['message'], codex_unknown",
+      "finally:",
+      "    module.resolve_agent_executable = old_resolve",
+      "    module.run_agent_probe = old_probe",
+      "old_resolve = module.resolve_agent_executable",
+      "old_probe = module.run_agent_probe",
+      "try:",
+      "    module.resolve_agent_executable = lambda backend, *args, **kwargs: backend",
+      "    api_probe_calls = []",
+      "    def api_provider_probe(executable, args, env=None, timeout=6.0):",
+      "        api_probe_calls.append(tuple(args))",
+      "        if args == ['--version']:",
+      "            return {'ok': True, 'returncode': 0, 'output': f'{executable} 1.0.0', 'error': '', 'timeout': False}",
+      "        return {'ok': False, 'returncode': 1, 'output': 'No credentials', 'error': '', 'timeout': False}",
+      "    module.run_agent_probe = api_provider_probe",
+      "    context.ui_settings_path.write_text(json.dumps({'agent': {'backend': 'codex'}, 'codex': {'provider': 'openai_api_key'}, 'claude': {'provider': 'external'}, 'env': {}, 'codex_env': {}, 'claude_env': {}}), encoding='utf-8')",
+      "    api_probe_calls.clear()",
+      "    codex_api = module.agent_setup_status('codex', dict(os.environ, OPENAI_API_KEY='sk-openai-test'))",
+      "    assert codex_api['ok'] and codex_api['auth'] == 'api_key' and ('login', 'status') not in api_probe_calls, (codex_api, api_probe_calls)",
+      "    codex_api_missing = module.agent_setup_status('codex', dict(os.environ, OPENAI_API_KEY=''))",
+      "    assert codex_api_missing['blocking'] and 'OpenAI API key' in codex_api_missing['message'], codex_api_missing",
+      "    context.ui_settings_path.write_text(json.dumps({'agent': {'backend': 'claude'}, 'codex': {'provider': 'cli'}, 'claude': {'provider': 'anthropic_api_key'}, 'env': {}, 'codex_env': {}, 'claude_env': {}}), encoding='utf-8')",
+      "    api_probe_calls.clear()",
+      "    claude_api = module.agent_setup_status('claude', dict(os.environ, ANTHROPIC_API_KEY='sk-ant-test'))",
+      "    assert claude_api['ok'] and claude_api['auth'] == 'api_key' and ('auth', 'status') not in api_probe_calls, (claude_api, api_probe_calls)",
+      "    claude_api_missing = module.agent_setup_status('claude', dict(os.environ, ANTHROPIC_API_KEY=''))",
+      "    assert claude_api_missing['blocking'] and 'Anthropic API key' in claude_api_missing['message'], claude_api_missing",
+      "    context.ui_settings_path.write_text(json.dumps({'agent': {'backend': 'claude'}, 'codex': {'provider': 'cli'}, 'claude': {'provider': 'custom_anthropic'}, 'env': {}, 'codex_env': {}, 'claude_env': {'ANTHROPIC_BASE_URL': 'https://gateway.example'}}), encoding='utf-8')",
+      "    custom_missing = module.agent_setup_status('claude', dict(os.environ, ANTHROPIC_BASE_URL='', ANTHROPIC_AUTH_TOKEN='', ANTHROPIC_API_KEY=''))",
+      "    assert custom_missing['blocking'] and 'base URL and credential' in custom_missing['message'], custom_missing",
+      "finally:",
+      "    module.resolve_agent_executable = old_resolve",
+      "    module.run_agent_probe = old_probe",
+      "context.ui_settings_path.write_text(json.dumps({'agent': {'backend': 'claude'}, 'codex': {'provider': 'cli'}, 'claude': {'provider': 'external'}, 'env': {}, 'codex_env': {}, 'claude_env': {}}), encoding='utf-8')",
       "gateway_env = dict(os.environ, PATH=os.environ['COAUTO_CLAUDE_FAIL_PATH'], COAUTO_CLAUDE='', CLAUDE_BIN='', ANTHROPIC_BASE_URL='https://api.z.ai/api/anthropic', ANTHROPIC_AUTH_TOKEN='zai-test')",
       "claude_gateway = module.agent_setup_status('claude', gateway_env)",
       "assert claude_gateway['ok'] and not claude_gateway['blocking'] and claude_gateway['auth'] == 'gateway', claude_gateway",
@@ -2302,6 +2397,19 @@ Confidence: medium
       "context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
       "module._CONTEXT.project = context",
       "context.ui_settings_path.parent.mkdir(parents=True, exist_ok=True)",
+      "saved_response = module.save_ui_settings({'agent': {'backend': 'codex'}, 'codex': {'provider': 'openai_api_key'}, 'claude': {'provider': 'anthropic_api_key'}, 'env': {}, 'codex_env': {'OPENAI_API_KEY': 'ui-openai-secret'}, 'claude_env': {'ANTHROPIC_API_KEY': 'ui-anthropic-secret'}})",
+      "saved_text = json.dumps(saved_response)",
+      "assert saved_response['codex']['provider'] == 'openai_api_key', saved_response",
+      "assert saved_response['codex_env']['present']['OPENAI_API_KEY'], saved_response",
+      "assert saved_response['claude_env']['present']['ANTHROPIC_API_KEY'], saved_response",
+      "assert 'ui-openai-secret' not in saved_text and 'ui-anthropic-secret' not in saved_text, saved_response",
+      "api_codex_env = module.agent_process_env('codex')",
+      "api_claude_env = module.agent_process_env('claude')",
+      "assert api_codex_env.get('OPENAI_API_KEY') == 'ui-openai-secret' and 'ANTHROPIC_API_KEY' not in api_codex_env, api_codex_env",
+      "assert api_claude_env.get('ANTHROPIC_API_KEY') == 'ui-anthropic-secret' and 'OPENAI_API_KEY' not in api_claude_env and 'ANTHROPIC_BASE_URL' not in api_claude_env, api_claude_env",
+      "context.ui_settings_path.write_text(json.dumps({'agent': {'backend': 'codex'}, 'codex': {'provider': 'cli'}, 'codex_env': {'OPENAI_API_KEY': 'ui-openai-secret'}, 'claude': {'provider': 'external'}, 'env': {}, 'claude_env': {}}), encoding='utf-8')",
+      "cli_codex_env = module.agent_process_env('codex')",
+      "assert 'OPENAI_API_KEY' not in cli_codex_env and 'ANTHROPIC_API_KEY' not in cli_codex_env, cli_codex_env",
       "context.ui_settings_path.write_text(json.dumps({'agent': {'backend': 'codex'}, 'codex': {}, 'claude': {'provider': 'zai_glm'}, 'env': {}, 'claude_env': {'ANTHROPIC_AUTH_TOKEN': 'ui-zai-test'}}), encoding='utf-8')",
       "codex_env = module.agent_process_env('codex')",
       "claude_env = module.agent_process_env('claude')",

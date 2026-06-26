@@ -5791,6 +5791,7 @@ body.is-dragging-file .composer {
 }
 
 .claude-gateway-settings[hidden],
+[data-codex-provider-field][hidden],
 [data-claude-provider-field][hidden] {
   display: none;
 }

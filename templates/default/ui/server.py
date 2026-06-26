@@ -1671,6 +1671,7 @@ def current_ui_settings_path() -> Path:
         return dashboard_runtime_dir() / "settings.json"
 
 DEFAULT_CODEX_SETTINGS = {
+    "provider": "cli",
     "model": "gpt-5.5",
     "reasoningEffort": "medium",
     "permissionPreset": "default",
@@ -1701,7 +1702,13 @@ SECRET_ENV_KEYS = [
     "GITHUB_TOKEN",
     "HF_TOKEN",
 ]
-ALLOWED_CLAUDE_PROVIDERS = {"external", "zai_glm", "custom_anthropic"}
+ALLOWED_CODEX_PROVIDERS = {"cli", "openai_api_key"}
+CODEX_ENV_KEYS = [
+    "OPENAI_API_KEY",
+]
+CODEX_SECRET_ENV_KEYS = {"OPENAI_API_KEY"}
+CODEX_NONSECRET_ENV_KEYS = [key for key in CODEX_ENV_KEYS if key not in CODEX_SECRET_ENV_KEYS]
+ALLOWED_CLAUDE_PROVIDERS = {"external", "anthropic_api_key", "zai_glm", "custom_anthropic"}
 CLAUDE_ENV_KEYS = [
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
@@ -1771,9 +1778,37 @@ def normalize_agent_backend(value: Any = "") -> str:
     return backend if backend in ALLOWED_AGENT_BACKENDS else DEFAULT_AGENT_SETTINGS["backend"]
 
 
+def normalize_codex_provider(value: Any = "") -> str:
+    provider = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "openai": "openai_api_key",
+        "api_key": "openai_api_key",
+        "openai_key": "openai_api_key",
+    }
+    provider = aliases.get(provider, provider)
+    return provider if provider in ALLOWED_CODEX_PROVIDERS else DEFAULT_CODEX_SETTINGS["provider"]
+
+
 def normalize_claude_provider(value: Any = "") -> str:
     provider = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "anthropic": "anthropic_api_key",
+        "api_key": "anthropic_api_key",
+        "gateway": "custom_anthropic",
+        "custom": "custom_anthropic",
+    }
+    provider = aliases.get(provider, provider)
     return provider if provider in ALLOWED_CLAUDE_PROVIDERS else DEFAULT_CLAUDE_SETTINGS["provider"]
+
+
+def normalize_codex_env_values(payload: Any) -> dict[str, str]:
+    values = payload if isinstance(payload, dict) else {}
+    normalized: dict[str, str] = {}
+    for key in CODEX_ENV_KEYS:
+        value = str(values.get(key) or "").strip()
+        if value:
+            normalized[key] = value
+    return normalized
 
 
 def normalize_claude_env_values(payload: Any) -> dict[str, str]:
@@ -1786,9 +1821,17 @@ def normalize_claude_env_values(payload: Any) -> dict[str, str]:
     return normalized
 
 
+def codex_env_for_provider(provider: Any, values: Any = None) -> dict[str, str]:
+    if normalize_codex_provider(provider) != "openai_api_key":
+        return {}
+    return normalize_codex_env_values(values)
+
+
 def claude_env_for_provider(provider: Any, values: Any = None) -> dict[str, str]:
     normalized_provider = normalize_claude_provider(provider)
     env = normalize_claude_env_values(values)
+    if normalized_provider == "anthropic_api_key":
+        return {key: value for key, value in env.items() if key == "ANTHROPIC_API_KEY"}
     if normalized_provider == "zai_glm":
         merged = dict(ZAI_GLM_CLAUDE_ENV_DEFAULTS)
         merged.update(env)
@@ -1929,6 +1972,8 @@ def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -
         if key == "model":
             model = str(values[key]).strip()
             settings[key] = model if model in ALLOWED_CODEX_MODELS else settings.get("model") or DEFAULT_CODEX_SETTINGS["model"]
+        elif key == "provider":
+            settings[key] = normalize_codex_provider(values[key])
         elif key == "approvalPolicy":
             approval = str(values[key]).strip()
             settings[key] = approval if approval in ALLOWED_APPROVAL_POLICIES else settings.get("approvalPolicy") or DEFAULT_CODEX_SETTINGS["approvalPolicy"]
@@ -2005,6 +2050,7 @@ def default_ui_settings_payload(backend: Any = "") -> dict[str, Any]:
         "codex": normalize_codex_settings({}),
         "claude": normalize_claude_settings({}),
         "env": {},
+        "codex_env": {},
         "claude_env": {},
     }
 
@@ -2208,6 +2254,7 @@ def load_ui_settings() -> dict[str, Any]:
         "codex": normalize_codex_settings({}),
         "claude": normalize_claude_settings({}),
         "env": {},
+        "codex_env": {},
         "claude_env": {},
     }
     settings_path = current_ui_settings_path()
@@ -2230,9 +2277,23 @@ def load_ui_settings() -> dict[str, Any]:
         settings["claude"] = normalize_claude_settings(payload["claude"], settings["claude"])
     if isinstance(payload.get("env"), dict):
         settings["env"] = {key: str(value) for key, value in payload["env"].items() if key in SECRET_ENV_KEYS and str(value)}
+    if isinstance(payload.get("codex_env"), dict):
+        settings["codex_env"] = normalize_codex_env_values(payload["codex_env"])
     if isinstance(payload.get("claude_env"), dict):
         settings["claude_env"] = normalize_claude_env_values(payload["claude_env"])
     return settings
+
+
+def public_codex_env(settings: dict[str, Any]) -> dict[str, Any]:
+    env = normalize_codex_env_values(settings.get("codex_env", {}))
+    return {
+        "provider": normalize_codex_provider(settings.get("codex", {}).get("provider")),
+        "present": {key: bool(env.get(key)) for key in CODEX_ENV_KEYS},
+        "masked": {key: ("Saved" if env.get(key) else "") for key in CODEX_SECRET_ENV_KEYS},
+        "values": {key: env.get(key, "") for key in CODEX_NONSECRET_ENV_KEYS},
+        "secret_keys": sorted(CODEX_SECRET_ENV_KEYS),
+        "keys": CODEX_ENV_KEYS,
+    }
 
 
 def public_claude_env(settings: dict[str, Any]) -> dict[str, Any]:
@@ -2254,6 +2315,7 @@ def public_ui_settings() -> dict[str, Any]:
         "agent": settings["agent"],
         "codex": settings["codex"],
         "claude": settings["claude"],
+        "codex_env": public_codex_env(settings),
         "claude_env": public_claude_env(settings),
         "env_present": {key: bool(settings["env"].get(key)) for key in SECRET_ENV_KEYS},
         "env_masked": {key: ("Saved" if settings["env"].get(key) else "") for key in SECRET_ENV_KEYS},
@@ -2281,6 +2343,17 @@ def save_ui_settings(payload: dict[str, Any]) -> dict[str, Any]:
         if key in SECRET_ENV_KEYS and str(value).strip():
             merged_env[key] = str(value).strip()
 
+    codex_env_values = payload.get("codex_env") if isinstance(payload.get("codex_env"), dict) else {}
+    merged_codex_env = dict(current.get("codex_env", {}))
+    for key in payload.get("clear_codex_env", []) if isinstance(payload.get("clear_codex_env"), list) else []:
+        if key in CODEX_ENV_KEYS:
+            merged_codex_env.pop(key, None)
+    for key, value in codex_env_values.items():
+        if key in CODEX_ENV_KEYS:
+            text = str(value).strip()
+            if text:
+                merged_codex_env[key] = text
+
     claude_env_values = payload.get("claude_env") if isinstance(payload.get("claude_env"), dict) else {}
     merged_claude_env = dict(current.get("claude_env", {}))
     for key in payload.get("clear_claude_env", []) if isinstance(payload.get("clear_claude_env"), list) else []:
@@ -2301,6 +2374,7 @@ def save_ui_settings(payload: dict[str, Any]) -> dict[str, Any]:
                 "codex": merged_codex,
                 "claude": merged_claude,
                 "env": merged_env,
+                "codex_env": normalize_codex_env_values(merged_codex_env),
                 "claude_env": normalize_claude_env_values(merged_claude_env),
             },
             ensure_ascii=False,
@@ -2462,14 +2536,77 @@ def external_claude_settings_env() -> dict[str, str]:
     return env
 
 
+def _first_env_value(key: str, *sources: dict[str, str]) -> str:
+    for source in sources:
+        value = str(source.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _selected_claude_credential_env(saved: dict[str, str], ambient: dict[str, str]) -> dict[str, str]:
+    token = _first_env_value("ANTHROPIC_AUTH_TOKEN", saved, ambient)
+    if token:
+        return {"ANTHROPIC_AUTH_TOKEN": token}
+    api_key = _first_env_value("ANTHROPIC_API_KEY", saved, ambient)
+    if api_key:
+        return {"ANTHROPIC_API_KEY": api_key}
+    return {}
+
+
 def agent_process_env(backend: str = "") -> dict[str, str]:
+    backend = normalize_agent_backend(backend)
     env = os.environ.copy()
     settings = load_ui_settings()
     env.update(settings.get("env", {}))
-    if normalize_agent_backend(backend) == "claude":
-        env.update(external_claude_settings_env())
+    if backend == "codex":
+        for key in CLAUDE_ENV_KEYS:
+            env.pop(key, None)
+        provider = normalize_codex_provider(settings.get("codex", {}).get("provider"))
+        if provider == "cli":
+            for key in CODEX_ENV_KEYS:
+                env.pop(key, None)
+        else:
+            saved = codex_env_for_provider(provider, settings.get("codex_env", {}))
+            if saved.get("OPENAI_API_KEY"):
+                env["OPENAI_API_KEY"] = saved["OPENAI_API_KEY"]
+        return env
+
+    if backend == "claude":
+        for key in CODEX_ENV_KEYS:
+            env.pop(key, None)
         provider = normalize_claude_provider(settings.get("claude", {}).get("provider"))
-        env.update(claude_env_for_provider(provider, settings.get("claude_env", {})))
+        external_env = external_claude_settings_env()
+        if provider == "external":
+            env.update(external_env)
+            return env
+
+        ambient = dict(env)
+        ambient.update(external_env)
+        saved = normalize_claude_env_values(settings.get("claude_env", {}))
+        for key in CLAUDE_ENV_KEYS:
+            env.pop(key, None)
+
+        if provider == "anthropic_api_key":
+            api_key = _first_env_value("ANTHROPIC_API_KEY", saved, ambient)
+            if api_key:
+                env["ANTHROPIC_API_KEY"] = api_key
+            return env
+
+        provider_env = claude_env_for_provider(provider, saved)
+        if provider == "custom_anthropic":
+            base_url = _first_env_value("ANTHROPIC_BASE_URL", saved, ambient)
+            if base_url:
+                provider_env["ANTHROPIC_BASE_URL"] = base_url
+            for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "API_TIMEOUT_MS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"):
+                value = _first_env_value(key, saved, ambient)
+                if value:
+                    provider_env[key] = value
+        credential_env = _selected_claude_credential_env(saved, ambient)
+        provider_env.pop("ANTHROPIC_AUTH_TOKEN", None)
+        provider_env.pop("ANTHROPIC_API_KEY", None)
+        provider_env.update(credential_env)
+        env.update(provider_env)
     return env
 
 
@@ -2654,10 +2791,42 @@ def claude_gateway_status_from_env(env: dict[str, str] | None = None) -> dict[st
     }
 
 
+def _json_object_from_probe_output(output: str) -> dict[str, Any] | None:
+    text = str(output or "").strip()
+    candidates = [text, *[line.strip() for line in text.splitlines() if line.strip().startswith("{")]]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _claude_auth_status_from_json(payload: dict[str, Any]) -> str:
+    true_keys = ("authenticated", "logged_in", "loggedIn", "is_authenticated", "isAuthenticated")
+    for key in true_keys:
+        if key in payload:
+            return "ok" if bool(payload.get(key)) else "missing"
+    string_keys = ("status", "state", "auth", "authentication", "login_status", "loginStatus")
+    for key in string_keys:
+        value = str(payload.get(key) or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if not value:
+            continue
+        if any(marker in value for marker in ("unauthenticated", "logged_out", "not_logged_in", "signed_out", "missing", "unauthorized")):
+            return "missing"
+        if any(marker in value for marker in ("authenticated", "logged_in", "signed_in", "authorized")):
+            return "ok"
+    return ""
+
+
 def auth_probe_status(backend: str, probe: dict[str, Any]) -> str:
-    if probe.get("ok"):
-        return "ok"
-    text = str(probe.get("output") or probe.get("error") or "").lower()
+    normalized = normalize_agent_backend(backend)
+    text = str(probe.get("output") or probe.get("error") or "")
+    lowered = text.lower()
     if probe.get("timeout"):
         return "unknown"
     unknown_markers = [
@@ -2674,8 +2843,14 @@ def auth_probe_status(backend: str, probe: dict[str, Any]) -> str:
         "unknown option",
         "not enough arguments",
     ]
-    if any(marker in text for marker in unknown_markers):
+    if any(marker in lowered for marker in unknown_markers):
         return "unknown"
+    if normalized == "claude":
+        json_status = _claude_auth_status_from_json(_json_object_from_probe_output(str(probe.get("output") or "")) or {})
+        if json_status:
+            return json_status
+    if probe.get("returncode") == 0 or probe.get("ok"):
+        return "ok"
     missing_markers = [
         "not logged",
         "not authenticated",
@@ -2690,7 +2865,7 @@ def auth_probe_status(backend: str, probe: dict[str, Any]) -> str:
         "not authorized",
         "not authorised",
     ]
-    if any(marker in text for marker in missing_markers):
+    if any(marker in lowered for marker in missing_markers):
         return "missing"
     return "missing" if probe.get("returncode") not in (None, 0) else "unknown"
 
@@ -2712,6 +2887,19 @@ def agent_setup_instruction(backend: str, reason: str) -> str:
             f"{label} is not authenticated. Run `{agent_login_command_text(backend)}` and verify "
             f"`{agent_auth_status_command_text(backend)}` before starting a run."
         )
+    if reason == "auth_status":
+        return (
+            f"{label} authentication status could not be verified. Run `{agent_auth_status_command_text(backend)}` "
+            f"or update {label} CLI, then try again."
+        )
+    if reason == "openai_api_key":
+        return "OpenAI API key is missing. Add it in Settings or start the UI with OPENAI_API_KEY."
+    if reason == "anthropic_api_key":
+        return "Anthropic API key is missing. Add it in Settings or start the UI with ANTHROPIC_API_KEY."
+    if reason == "zai_glm":
+        return "Z.AI GLM Coding Plan needs a Z.AI API key. Add it in Settings or set ANTHROPIC_AUTH_TOKEN."
+    if reason == "custom_anthropic":
+        return "Custom Anthropic-compatible gateway needs a base URL and credential. Add them in Settings."
     return f"{label} readiness could not be determined."
 
 
@@ -2719,10 +2907,17 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
     backend = normalize_agent_backend(backend)
     label = agent_display_name(backend)
     process_env = env if env is not None else agent_process_env(backend)
+    settings = load_ui_settings()
+    provider = (
+        normalize_claude_provider(settings.get("claude", {}).get("provider"))
+        if backend == "claude"
+        else normalize_codex_provider(settings.get("codex", {}).get("provider"))
+    )
     gateway_status = claude_gateway_status_from_env(process_env) if backend == "claude" else {}
     base: dict[str, Any] = {
         "backend": backend,
         "label": label,
+        "provider": provider,
         "ok": False,
         "blocking": False,
         "installed": False,
@@ -2760,6 +2955,66 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
 
     base["installed"] = True
     base["version"] = str(version_probe.get("output") or "").splitlines()[0][:240]
+
+    if backend == "codex" and provider == "openai_api_key":
+        if str(process_env.get("OPENAI_API_KEY") or "").strip():
+            base.update({
+                "ok": True,
+                "blocking": False,
+                "auth": "api_key",
+                "message": "Codex CLI is installed and OpenAI API key is available.",
+            })
+            return base
+        base.update({
+            "blocking": True,
+            "auth": "missing",
+            "message": agent_setup_instruction(backend, "openai_api_key"),
+            "details": "Selected provider is OpenAI API key, but OPENAI_API_KEY is not available to this UI process.",
+        })
+        return base
+
+    if backend == "claude" and provider == "anthropic_api_key":
+        if str(process_env.get("ANTHROPIC_API_KEY") or "").strip():
+            base.update({
+                "ok": True,
+                "blocking": False,
+                "auth": "api_key",
+                "message": "Claude Code CLI is installed and Anthropic API key is available.",
+            })
+            return base
+        base.update({
+            "blocking": True,
+            "auth": "missing",
+            "message": agent_setup_instruction(backend, "anthropic_api_key"),
+            "details": "Selected provider is Anthropic API key, but ANTHROPIC_API_KEY is not available to this UI process.",
+        })
+        return base
+
+    if backend == "claude" and provider in {"zai_glm", "custom_anthropic"}:
+        base["gateway"] = gateway_status
+        if gateway_status.get("complete"):
+            base.update({
+                "ok": True,
+                "blocking": False,
+                "auth": "gateway",
+                "message": (
+                    "Claude Code CLI is installed and an Anthropic-compatible gateway is configured "
+                    f"via {gateway_status.get('credential_key') or 'environment credentials'}."
+                ),
+            })
+            return base
+        base.update({
+            "blocking": True,
+            "auth": "missing",
+            "message": agent_setup_instruction(backend, provider),
+            "details": (
+                "Missing gateway base URL."
+                if not gateway_status.get("base_url")
+                else "Missing gateway credential."
+            ),
+        })
+        return base
+
     auth_probe = run_agent_probe(executable, agent_auth_command(backend), process_env)
     auth = auth_probe_status(backend, auth_probe)
     base["auth"] = auth
@@ -2794,11 +3049,10 @@ def agent_setup_status(backend: str, env: dict[str, str] | None = None) -> dict[
         return base
     if auth == "unknown":
         base.update({
-            "ok": True,
-            "blocking": False,
+            "ok": False,
+            "blocking": True,
             "message": (
-                f"{label} CLI is installed, but `{agent_auth_status_command_text(backend)}` did not return a supported "
-                "auth status. Startup will continue and report any CLI failure normally."
+                agent_setup_instruction(backend, "auth_status")
             ),
             "details": str(auth_probe.get("output") or auth_probe.get("error") or ""),
         })

@@ -33,10 +33,15 @@ Install:
   ```
 
   Windows is supported through native Windows or WSL2 ([Codex Windows guide](https://developers.openai.com/codex/windows)).
-- **Claude Code CLI** (optional backend) — install and authenticate Claude Code
-  to select `Claude Code` in the UI. CoAutoResearch talks to the CLI directly;
-  no SDK is added. Claude Code can also be pointed at an Anthropic-compatible
-  gateway such as Z.AI GLM from Settings.
+- **Claude Code CLI** (optional backend) — install Claude Code to select
+  `Claude Code` in the UI. CoAutoResearch talks to the CLI directly; no SDK is
+  added.
+
+For authentication, keep the default provider if you already use CLI login:
+`Use existing Codex CLI login` or `Use existing Claude Code configuration`.
+Alternatively, open Settings and choose `OpenAI API key` for Codex or
+`Anthropic API key` for Claude Code. API keys saved in Settings are injected only
+into that backend's runs; they are not echoed back by `/api/settings`.
 
 Check the basics:
 
@@ -52,6 +57,9 @@ claude auth status
 
 On Windows, use `python --version` or `py -3 --version` if `python3` is not
 available.
+
+If you use an API-key provider, the relevant status command is not required for
+readiness, but the selected CLI still must pass `--version`.
 
 ### Claude Code With GLM / Z.AI
 

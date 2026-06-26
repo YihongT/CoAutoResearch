@@ -134,6 +134,7 @@ const agentBackends = {
 const allowedAgentBackends = new Set(Object.keys(agentBackends));
 
 const defaultCodexSessionSettings = {
+  provider: "cli",
   model: "gpt-5.5",
   reasoningEffort: "medium",
   permissionPreset: "default",
@@ -186,8 +187,14 @@ const modelOptionsByBackend = {
   ],
 };
 
+const codexProviderLabels = {
+  cli: "Use existing Codex CLI login",
+  openai_api_key: "OpenAI API key",
+};
+const allowedCodexProviders = new Set(Object.keys(codexProviderLabels));
 const claudeProviderLabels = {
   external: "Use existing Claude Code configuration",
+  anthropic_api_key: "Anthropic API key",
   zai_glm: "Z.AI GLM Coding Plan",
   custom_anthropic: "Custom Anthropic-compatible gateway",
 };
@@ -201,6 +208,7 @@ const zaiClaudeEnvDefaults = {
   ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.2[1m]",
   ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.2[1m]",
 };
+const codexSecretKeys = new Set(["OPENAI_API_KEY"]);
 const claudeGatewaySecretKeys = new Set(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]);
 
 const backendDocLinks = {
@@ -1027,8 +1035,26 @@ function normalizeAgentBackend(value) {
   return allowedAgentBackends.has(backend) ? backend : defaultAgentSettings.backend;
 }
 
+function normalizeCodexProvider(value) {
+  const raw = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+  const aliases = {
+    openai: "openai_api_key",
+    openai_key: "openai_api_key",
+    api_key: "openai_api_key",
+  };
+  const provider = aliases[raw] || raw;
+  return allowedCodexProviders.has(provider) ? provider : defaultCodexSessionSettings.provider;
+}
+
 function normalizeClaudeProvider(value) {
-  const provider = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+  const raw = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+  const aliases = {
+    anthropic: "anthropic_api_key",
+    api_key: "anthropic_api_key",
+    custom: "custom_anthropic",
+    gateway: "custom_anthropic",
+  };
+  const provider = aliases[raw] || raw;
   return allowedClaudeProviders.has(provider) ? provider : defaultClaudeSessionSettings.provider;
 }
 
@@ -1484,8 +1510,10 @@ function agentSetupGatewayText(backend, status = {}) {
 function agentSetupAuthText(status = {}) {
   const auth = String(status.auth || "unknown");
   if (auth === "ok") return "Auth: authenticated.";
+  if (auth === "api_key") return "Auth: API key.";
   if (auth === "gateway") return "Auth: gateway credential.";
-  if (auth === "missing") return "Auth: login or gateway credential needed.";
+  if (auth === "missing") return "Auth: login, API key, or gateway credential needed.";
+  if (status.blocking) return "Auth: status check failed.";
   return "Auth: not confirmed yet.";
 }
 
@@ -4315,6 +4343,8 @@ function normalizeSessionSettings(settings = {}) {
     const validClaudeModel = Boolean(claudeModel) && (allowedModels.has(claudeModel) || isValidCustomClaudeModel(claudeModel));
     if (!validClaudeModel) merged.model = defaults.model;
     merged.provider = normalizeClaudeProvider(merged.provider);
+  } else {
+    merged.provider = normalizeCodexProvider(merged.provider);
   }
   merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend, merged.model);
   merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
@@ -4412,6 +4442,16 @@ function stripBackendSetting(settings) {
   return copy;
 }
 
+function publicCodexEnv(settings = uiSettings || {}) {
+  const payload = settings?.codex_env;
+  return payload && typeof payload === "object" ? payload : {};
+}
+
+function publicCodexEnvPresent(settings = uiSettings || {}) {
+  const present = publicCodexEnv(settings).present;
+  return present && typeof present === "object" ? present : {};
+}
+
 function publicClaudeEnv(settings = uiSettings || {}) {
   const payload = settings?.claude_env;
   return payload && typeof payload === "object" ? payload : {};
@@ -4425,6 +4465,10 @@ function publicClaudeEnvValues(settings = uiSettings || {}) {
 function publicClaudeEnvPresent(settings = uiSettings || {}) {
   const present = publicClaudeEnv(settings).present;
   return present && typeof present === "object" ? present : {};
+}
+
+function codexProviderFromSettings(settings = uiSettings || {}) {
+  return normalizeCodexProvider(settings?.codex?.provider || publicCodexEnv(settings).provider || defaultCodexSessionSettings.provider);
 }
 
 function claudeProviderFromSettings(settings = uiSettings || {}) {
@@ -4443,12 +4487,29 @@ function claudeGatewayFieldValue(settings, key, provider) {
   return normalizedProvider === "zai_glm" ? (zaiClaudeEnvDefaults[key] || "") : "";
 }
 
+function codexEnvPayloadFromModal() {
+  const form = $("#settings-form");
+  const provider = normalizeCodexProvider(form.elements.settingsCodexProvider?.value || codexProviderFromSettings());
+  const env = {};
+  const clear = [];
+  if (provider !== "openai_api_key") return { env, clear };
+  const apiKey = String(form.elements.settingsCodexApiKey?.value || "").trim();
+  if (apiKey) env.OPENAI_API_KEY = apiKey;
+  return { env, clear };
+}
+
 function claudeEnvPayloadFromModal() {
   const form = $("#settings-form");
   const provider = normalizeClaudeProvider(form.elements.settingsClaudeProvider?.value || claudeProviderFromSettings());
   const env = {};
   const clear = [];
   if (provider === "external") {
+    return { env, clear };
+  }
+
+  if (provider === "anthropic_api_key") {
+    const apiKey = String(form.elements.settingsClaudeApiKey?.value || "").trim();
+    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
     return { env, clear };
   }
 
@@ -4495,7 +4556,7 @@ function settingsProviderFromModal(backend) {
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("settingsReviewCheckpointInterval")),
     provider: normalizedBackend === "claude"
       ? normalizeClaudeProvider(data.get("settingsClaudeProvider") || claudeProviderFromSettings())
-      : undefined,
+      : normalizeCodexProvider(data.get("settingsCodexProvider") || codexProviderFromSettings()),
   });
 }
 
@@ -4530,6 +4591,7 @@ function hydrateSettingsDialog(settings) {
   form.elements.settingsWebSearch.checked = Boolean(provider.webSearch);
   form.elements.settingsExtraConfig.value = provider.extraConfig || "";
   if (form.elements.settingsReviewCheckpointInterval) form.elements.settingsReviewCheckpointInterval.value = provider.reviewCheckpointInterval;
+  hydrateCodexProviderSettings(settings, backend, provider.provider);
   hydrateClaudeProviderSettings(settings, backend, provider.provider);
   renderAgentStatusNote("#settings-agent-status", backend, "settings");
 
@@ -4560,6 +4622,34 @@ function hydrateSettingsDialog(settings) {
     .join("");
 }
 
+function hydrateCodexProviderSettings(settings = uiSettings || {}, backend = activeSettingsBackend(), providerOverride = "") {
+  const form = $("#settings-form");
+  if (!form) return;
+  const isCodex = normalizeAgentBackend(backend) === "codex";
+  const provider = normalizeCodexProvider(providerOverride || settings?.codex?.provider || defaultCodexSessionSettings.provider);
+  if (form.elements.settingsCodexProvider) form.elements.settingsCodexProvider.value = provider;
+  document.querySelectorAll("[data-codex-provider-field]").forEach((node) => {
+    node.hidden = !isCodex;
+  });
+  const panel = $("#codex-api-key-settings");
+  if (panel) panel.hidden = !isCodex || provider !== "openai_api_key";
+  if (!isCodex) return;
+
+  const envPresent = publicCodexEnvPresent(settings);
+  const saved = Boolean(envPresent.OPENAI_API_KEY);
+  if (form.elements.settingsCodexApiKey) {
+    form.elements.settingsCodexApiKey.value = "";
+    form.elements.settingsCodexApiKey.placeholder = saved ? "Saved - leave blank to keep" : "Paste OpenAI API key";
+  }
+  const status = $("#settings-codex-api-key-status");
+  if (status) status.textContent = saved ? "OpenAI API key saved" : "Empty";
+  const clearButton = $("#settings-codex-api-key-clear");
+  if (clearButton) {
+    clearButton.hidden = !saved;
+    clearButton.dataset.clearCodexSecret = "OPENAI_API_KEY";
+  }
+}
+
 function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = activeSettingsBackend(), providerOverride = "") {
   const form = $("#settings-form");
   if (!form) return;
@@ -4570,7 +4660,9 @@ function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = ac
     node.hidden = !isClaude;
   });
   const panel = $("#claude-gateway-settings");
-  if (panel) panel.hidden = !isClaude || provider === "external";
+  if (panel) panel.hidden = !isClaude || !["zai_glm", "custom_anthropic"].includes(provider);
+  const apiKeyPanel = $("#claude-api-key-settings");
+  if (apiKeyPanel) apiKeyPanel.hidden = !isClaude || provider !== "anthropic_api_key";
   if (!isClaude) return;
 
   const envPresent = publicClaudeEnvPresent(settings);
@@ -4586,8 +4678,19 @@ function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = ac
     form.elements.settingsClaudeCredential.value = "";
     form.elements.settingsClaudeCredential.placeholder = authTokenSaved || apiKeySaved ? "Saved - leave blank to keep" : "Paste gateway credential";
   }
+  if (form.elements.settingsClaudeApiKey) {
+    form.elements.settingsClaudeApiKey.value = "";
+    form.elements.settingsClaudeApiKey.placeholder = apiKeySaved ? "Saved - leave blank to keep" : "Paste Anthropic API key";
+  }
+  const apiKeyStatus = $("#settings-claude-api-key-status");
+  if (apiKeyStatus) apiKeyStatus.textContent = apiKeySaved ? "Anthropic API key saved" : "Empty";
+  const apiKeyClearButton = $("#settings-claude-api-key-clear");
+  if (apiKeyClearButton) {
+    apiKeyClearButton.hidden = !apiKeySaved;
+    apiKeyClearButton.dataset.clearClaudeSecret = "ANTHROPIC_API_KEY";
+  }
   const status = $("#settings-claude-credential-status");
-  const clearButton = document.querySelector("[data-clear-claude-secret]");
+  const clearButton = $("#settings-claude-credential-clear");
   const savedCredentialKey = authTokenSaved ? "ANTHROPIC_AUTH_TOKEN" : apiKeySaved ? "ANTHROPIC_API_KEY" : "";
   if (status) {
     status.textContent = authTokenSaved
@@ -4648,6 +4751,7 @@ async function saveUiSettings(event) {
         if (value) env[key] = value;
       });
       const settingsPayload = settingsPayloadFromModal();
+      const codexEnvPayload = codexEnvPayloadFromModal();
       const claudeEnvPayload = claudeEnvPayloadFromModal();
       const payload = await api("/api/settings", {
         method: "POST",
@@ -4655,6 +4759,8 @@ async function saveUiSettings(event) {
           ...settingsPayload,
           env,
           clear_env: clearEnv,
+          codex_env: codexEnvPayload.env,
+          clear_codex_env: codexEnvPayload.clear,
           claude_env: claudeEnvPayload.env,
           clear_claude_env: claudeEnvPayload.clear,
         }),
@@ -4699,6 +4805,19 @@ async function clearSavedSecret(key) {
   hydrateSettingsDialog(uiSettings);
   applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
   showToast(`${secretKeyLabels[key] || key} cleared.`);
+}
+
+async function clearSavedCodexSecret(key) {
+  if (!codexSecretKeys.has(key)) return;
+  const settingsPayload = settingsPayloadFromModal();
+  const payload = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({ ...settingsPayload, codex_env: {}, clear_codex_env: [key] }),
+  });
+  uiSettings = payload.settings || {};
+  hydrateSettingsDialog(uiSettings);
+  applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
+  showToast(`${key} cleared.`);
 }
 
 async function clearSavedClaudeSecret(key) {
@@ -11151,6 +11270,11 @@ function bindEvents() {
     settingsFromForm();
   });
   $("#settings-form")?.elements?.settingsBackend?.addEventListener("change", (event) => switchSettingsBackend(event.target.value));
+  $("#settings-form")?.elements?.settingsCodexProvider?.addEventListener("change", () => {
+    const provider = $("#settings-form")?.elements?.settingsCodexProvider?.value || "";
+    hydrateCodexProviderSettings(uiSettings || {}, "codex", provider);
+    renderAgentStatusNote("#settings-agent-status", "codex", "settings");
+  });
   $("#settings-form")?.elements?.settingsClaudeProvider?.addEventListener("change", () => {
     const provider = $("#settings-form")?.elements?.settingsClaudeProvider?.value || "";
     hydrateClaudeProviderSettings(uiSettings || {}, "claude", provider);
@@ -11307,6 +11431,11 @@ function bindEvents() {
     const clearSecret = event.target.closest("[data-clear-secret]");
     if (clearSecret) {
       clearSavedSecret(clearSecret.dataset.clearSecret);
+      return;
+    }
+    const clearCodexSecret = event.target.closest("[data-clear-codex-secret]");
+    if (clearCodexSecret) {
+      clearSavedCodexSecret(clearCodexSecret.dataset.clearCodexSecret);
       return;
     }
     const clearClaudeSecret = event.target.closest("[data-clear-claude-secret]");

@@ -33,5 +33,8 @@ Cloudflare Access or another authenticated network boundary.
 Before launching an agent run, the UI may execute local readiness probes for the
 selected backend: `codex --version`, `codex login status`, `claude --version`,
 or `claude auth status`. These checks are used only to produce clearer setup
-errors. CoAutoResearch does not read, store, or transmit provider credentials;
-authentication remains managed by the Codex or Claude Code CLI.
+errors. If you choose an API-key provider in Settings, CoAutoResearch stores that
+key in the local UI settings file and injects it only into the selected backend's
+child process environment. `/api/settings` reports only whether a key is present;
+it never returns the raw key. Do not commit the local UI runtime settings folder
+or share it with other users.

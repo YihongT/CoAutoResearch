@@ -57,7 +57,9 @@ Bringing a proposal, a deep-research report, or a half-finished project? See
 how to turn the blueprint into a finished paper.
 
 You'll need **Node 18+** and one agent CLI — **Codex** (default) or **Claude
-Code**. The few-minute setup is in [Getting started](docs/getting-started.md).
+Code**. Each backend can use its normal CLI login, or a provider API key saved in
+the UI Settings. The few-minute setup is in
+[Getting started](docs/getting-started.md).
 
 For repeated use, install it once:
 

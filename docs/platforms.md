@@ -122,11 +122,26 @@ $env:COAUTO_CLAUDE = (Get-Command claude).Source
 co-auto-research ui
 ```
 
-Before starting framing, autoresearch, chat, resume, or restart, the UI checks
-the selected backend with `--version` and the provider auth status command. A
-definitely missing or unauthenticated selected backend blocks startup with
-provider-specific instructions; the UI never silently falls back to the other
-backend.
+Before starting framing, autoresearch, chat, resume, or restart, the UI always
+checks the selected backend with `--version`. With the default providers it also
+checks `codex login status` or `claude auth status`. With API-key providers,
+readiness requires the relevant key instead: `OPENAI_API_KEY` for Codex or
+`ANTHROPIC_API_KEY` for Claude Code. A definitely missing or unauthenticated
+selected backend blocks startup with provider-specific instructions; the UI
+never silently falls back to the other backend.
+
+### API-Key Providers
+
+Settings exposes provider choices per backend:
+
+- Codex: `Use existing Codex CLI login` or `OpenAI API key`.
+- Claude Code: `Use existing Claude Code configuration`, `Anthropic API key`,
+  `Z.AI GLM Coding Plan`, or `Custom Anthropic-compatible gateway`.
+
+Provider switching does not delete saved keys. Use the Clear action beside a key
+field when you want to remove it. Saved Codex keys are injected only into Codex
+runs; saved Claude keys and gateway credentials are injected only into Claude
+Code runs.
 
 ### Claude Code With Anthropic-Compatible Gateways
 

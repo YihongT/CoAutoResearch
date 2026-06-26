@@ -9,6 +9,8 @@
 - Added proxy-aware `--remote` support through `graftcp`, plus
   `co-auto-research install-graftcp` for Linux servers that reach the internet
   through an HTTP proxy.
+- Added first-class Settings providers for Codex OpenAI API keys and Claude
+  Anthropic API keys, with backend-scoped secret injection.
 - Fixed Claude Code `/goal` handling so Claude backend commands follow Claude
   Code native goal semantics.
 - Passed Claude `/goal` clear aliases through correctly: `clear`, `stop`,

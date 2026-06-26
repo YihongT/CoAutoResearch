@@ -173,6 +173,9 @@ hostnames are often not valid SSH aliases from your laptop.
 | `CODEX_BIN` | Alternate Codex executable path. |
 | `COAUTO_CLAUDE` | Explicit Claude Code executable path. |
 | `CLAUDE_BIN` | Alternate Claude Code executable path. |
+| `OPENAI_API_KEY` | Used by the Codex `OpenAI API key` provider when no saved Settings key is present. Not passed to Claude Code runs. |
+| `ANTHROPIC_API_KEY` | Used by the Claude `Anthropic API key` provider when no saved Settings key is present. Not passed to Codex runs. |
+| `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` | Used by Claude gateway providers such as Z.AI GLM or custom Anthropic-compatible gateways. Not passed to Codex runs. |
 | `COAUTO_NO_OPEN` | Disable automatic browser launch. |
 | `COAUTO_CLOUDFLARED` | Explicit `cloudflared` executable path for `--remote`. |
 | `COAUTO_CLOUDFLARED_DOWNLOAD_URL` | Override the standalone `cloudflared` download URL used by `install-cloudflared`. |
