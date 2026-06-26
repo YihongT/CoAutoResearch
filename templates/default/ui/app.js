@@ -1357,7 +1357,7 @@ function allBackendsBlocking() {
 
 function noProjectsDashboard() {
   const projects = Array.isArray(appState?.projects) ? appState.projects : [];
-  return Boolean(appState?.multi_project && !activeProjectId && !projects.length);
+  return Boolean(appState?.multi_project && !projects.length);
 }
 
 function initialPreflightDismissed() {
@@ -1947,7 +1947,12 @@ function renderProjectList() {
   const projects = Array.isArray(appState?.projects) ? appState.projects : [];
   renderProjectCreateButton();
   if (!projects.length) {
-    target.innerHTML = `<div class="project-empty">No projects yet. Use + to create one.</div>`;
+    target.innerHTML = `
+      <button class="project-empty project-empty-action" type="button" data-create-first-project>
+        <span>No projects yet.</span>
+        <strong>Create project</strong>
+      </button>
+    `;
     renderRailVisibility();
     renderProjectAvailability();
     return;
@@ -10906,6 +10911,9 @@ function bindEvents() {
     button.addEventListener("click", () => setPanel(button.dataset.view));
   });
   $("#open-project-create")?.addEventListener("click", openProjectCreateDialog);
+  $("#project-list")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-create-first-project]")) openProjectCreateDialog();
+  });
   $("#project-create-form")?.addEventListener("submit", createProjectFromDialog);
   $("#project-agent-backend")?.addEventListener("change", (event) => {
     renderAgentStatusNote("#project-agent-backend-note", event.target.value, "project");

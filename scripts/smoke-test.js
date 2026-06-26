@@ -739,6 +739,43 @@ async function smokeRemoteAuth() {
   }
 }
 
+async function smokeEmptyDashboardSettings() {
+  const python = findPython();
+  const port = await freePort();
+  const emptyProjectsDir = path.join(tempRoot, "empty-dashboard-projects");
+  await fsp.mkdir(emptyProjectsDir, { recursive: true });
+  const serverPath = path.join(root, "templates", "default", "ui", "server.py");
+  const proc = spawn(python.command, [...python.args, serverPath, "--host", "127.0.0.1", "--port", String(port), "--projects-dir", emptyProjectsDir], {
+    cwd: emptyProjectsDir,
+    env: { ...process.env, COAUTO_TEMPLATE_ROOT: path.join(root, "templates", "default") },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  try {
+    await waitForProcessOutput(proc, (output) => output.includes(`Open http://127.0.0.1:${port}`), 15000);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const projects = await fetch(`${baseUrl}/api/projects`);
+    const projectPayload = await projects.json();
+    if (projects.status !== 200 || !Array.isArray(projectPayload.projects) || projectPayload.projects.length !== 0) {
+      throw new Error(`empty dashboard should return an empty project list, got ${projects.status} ${JSON.stringify(projectPayload)}`);
+    }
+    const settings = await fetch(`${baseUrl}/api/settings`);
+    const settingsPayload = await settings.json();
+    if (settings.status !== 200 || !settingsPayload.settings?.agent?.backend) {
+      throw new Error(`empty dashboard settings should not require a project, got ${settings.status} ${JSON.stringify(settingsPayload)}`);
+    }
+    const saved = await fetch(`${baseUrl}/api/settings`, {
+      method: "POST",
+      body: JSON.stringify({ agent: { backend: "claude" } })
+    });
+    const savedPayload = await saved.json();
+    if (saved.status !== 200 || savedPayload.settings?.agent?.backend !== "claude") {
+      throw new Error(`empty dashboard settings should be saved in dashboard runtime, got ${saved.status} ${JSON.stringify(savedPayload)}`);
+    }
+  } finally {
+    await terminateProcess(proc);
+  }
+}
+
 async function writeFakeAuthFailureBin(directory, backend) {
   await fsp.mkdir(directory, { recursive: true });
   const name = backend === "claude" ? "claude" : "codex";
@@ -1991,6 +2028,7 @@ Confidence: medium
   await smokeRemoteSshMode();
   await smokeRemoteCloudflareFallback();
   await smokeRemoteAuth();
+  await smokeEmptyDashboardSettings();
 
   const fakeBin = path.join(tempRoot, "fake-bin");
   await writeFakeCodexBin(fakeBin);

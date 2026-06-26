@@ -11049,6 +11049,31 @@ body.is-resizing-file-viewer .file-viewer-body {
   font-size: 12px;
 }
 
+.project-empty-action {
+  width: 100%;
+  border: 1px solid rgba(245, 239, 227, 0.16);
+  border-radius: 12px;
+  background: rgba(245, 239, 227, 0.06);
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-empty-action span,
+.project-empty-action strong {
+  display: block;
+}
+
+.project-empty-action strong {
+  margin-top: 4px;
+  color: rgba(245, 239, 227, 0.86);
+  font-size: 12px;
+}
+
+.project-empty-action:hover {
+  background: rgba(245, 239, 227, 0.1);
+  color: rgba(245, 239, 227, 0.72);
+}
+
 .project-dialog {
   width: min(480px, calc(100vw - 42px));
   padding: 0;

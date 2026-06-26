@@ -1657,6 +1657,19 @@ RESEARCH_LOCK = DynamicLock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_LOCK = threading.Lock()
 
+
+def dashboard_runtime_dir() -> Path:
+    if PROJECT_REGISTRY and PROJECT_REGISTRY.projects_dir:
+        return PROJECT_REGISTRY.projects_dir / ".co-auto-research" / "ui"
+    return DEFAULT_PROJECT_ROOT / "ui" / ".runtime"
+
+
+def current_ui_settings_path() -> Path:
+    try:
+        return Path(os.fspath(UI_SETTINGS_PATH))
+    except ValueError:
+        return dashboard_runtime_dir() / "settings.json"
+
 DEFAULT_CODEX_SETTINGS = {
     "model": "gpt-5.5",
     "reasoningEffort": "medium",
@@ -2197,10 +2210,11 @@ def load_ui_settings() -> dict[str, Any]:
         "env": {},
         "claude_env": {},
     }
-    if not UI_SETTINGS_PATH.exists():
+    settings_path = current_ui_settings_path()
+    if not settings_path.exists():
         return settings
     try:
-        payload = json.loads(UI_SETTINGS_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return settings
     if isinstance(payload.get("agent"), dict):
@@ -2278,8 +2292,9 @@ def save_ui_settings(payload: dict[str, Any]) -> dict[str, Any]:
             if text:
                 merged_claude_env[key] = text
 
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    UI_SETTINGS_PATH.write_text(
+    settings_path = current_ui_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
         json.dumps(
             {
                 "agent": merged_agent,
@@ -2433,11 +2448,16 @@ def read_claude_settings_env(path: Path) -> dict[str, str]:
 
 def external_claude_settings_env() -> dict[str, str]:
     env: dict[str, str] = {}
-    for path in (
-        Path.home() / ".claude" / "settings.json",
-        REPO_ROOT / ".claude" / "settings.json",
-        REPO_ROOT / ".claude" / "settings.local.json",
-    ):
+    paths = [Path.home() / ".claude" / "settings.json"]
+    try:
+        repo_root = Path(os.fspath(REPO_ROOT))
+        paths.extend([
+            repo_root / ".claude" / "settings.json",
+            repo_root / ".claude" / "settings.local.json",
+        ])
+    except ValueError:
+        pass
+    for path in paths:
         env.update(read_claude_settings_env(path))
     return env
 
@@ -10792,6 +10812,9 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                 "multi_project": bool(PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project),
             })
             return
+        if parsed.path == "/api/settings":
+            self.send_json({"ok": True, "settings": public_ui_settings(), "secret_keys": SECRET_ENV_KEYS})
+            return
         if not parsed.path.startswith("/api/"):
             self.serve_static(parsed.path)
             return
@@ -10840,9 +10863,6 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/framing/messages":
                     self.send_json({"ok": True, "messages": load_framing_messages()})
-                    return
-                if parsed.path == "/api/settings":
-                    self.send_json({"ok": True, "settings": public_ui_settings(), "secret_keys": SECRET_ENV_KEYS})
                     return
                 if parsed.path == "/api/agent/models":
                     query = parse_qs(parsed.query)
@@ -10907,6 +10927,9 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     raise ValueError("Project registry is not available.")
                 result = PROJECT_REGISTRY.delete_project(payload)
                 self.send_json({"ok": True, **result})
+                return
+            if parsed.path == "/api/settings":
+                self.send_json({"ok": True, "settings": save_ui_settings(payload), "secret_keys": SECRET_ENV_KEYS})
                 return
             if parsed.path == "/api/projects/upgrade-reviewers":
                 project_id = self.request_project_id(parsed, payload)
@@ -10981,9 +11004,6 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/framing/messages":
                     self.send_json({"ok": True, "messages": update_framing_messages(payload)})
-                    return
-                if parsed.path == "/api/settings":
-                    self.send_json({"ok": True, "settings": save_ui_settings(payload), "secret_keys": SECRET_ENV_KEYS})
                     return
                 if parsed.path == "/api/file/save":
                     path = str(payload.get("path", "")).strip()
