@@ -196,6 +196,10 @@
                             </div>
 	                          <textarea id="cold-file-editor" rows="1" wrap="soft" spellcheck="false" aria-label="Research brief" placeholder="Research topic, problem, scope, and data or materials to use..."></textarea>
 	                          <div class="brief-run-controls">
+                              <div class="composer-mode-toggle" role="group" aria-label="Composer mode">
+                                <button class="is-active" type="button" data-composer-mode="chat" aria-pressed="true">Chat</button>
+                                <button type="button" data-composer-mode="plan" aria-pressed="false">Plan</button>
+                              </div>
 	                            <label>
 	                              <span>Model</span>
 	                              <select id="composer-model" aria-label="Agent model">
@@ -323,6 +327,10 @@
                   <div class="attachment-tray" id="chat-attachment-tray" aria-live="polite"></div>
                   <textarea name="message" rows="1" placeholder="Message the current agent session..." disabled></textarea>
                   <div class="composer-actions">
+                    <div class="composer-mode-toggle" role="group" aria-label="Composer mode">
+                      <button class="is-active" type="button" data-composer-mode="chat" aria-pressed="true">Chat</button>
+                      <button type="button" data-composer-mode="plan" aria-pressed="false">Plan</button>
+                    </div>
                     <button class="secondary-button" id="continue-research" type="button" disabled>Continue</button>
                     <button class="send-button" type="submit" aria-label="Send" disabled>Send</button>
                   </div>

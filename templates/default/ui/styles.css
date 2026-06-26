@@ -932,6 +932,40 @@ h3 {
   flex-wrap: wrap;
 }
 
+.composer-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.composer-mode-toggle button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.composer-mode-toggle button:hover {
+  color: var(--ink);
+}
+
+.composer-mode-toggle button.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(17, 20, 17, 0.08);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -5132,6 +5166,91 @@ body.is-dragging-file .composer {
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.plan-card-message {
+  width: min(860px, 100%);
+  max-width: min(860px, 100%);
+}
+
+.plan-card-bubble {
+  gap: 12px;
+}
+
+.plan-card-head {
+  align-items: center;
+}
+
+.plan-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.plan-status.ready {
+  border-color: rgba(45, 120, 83, 0.24);
+  background: rgba(45, 120, 83, 0.08);
+  color: #2d7853;
+}
+
+.plan-status.failed {
+  border-color: rgba(170, 62, 54, 0.24);
+  background: rgba(170, 62, 54, 0.08);
+  color: #9f332b;
+}
+
+.plan-rendered {
+  max-height: min(54vh, 520px);
+  overflow: auto;
+  padding: 2px 2px 8px;
+  background: transparent;
+  border: 0;
+}
+
+.plan-step-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.plan-step-list li {
+  padding-left: 2px;
+}
+
+.plan-step-list span {
+  display: inline-block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.plan-step-list p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.plan-error,
+.plan-empty,
+.plan-approved-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.plan-error {
+  color: #9f332b;
+}
+
+.plan-card-actions {
+  align-items: center;
 }
 
 .framing-project-panel {

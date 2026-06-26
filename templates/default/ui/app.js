@@ -1,6 +1,7 @@
 const initialUrlParams = new URLSearchParams(window.location.search);
 const MATERIAL_NAVIGATION_PANELS = new Set(["workspace", "resources", "trials", "reviews", "manuscript"]);
 const NAVIGATION_PANELS = new Set(["chat", ...MATERIAL_NAVIGATION_PANELS]);
+const COMPOSER_MODES = new Set(["chat", "plan"]);
 
 function projectScopedStorageKey(projectId, key) {
   return `coAutoResearch:${projectId || "default"}:${key}`;
@@ -34,8 +35,19 @@ function initialMaterialPanel(projectId) {
   );
 }
 
+function normalizeComposerMode(mode, fallback = "chat") {
+  const value = String(mode || "").trim().toLowerCase();
+  return COMPOSER_MODES.has(value) ? value : fallback;
+}
+
+function initialComposerMode(projectId) {
+  return normalizeComposerMode(projectScopedGet(projectId, "composerMode", "chat"));
+}
+
 let appState = null;
 let activeProjectId = initialUrlParams.get("project") || localStorage.getItem("coAutoResearchActiveProject") || "";
+let composerMode = initialComposerMode(activeProjectId);
+let pendingPlanRevisionId = "";
 const restoredNavigationPanel = initialNavigationPanel(activeProjectId);
 let activeView = restoredNavigationPanel === "chat" ? "chat" : "materials";
 let activePanel = restoredNavigationPanel === "chat" ? initialMaterialPanel(activeProjectId) : restoredNavigationPanel;
@@ -534,14 +546,40 @@ function normalizeResumeTrialContext(value) {
 
 function normalizeFramingMessage(message) {
   if (!message || !["user", "assistant"].includes(message.role)) return null;
-  const allowedKinds = new Set(["text", "project", "goal-launch", "command", "intervention-recorded"]);
+  const allowedKinds = new Set(["text", "project", "plan", "goal-launch", "command", "intervention-recorded"]);
   const kind = allowedKinds.has(message.kind) ? message.kind : "text";
-  const artifact = message.artifact && typeof message.artifact === "object"
-    ? {
+  let artifact = null;
+  if (message.artifact && typeof message.artifact === "object") {
+    if (kind === "plan") {
+      const rawSteps = Array.isArray(message.artifact.steps) ? message.artifact.steps : [];
+      artifact = {
+        type: "plan",
+        id: String(message.artifact.id || message.planId || "").trim(),
+        provider: normalizeAgentBackend(message.artifact.provider || ""),
+        model: String(message.artifact.model || "").trim(),
+        status: String(message.artifact.status || "pending").trim(),
+        text: String(message.artifact.text || message.artifact.plan_text || "").trim(),
+        plan_text: String(message.artifact.plan_text || message.artifact.text || "").trim(),
+        steps: rawSteps
+          .map((step) => ({
+            step: String(step?.step || step?.text || "").trim(),
+            status: String(step?.status || "").trim(),
+          }))
+          .filter((step) => step.step),
+        explanation: String(message.artifact.explanation || "").trim(),
+        error: String(message.artifact.error || "").trim(),
+        created_at: String(message.artifact.created_at || "").trim(),
+        updated_at: String(message.artifact.updated_at || "").trim(),
+        approved_at: String(message.artifact.approved_at || "").trim(),
+        implemented_run_id: String(message.artifact.implemented_run_id || "").trim(),
+      };
+    } else {
+      artifact = {
         path: String(message.artifact.path || "").trim(),
         text: String(message.artifact.text || "").trim(),
-      }
-    : null;
+      };
+    }
+  }
   const attachments = Array.isArray(message.attachments)
     ? message.attachments
         .map((item) => {
@@ -569,9 +607,12 @@ function normalizeFramingMessage(message) {
         .filter(Boolean)
     : [];
   const resumeFromTrial = normalizeResumeTrialContext(message.resumeFromTrial);
-  const text = String(message.text || "").trim() || (message.role === "user" && attachments.length ? attachmentOnlyMessage(attachments) : "");
+  const text = String(message.text || "").trim()
+    || (kind === "plan" ? String(artifact?.plan_text || artifact?.error || "Planning...").trim() : "")
+    || (message.role === "user" && attachments.length ? attachmentOnlyMessage(attachments) : "");
   if (kind === "project" && (!artifact?.text || isPlaceholderProject(artifact.text))) return null;
-  if (!text && !(artifact?.path && artifact?.text)) return null;
+  if (kind === "plan" && !artifact?.id) return null;
+  if (!text && !(artifact?.path && artifact?.text) && !(kind === "plan" && artifact?.id)) return null;
   return {
     id: String(message.id || newMessageId()).trim(),
     role: message.role,
@@ -579,9 +620,12 @@ function normalizeFramingMessage(message) {
     text,
     created_at: String(message.created_at || new Date().toISOString()),
     ...(String(message.edited_at || "").trim() ? { edited_at: String(message.edited_at || "").trim() } : {}),
-    ...(artifact?.path && artifact?.text ? { artifact } : {}),
+    ...(kind === "plan" && artifact?.id ? { artifact, planId: artifact.id } : {}),
+    ...(kind !== "plan" && artifact?.path && artifact?.text ? { artifact } : {}),
     ...(attachments.length ? { attachments } : {}),
     ...(resumeFromTrial ? { resumeFromTrial } : {}),
+    ...(String(message.mode || "").trim() ? { mode: String(message.mode || "").trim() } : {}),
+    ...(String(message.revisePlanId || "").trim() ? { revisePlanId: String(message.revisePlanId || "").trim() } : {}),
   };
 }
 
@@ -594,7 +638,9 @@ function chatHistoryItemForRequest(message) {
     id: normalized.id,
     role: normalized.role,
     kind: normalized.kind || "text",
-    text: String(normalized.text || "").trim(),
+    text: normalized.kind === "plan"
+      ? String(normalized.artifact?.plan_text || normalized.artifact?.text || normalized.text || "").trim()
+      : String(normalized.text || "").trim(),
     created_at: normalized.created_at || "",
   };
   if (Array.isArray(normalized.attachments) && normalized.attachments.length) {
@@ -954,6 +1000,28 @@ function scopedSet(key, value) {
 
 function scopedRemove(key) {
   localStorage.removeItem(scopedStorageKey(key));
+}
+
+function isPlanComposerMode() {
+  return composerMode === "plan";
+}
+
+function renderComposerModeControls() {
+  $$("[data-composer-mode]").forEach((button) => {
+    const mode = normalizeComposerMode(button.dataset.composerMode);
+    const active = mode === composerMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function setComposerMode(mode, options = {}) {
+  const next = normalizeComposerMode(mode);
+  composerMode = next;
+  if (options.persist !== false) scopedSet("composerMode", next);
+  if (next !== "plan") pendingPlanRevisionId = "";
+  renderComposerModeControls();
+  renderComposerActionButtons();
 }
 
 function scopedJsonGet(key, fallback = {}) {
@@ -1830,6 +1898,11 @@ function mergeSessionFromApiResponse(payload) {
   optimisticResearchSession = null;
   if (!appState) appState = {};
   appState.research_session = session;
+  const plan = payload?.result?.plan || session.latest_plan || null;
+  if (plan && typeof plan === "object" && plan.id) {
+    appState.latest_plan = plan;
+    if (upsertLatestPlanMessage(localMessages)) lastFramingHtml = "";
+  }
   renderChatState();
   renderSession();
   renderResumeCommandBar();
@@ -2181,6 +2254,8 @@ async function switchProject(projectId) {
   persistNavigationState();
   activeProjectId = next;
   localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+  composerMode = initialComposerMode(activeProjectId);
+  pendingPlanRevisionId = "";
   resetProjectClientState();
   restoreNavigationState();
   hydrateTargetVenueField({ force: true });
@@ -2199,15 +2274,20 @@ async function loadProjects() {
   if (resolvedProjectId && resolvedProjectId !== activeProjectId) {
     activeProjectId = resolvedProjectId;
     localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+    composerMode = initialComposerMode(activeProjectId);
+    pendingPlanRevisionId = "";
   }
   if (!activeProjectId || !known.has(activeProjectId)) {
     activeProjectId = String(resolveProjectIdAlias(projects, payload.active_project_id) || projects[0]?.id || "");
     if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
     else localStorage.removeItem("coAutoResearchActiveProject");
+    composerMode = initialComposerMode(activeProjectId);
+    pendingPlanRevisionId = "";
   }
   appState = { ...(appState || {}), projects, active_project_id: activeProjectId, multi_project: Boolean(payload.multi_project) };
   renderProjectList();
   renderProjectAvailability();
+  renderComposerModeControls();
   maybeOpenInitialProjectDialog();
 }
 
@@ -2997,6 +3077,7 @@ function syncComposerActionButton(button, { stopMode, disabled, sendHtml, sendLa
 }
 
 function renderComposerActionButtons() {
+  renderComposerModeControls();
   const stopMode = canStopCurrentRun();
   const resourceBlocked = hasBlockingResourceImports();
   const blockedMessage = blockingResourceImportMessage();
@@ -3231,7 +3312,9 @@ function framingMessageDedupeKey(message) {
     String(message?.resumeFromTrial?.id || ""),
     String(message?.resumeFromTrial?.path || ""),
     String(message?.artifact?.path || ""),
+    String(message?.artifact?.id || ""),
     String(message?.artifact?.text || "").trim(),
+    String(message?.artifact?.plan_text || "").trim(),
   ].join("\n");
 }
 
@@ -3333,7 +3416,7 @@ function isFramingThreadUserTranscript(entry) {
   const rawType = String(entry?.raw_type || "").toLowerCase();
   const role = String(entry?.role || "").toLowerCase();
   const text = String(entry?.content || "").trim();
-  return ["ui.framing", "ui.chat"].includes(rawType) && role === "user" && text && !isDefaultBriefTemplate(text);
+  return ["ui.framing", "ui.chat", "ui.plan"].includes(rawType) && role === "user" && text && !isDefaultBriefTemplate(text);
 }
 
 function transcriptFramingMessageId(entry) {
@@ -3394,7 +3477,7 @@ function pruneNonFinalRecoveredAssistantMessages(messages) {
   if (!staleIds.size && !staleTexts.size) return messages;
   return messages.filter((message) => {
     const id = String(message?.id || "");
-    if (message.role !== "assistant" || message.kind === "project") return true;
+    if (message.role !== "assistant" || message.kind === "project" || message.kind === "plan") return true;
     if (finalIds.has(id)) return true;
     if (staleIds.has(id)) return false;
     const text = normalizedTranscriptText(message.text);
@@ -3465,6 +3548,61 @@ function latestProjectIndex(messages = localMessages) {
     if (isProjectDraftMessage(messages[index])) return index;
   }
   return -1;
+}
+
+function planMessageFromArtifact(artifact) {
+  if (!artifact || typeof artifact !== "object") return null;
+  const id = String(artifact.id || "").trim();
+  if (!id) return null;
+  const text = String(artifact.plan_text || artifact.text || artifact.error || "Planning...").trim();
+  return normalizeFramingMessage({
+    id: `plan-${id}`,
+    role: "assistant",
+    kind: "plan",
+    text,
+    created_at: String(artifact.created_at || new Date().toISOString()),
+    artifact: {
+      type: "plan",
+      id,
+      provider: artifact.provider || "",
+      model: artifact.model || "",
+      status: artifact.status || "pending",
+      text,
+      plan_text: artifact.plan_text || artifact.text || "",
+      steps: Array.isArray(artifact.steps) ? artifact.steps : [],
+      explanation: artifact.explanation || "",
+      error: artifact.error || "",
+      created_at: artifact.created_at || "",
+      updated_at: artifact.updated_at || "",
+      approved_at: artifact.approved_at || "",
+      implemented_run_id: artifact.implemented_run_id || "",
+    },
+  });
+}
+
+function latestPlanMessageIndex(messages = localMessages, planId = "") {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.kind !== "plan") continue;
+    if (!planId || String(message.artifact?.id || "") === String(planId)) return index;
+  }
+  return -1;
+}
+
+function upsertLatestPlanMessage(messages) {
+  const latestPlan = appState?.research_session?.latest_plan || appState?.latest_plan || {};
+  const message = planMessageFromArtifact(latestPlan);
+  if (!message) return false;
+  const index = latestPlanMessageIndex(messages, message.artifact?.id || "");
+  if (index >= 0) {
+    if (JSON.stringify(messages[index].artifact || {}) !== JSON.stringify(message.artifact || {})) {
+      messages[index] = { ...messages[index], ...message };
+      return true;
+    }
+    return false;
+  }
+  messages.push(message);
+  return true;
 }
 
 function isGoalLaunchMessage(message) {
@@ -3549,6 +3687,7 @@ function restoreFramingMessages() {
       shouldPersist = true;
     }
   }
+  if (upsertLatestPlanMessage(nextMessages)) shouldPersist = true;
   if (!hasGoalLaunchMessage(nextMessages) && (hasGoalStarted() || visibleTrials().length)) {
     const message = goalLaunchMessage();
     if (message) {
@@ -3658,8 +3797,76 @@ function controlMessageDisplay(message, text = String(message?.text || "").trim(
   return { label: "Command", value: text || "Command sent" };
 }
 
+function planStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "ready") return "Ready";
+  if (value === "approved") return "Approved";
+  if (value === "failed") return "Failed";
+  if (value === "running") return "Planning";
+  return "Pending";
+}
+
+function planStepsHtml(steps = []) {
+  if (!Array.isArray(steps) || !steps.length) return "";
+  return `
+    <ol class="plan-step-list">
+      ${steps
+        .map((step) => `
+          <li>
+            <span>${escapeHtml(step.status || "step")}</span>
+            <p>${escapeHtml(step.step || "")}</p>
+          </li>
+        `)
+        .join("")}
+    </ol>
+  `;
+}
+
+function planCardHtml(message) {
+  const artifact = message.artifact || {};
+  const planId = String(artifact.id || message.planId || "").trim();
+  const status = String(artifact.status || "pending").toLowerCase();
+  const planText = String(artifact.plan_text || artifact.text || message.text || "").trim();
+  const error = String(artifact.error || "").trim();
+  const ready = status === "ready";
+  const approved = status === "approved";
+  const provider = agentLabel(artifact.provider || sessionBackend());
+  const model = String(artifact.model || "").trim();
+  const body = error
+    ? `<div class="plan-error">${escapeHtml(error)}</div>`
+    : planText
+      ? `<div class="plan-rendered markdown-preview">${markdownToHtml(planText)}</div>`
+      : `<div class="plan-empty">Waiting for the planning result...</div>`;
+  const actions = `
+    <div class="project-card-actions plan-card-actions">
+      ${messageCopyButton(planText, "Copy plan", "Plan copied.")}
+      ${ready ? `<button class="secondary-button small-button" type="button" data-plan-revise="${escapeHtml(planId)}">Revise</button>` : ""}
+      ${ready ? `<button class="primary-button small-button" type="button" data-plan-approve="${escapeHtml(planId)}">Approve &amp; run</button>` : ""}
+      ${approved ? `<span class="plan-approved-note">Implementation started.</span>` : ""}
+    </div>
+  `;
+  return `
+    <article class="framing-message assistant plan-card-message" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="plan">
+      <div class="transcript-meta">CoAutoResearch / Plan</div>
+      <div class="transcript-body project-draft-bubble plan-card-bubble">
+        <div class="project-card-head plan-card-head">
+          <div>
+            <strong>Plan</strong>
+            <span>${escapeHtml(provider)}${model ? ` / ${escapeHtml(model)}` : ""}</span>
+          </div>
+          <span class="plan-status ${escapeHtml(status)}">${escapeHtml(planStatusLabel(status))}</span>
+        </div>
+        ${planStepsHtml(artifact.steps)}
+        ${body}
+        ${actions}
+      </div>
+    </article>
+  `;
+}
+
 function framingMessageHtml(message) {
   if (message.kind === "project" && message.artifact?.text) return projectDraftCardHtml(message);
+  if (message.kind === "plan" && message.artifact?.id) return planCardHtml(message);
   if (isControlFramingMessage(message)) return framingControlMessageHtml(message);
   const role = message.role === "user" ? "user" : "assistant";
   const title = role === "user" ? "You" : "CoAutoResearch";
@@ -3704,7 +3911,9 @@ function framingThinkingHtml() {
 
 function currentRunLiveStatusHtml() {
   const mode = String(sessionState().mode || "").toLowerCase();
-  const status = hasLaunched() || ["chat", "command"].includes(mode)
+  const status = mode === "plan"
+    ? "Planning response"
+    : hasLaunched() || ["chat", "command"].includes(mode)
     ? activeRunStatusLabel()
     : isSessionRunning()
       ? "Drafting PROJECT.md"
@@ -6115,7 +6324,7 @@ function inlineRunActivityHtml(userEntry, entries) {
 function transcriptRunStart(entry) {
   const rawType = String(entry?.raw_type || "").toLowerCase();
   const role = String(entry?.role || "").toLowerCase();
-  return role === "user" && ["ui.framing", "ui.chat", "ui.research", "ui.goal"].includes(rawType);
+  return role === "user" && ["ui.framing", "ui.chat", "ui.plan", "ui.research", "ui.goal"].includes(rawType);
 }
 
 function normalizedTranscriptText(value) {
@@ -9292,12 +9501,15 @@ function ensureAttachmentMenu() {
 function positionAttachmentMenu(menu = $("#attachment-menu"), button = $("#composer-attach-button")) {
   if (!menu || !button || menu.hidden || typeof button.getBoundingClientRect !== "function") return;
   const buttonRect = button.getBoundingClientRect();
+  const composerRect = button.closest?.(".brief-composer-row")?.getBoundingClientRect?.() || null;
+  const anchorTop = Math.min(buttonRect.top, Number.isFinite(composerRect?.top) ? composerRect.top : buttonRect.top);
+  const anchorBottom = Math.max(buttonRect.bottom, Number.isFinite(composerRect?.bottom) ? composerRect.bottom : buttonRect.bottom);
   const menuWidth = Math.min(260, Math.max(220, window.innerWidth - 40));
   menu.style.width = `${menuWidth}px`;
   const menuHeight = menu.offsetHeight || 114;
   const left = Math.min(Math.max(20, buttonRect.left), Math.max(20, window.innerWidth - menuWidth - 20));
-  let top = buttonRect.top - menuHeight - 10;
-  if (top < 12) top = Math.min(window.innerHeight - menuHeight - 12, buttonRect.bottom + 10);
+  let top = anchorTop - menuHeight - 10;
+  if (top < 12) top = Math.min(window.innerHeight - menuHeight - 12, anchorBottom + 10);
   menu.style.left = `${left}px`;
   menu.style.top = `${Math.max(12, top)}px`;
   menu.style.bottom = "auto";
@@ -10887,7 +11099,13 @@ function isComposerCommandLine(line) {
   const normalized = String(line || "").trim().toLowerCase().replace(/\s+/g, " ");
   if (!normalized.startsWith("/")) return false;
   if (isLocalSlashControl(normalized)) return true;
-  return /^\/(?:permissions|model|plan)(?:\s+.*)?$/.test(normalized);
+  return /^\/(?:permissions|model)(?:\s+.*)?$/.test(normalized);
+}
+
+function parsePlanSlashCommand(text) {
+  const value = String(text || "").trim();
+  if (!/^\/plan(?:\s|$)/i.test(value)) return null;
+  return value.replace(/^\/plan(?:\s+)?/i, "").trim();
 }
 
 function composerPromptNextValue(currentValue, prompt) {
@@ -11035,22 +11253,36 @@ async function sendSessionComposerMessage(message) {
     return false;
   }
   const text = String(message || "").trim();
-  const isCommand = text.startsWith("/");
+  const planSlashMessage = parsePlanSlashCommand(text);
+  const isPlanRequest = planSlashMessage !== null || (!text.startsWith("/") && isPlanComposerMode());
+  const isCommand = text.startsWith("/") && !isPlanRequest;
   const attachments = currentComposerAttachments();
   const resourceLinksForRequest = isCommand ? [] : collectResourceLinks();
   const uploadItemsForRequest = isCommand ? [] : copyComposerItems(selectedUploadItems);
   let resumeFromTrial = selectedResumeTrialPayload();
   if (!text && !attachments.length && !resumeFromTrial) return false;
   const localControl = canSendLocalSlashControl(text);
-  const queueChatDuringRun = canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial);
+  if (isPlanRequest && isSessionRunning()) {
+    showToast("Wait for the current agent run to finish before starting a plan.", true);
+    return false;
+  }
+  const queueChatDuringRun = !isPlanRequest && canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial);
   if (!canSendSessionComposerMessage() && !localControl && !queueChatDuringRun) {
     showToast("Wait for the current agent run to finish before sending another message.", true);
     return false;
   }
   const commandSettings = isCommand ? settingsFromForm() : null;
-  let messageText = text;
+  let messageText = planSlashMessage !== null ? planSlashMessage : text;
+  if (isPlanRequest && !messageText && !attachments.length) {
+    showToast("Write what you want the agent to plan.", true);
+    return false;
+  }
   if (resumeFromTrial && isCommand) {
     showToast("Remove the Continue from Trial chip before sending a slash command, or send a normal instruction for this fork.", true);
+    return false;
+  }
+  if (resumeFromTrial && isPlanRequest) {
+    showToast("Remove the Continue from Trial chip before starting a plan.", true);
     return false;
   }
   if (resumeFromTrial) {
@@ -11061,7 +11293,11 @@ async function sendSessionComposerMessage(message) {
   const displayText = isCommand ? text : messageText || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
   let appendedMessage = null;
   if (!isCommand) {
-    appendedMessage = appendFramingMessage("user", displayText, { attachments, resumeFromTrial });
+    appendedMessage = appendFramingMessage("user", displayText, {
+      attachments,
+      resumeFromTrial,
+      ...(isPlanRequest ? { mode: "plan", revisePlanId: pendingPlanRevisionId } : {}),
+    });
     framingReplyPending = true;
     beginFramingPending(appendedMessage?.id || "");
     clearFramingComposerText(text || displayText);
@@ -11080,6 +11316,8 @@ async function sendSessionComposerMessage(message) {
   }
   const endpoint = isCommand
       ? "/api/research/command"
+      : isPlanRequest
+        ? "/api/research/plan"
       : resumeFromTrial
         ? "/api/research/resume-from-trial"
         : "/api/research/chat";
@@ -11094,7 +11332,8 @@ async function sendSessionComposerMessage(message) {
           conversationHistory: conversationHistoryForRequest(localMessages),
           files,
           resourceLinks: resourceLinksForRequest,
-          resumeFromTrial,
+          resumeFromTrial: isPlanRequest ? null : resumeFromTrial,
+          ...(isPlanRequest && pendingPlanRevisionId ? { revisePlanId: pendingPlanRevisionId } : {}),
           settings: settingsFromForm(),
         };
     if (appendedMessage) await persistFramingMessages();
@@ -11112,6 +11351,7 @@ async function sendSessionComposerMessage(message) {
     throw error;
   }
   mergeSessionFromApiResponse(response);
+  if (isPlanRequest) pendingPlanRevisionId = "";
   await notifyResourceHandlingFromResponse(response);
   reconcileFramingPending(localMessages);
   renderFramingConversation();
@@ -11181,6 +11421,41 @@ async function coldStartFromPrepare() {
   }
 }
 
+async function approvePlan(planId) {
+  const id = String(planId || "").trim();
+  if (!id) return;
+  if (isSessionRunning()) {
+    showToast("Wait for the current agent run to finish before approving a plan.", true);
+    return;
+  }
+  try {
+    framingReplyPending = true;
+    beginFramingPending("");
+    const response = await api("/api/research/plan/approve", {
+      method: "POST",
+      body: JSON.stringify({ planId: id, settings: settingsFromForm() }),
+    });
+    mergeSessionFromApiResponse(response);
+    showToast("Started implementation run.");
+    await loadOverview(true);
+    scrollFramingToBottomSoon();
+  } catch (error) {
+    framingReplyPending = false;
+    reconcileFramingPending(localMessages);
+    renderFramingConversation();
+    showToast(error.message, true);
+  }
+}
+
+function revisePlan(planId) {
+  const id = String(planId || "").trim();
+  if (!id) return;
+  pendingPlanRevisionId = id;
+  setComposerMode("plan");
+  showToast("Plan revision mode is ready.");
+  $("#cold-file-editor")?.focus();
+}
+
 async function resendConversationMessage(id, text) {
   const message = localMessages.find((item) => item.id === id && item.role === "user");
   const next = String(text || "").trim();
@@ -11190,7 +11465,8 @@ async function resendConversationMessage(id, text) {
     return;
   }
   const index = localMessages.findIndex((item) => item.id === id);
-  const useFramingRun = isTruePreProjectBriefResend(index);
+  const usePlanRun = message.mode === "plan";
+  const useFramingRun = !usePlanRun && isTruePreProjectBriefResend(index);
   const editAttachments = editDraftAttachments(id);
   const displayText = next || attachmentOnlyMessage(editAttachments);
   if (!displayText) return;
@@ -11238,10 +11514,14 @@ async function resendConversationMessage(id, text) {
         },
         settings: settingsFromForm(),
       };
+      if (usePlanRun) {
+        delete body.resendContext.forceFreshSession;
+        if (message.revisePlanId) body.revisePlanId = message.revisePlanId;
+      }
       if (files.length) body.files = files;
       if (resourceLinks.length) body.resourceLinks = resourceLinks;
       if (retainedAttachments.length) body.retainedAttachments = retainedAttachments;
-      const response = await api("/api/research/chat", {
+      const response = await api(usePlanRun ? "/api/research/plan" : "/api/research/chat", {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -11474,6 +11754,9 @@ function bindEvents() {
   $("#settings-form").addEventListener("submit", saveUiSettings);
   $$(".stage-pill").forEach((button) => {
     button.addEventListener("click", () => setStage(button.dataset.stage));
+  });
+  $$("[data-composer-mode]").forEach((button) => {
+    button.addEventListener("click", () => setComposerMode(button.dataset.composerMode));
   });
 
   $("#launch-autoresearch").addEventListener("click", launchAutoresearch);
@@ -11999,6 +12282,11 @@ function bindEvents() {
     }
     const command = event.target.closest("[data-command]");
     if (command) {
+      if (String(command.dataset.command || "").trim().toLowerCase() === "/plan") {
+        setComposerMode("plan");
+        $("#cold-file-editor")?.focus();
+        return;
+      }
       insertComposerPrompt(command.dataset.command);
       return;
     }
@@ -12094,6 +12382,16 @@ function bindEvents() {
     const editAttachmentRemove = event.target.closest("[data-edit-attachment-remove]");
     if (editAttachmentRemove) {
       removeEditAttachment(editingFramingId, editAttachmentRemove.dataset.editAttachmentRemove);
+      return;
+    }
+    const planApprove = event.target.closest("[data-plan-approve]");
+    if (planApprove) {
+      approvePlan(planApprove.dataset.planApprove).catch((error) => showToast(error.message, true));
+      return;
+    }
+    const planRevise = event.target.closest("[data-plan-revise]");
+    if (planRevise) {
+      revisePlan(planRevise.dataset.planRevise);
       return;
     }
     const projectEdit = event.target.closest("[data-project-edit]");

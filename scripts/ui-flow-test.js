@@ -581,13 +581,33 @@ function loadAppContext() {
       return globalThis.__apiResponse || {
         ok: true,
         result: {
+          ...(endpoint === "/api/research/plan" ? {
+            plan: {
+              id: "P_test",
+              provider: "codex",
+              model: "gpt-5.5",
+              status: "running",
+              plan_text: "",
+              steps: [],
+            },
+          } : {}),
           session: {
             id: "s2",
             session_id: "sid",
             status: "running",
-            mode: endpoint.includes("command") ? "command" : "chat",
+            mode: endpoint.includes("command") ? "command" : endpoint === "/api/research/plan" ? "plan" : "chat",
             started_at: "2026-06-17T10:01:00.000Z",
-            transcript: []
+            transcript: [],
+            latest_plan: endpoint === "/api/research/plan"
+              ? {
+                  id: "P_test",
+                  provider: "codex",
+                  model: "gpt-5.5",
+                  status: "running",
+                  plan_text: "",
+                  steps: [],
+                }
+              : {}
           }
         }
       };
@@ -608,6 +628,8 @@ function loadAppContext() {
       attachments: message.attachments || [],
       resumeFromTrial: message.resumeFromTrial || null,
       artifact: message.artifact || null,
+      mode: message.mode || "",
+      revisePlanId: message.revisePlanId || "",
     }));
     globalThis.__setMessages = (messages) => {
       localMessages.splice(0, localMessages.length, ...messages.map((message) => normalizeFramingMessage(message)).filter(Boolean));
@@ -1350,6 +1372,90 @@ async function testEmptyProjectPrepareUsesChatEndpoint() {
   assert.equal(app.context.__apiCalls[0].body.message, "How should I use this tool?");
   assert.equal(app.context.__startedFramingBrief, undefined, "empty project first message must not start the framing helper");
   assert.equal(app.context.__confirmMessageLog().length, 0, "ordinary empty-project chat should not ask for a regenerate confirmation");
+}
+
+async function testPlanComposerModeUsesPlanEndpoint() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    setComposerMode("plan");
+  `);
+  app.coldEditor.value = "Plan the first implementation pass.";
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan", "Plan mode should use the real plan endpoint");
+  assert.equal(app.context.__apiCalls[0].body.message, "Plan the first implementation pass.");
+  assert.equal(app.context.__apiCalls[0].body.conversationHistory.length >= 1, true, "plan requests should send conversation history");
+  assert.equal(app.context.__startedFramingBrief, undefined, "Plan mode must not start the framing helper");
+  assert.equal(app.context.__messages()[0].mode, "plan", "visible plan request should remember its mode for resend");
+}
+
+async function testTypedPlanSlashIsConvertedLocally() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+  `);
+  const sent = await app.run('sendSessionComposerMessage("/plan fix the upload flow")');
+  assert.equal(sent, true, "typed /plan should submit as a plan request");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan", "typed /plan must not hit the slash command endpoint");
+  assert.equal(app.context.__apiCalls[0].body.message, "fix the upload flow", "typed /plan prefix should be stripped");
+  assert.equal(app.context.__messages()[0].kind, "text", "typed /plan should render as a normal user request, not a command row");
+  assert.equal(app.context.__messages()[0].text, "fix the upload flow");
+}
+
+async function testPlanRequestBlockedDuringActiveRun() {
+  const app = loadAppContext();
+  app.run(`
+    setComposerMode("plan");
+    __setSession({ id: "active", session_id: "sid", status: "running", mode: "chat", active_run: { running: true }, transcript: [] });
+  `);
+  const sent = await app.run('sendSessionComposerMessage("Plan while active")');
+  assert.equal(sent, false, "plan requests should not queue behind an active run");
+  assert.equal(app.context.__apiCalls.length, 0, "blocked plan requests must not call the backend");
+  assert.equal(app.context.__toastMessages.some((item) => item.message.includes("starting a plan")), true);
+}
+
+async function testPlanCardApproveReviseAndResend() {
+  const app = loadAppContext();
+  app.run(`
+    appState.research_session.latest_plan = {
+      id: "P_ready",
+      provider: "codex",
+      model: "gpt-5.5",
+      status: "ready",
+      plan_text: "# Plan\\n\\n1. Update the UI.",
+      steps: [{ step: "Inspect UI", status: "completed" }, { step: "Patch flow", status: "pending" }],
+      created_at: "2026-06-26T10:00:00.000Z"
+    };
+    restoreFramingMessages();
+  `);
+  const planMessage = app.context.__messages().find((message) => message.kind === "plan");
+  assert.equal(Boolean(planMessage), true, "overview restore should surface latest ready plan as a plan card message");
+  const html = app.run('framingMessageHtml(localMessages.find((message) => message.kind === "plan"))');
+  assert.equal(html.includes("data-plan-approve"), true, "ready plan card should show approve action");
+  assert.equal(html.includes("data-plan-revise"), true, "ready plan card should show revise action");
+  assert.equal(html.includes("data-project-launch"), false, "plan card must not show PROJECT.md launch action");
+
+  app.run('revisePlan("P_ready")');
+  app.coldEditor.value = "Make it more conservative.";
+  await app.run("coldStartFromPrepare()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan", "revising a plan should send a plan request");
+  assert.equal(app.context.__apiCalls[0].body.revisePlanId, "P_ready", "plan revision should include prior plan id");
+
+  app.context.__apiCalls.length = 0;
+  app.run(`__setSession({ id: "done", session_id: "", status: "completed", mode: "plan", active_run: { running: false }, transcript: [] });`);
+  await app.run('approvePlan("P_ready")');
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan/approve", "approve should call the plan approve endpoint");
+  assert.equal(app.context.__apiCalls[0].body.planId, "P_ready");
 }
 
 async function testFreshRemoteProjectFirstMessageSends() {
@@ -5231,6 +5337,10 @@ testNavigationStatePersistsPanelAndScroll();
 await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
+await testPlanComposerModeUsesPlanEndpoint();
+await testTypedPlanSlashIsConvertedLocally();
+await testPlanRequestBlockedDuringActiveRun();
+await testPlanCardApproveReviseAndResend();
 await testFreshRemoteProjectFirstMessageSends();
 await testFreshRemoteProjectStaleRunningSnapshotStillSends();
 await testRunningChatMessageIsQueued();

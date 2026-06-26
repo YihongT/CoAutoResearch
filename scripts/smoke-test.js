@@ -1403,7 +1403,7 @@ Confidence: medium
   }
   assertThemeContrast(stylesCss);
   if (
-    !serverPy.includes('{"text", "project", "goal-launch", "command", "intervention-recorded"}') ||
+    !serverPy.includes('{"text", "project", "plan", "goal-launch", "command", "intervention-recorded"}') ||
     !serverPy.includes('clean["text"] = f"Attached {count}') ||
     !serverPy.includes('display_message = "Attached resources."')
   ) {
@@ -1439,7 +1439,7 @@ Confidence: medium
     appJs.includes("appendInterventionAcknowledgementFromResponse") ||
     !appJs.includes("function canQueueChatDuringAutoresearchRun") ||
     !appJs.includes("Queued; CoAutoResearch will reply after the current run finishes.") ||
-    !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command", "intervention-recorded"])') ||
+    !appJs.includes('const allowedKinds = new Set(["text", "project", "plan", "goal-launch", "command", "intervention-recorded"])') ||
     !appJs.includes("clientMessageId: message.id") ||
     !appJs.includes("clientMessageId: appendedMessage?.id") ||
     !appJs.includes("conversationHistory: conversationHistoryForRequest(localMessages)") ||
@@ -1451,7 +1451,8 @@ Confidence: medium
     appJs.includes("resendTranscriptMessage") ||
     appJs.includes("data-transcript-edit") ||
     appJs.includes("transcript-edit-form") ||
-    !appJs.includes("const useFramingRun = isTruePreProjectBriefResend(index)") ||
+    !appJs.includes("const usePlanRun = message.mode === \"plan\"") ||
+    !appJs.includes("const useFramingRun = !usePlanRun && isTruePreProjectBriefResend(index)") ||
     !appJs.includes('showToast(useFramingRun ? `${agentLabel(sessionBackend())} is reframing PROJECT.md.` : "Regenerating reply.")') ||
     !serverPy.includes("CHAT_PROTECTED_PATHS") ||
     !serverPy.includes("create_chat_protected_snapshot() if mode == \"chat\" else None") ||
@@ -1460,6 +1461,36 @@ Confidence: medium
     !serverPy.includes("read_trajectory_state() if chat_guard_active else sync_trajectory_state(\"snapshot\")")
   ) {
     throw new Error("chat mode must not be able to create or sync autoresearch trial artifacts");
+  }
+  if (
+    !serverPy.includes("def start_research_plan") ||
+    !serverPy.includes("def start_research_plan_approve") ||
+    !serverPy.includes("def plan_research_prompt") ||
+    !serverPy.includes("Do not create, edit, delete, rename, or move any project/repository files.") ||
+    !serverPy.includes("def codex_app_server_command") ||
+    !serverPy.includes('args.extend(["app-server", "--listen", "stdio://"])') ||
+    !serverPy.includes('"capabilities": {"experimentalApi": True}') ||
+    !serverPy.includes('"collaborationMode"') ||
+    !serverPy.includes('"mode": "plan"') ||
+    !serverPy.includes('"sandboxPolicy": {"type": "readOnly"') ||
+    !serverPy.includes("Codex app-server did not return a plan item") ||
+    !serverPy.includes("def write_claude_plan_hook") ||
+    !serverPy.includes('"PermissionRequest"') ||
+    !serverPy.includes('"matcher": "ExitPlanMode"') ||
+    !serverPy.includes('"behavior": "deny"') ||
+    !serverPy.includes('"interrupt": True') ||
+    !serverPy.includes("Use Plan mode for `/plan`; CoAutoResearch will not forward `/plan` to the agent.") ||
+    !appJs.includes("function parsePlanSlashCommand") ||
+    !appJs.includes('const isPlanRequest = planSlashMessage !== null || (!text.startsWith("/") && isPlanComposerMode())') ||
+    !appJs.includes('"/api/research/plan"') ||
+    !appJs.includes('"/api/research/plan/approve"') ||
+    !appJs.includes("function planCardHtml") ||
+    !appJs.includes("data-plan-approve") ||
+    !appJs.includes("data-plan-revise") ||
+    !appJs.includes("[data-composer-mode]") ||
+    !indexHtml.includes('data-composer-mode="plan"')
+  ) {
+    throw new Error("real Plan Mode must use dedicated plan APIs, Codex app-server, Claude ExitPlanMode capture, and plan cards without forwarding /plan");
   }
   if (
     !indexHtml.includes('id="composer-attach-button"') ||
@@ -1580,7 +1611,7 @@ Confidence: medium
     !appJs.includes("mergePendingLocalFramingMessages") ||
     !appJs.includes("recoveredFramingMessagesFromSession") ||
     !appJs.includes("isFramingThreadUserTranscript") ||
-    !appJs.includes('["ui.framing", "ui.chat"].includes(rawType)') ||
+    !appJs.includes('["ui.framing", "ui.chat", "ui.plan"].includes(rawType)') ||
     !appJs.includes("editedTranscriptCutWindows") ||
     !appJs.includes("message.edited_at = new Date().toISOString()") ||
     !appJs.includes("framingReplyPending = true") ||
@@ -1731,7 +1762,7 @@ Confidence: medium
   }
   if (
     !appVersion ||
-    !appJs.includes('const allowedKinds = new Set(["text", "project", "goal-launch", "command", "intervention-recorded"])') ||
+    !appJs.includes('const allowedKinds = new Set(["text", "project", "plan", "goal-launch", "command", "intervention-recorded"])') ||
     !appJs.includes('appendFramingMessage("user", displayText, { kind: "command" })') ||
     !appJs.includes('beginFramingPending(appendedMessage?.id || "");') ||
     !appJs.includes("function framingControlMessageHtml(message)") ||

@@ -13,6 +13,7 @@ import json
 import mimetypes
 import os
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -38,6 +39,7 @@ AUTORESEARCH_MAX_ITERATIONS = DEFAULT_REVIEW_CHECKPOINT_INTERVAL
 PRE_EXEC_SCRIPT_MAX_CHARS = 4000
 PORT_FALLBACK_ATTEMPTS = 50
 FRAMING_MESSAGES_CLIENT_VERSION = "20260617-trial-selection"
+PLAN_ARTIFACT_SCHEMA_VERSION = 1
 MAX_TEXT_BYTES = 500_000
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 RESOURCE_IMPORT_CHUNK_BYTES = 8 * 1024 * 1024
@@ -268,6 +270,9 @@ def new_research_session() -> dict[str, Any]:
         "last_event_at": "",
         "last_event_summary": "",
         "agent_notice": {},
+        "plan_id": "",
+        "plan_thread_id": "",
+        "plan_turn_id": "",
         "process": None,
     }
 
@@ -2452,7 +2457,7 @@ def sanitize_framing_message(item: Any) -> dict[str, Any] | None:
     kind = str(item.get("kind") or "text").strip()
     if role not in {"user", "assistant"}:
         return None
-    if kind not in {"text", "project", "goal-launch", "command", "intervention-recorded"}:
+    if kind not in {"text", "project", "plan", "goal-launch", "command", "intervention-recorded"}:
         kind = "text"
     clean: dict[str, Any] = {
         "id": str(item.get("id") or "").strip()[:120],
@@ -2466,13 +2471,51 @@ def sanitize_framing_message(item: Any) -> dict[str, Any] | None:
         clean["edited_at"] = edited_at[:80]
     artifact = item.get("artifact")
     if isinstance(artifact, dict):
-        artifact_path = str(artifact.get("path") or "").strip()
-        artifact_text = str(artifact.get("text") or "").strip()
-        if artifact_path and artifact_text:
-            clean["artifact"] = {
-                "path": artifact_path[:400],
-                "text": artifact_text[:120_000],
-            }
+        if kind == "plan":
+            plan_id = normalize_plan_id(artifact.get("id") or item.get("planId"))
+            plan_text = str(artifact.get("plan_text") or artifact.get("text") or "").strip()
+            plan_error = str(artifact.get("error") or "").strip()
+            raw_steps = artifact.get("steps") if isinstance(artifact.get("steps"), list) else []
+            steps = []
+            for step in raw_steps[:80]:
+                if not isinstance(step, dict):
+                    continue
+                step_text = str(step.get("step") or step.get("text") or "").strip()
+                if step_text:
+                    steps.append({"step": step_text[:1200], "status": str(step.get("status") or "").strip()[:80]})
+            if plan_id:
+                clean["artifact"] = {
+                    "type": "plan",
+                    "id": plan_id,
+                    "provider": normalize_agent_backend(artifact.get("provider")),
+                    "model": str(artifact.get("model") or "").strip()[:120],
+                    "status": str(artifact.get("status") or "pending").strip()[:80],
+                    "text": plan_text[:120_000],
+                    "plan_text": plan_text[:120_000],
+                    "steps": steps,
+                    "explanation": str(artifact.get("explanation") or "").strip()[:4000],
+                    "error": plan_error[:4000],
+                    "created_at": str(artifact.get("created_at") or "").strip()[:80],
+                    "updated_at": str(artifact.get("updated_at") or "").strip()[:80],
+                    "approved_at": str(artifact.get("approved_at") or "").strip()[:80],
+                    "implemented_run_id": str(artifact.get("implemented_run_id") or "").strip()[:120],
+                }
+                if not clean["text"]:
+                    clean["text"] = (plan_text or plan_error or "Planning...")[:40_000]
+        else:
+            artifact_path = str(artifact.get("path") or "").strip()
+            artifact_text = str(artifact.get("text") or "").strip()
+            if artifact_path and artifact_text:
+                clean["artifact"] = {
+                    "path": artifact_path[:400],
+                    "text": artifact_text[:120_000],
+                }
+    mode = str(item.get("mode") or "").strip()
+    if mode in {"chat", "plan"}:
+        clean["mode"] = mode
+    revise_plan_id = normalize_plan_id(item.get("revisePlanId"))
+    if revise_plan_id:
+        clean["revisePlanId"] = revise_plan_id
     attachments = item.get("attachments")
     if isinstance(attachments, list):
         clean_attachments = []
@@ -9091,6 +9134,7 @@ def research_session_snapshot() -> dict[str, Any]:
             "trajectory": trajectory,
             "expected_trial": expected_trial,
             "active_run": active_run,
+            "latest_plan": latest_plan_artifact(),
             **queued_chat_summary(),
         }
 
@@ -9458,7 +9502,7 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
         persist_research_session()
     if returncode == 0:
         try:
-            if mode != "chat":
+            if mode not in {"chat", "plan"}:
                 validate_expected_trial_marker()
                 maybe_checkpoint_latest_trial()
                 sync_trajectory_state("run_completed")
@@ -9696,6 +9740,528 @@ def start_research_run(
         RESEARCH_SESSION["process_thread"] = thread
     thread.start()
     return research_session_snapshot()
+
+
+def codex_app_server_command(settings: dict[str, Any]) -> list[str]:
+    executable = resolve_agent_executable("codex", agent_process_env("codex"))
+    args = [executable]
+    if settings.get("webSearch"):
+        args.extend(["-c", 'web_search="live"'])
+    args.extend(extra_config_args(str(settings.get("extraConfig") or "")))
+    args.extend(["app-server", "--listen", "stdio://"])
+    return args
+
+
+def json_rpc_write(proc: subprocess.Popen[str], message: dict[str, Any]) -> None:
+    if proc.stdin is None:
+        raise RuntimeError("Agent app-server stdin is closed.")
+    proc.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+    proc.stdin.flush()
+
+
+def extract_nested_id(payload: Any, names: tuple[str, ...]) -> str:
+    if isinstance(payload, dict):
+        for name in names:
+            value = payload.get(name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for key in ("thread", "turn", "result", "params", "item"):
+            nested = payload.get(key)
+            found = extract_nested_id(nested, names)
+            if found:
+                return found
+        for nested in payload.values():
+            found = extract_nested_id(nested, names)
+            if found:
+                return found
+    if isinstance(payload, list):
+        for item in payload:
+            found = extract_nested_id(item, names)
+            if found:
+                return found
+    return ""
+
+
+def codex_plan_event_parts(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    method = str(event.get("method") or event.get("type") or event.get("event") or "").strip()
+    params = event.get("params") if isinstance(event.get("params"), dict) else event
+    return method, params if isinstance(params, dict) else {}
+
+
+def plan_steps_from_payload(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    steps: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        step = str(item.get("step") or item.get("text") or "").strip()
+        status = str(item.get("status") or "").strip()
+        if step:
+            steps.append({"step": step, "status": status})
+    return steps
+
+
+def initialize_plan_research_session(
+    plan_id: str,
+    display_message: str,
+    settings: dict[str, Any],
+    command: list[str],
+    backend: str,
+) -> None:
+    with RESEARCH_LOCK:
+        proc = RESEARCH_SESSION.get("process")
+        status = str(RESEARCH_SESSION.get("status") or "")
+        if (proc and proc.poll() is None) or session_startup_without_process(status, RESEARCH_SESSION.get("started_at")):
+            raise ValueError(f"A {agent_display_name(backend)} run is already active.")
+        RESEARCH_SESSION.update(
+            {
+                "id": f"S{now_id()}_plan",
+                "session_id": "",
+                "status": "running",
+                "backend": backend,
+                "mode": "plan",
+                "command": command,
+                "settings": settings,
+                "started_at": now_iso(),
+                "ended_at": "",
+                "returncode": None,
+                "logs": [],
+                "raw_logs": [],
+                "transcript": [],
+                "loop_active": False,
+                "loop_stop_reason": RESEARCH_SESSION.get("loop_stop_reason", ""),
+                "process": None,
+                "last_event_at": now_iso(),
+                "last_event_summary": "Starting plan mode.",
+                "agent_notice": {},
+                "protected_snapshot": None,
+                "plan_id": plan_id,
+                "plan_thread_id": "",
+                "plan_turn_id": "",
+            }
+        )
+        RESEARCH_SESSION["transcript"].append(transcript_entry("user", "user", "User", display_message, "ui.plan", True))
+        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+    persist_research_session()
+
+
+def start_plan_process(
+    command: list[str],
+    settings: dict[str, Any],
+    backend: str,
+    plan_id: str,
+    processor: Any,
+    prompt: str,
+) -> dict[str, Any]:
+    wrapper_path: Path | None = None
+    try:
+        process_env = agent_process_env(backend)
+        popen_command, use_shell, wrapper_path = popen_command_for_agent(command, settings, process_env)
+        proc = subprocess.Popen(
+            popen_command,
+            cwd=REPO_ROOT,
+            env=process_env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            shell=use_shell,
+            start_new_session=os.name != "nt",
+        )
+        if wrapper_path:
+            setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
+    except (OSError, ValueError) as exc:
+        if wrapper_path:
+            try:
+                wrapper_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        message = agent_start_error_message(exc, command, backend) if isinstance(exc, OSError) else str(exc)
+        append_research_log(message)
+        mark_plan_artifact_failed(plan_id, message)
+        finish_research_run(127)
+        return research_session_snapshot()
+
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["process"] = proc
+        RESEARCH_SESSION["pre_exec_script_applied"] = bool(wrapper_path)
+    append_research_log(f"Started: {' '.join(command)}")
+    if wrapper_path:
+        append_research_log(f"Applied shell setup before starting {agent_display_name(backend)}.")
+    context = current_project_context()
+    thread = threading.Thread(target=run_in_project, args=(context, processor, proc, plan_id, prompt, settings), daemon=True)
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["process_thread"] = thread
+    thread.start()
+    return research_session_snapshot()
+
+
+def process_codex_app_server_plan_run(
+    proc: subprocess.Popen[str],
+    plan_id: str,
+    prompt: str,
+    settings: dict[str, Any],
+) -> None:
+    returncode: int | None = None
+    thread_id = ""
+    turn_id = ""
+    plan_text_parts: dict[str, list[str]] = {}
+    final_plan_text = ""
+    sent_thread_start = False
+    sent_turn_start = False
+    next_request_id = 1
+
+    def request(method: str, params: dict[str, Any] | None = None) -> int:
+        nonlocal next_request_id
+        request_id = next_request_id
+        next_request_id += 1
+        json_rpc_write(proc, {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}})
+        return request_id
+
+    try:
+        assert proc.stdout is not None
+        request(
+            "initialize",
+            {
+                "clientInfo": {"name": "co-auto-research-ui", "version": "1.0", "title": "CoAutoResearch UI"},
+                "capabilities": {"experimentalApi": True},
+            },
+        )
+        for line in proc.stdout:
+            append_research_log(line)
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                event = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("error"):
+                error_text = event_payload_text(event.get("error")) or "Codex app-server returned an error."
+                raise RuntimeError(
+                    f"{error_text} Codex plan mode requires app-server experimental collaborationMode support; upgrade Codex CLI."
+                )
+
+            method, params = codex_plan_event_parts(event)
+            if method in {"thread/started", "thread.started"}:
+                thread_id = extract_nested_id(params, ("threadId", "thread_id", "id")) or thread_id
+            if method in {"turn/started", "turn.started"}:
+                turn_id = extract_nested_id(params, ("turnId", "turn_id", "id")) or turn_id
+                if turn_id:
+                    with RESEARCH_LOCK:
+                        RESEARCH_SESSION["plan_turn_id"] = turn_id
+                    update_plan_artifact(plan_id, thread_id=thread_id, session_id=thread_id, status="running")
+
+            if "id" in event and int(event.get("id") or 0) == 1 and not sent_thread_start:
+                json_rpc_write(proc, {"jsonrpc": "2.0", "method": "initialized", "params": {}})
+                request(
+                    "thread/start",
+                    {
+                        "cwd": str(REPO_ROOT),
+                        "model": normalize_codex_model(settings.get("model")),
+                        "sandbox": "read-only",
+                        "approvalPolicy": "never",
+                    },
+                )
+                sent_thread_start = True
+                continue
+
+            if sent_thread_start and not sent_turn_start:
+                candidate_thread_id = extract_nested_id(event, ("threadId", "thread_id", "id"))
+                if candidate_thread_id:
+                    thread_id = thread_id or candidate_thread_id
+                    with RESEARCH_LOCK:
+                        RESEARCH_SESSION["plan_thread_id"] = thread_id
+                    model = normalize_codex_model(settings.get("model"))
+                    reasoning = normalize_reasoning_effort(settings.get("reasoningEffort"), "codex", model)
+                    request(
+                        "turn/start",
+                        {
+                            "threadId": thread_id,
+                            "input": [{"type": "text", "text": prompt, "text_elements": []}],
+                            "cwd": str(REPO_ROOT),
+                            "model": model,
+                            "approvalPolicy": "never",
+                            "sandboxPolicy": {"type": "readOnly", "networkAccess": bool(settings.get("webSearch"))},
+                            "collaborationMode": {
+                                "mode": "plan",
+                                "settings": {
+                                    "model": model,
+                                    "reasoning_effort": reasoning or None,
+                                    "developer_instructions": None,
+                                },
+                            },
+                        },
+                    )
+                    sent_turn_start = True
+                    update_plan_artifact(plan_id, thread_id=thread_id, session_id=thread_id, status="running")
+                    continue
+
+            if method in {"item/plan/delta", "item.plan.delta"}:
+                item_id = str(params.get("itemId") or params.get("item_id") or "plan")
+                delta = str(params.get("delta") or "")
+                if delta:
+                    plan_text_parts.setdefault(item_id, []).append(delta)
+                    plan_text = "".join(plan_text_parts[item_id]).strip()
+                    artifact = update_plan_artifact(plan_id, status="running", plan_text=plan_text, thread_id=thread_id, session_id=thread_id)
+                    append_plan_transcript(artifact)
+                continue
+
+            if method in {"turn/plan/updated", "turn.plan.updated"}:
+                steps = plan_steps_from_payload(params.get("plan"))
+                artifact = update_plan_artifact(
+                    plan_id,
+                    status="running",
+                    steps=steps,
+                    explanation=str(params.get("explanation") or ""),
+                    thread_id=thread_id,
+                    session_id=thread_id,
+                )
+                append_plan_transcript(artifact)
+                continue
+
+            if method in {"item/completed", "item.completed"}:
+                item = params.get("item") if isinstance(params.get("item"), dict) else {}
+                if str(item.get("type") or "").lower() == "plan":
+                    final_plan_text = str(item.get("text") or "").strip()
+                    if final_plan_text:
+                        artifact = update_plan_artifact(
+                            plan_id,
+                            status="ready",
+                            plan_text=final_plan_text,
+                            thread_id=thread_id,
+                            session_id=thread_id,
+                        )
+                        append_plan_transcript(artifact)
+                continue
+
+            if method in {"turn/completed", "turn.completed"}:
+                break
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            returncode = proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            # `codex app-server` is a long-lived server process. After the
+            # plan turn completes, stop the stdio server explicitly so the UI
+            # session can complete instead of waiting for the server forever.
+            signal_research_process(proc)
+            try:
+                returncode = proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                signal_research_process(proc, force=True)
+                returncode = proc.wait(timeout=1)
+    except Exception as exc:  # pragma: no cover - defensive adapter handling
+        append_research_log(f"Codex plan mode error: {exc}")
+        mark_plan_artifact_failed(plan_id, str(exc))
+        returncode = proc.poll()
+    finally:
+        wrapper_path = getattr(proc, "_coauto_pre_exec_wrapper", None)
+        if wrapper_path:
+            try:
+                Path(wrapper_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except OSError:
+            pass
+
+    with RESEARCH_LOCK:
+        if RESEARCH_SESSION.get("process") is not proc:
+            return
+    artifact = read_plan_artifact(plan_id)
+    if str(artifact.get("status") or "") != "ready":
+        text = str(artifact.get("plan_text") or final_plan_text or "").strip()
+        if text:
+            artifact = update_plan_artifact(plan_id, status="ready", plan_text=text, thread_id=thread_id, session_id=thread_id)
+            append_plan_transcript(artifact)
+            returncode = 0
+        else:
+            mark_plan_artifact_failed(
+                plan_id,
+                "Codex app-server did not return a plan item. Upgrade Codex CLI; CoAutoResearch does not fallback to sending `/plan` through codex exec.",
+            )
+            returncode = returncode if returncode not in {0, None} else 1
+    finish_research_run(0 if str(read_plan_artifact(plan_id).get("status") or "") == "ready" else returncode)
+
+
+def extract_claude_exit_plan(event: Any) -> str:
+    if isinstance(event, dict):
+        name = str(event.get("name") or event.get("tool_name") or event.get("tool") or "").strip()
+        tool_input = event.get("input") if isinstance(event.get("input"), dict) else event.get("tool_input")
+        if name == "ExitPlanMode" and isinstance(tool_input, dict):
+            plan = str(tool_input.get("plan") or "").strip()
+            if plan:
+                return plan
+        for value in event.values():
+            plan = extract_claude_exit_plan(value)
+            if plan:
+                return plan
+    if isinstance(event, list):
+        for item in event:
+            plan = extract_claude_exit_plan(item)
+            if plan:
+                return plan
+    return ""
+
+
+def claude_plan_hook_paths(plan_id: str) -> tuple[Path, Path]:
+    hook_dir = plan_runtime_dir() / "hooks"
+    hook_dir.mkdir(parents=True, exist_ok=True)
+    return hook_dir / f"{normalize_plan_id(plan_id)}_exit_plan_hook.py", hook_dir / f"{normalize_plan_id(plan_id)}_settings.json"
+
+
+def write_claude_plan_hook(plan_id: str) -> Path:
+    hook_path, settings_path = claude_plan_hook_paths(plan_id)
+    artifact_path = plan_artifact_path(plan_id)
+    hook_path.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+def find_plan(value):
+    if isinstance(value, dict):
+        name = str(value.get("name") or value.get("tool_name") or value.get("tool") or "")
+        tool_input = value.get("tool_input") if isinstance(value.get("tool_input"), dict) else value.get("input")
+        if name == "ExitPlanMode" and isinstance(tool_input, dict):
+            plan = str(tool_input.get("plan") or "").strip()
+            if plan:
+                return plan
+        for key in ("tool_input", "input"):
+            nested = value.get(key)
+            if isinstance(nested, dict):
+                plan = str(nested.get("plan") or "").strip()
+                if plan:
+                    return plan
+        for nested in value.values():
+            plan = find_plan(nested)
+            if plan:
+                return plan
+    if isinstance(value, list):
+        for nested in value:
+            plan = find_plan(nested)
+            if plan:
+                return plan
+    return ""
+
+artifact_path = Path(sys.argv[1])
+try:
+    payload = json.loads(sys.stdin.read() or "{}")
+except json.JSONDecodeError:
+    payload = {}
+plan = find_plan(payload)
+if plan:
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["status"] = "ready"
+    artifact["plan_text"] = plan
+    artifact["updated_at"] = datetime.now(timezone.utc).isoformat()
+    artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+print(json.dumps({
+    "behavior": "deny",
+    "interrupt": True,
+    "message": "Plan captured by CoAutoResearch. Approve the plan in the UI to run implementation."
+}))
+""",
+        encoding="utf-8",
+    )
+    hook_path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    command = f"{shlex.quote(sys.executable)} {shlex.quote(str(hook_path))} {shlex.quote(str(artifact_path))}"
+    settings_payload = {
+        "hooks": {
+            "PermissionRequest": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [{"type": "command", "command": command}],
+                }
+            ]
+        }
+    }
+    settings_path.write_text(json.dumps(settings_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return settings_path
+
+
+def process_claude_plan_run(
+    proc: subprocess.Popen[str],
+    plan_id: str,
+    prompt: str,
+    settings: dict[str, Any],
+) -> None:
+    returncode: int | None = None
+    try:
+        assert proc.stdin is not None
+        proc.stdin.write(prompt)
+        proc.stdin.write("\n")
+        proc.stdin.close()
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            append_research_log(line)
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                event = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            plan = extract_claude_exit_plan(event)
+            if plan:
+                artifact = update_plan_artifact(plan_id, status="ready", plan_text=plan)
+                append_plan_transcript(artifact)
+        returncode = proc.wait()
+    except Exception as exc:  # pragma: no cover - defensive adapter handling
+        append_research_log(f"Claude plan mode error: {exc}")
+        mark_plan_artifact_failed(plan_id, str(exc))
+        returncode = proc.poll()
+    finally:
+        wrapper_path = getattr(proc, "_coauto_pre_exec_wrapper", None)
+        if wrapper_path:
+            try:
+                Path(wrapper_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+    with RESEARCH_LOCK:
+        if RESEARCH_SESSION.get("process") is not proc:
+            return
+    artifact = read_plan_artifact(plan_id)
+    if str(artifact.get("status") or "") != "ready" and str(artifact.get("plan_text") or "").strip():
+        artifact = update_plan_artifact(plan_id, status="ready")
+        append_plan_transcript(artifact)
+    if str(read_plan_artifact(plan_id).get("status") or "") != "ready":
+        mark_plan_artifact_failed(plan_id, "Claude plan mode did not provide an ExitPlanMode plan.")
+        returncode = returncode if returncode not in {0, None} else 1
+    finish_research_run(0 if str(read_plan_artifact(plan_id).get("status") or "") == "ready" else returncode)
+
+
+def start_codex_plan_run(prompt: str, display_message: str, settings: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
+    backend = "codex"
+    ensure_agent_ready(backend, settings=settings)
+    command = codex_app_server_command(settings)
+    initialize_plan_research_session(str(artifact["id"]), display_message, settings, command, backend)
+    update_plan_artifact(str(artifact["id"]), status="running")
+    return start_plan_process(command, settings, backend, str(artifact["id"]), process_codex_app_server_plan_run, prompt)
+
+
+def start_claude_plan_run(prompt: str, display_message: str, settings: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
+    backend = "claude"
+    plan_settings = normalize_claude_settings({**settings, "permissionPreset": "plan", "permissionMode": "plan"}, settings)
+    plan_settings["backend"] = "claude"
+    ensure_agent_ready(backend, settings=plan_settings)
+    settings_path = write_claude_plan_hook(str(artifact["id"]))
+    executable = resolve_agent_executable("claude", agent_process_env("claude"))
+    command = [executable, *settings_to_claude_args(plan_settings, resume=False), "--settings", str(settings_path)]
+    initialize_plan_research_session(str(artifact["id"]), display_message, plan_settings, command, backend)
+    update_plan_artifact(str(artifact["id"]), status="running")
+    return start_plan_process(command, plan_settings, backend, str(artifact["id"]), process_claude_plan_run, prompt)
 
 
 def cold_start_prompt(payload: dict[str, Any]) -> str:
@@ -9993,6 +10559,61 @@ Allowed behavior:
 - If resources were attached, acknowledge what the UI saved and say that Resource Intake or autoresearch should be launched explicitly before treating them as trial evidence.
 
 Use AGENTS.md for repository conventions, but the boundary above overrides any instruction that would start or continue a trial. Be concise in the final response."""
+
+
+def plan_research_prompt(
+    message: str,
+    conversation_history: Any = None,
+    revision_plan: str = "",
+) -> str:
+    extra = message.strip()
+    revision_section = ""
+    if revision_plan.strip():
+        revision_section = f"""
+Previous plan to revise:
+{revision_plan.strip()}
+"""
+    return f"""Plan only. Do not implement.
+
+User request:
+{extra or "(No text; attached resources may have been saved by the UI.)"}
+{chat_history_prompt_section(conversation_history)}
+{revision_section}
+
+Rules:
+- Read the project files and supplied conversation context only as needed to produce a concrete plan.
+- Do not create, edit, delete, rename, or move any project/repository files.
+- Do not update `PROJECT.md`, framing files, manuscript files, resources, trajectory files, trials, reviewer outputs, or runtime state.
+- Do not start autoresearch, create trials, run tests, execute setup commands, install dependencies, or make implementation changes.
+- If the request is ambiguous or missing decisions, make that explicit in the plan and list the questions or choices the user should decide before approval.
+- Produce a concise but actionable Markdown plan with ordered steps, validation, and risks/assumptions where useful.
+- The final output must be the plan itself, not a promise to plan or a request to switch modes."""
+
+
+def approved_plan_prompt(plan: dict[str, Any], instruction: str = "") -> str:
+    request = plan.get("request") if isinstance(plan.get("request"), dict) else {}
+    plan_text = str(plan.get("plan_text") or "").strip()
+    user_request = str(request.get("message") or "").strip()
+    extra = str(instruction or "").strip()
+    extra_section = f"""
+
+Additional user instruction for implementation:
+{extra}
+""" if extra else ""
+    return f"""Implement the approved plan exactly, using normal CoAutoResearch chat/implementation behavior.
+
+Original user request:
+{user_request or "(No original request recorded.)"}
+
+Approved plan:
+{plan_text}
+{extra_section}
+
+Implementation rules:
+- Treat the approved plan as the user's authorization to make the described changes.
+- Keep edits scoped to the approved plan and current project conventions.
+- If a step is impossible or unsafe, stop and explain the blocker instead of silently substituting unrelated work.
+- Run focused validation when practical and report what changed."""
 
 
 def continue_research_prompt(message: str = "") -> str:
@@ -10690,6 +11311,175 @@ def active_process_mode() -> tuple[bool, str]:
     return running, mode
 
 
+def plan_runtime_dir() -> Path:
+    path = RUNTIME_DIR / "plans"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def normalize_plan_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", text)[:120]
+
+
+def plan_artifact_path(plan_id: str) -> Path:
+    clean_id = normalize_plan_id(plan_id)
+    if not clean_id:
+        raise ValueError("Plan id is required.")
+    return plan_runtime_dir() / f"{clean_id}.json"
+
+
+def public_plan_artifact(artifact: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(artifact, dict):
+        return {}
+    request = artifact.get("request") if isinstance(artifact.get("request"), dict) else {}
+    return {
+        "schema_version": int(artifact.get("schema_version") or PLAN_ARTIFACT_SCHEMA_VERSION),
+        "id": str(artifact.get("id") or ""),
+        "provider": normalize_agent_backend(artifact.get("provider")),
+        "model": str(artifact.get("model") or ""),
+        "status": str(artifact.get("status") or "pending"),
+        "request": {
+            "message": str(request.get("message") or ""),
+            "display_message": str(request.get("display_message") or request.get("message") or ""),
+            "attachments": request.get("attachments") if isinstance(request.get("attachments"), dict) else {},
+            "revision_of": str(request.get("revision_of") or ""),
+        },
+        "plan_text": str(artifact.get("plan_text") or ""),
+        "steps": artifact.get("steps") if isinstance(artifact.get("steps"), list) else [],
+        "explanation": str(artifact.get("explanation") or ""),
+        "thread_id": str(artifact.get("thread_id") or ""),
+        "session_id": str(artifact.get("session_id") or ""),
+        "created_at": str(artifact.get("created_at") or ""),
+        "updated_at": str(artifact.get("updated_at") or ""),
+        "approved_at": str(artifact.get("approved_at") or ""),
+        "implemented_run_id": str(artifact.get("implemented_run_id") or ""),
+        "error": str(artifact.get("error") or ""),
+    }
+
+
+def read_plan_artifact(plan_id: str) -> dict[str, Any]:
+    path = plan_artifact_path(plan_id)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"Plan not found: {plan_id}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Plan artifact is invalid: {plan_id}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Plan artifact is invalid: {plan_id}")
+    return payload
+
+
+def write_plan_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    plan_id = normalize_plan_id(artifact.get("id"))
+    if not plan_id:
+        raise ValueError("Plan id is required.")
+    clean = dict(artifact)
+    clean["schema_version"] = int(clean.get("schema_version") or PLAN_ARTIFACT_SCHEMA_VERSION)
+    clean["id"] = plan_id
+    clean["updated_at"] = now_iso()
+    path = plan_artifact_path(plan_id)
+    tmp_path = path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
+    return clean
+
+
+def update_plan_artifact(plan_id: str, **updates: Any) -> dict[str, Any]:
+    try:
+        artifact = read_plan_artifact(plan_id)
+    except ValueError:
+        artifact = {"schema_version": PLAN_ARTIFACT_SCHEMA_VERSION, "id": normalize_plan_id(plan_id), "created_at": now_iso()}
+    artifact.update(updates)
+    return write_plan_artifact(artifact)
+
+
+def latest_plan_artifact() -> dict[str, Any]:
+    try:
+        files = sorted(plan_runtime_dir().glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    except OSError:
+        return {}
+    for path in files:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return public_plan_artifact(payload)
+    return {}
+
+
+def create_plan_artifact(
+    provider: str,
+    settings: dict[str, Any],
+    message: str,
+    display_message: str,
+    attachments: dict[str, Any],
+    revision_of: str = "",
+) -> dict[str, Any]:
+    plan_id = f"P{now_id()}_{slugify(message[:48] or 'plan', 'plan')}"
+    artifact = {
+        "schema_version": PLAN_ARTIFACT_SCHEMA_VERSION,
+        "id": plan_id,
+        "provider": normalize_agent_backend(provider),
+        "model": str(settings.get("model") or ""),
+        "status": "pending",
+        "request": {
+            "message": message,
+            "display_message": display_message,
+            "attachments": attachments,
+            "revision_of": revision_of,
+        },
+        "plan_text": "",
+        "steps": [],
+        "explanation": "",
+        "thread_id": "",
+        "session_id": "",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "approved_at": "",
+        "implemented_run_id": "",
+        "error": "",
+    }
+    return write_plan_artifact(artifact)
+
+
+def append_plan_transcript(artifact: dict[str, Any]) -> None:
+    public = public_plan_artifact(artifact)
+    if not public.get("id"):
+        return
+    with RESEARCH_LOCK:
+        existing_index = -1
+        for index, item in enumerate(RESEARCH_SESSION.get("transcript", [])):
+            if item.get("kind") == "plan" and item.get("artifact", {}).get("id") == public["id"]:
+                existing_index = index
+                break
+        entry = transcript_entry(
+            "assistant",
+            "plan",
+            "Plan",
+            public.get("plan_text") or public.get("error") or "Planning...",
+            "ui.plan.artifact",
+            False,
+        )
+        entry["artifact"] = public
+        if existing_index >= 0:
+            RESEARCH_SESSION["transcript"][existing_index] = {**RESEARCH_SESSION["transcript"][existing_index], **entry}
+        else:
+            RESEARCH_SESSION["transcript"].append(entry)
+        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+    persist_research_session()
+
+
+def mark_plan_artifact_failed(plan_id: str, error: str) -> dict[str, Any]:
+    artifact = update_plan_artifact(plan_id, status="failed", error=str(error or "Plan run failed."))
+    append_plan_transcript(artifact)
+    return artifact
+
+
 def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
     message = str(payload.get("message", "")).strip()
     if isinstance(payload.get("resumeFromTrial"), dict):
@@ -10724,6 +11514,85 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
             display_prompt=display_message,
         ),
     }
+
+
+def implementation_settings_from_payload(raw: Any) -> dict[str, Any]:
+    settings = normalize_research_settings(raw)
+    backend = normalize_agent_backend(settings.get("backend"))
+    if backend == "claude":
+        preset = infer_claude_permission_preset(settings)
+        if preset == "plan" or str(settings.get("permissionMode") or "") == "plan":
+            settings = normalize_claude_settings({**settings, "permissionPreset": "default", "permissionMode": "default"}, settings)
+            settings["backend"] = "claude"
+    return settings
+
+
+def start_research_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    message = str(payload.get("message", "")).strip()
+    if message.startswith("/plan"):
+        message = re.sub(r"^/plan\b", "", message, count=1, flags=re.IGNORECASE).strip()
+    if message.startswith("/"):
+        raise ValueError("Plan mode only accepts ordinary planning requests; send slash commands in Chat mode.")
+    if isinstance(payload.get("resumeFromTrial"), dict):
+        raise ValueError("Plan mode cannot continue from a trial. Use Chat mode for confirmed trial forks.")
+    display_message = message
+    message, attachments = attach_message_resources(payload, message)
+    if not display_message and any(attachments.get(key) for key in ("saved_files", "resource_links", "resource_clues", "metadata_files")):
+        display_message = "Plan with attached resources."
+    if not display_message.strip() and not message.strip():
+        raise ValueError("Plan request is required.")
+    running, _mode = active_process_mode()
+    if running:
+        raise ValueError("Wait for the current agent run to finish before starting a plan.")
+    settings = normalize_research_settings(payload.get("settings"))
+    backend = normalize_agent_backend(settings.get("backend"))
+    revision_of = normalize_plan_id(payload.get("revisePlanId"))
+    revision_plan = ""
+    if revision_of:
+        try:
+            prior = read_plan_artifact(revision_of)
+            revision_plan = str(prior.get("plan_text") or "").strip()
+        except ValueError:
+            revision_plan = ""
+    conversation_history = payload.get("conversationHistory") if isinstance(payload.get("conversationHistory"), list) else []
+    artifact = create_plan_artifact(backend, settings, message, display_message, attachments, revision_of=revision_of)
+    prompt = plan_research_prompt(message, conversation_history=conversation_history, revision_plan=revision_plan)
+    try:
+        if backend == "claude":
+            session = start_claude_plan_run(prompt, display_message, settings, artifact)
+        else:
+            session = start_codex_plan_run(prompt, display_message, settings, artifact)
+    except Exception as exc:
+        mark_plan_artifact_failed(str(artifact["id"]), str(exc))
+        raise
+    return {"files": attachments, "plan": public_plan_artifact(read_plan_artifact(str(artifact["id"]))), "session": session}
+
+
+def start_research_plan_approve(payload: dict[str, Any]) -> dict[str, Any]:
+    plan_id = normalize_plan_id(payload.get("planId") or payload.get("id"))
+    if not plan_id:
+        raise ValueError("Plan id is required.")
+    artifact = read_plan_artifact(plan_id)
+    plan_text = str(artifact.get("plan_text") or "").strip()
+    status = str(artifact.get("status") or "").strip()
+    if status not in {"ready", "approved"} or not plan_text:
+        raise ValueError("Only a ready plan can be approved.")
+    running, _mode = active_process_mode()
+    if running:
+        raise ValueError("Wait for the current agent run to finish before approving a plan.")
+    settings = implementation_settings_from_payload(payload.get("settings"))
+    artifact = update_plan_artifact(plan_id, status="approved", approved_at=now_iso())
+    append_plan_transcript(artifact)
+    instruction = str(payload.get("instruction") or "").strip()
+    session = start_research_run(
+        approved_plan_prompt(artifact, instruction),
+        "chat",
+        resume=should_resume_research_session(settings),
+        settings_payload=settings,
+        display_prompt=f"Implement approved plan {plan_id}.",
+    )
+    update_plan_artifact(plan_id, implemented_run_id=str(session.get("id") or ""))
+    return {"plan": public_plan_artifact(read_plan_artifact(plan_id)), "session": research_session_snapshot()}
 
 
 def start_research_resume_from_trial(payload: dict[str, Any]) -> dict[str, Any]:
@@ -11126,6 +11995,8 @@ def start_research_command(payload: dict[str, Any]) -> dict[str, Any]:
     if not command.startswith("/"):
         command = f"/{command}"
     normalized = re.sub(r"\s+", " ", command.lower()).strip()
+    if normalized == "/plan" or normalized.startswith("/plan "):
+        raise ValueError("Use Plan mode for `/plan`; CoAutoResearch will not forward `/plan` to the agent.")
     settings_payload = payload.get("settings")
     local = handle_local_slash_command(command, normalized, settings_payload)
     if local is not None:
@@ -11165,10 +12036,30 @@ def stop_research_session() -> dict[str, Any]:
         RESEARCH_SESSION["loop_stop_reason"] = "stopped_by_user"
         proc = RESEARCH_SESSION.get("process")
         live = bool(proc and proc.poll() is None)
+        mode = str(RESEARCH_SESSION.get("mode") or "")
+        backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or (RESEARCH_SESSION.get("settings") or {}).get("backend"))
+        plan_thread_id = str(RESEARCH_SESSION.get("plan_thread_id") or "")
+        plan_turn_id = str(RESEARCH_SESSION.get("plan_turn_id") or "")
         if live:
             RESEARCH_SESSION["status"] = "stopping"
     if live and proc:
-        signal_research_process(proc)
+        sent_plan_interrupt = False
+        if mode == "plan" and backend == "codex" and plan_thread_id and plan_turn_id:
+            try:
+                json_rpc_write(
+                    proc,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": int(time.time() * 1000),
+                        "method": "turn/interrupt",
+                        "params": {"threadId": plan_thread_id, "turnId": plan_turn_id},
+                    },
+                )
+                sent_plan_interrupt = True
+            except Exception:
+                pass
+        if not sent_plan_interrupt:
+            signal_research_process(proc)
         killer = threading.Thread(target=run_in_project, args=(context, force_kill_research_process_after_delay, proc), daemon=True)
         killer.start()
         append_research_log("Stop requested from UI.")
@@ -11459,6 +12350,12 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/research/chat":
                     self.send_json({"ok": True, "result": start_research_chat(payload)})
+                    return
+                if parsed.path == "/api/research/plan":
+                    self.send_json({"ok": True, "result": start_research_plan(payload)})
+                    return
+                if parsed.path == "/api/research/plan/approve":
+                    self.send_json({"ok": True, "result": start_research_plan_approve(payload)})
                     return
                 if parsed.path == "/api/research/resume-from-trial":
                     self.send_json({"ok": True, "result": start_research_resume_from_trial(payload)})
