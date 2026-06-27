@@ -1130,6 +1130,51 @@ function loadAppContext() {
       restoreTrialStripScroll();
       return { first, second: strip.scrollLeft, state: { ...trialStripScrollState } };
     };
+    globalThis.__trialStripSelectedProbe = () => {
+      __setSession({
+        id: "s1",
+        session_id: "sid",
+        status: "completed",
+        mode: "goal",
+        loop_active: false,
+        gate: { status: "continue" },
+        transcript: []
+      });
+      const originalQuerySelector = document.querySelector.bind(document);
+      const reviewStrip = {
+        dataset: {},
+        clientWidth: 300,
+        scrollWidth: 1200,
+        scrollLeft: 0,
+        addEventListener() {},
+        getBoundingClientRect: () => ({ left: 0, right: 300 }),
+        querySelector: () => null,
+      };
+      const strip = originalQuerySelector(".trial-strip-scroll");
+      strip.clientWidth = 300;
+      strip.scrollWidth = 1200;
+      strip.scrollLeft = 0;
+      strip.getBoundingClientRect = () => ({ left: 0, right: 300 });
+      const chip = {
+        offsetWidth: 80,
+        offsetLeft: 900,
+        getBoundingClientRect: () => ({ left: 900 - strip.scrollLeft, right: 980 - strip.scrollLeft }),
+      };
+      strip.querySelector = (selector) => selector === '[data-trial-select="18"]' ? chip : null;
+      selectedTrialIndex = 18;
+      trialStripScrollState = { mode: "manual", left: 0, liveIteration: 0, selectedIteration: 18, touchedAt: Date.now() };
+      document.querySelector = (selector) => {
+        if (String(selector).includes("#autoresearch-dock")) return strip;
+        if (selector === ".trial-strip-scroll") return reviewStrip;
+        return originalQuerySelector(selector);
+      };
+      try {
+        restoreTrialStripScroll({ selectedIteration: 18 });
+        return { left: strip.scrollLeft, reviewLeft: reviewStrip.scrollLeft, state: { ...trialStripScrollState } };
+      } finally {
+        document.querySelector = originalQuerySelector;
+      }
+    };
     globalThis.__liveTrialStatusProbe = (session) => {
       __setSession(session);
       appState.trials = [];
@@ -2135,7 +2180,7 @@ async function testSteeringResendStartsVisibleNormalChatRun() {
   assert.equal(messages.length, 1, "resend should keep the edited user turn and wait for the agent reply");
   assert.equal(messages[0].role, "user");
   assert.equal(app.context.__pendingState().reply, true, "resend chat should keep reply pending while Codex works");
-  assert.equal(app.run("__thinkingProbe()").includes("Codex is working"), true, "resend chat should show the normal working UI");
+  assert.equal(app.run("__thinkingProbe()").includes("Working for"), true, "resend chat should show the normal working UI");
   const chatCalls = app.context.__apiCalls.filter((call) => call.endpoint === "/api/research/chat");
   assert.equal(chatCalls.length, 1, "resend should call chat once");
   assert.equal(chatCalls[0].body.clientMessageId, "u1", "resend should identify the edited message");
@@ -2259,7 +2304,9 @@ async function testLaunchGoalMessageBeforeBackendWork() {
   assert.equal(optimisticSession.mode, "goal", "goal launch should immediately expose goal mode");
   assert.equal(optimisticSession.loop_iteration, 1, "goal launch should immediately show the first trial");
   assert.equal(optimisticSession.active_run.trial_iteration, 1, "goal launch should mark Trial 1 as the active run");
-  assert.equal(app.run("__thinkingProbe()").includes("Starting autoresearch on Trial 1"), true, "pending UI should name the optimistic trial immediately");
+  const thinkingHtml = app.run("__thinkingProbe()");
+  assert.equal(thinkingHtml.includes("Trial 1"), true, "pending UI should name the optimistic trial immediately");
+  assert.equal(thinkingHtml.includes("Working for"), true, "pending UI should show the running timer immediately");
   const html = app.run("__messageHtml(0)");
   assert.equal(html.includes('class="framing-message control"'), true, "goal launch should render as a control row, not a user bubble");
   assert.equal(html.includes("Autoresearch"), true);
@@ -2432,6 +2479,7 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
         { id: "tu1", role: "user", kind: "user", raw_type: "ui.goal", content: "Start autoresearch loop.", created_at: "2026-06-17T10:00:00.000Z" },
         { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "codex exec resume", created_at: "2026-06-17T10:00:01.000Z" },
         { id: "ta1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking sources.", created_at: "2026-06-17T10:00:04.000Z" },
+        { id: "ta2", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Narrowing the evidence matrix for Trial 1.", created_at: "2026-06-17T10:00:04.500Z" },
         { id: "tc2", role: "command", kind: "command", raw_type: "process.started", content: "git status --short", created_at: "2026-06-17T10:00:05.000Z" }
       ]
     });
@@ -2439,37 +2487,44 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   const html = app.run("__sessionTimelineProbe()");
   assert.equal(html.includes("Current session activity"), false, "trial timeline must not append the old current-session activity card");
   assert.equal(html.includes("Latest session activity"), false, "trial timeline must not append legacy session activity labels");
-  assert.equal(html.includes("Codex is working on Trial 1"), true, "running trials should use the server-provided active run label");
+  assert.equal(html.includes("Codex is working on Trial 1"), false, "running trials should not render the verbose active run label");
   assert.equal(html.includes("trial-history-micro-spinner"), true, "running autoresearch header should show the micro spinner");
-  assert.equal(html.includes("trial-history-card is-collapsed is-running"), true, "running autoresearch header should expose running state");
-  assert.equal(html.includes("Pause after current turn"), true, "running trial live status should expose a loop pause button");
+  assert.equal(html.includes("trial-history-card is-expanded is-running"), true, "running autoresearch panel should default to expanded while exposing running state");
+  assert.equal(html.includes("trial-report-card is-running"), true, "running trial panel should use the standard trial report card layout");
+  assert.equal(html.includes("Pause after current turn"), true, "running trial panel should expose a loop pause button");
   assert.equal(html.includes("data-pause-autoresearch"), true, "contextual pause button should pause the loop after the current turn");
-  assert.equal(html.includes("Stop current run"), true, "running trial live status should expose a contextual stop button");
+  assert.equal(html.includes("Stop current run"), true, "running trial panel should expose a contextual stop button");
   assert.equal(html.includes("data-stop-current-run"), true, "contextual stop button should stop the active Codex process");
-  assert.equal(html.includes("Live trial activity"), true, "running trial event details should be folded under the live status row");
+  assert.equal(html.includes("trial-report-control-actions"), true, "running trial controls should use the standard trial action row");
+  assert.equal(html.includes("Live trial activity"), true, "running trial event details should be folded under the standard trial card");
   assert.equal(html.includes("data-resume-autoresearch"), false, "running trial panel should not duplicate resume controls");
   assert.equal(html.includes("data-restart-autoresearch"), false, "running trial panel should not duplicate restart controls");
   assert.equal(html.includes("Open latest manuscript"), false, "first running trial should not expose latest manuscript before a report exists");
   assert.equal(html.includes("Report pending"), false, "running trial should not render a low-information pending report card");
   assert.equal(html.includes("Report is not available yet."), false, "running trial should not render a low-information pending report card");
-  assert.equal(html.includes("<span>Trial activity</span>"), false, "running trial details should stay in the live status row instead of a duplicate report card");
+  assert.equal(html.includes("<span>Trial activity</span>"), false, "running trial details should keep the live activity label instead of a duplicate report label");
+  const visibleTrialUpdates = html.match(/<div class="trial-live-updates"[\s\S]*?<\/div>/)?.[0] || "";
+  assert.equal(visibleTrialUpdates.includes("Checking sources."), false, "running trial should keep older process updates in the folded activity");
+  assert.equal(visibleTrialUpdates.includes("Narrowing the evidence matrix for Trial 1."), true, "running trial should show the latest process update outside the folded activity");
+  assert.equal(visibleTrialUpdates.includes("git status --short"), false, "running trial visible updates should not promote raw commands");
   const composer = app.run("__composerSuggestionsProbe()");
   assert.equal(composer.hidden, true, "autoresearch composer suggestion row should stay hidden while running");
   assert.equal(composer.html.includes("Show autoresearch"), false, "composer suggestions should not expose Show autoresearch");
   assert.equal(composer.html.includes("Status"), false, "composer suggestions should not expose Status");
   assert.equal(composer.html.includes("Processes"), false, "composer suggestions should not expose Processes");
   const thinkingHtml = app.run("__thinkingProbe()");
-  assert.equal(thinkingHtml.includes("Codex is working on Trial 1"), true, "working bubble should name the active trial");
+  assert.equal(thinkingHtml.includes("Codex is working on Trial 1"), false, "working bubble should avoid the verbose active run label");
   assert.equal(thinkingHtml.includes("Working for"), true, "working bubble should show elapsed running time");
   assert.equal(thinkingHtml.includes("Trial 1"), true, "working bubble should include the trial axis for autoresearch runs");
   assert.equal(thinkingHtml.includes("Current run activity"), false, "autoresearch working bubble should not duplicate the trial live activity panel");
   assert.equal(thinkingHtml.includes("Live trial activity"), true, "autoresearch working bubble should keep the trial live activity panel");
   assert.equal(thinkingHtml.includes("<span>Run activity</span>"), false, "autoresearch working bubble should not use the ordinary chat activity label");
-  assert.equal(thinkingHtml.includes("Update: Checking sources."), true, "trial live activity summary should expose the latest update");
-  assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking sources.", "collapsed current run summary should prefer readable Codex updates over later commands");
+  const thinkingVisibleTrialUpdates = thinkingHtml.match(/<div class="trial-live-updates"[\s\S]*?<\/div>/)?.[0] || "";
+  assert.equal(thinkingVisibleTrialUpdates.includes("Update: Narrowing the evidence matrix for Trial 1."), false, "trial live status should not duplicate updates as a prefixed summary");
+  assert.equal(app.run("__progressSummaryProbe()"), "Update: Narrowing the evidence matrix for Trial 1.", "collapsed current run summary should prefer readable Codex updates over later commands");
 }
 
-function testRunningTrialOpenButtonsStayGroupedLeft() {
+function testRunningTrialHidesArtifactButtons() {
   const app = loadAppContext();
   app.run(`
     appState.trials = [{
@@ -2505,14 +2560,132 @@ function testRunningTrialOpenButtonsStayGroupedLeft() {
     });
   `);
   const html = app.run("__sessionTimelineProbe()");
-  const openGroup = html.match(/<div class="trial-report-open-actions">([\s\S]*?)<\/div>/)?.[1] || "";
   assert.equal(html.includes("Open latest manuscript"), false, "latest manuscript action should no longer live in the header");
-  assert.equal(openGroup.includes("Open manuscript"), true, "running trial open group should contain Open manuscript");
-  assert.equal(openGroup.includes("Open report"), true, "running trial open group should contain Open report");
-  assert.equal(openGroup.includes("Open review"), true, "running trial open group should contain Open review");
-  assert.ok(openGroup.indexOf("Open manuscript") < openGroup.indexOf("Open report"), "Open manuscript should lead the artifact actions");
-  assert.equal(html.includes('<div class="trial-report-actions"><div class="trial-report-open-actions">'), true, "running trial should keep open buttons in the left open-action group");
-  assert.equal(html.includes('<div class="trial-report-control-actions">Open review'), false, "running trial must not place Open review in the right control group");
+  assert.equal(html.includes("Open manuscript"), false, "running trial panel should not expose a manuscript artifact before the trial boundary closes");
+  assert.equal(html.includes("Open report"), false, "running trial panel should not expose report artifacts before the trial boundary closes");
+  assert.equal(html.includes("Open review"), false, "running trial panel should not expose review artifacts before the trial boundary closes");
+  assert.equal(html.includes("trial-report-open-actions"), false, "running trial panel should not render artifact open actions");
+}
+
+function testTrialOpenButtonsUseManuscriptSnapshotWhenAvailable() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000003_manuscript_revision",
+      iteration: 3,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000003_manuscript_revision/REPORT.md",
+      review_path: "research_trajectory/trials/000003_manuscript_revision/reviews/FINAL_GATE_REVIEW.md",
+      manuscript_snapshot_path: "research_trajectory/checkpoints/000003_manuscript_revision/manuscript/BLUEPRINT.md",
+      manuscript_snapshot_exists: true,
+      report_summary: "Manuscript revised."
+    }];
+    __setSession({
+      id: "s3",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 3,
+      gate: { status: "continue" },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  const openGroup = html.match(/<div class="trial-report-open-actions">([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.equal(openGroup.includes('data-inline-fullscreen="research_trajectory/checkpoints/000003_manuscript_revision/manuscript/BLUEPRINT.md"'), true, "trial manuscript action should open the checkpoint manuscript snapshot");
+  assert.equal(openGroup.includes('data-inline-fullscreen="manuscript/BLUEPRINT.md"'), false, "snapshot-backed trials should not open the latest manuscript from the trial action");
+  assert.ok(openGroup.indexOf("Open manuscript") < openGroup.indexOf("Open report"), "snapshot manuscript action should still lead report artifacts");
+}
+
+function testTrialOpenButtonsFallBackToLatestManuscript() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000004_legacy_trial_without_checkpoint",
+      iteration: 4,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000004_legacy_trial_without_checkpoint/REPORT.md",
+      review_path: "research_trajectory/trials/000004_legacy_trial_without_checkpoint/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Legacy trial."
+    }];
+    __setSession({
+      id: "s4",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 4,
+      gate: { status: "continue" },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  const openGroup = html.match(/<div class="trial-report-open-actions">([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.equal(openGroup.includes('data-inline-fullscreen="manuscript/BLUEPRINT.md"'), true, "trials without a snapshot should keep the latest manuscript fallback");
+  assert.equal(openGroup.includes("Open manuscript"), true, "fallback manuscript action should keep the same visible label");
+}
+
+function testManualTrialSelectionOverridesRunningPanel() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000016_reported_baseline",
+      iteration: 16,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000016_reported_baseline/REPORT.md",
+      review_path: "research_trajectory/trials/000016_reported_baseline/reviews/FINAL_GATE_REVIEW.md",
+      manuscript_snapshot_path: "research_trajectory/checkpoints/000016_reported_baseline/manuscript/BLUEPRINT.md",
+      manuscript_snapshot_exists: true,
+      report_summary: "Trial 16 historical manuscript panel."
+    }, {
+      id: "000018_latest_done",
+      iteration: 18,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000018_latest_done/REPORT.md",
+      review_path: "research_trajectory/trials/000018_latest_done/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Trial 18 latest closed panel."
+    }];
+    __setSession({
+      id: "s19",
+      session_id: "sid",
+      status: "running",
+      mode: "goal",
+      loop_active: true,
+      loop_iteration: 19,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "goal",
+        run_id: "s19",
+        started_at: "2026-06-17T10:00:00.000Z",
+        trial_iteration: 19,
+        trial_label: "Trial 19",
+        status_label: "Codex is working on Trial 19"
+      },
+      trajectory: {
+        latest_active_trial: "000018_latest_done",
+        next_trial_number: 20
+      },
+      gate: { status: "continue" },
+      transcript: [
+        { id: "tu19", role: "user", kind: "user", raw_type: "ui.goal", content: "Continue autoresearch.", created_at: "2026-06-17T10:00:00.000Z" },
+        { id: "ta19", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Running Trial 19 update.", created_at: "2026-06-17T10:00:04.000Z" }
+      ]
+    });
+    selectedTrialIndex = 16;
+    trialStripScrollState = { mode: "manual", left: 0, liveIteration: 19, selectedIteration: 16, touchedAt: Date.now() };
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes('data-trial-select="19"'), true, "running trial chip should remain visible while another trial is selected");
+  assert.equal(html.includes("Trial 16 historical manuscript panel."), true, "manual selection should render the selected historical trial panel while a run is active");
+  assert.equal(html.includes("Running Trial 19 update."), false, "manual selection should not force the running trial live panel into the selected trial body");
+  assert.equal(html.includes("Live trial activity"), false, "manual selection should hide the running trial live details until the running chip is selected");
+  assert.equal(html.includes('data-inline-fullscreen="research_trajectory/checkpoints/000016_reported_baseline/manuscript/BLUEPRINT.md"'), true, "selected historical trial should keep its manuscript snapshot action");
 }
 
 function testAutoresearchPanelCollapsePersists() {
@@ -2544,8 +2717,8 @@ function testAutoresearchPanelCollapsePersists() {
     });
   `);
   const initial = app.run("__autoresearchPanelCollapseProbe()");
-  assert.equal(initial.collapsed, true, "autoresearch panel should default to collapsed");
-  assert.equal(initial.html.includes('data-autoresearch-panel-collapsed="true"'), true, "collapsed state should render on the trial card");
+  assert.equal(initial.collapsed, false, "autoresearch panel should default to expanded");
+  assert.equal(initial.html.includes('data-autoresearch-panel-collapsed="false"'), true, "expanded state should render on the trial card by default");
   assert.equal(initial.html.includes("trial-history-title-row"), false, "trial history header should not render the redundant title/count row");
   assert.equal(initial.html.includes("trial-history-kicker-icon"), true, "trial history header should render the autoresearch glyph");
   assert.equal(initial.html.includes('href="#brand-mark-glyph"'), true, "trial history header should reuse the app brand glyph");
@@ -2560,13 +2733,14 @@ function testAutoresearchPanelCollapsePersists() {
   assert.equal(initial.html.includes("trial-history-toggle-icon"), false, "collapsed state should not render the old standalone chevron button");
   assert.equal(initial.html.includes("trial-history-latest-update"), true, "collapsed state should render the latest process update");
   assert.equal(initial.html.includes("Synthesizing the latest evidence table."), true, "collapsed state should include the latest agent progress text");
+  const collapsed = app.run("__toggleAutoresearchPanelCollapse()");
+  assert.equal(collapsed.collapsed, true, "toggle should collapse the autoresearch panel");
+  assert.equal(collapsed.stored, "true", "collapsed state should persist in scoped localStorage");
+  assert.equal(collapsed.html.includes('data-autoresearch-panel-collapsed="true"'), true, "collapsed state should render on the trial card");
   const expanded = app.run("__toggleAutoresearchPanelCollapse()");
-  assert.equal(expanded.collapsed, false, "toggle should expand the autoresearch panel");
+  assert.equal(expanded.collapsed, false, "second toggle should expand the autoresearch panel again");
   assert.equal(expanded.stored, "false", "expanded state should persist in scoped localStorage");
   assert.equal(expanded.html.includes('data-autoresearch-panel-collapsed="false"'), true, "expanded state should render on the trial card");
-  const collapsed = app.run("__toggleAutoresearchPanelCollapse()");
-  assert.equal(collapsed.collapsed, true, "second toggle should collapse the autoresearch panel again");
-  assert.equal(collapsed.stored, "true", "collapsed state should persist in scoped localStorage");
   app.run(`
     appState.trials[0].is_closed = false;
     appState.trials[0].progress = {
@@ -2718,6 +2892,8 @@ function testAutoresearchPanelPersistsAfterFramingReply() {
   assert.equal(html.includes("Updated PROJECT.md for the pre-loop framing pass."), true, "ordinary framing reply should remain visible");
   assert.equal(html.includes("Trial 18"), true, "pending expected trial should remain visible after a framing reply");
   assert.equal(html.includes("Pending autoresearch step with I0008."), true, "pending intervention should be summarized in the trial panel");
+  const reportCard = html.match(/<article class="trial-report-card[\s\S]*?<\/article>/)?.[0] || "";
+  assert.equal((reportCard.match(/Pending autoresearch step with I0008\./g) || []).length, 1, "pending intervention summary should not duplicate inside the trial report card");
   assert.equal(html.includes("data-resume-autoresearch"), true, "pending expected trial should expose Resume autoresearch");
   assert.equal(html.includes('data-trial-select="17"'), true, "latest reported trial should remain available in the trial axis");
   assert.equal(html.includes("Latest: 000017_table_appendix_provenance_repair"), false, "redundant latest header context should not render");
@@ -2849,7 +3025,7 @@ function testLowInformationTrialSummaryIsOmitted() {
         id: "assistant-created-trial",
         role: "assistant",
         raw_type: "item.message",
-        content: "Created Trial \`000018_best_effect_analysis_method_design\`.",
+        content: "Created Trial \`000018_best_effect_analysis_method_design\` as the next",
         created_at: "2026-01-01T00:00:00Z"
       }]
     });
@@ -3302,14 +3478,16 @@ function testChatRunThinkingUsesLiveStatus() {
         status_label: "Codex is working"
       },
       transcript: [
+        { id: "tr0", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Update: Preparing the current project context.", created_at: "2026-06-17T10:00:01.500Z" },
         { id: "tr1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking the selected trial boundary.", created_at: "2026-06-17T10:00:02.000Z" },
+        { id: "tr2", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Comparing the manuscript title against the current story logic.", created_at: "2026-06-17T10:00:02.500Z" },
         { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "git diff -- PROJECT.md", created_at: "2026-06-17T10:00:03.000Z" }
       ]
     });
   `);
   const html = app.run("__thinkingProbe()");
   assert.equal(html.includes("run-live-status"), true, "running chat sessions should use the lightweight live status surface");
-  assert.equal(html.includes("Codex is working"), true, "running chat status should use the server-provided active run label");
+  assert.equal(html.includes("Codex is working"), false, "running chat status should not render the verbose active run label");
   assert.equal(html.includes("Working for"), true, "running chat status should show elapsed running time");
   assert.equal(html.includes("Run activity"), true, "running chat sessions should keep raw events folded under run activity");
   assert.equal(html.includes("Current run activity"), false, "running chat sessions should not show the legacy current-run activity panel");
@@ -3317,11 +3495,17 @@ function testChatRunThinkingUsesLiveStatus() {
   assert.equal(html.includes("data-pause-autoresearch"), false, "chat runs do not have an autoresearch next turn to pause");
   assert.equal(html.includes("Stop current run"), true, "running chat sessions should expose a current-run stop control");
   assert.equal(html.includes("data-stop-current-run"), true, "current-run stop must terminate the active process");
-  assert.equal(html.includes("Update: Checking the selected trial boundary."), true, "chat run summary should expose the latest update");
+  assert.equal(html.includes("Update: Comparing the manuscript title against the current story logic."), false, "chat run status should not duplicate updates as a prefixed summary");
+  const visibleUpdates = html.match(/<div class="run-live-updates"[\s\S]*?<\/div>/)?.[0] || "";
+  assert.equal(visibleUpdates.includes("Preparing the current project context."), true, "chat run should show assistant updates even when the raw transcript used an Update prefix");
+  assert.equal(visibleUpdates.includes("Update: Preparing the current project context."), false, "visible process updates should strip redundant Update prefixes");
+  assert.equal(visibleUpdates.includes("Checking the selected trial boundary."), true, "chat run should show process assistant updates outside the raw activity fold");
+  assert.equal(visibleUpdates.includes("Comparing the manuscript title against the current story logic."), true, "chat run should show multiple process assistant updates");
+  assert.equal(visibleUpdates.includes("git diff -- PROJECT.md"), false, "chat run visible updates should not promote raw commands");
   assert.equal(html.includes("Planning"), false, "ordinary chat thinking should not render trial progress stages");
   assert.equal(html.includes("Synthesizing"), false, "ordinary chat thinking should not render trial progress stages");
   assert.equal(html.includes("Gate update"), false, "ordinary chat thinking should not render trial progress stages");
-  assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking the selected trial boundary.", "chat run summary should prefer readable updates over later commands");
+  assert.equal(app.run("__progressSummaryProbe()"), "Update: Comparing the manuscript title against the current story logic.", "chat run summary should prefer readable updates over later commands");
   const expandedHtml = app.run(`
     openRunActivityDetails.add(activeRunActivityDetailsKey());
     __progressDetailsProbe();
@@ -3359,9 +3543,141 @@ function testChatRunCommandOnlyKeepsRawCommandFolded() {
   const summary = app.run("__progressSummaryProbe()");
   assert.equal(summary.includes("codex exec resume"), false, "command-only chat runs should not expose raw commands as the main summary");
   assert.match(summary, /Waiting|No agent events|Last event|Rate limit/i, "command-only chat runs should show a user-readable waiting summary");
+  assert.equal(html.includes("Preparing response..."), true, "command-only chat runs should show a quiet pending placeholder until the first process update arrives");
   assert.equal(html.includes("Run activity"), true, "command-only chat runs should still expose folded activity details");
   assert.equal(html.includes("codex exec resume"), true, "folded activity details should retain raw command content for debugging");
   assert.equal(html.includes("Current run activity"), false, "command-only chat runs should not use the legacy activity label");
+}
+
+function testLocalPendingDoesNotFlashPreviousRunUpdates() {
+  const app = loadAppContext();
+  app.run(`
+    const now = Date.now();
+    framingReplyPending = true;
+    framingPendingSince = now;
+    pendingFramingUserMessageId = "u2";
+    __setMessages([
+      { id: "u2", role: "user", kind: "text", text: "new question", created_at: new Date(now).toISOString() }
+    ]);
+    __setSession({
+      id: "old",
+      session_id: "sid",
+      status: "completed",
+      mode: "chat",
+      started_at: new Date(now - 120000).toISOString(),
+      active_run: {
+        running: false,
+        mode: "chat",
+        run_id: "old",
+        started_at: new Date(now - 120000).toISOString()
+      },
+      transcript: [
+        { id: "old-user", role: "user", kind: "user", raw_type: "ui.chat", content: "old question", created_at: new Date(now - 2000).toISOString() },
+        { id: "old-assistant", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Old process update should not flash.", created_at: new Date(now - 500).toISOString() }
+      ]
+    });
+  `);
+  const html = app.run("__thinkingProbe()");
+  assert.equal(html.includes("Old process update should not flash."), false, "new local pending scope should filter previous run updates even if they are very recent");
+  assert.equal(html.includes("Preparing response..."), true, "new local pending scope should show the quiet pending placeholder");
+}
+
+function testRunningProgressIgnoresLateLocalPendingTimestamp() {
+  const app = loadAppContext();
+  app.run(`
+    framingPendingSince = Date.parse("2026-06-17T10:05:00.000Z");
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "chat",
+      loop_active: false,
+      loop_iteration: 0,
+      started_at: "2026-06-17T09:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "chat",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z",
+        status_label: "Codex is working"
+      },
+      transcript: [
+        { id: "tu1", role: "user", kind: "user", raw_type: "ui.chat", content: "Discuss title direction.", created_at: "2026-06-17T10:00:00.000Z" },
+        { id: "ta1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking the title/story mismatch.", created_at: "2026-06-17T10:00:10.000Z" }
+      ]
+    });
+  `);
+  assert.equal(
+    app.run("currentProgressStartTime(sessionState().transcript)"),
+    Date.parse("2026-06-17T10:00:00.000Z"),
+    "server active_run start should win over a later local pending timestamp"
+  );
+  assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking the title/story mismatch.", "late local pending time must not filter out real Codex updates");
+}
+
+function testRunningProgressFallsBackToReasoningSummary() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "chat",
+      loop_active: false,
+      loop_iteration: 0,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "chat",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z",
+        status_label: "Codex is working"
+      },
+      transcript: [
+        { id: "tr1", role: "assistant", kind: "reasoning", raw_type: "item.reasoning", content: "Comparing the manuscript title with the current story logic.", created_at: "2026-06-17T10:00:03.000Z" },
+        { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "rg title manuscript", created_at: "2026-06-17T10:00:04.000Z" }
+      ]
+    });
+  `);
+  const summary = app.run("__progressSummaryProbe()");
+  assert.equal(summary, "Reasoning: Comparing the manuscript title with the current story logic.", "running summary should use process reasoning when no user-facing update exists yet");
+  const html = app.run("__thinkingProbe()");
+  assert.equal(html.includes("Reasoning: Comparing the manuscript title with the current story logic."), false, "live status should not duplicate reasoning as a prefixed summary");
+  assert.equal(html.includes("Comparing the manuscript title with the current story logic."), true, "live status should expose the compact reasoning text");
+  assert.equal(html.includes("Command: rg title manuscript"), false, "live status should not promote raw commands over reasoning");
+}
+
+function testCurrentRunningTranscriptGroupDoesNotRenderWorkedActivity() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "Discuss title direction.", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "Partial current answer.", created_at: "2026-06-17T10:00:05.000Z" }
+    ]);
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "chat",
+      loop_active: false,
+      loop_iteration: 0,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "chat",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z",
+        status_label: "Codex is working"
+      },
+      transcript: [
+        { id: "tu1", role: "user", kind: "user", raw_type: "ui.chat", content: "Discuss title direction.", created_at: "2026-06-17T10:00:00.000Z" },
+        { id: "tr1", role: "assistant", kind: "reasoning", raw_type: "item.reasoning", content: "Thinking through the current response.", created_at: "2026-06-17T10:00:01.000Z" },
+        { id: "ta1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Partial current answer.", created_at: "2026-06-17T10:00:02.000Z" }
+      ]
+    });
+  `);
+  const activity = app.run("__activityProbe()");
+  assert.equal(activity.hasWorked, false, "current running transcript group should stay in the live status, not render as completed Worked activity");
 }
 
 function testWorkingDurationFormatter() {
@@ -3381,6 +3697,10 @@ function testTrialStripScrollRestoresAcrossRender() {
   assert.ok(auto.first > 0, "auto trial strip restore should bring the running chip into view");
   assert.equal(auto.second, auto.first, "poll-driven rerenders must not reset auto-centered trial strip scroll to the left edge");
   assert.equal(auto.state.mode, "auto", "auto-centering should not become sticky manual scroll state");
+  const selected = app.run("__trialStripSelectedProbe()");
+  assert.ok(selected.left > 0, "selected trial restore should center the selected chip even when stale scrollLeft is zero");
+  assert.equal(selected.reviewLeft, 0, "selected trial restore should target the autoresearch strip instead of the first generic strip");
+  assert.equal(selected.state.mode, "manual", "selected trial restore should keep the user's selected-trial state manual");
 }
 
 function testRunningTrialUsesProgressFallback() {
@@ -5851,8 +6171,59 @@ function testNavigationStatePersistsPanelAndScroll() {
   assert.equal(state.scrollTop, 720, "material panel scroll position should be restored after re-render");
 }
 
+function testAgentPanelScrollRestoreAndEntryBehavior() {
+  const app = loadAppContext();
+  const state = app.run(`
+    const main = document.querySelector(".main-stage");
+
+    activeView = "chat";
+    activePanel = "resources";
+    chatScrollRestoredProjectId = "";
+    globalThis.__scrollCount = 0;
+    main.scrollTop = 360;
+    persistActiveViewScrollPosition();
+    main.scrollTop = 0;
+    globalThis.__renderFramingConversationImpl();
+    const refreshAgentScrollTop = main.scrollTop;
+    const refreshAgentScrollCount = globalThis.__scrollCount;
+
+    main.scrollTop = 420;
+    persistActiveViewScrollPosition();
+    main.scrollTop = 0;
+    setPanel("chat");
+    const sameAgentScrollTop = main.scrollTop;
+    const sameAgentScrollCount = globalThis.__scrollCount;
+
+    activeView = "materials";
+    activePanel = "manuscript";
+    main.scrollTop = 700;
+    setPanel("chat");
+
+    ({
+      refreshAgentScrollTop,
+      refreshAgentScrollCount,
+      sameAgentScrollTop,
+      sameAgentScrollCount,
+      afterMaterialScrollCount: globalThis.__scrollCount,
+      activeView,
+      activePanel,
+      storedAgentScroll: localStorage.getItem(scopedStorageKey("viewScroll:chat")),
+      storedMaterialScroll: localStorage.getItem(scopedStorageKey("viewScroll:manuscript"))
+    });
+  `);
+  assert.equal(state.refreshAgentScrollTop, 360, "refresh-style Agent render should restore the previous Agent scroll position");
+  assert.equal(state.refreshAgentScrollCount, 0, "refresh-style Agent render should not force-scroll to latest");
+  assert.equal(state.sameAgentScrollTop, 420, "refresh-style Agent restore should keep the user's previous Agent scroll position");
+  assert.equal(state.sameAgentScrollCount, 0, "re-entering Agent from Agent should not force-scroll to latest");
+  assert.equal(state.afterMaterialScrollCount, 1, "entering Agent from another panel should scroll to the latest interaction");
+  assert.equal(state.activeView, "chat", "Agent view should be active after switching from a material panel");
+  assert.equal(state.storedAgentScroll, "420", "Agent scroll should be persisted project-locally");
+  assert.equal(state.storedMaterialScroll, "700", "leaving a material panel should persist its scroll before switching to Agent");
+}
+
 testButtonInventoryHasHandlers();
 testNavigationStatePersistsPanelAndScroll();
+testAgentPanelScrollRestoreAndEntryBehavior();
 await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
@@ -5897,7 +6268,10 @@ testMarkdownOrderedListsPreserveExplicitNumbers();
 testMessagesExposeCopyButtons();
 testFileTreePdfPreviewControls();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
-testRunningTrialOpenButtonsStayGroupedLeft();
+testRunningTrialHidesArtifactButtons();
+testTrialOpenButtonsUseManuscriptSnapshotWhenAvailable();
+testTrialOpenButtonsFallBackToLatestManuscript();
+testManualTrialSelectionOverridesRunningPanel();
 testAutoresearchPanelCollapsePersists();
 testAutoresearchPanelRendersInFloatingDock();
 testPausedAutoresearchActionsRenderInTrialPanel();
@@ -5917,6 +6291,10 @@ testOnlyLatestClosedTrialUsesDoneStatus();
 testHistoricalReportedTrialsDoNotUseIncompleteChipStyle();
 testChatRunThinkingUsesLiveStatus();
 testChatRunCommandOnlyKeepsRawCommandFolded();
+testLocalPendingDoesNotFlashPreviousRunUpdates();
+testRunningProgressIgnoresLateLocalPendingTimestamp();
+testRunningProgressFallsBackToReasoningSummary();
+testCurrentRunningTranscriptGroupDoesNotRenderWorkedActivity();
 testWorkingDurationFormatter();
 testTrialStripScrollRestoresAcrossRender();
 testRunningTrialUsesProgressFallback();

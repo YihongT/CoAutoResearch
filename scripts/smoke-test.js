@@ -1724,7 +1724,8 @@ Confidence: medium
     !appJs.includes("function pendingExpectedTrialIteration()") ||
     !appJs.includes("function pendingExpectedTrialReport") ||
     !appJs.includes("function persistentAutoresearchPanelHtml") ||
-    !appJs.includes("const activeTrial = liveIteration || (manuallySelected ? selected : (pendingExpected || selected))") ||
+    !appJs.includes("const activeTrial = manuallySelected ? selected : (liveIteration || pendingExpected || selected)") ||
+    !appJs.includes("Number(activeTrial) === Number(liveIteration)") ||
     !(
       (
         appJs.includes("const countParts = [`${trials.length} active trial") &&
@@ -1748,16 +1749,16 @@ Confidence: medium
     !appJs.includes("workingDurationHtml()") ||
     !appJs.includes("function activeTrialHistoryHtml()") ||
     !appJs.includes("function scheduleWorkingTicker()") ||
-    !appJs.includes("trial-live-status") ||
+    !appJs.includes("trial-report-card is-running") ||
     !appJs.includes("Live trial activity") ||
     !appJs.includes("data-pause-autoresearch") ||
     !appJs.includes("Pause after current turn") ||
     !appJs.includes("data-stop-current-run") ||
     !appJs.includes("Stop current run") ||
-    !appJs.includes("trial-live-status-actions") ||
+    !appJs.includes("trial-report-control-actions") ||
     !stylesCss.includes(".current-run-control-button") ||
-    !stylesCss.includes(".trial-live-status") ||
-    !stylesCss.includes(".trial-live-status-actions") ||
+    !stylesCss.includes(".trial-report-card") ||
+    !stylesCss.includes(".trial-report-control-actions") ||
     appJs.includes("const liveIteration = isLiveGoalSession() ? Number(sessionState().loop_iteration || 0) : 0") ||
     appJs.includes("isSessionRunning() && hasGoalStarted() ? Number(sessionState().loop_iteration || 0) : 0") ||
     appJs.includes("const running = isSessionRunning() && Number(sessionState().loop_iteration || 0) === Number(iteration)")
@@ -3486,6 +3487,16 @@ Confidence: medium
     "base_trial = module.active_reported_trials()[0]",
     "checkpoint = module.write_trial_checkpoint(base_trial)",
     "assert checkpoint['created'] is True, checkpoint",
+    "checkpoint_blueprint = root / checkpoint['path'] / 'manuscript' / 'BLUEPRINT.md'",
+    "assert checkpoint_blueprint.read_text(encoding='utf-8') == '# Manuscript at checkpoint\\n'",
+    "collected_base = next(item for item in module.collect_trials() if item['id'] == '000001_base_boundary')",
+    "assert collected_base['manuscript_snapshot_path'] == checkpoint['path'] + '/manuscript/BLUEPRINT.md', collected_base",
+    "assert collected_base['manuscript_snapshot_exists'] is True, collected_base",
+    "assert collected_base['manuscript_snapshot_source'] == 'checkpoint', collected_base",
+    "snapshot_file = module.read_text_file(collected_base['manuscript_snapshot_path'])",
+    "assert snapshot_file['exists'] is True and snapshot_file['editable'] is False, snapshot_file",
+    "active_blueprint = module.read_text_file('manuscript/BLUEPRINT.md')",
+    "assert active_blueprint['exists'] is True and active_blueprint['editable'] is True, active_blueprint",
     "checkpoint_state = root / checkpoint['path'] / 'research_trajectory' / 'STATE.md'",
     "checkpoint_state.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)",
     "assert not (checkpoint_state.stat().st_mode & stat.S_IWUSR), oct(checkpoint_state.stat().st_mode)",

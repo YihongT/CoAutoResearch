@@ -10122,12 +10122,12 @@ body.has-brief-dock {
 
 /* Runtime command suggestions and trial timeline */
 body.has-brief-dock {
-  padding-bottom: calc(var(--brief-dock-height, 132px) + 36px);
+  padding-bottom: calc(var(--brief-dock-height, 132px) + 18px);
 }
 
 body.has-brief-dock .main-stage {
   padding-bottom: 0;
-  scroll-padding-bottom: calc(var(--brief-dock-height, 132px) + 36px);
+  scroll-padding-bottom: calc(var(--brief-dock-height, 132px) + 18px);
 }
 
 body.has-brief-dock.has-autoresearch-dock .main-stage {
@@ -10140,8 +10140,8 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .stage-panel[data-s
 }
 
 body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
-  padding-bottom: calc(var(--brief-dock-height, 132px) + 44px);
-  scroll-padding-bottom: calc(var(--brief-dock-height, 132px) + 44px);
+  padding-bottom: calc(var(--brief-dock-height, 132px) + 12px);
+  scroll-padding-bottom: calc(var(--brief-dock-height, 132px) + 12px);
 }
 
 .composer-suggestion-row[hidden] {
@@ -10636,6 +10636,28 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.run-live-updates,
+.trial-live-updates {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-live-updates p,
+.trial-live-updates p {
+  margin: 0;
+  color: rgba(32, 31, 27, 0.78);
+  font-size: 14px;
+  line-height: 1.56;
+  overflow-wrap: anywhere;
+}
+
+.run-live-placeholder {
+  color: rgba(32, 31, 27, 0.54);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .trial-progress-stepper {
@@ -11237,7 +11259,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 
 @media (max-width: 760px) {
   body.has-brief-dock {
-    padding-bottom: calc(var(--brief-dock-height, 120px) + 28px);
+    padding-bottom: calc(var(--brief-dock-height, 120px) + 16px);
   }
 
   .composer-suggestion-row {
@@ -16019,6 +16041,29 @@ html[data-theme] .run-live-status p {
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+html[data-theme] :is(.run-live-updates, .trial-live-updates) {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+html[data-theme] :is(.run-live-updates, .trial-live-updates) p {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--reader);
+  font-size: 14px;
+  line-height: 1.56;
+  overflow-wrap: anywhere;
+}
+
+html[data-theme] .run-live-placeholder {
+  color: var(--muted);
+  font-family: var(--reader);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 html[data-theme] :is(.run-live-details, .framing-progress-details) {

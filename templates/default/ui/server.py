@@ -3928,6 +3928,11 @@ def file_raw_url(relative_path: str) -> str:
     return f"/api/file/raw?project={quote(current_project_context().id)}&path={quote(relative_path)}"
 
 
+def is_checkpoint_manuscript_path(relative_path: str) -> bool:
+    normalized = str(relative_path or "").replace("\\", "/").lstrip("/")
+    return normalized.startswith("research_trajectory/checkpoints/") and "/manuscript/" in normalized
+
+
 def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str, Any]:
     display_path = str(relative_path).replace("\\", "/").lstrip("/")
     try:
@@ -3947,7 +3952,11 @@ def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str,
         previewable = path.suffix.lower() in PREVIEWABLE_SUFFIXES
         root = REPO_ROOT.resolve()
         resolved = path.resolve()
-        editable = path.suffix.lower() in EDITABLE_SUFFIXES and (resolved == root or root in resolved.parents)
+        editable = (
+            path.suffix.lower() in EDITABLE_SUFFIXES
+            and (resolved == root or root in resolved.parents)
+            and not is_checkpoint_manuscript_path(relative)
+        )
         if kind in {"image", "pdf", "binary"}:
             return {
                 "path": relative,
@@ -3989,6 +3998,9 @@ def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str,
 
 def write_text_file(relative_path: str, text: str) -> dict[str, Any]:
     path = repo_path(relative_path)
+    relative = rel_path(path)
+    if is_checkpoint_manuscript_path(relative):
+        raise ValueError("Checkpoint manuscript snapshots are read-only.")
     root = REPO_ROOT.resolve()
     resolved = path.resolve()
     if resolved != root and root not in resolved.parents:
@@ -4000,7 +4012,7 @@ def write_text_file(relative_path: str, text: str) -> dict[str, Any]:
         raise ValueError(f"File is too large to save from the UI: {relative_path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(encoded)
-    return read_text_file(rel_path(path))
+    return read_text_file(relative)
 
 
 def safe_read(path: Path, limit: int = MAX_TEXT_BYTES) -> str:
@@ -5422,6 +5434,8 @@ def collect_trials() -> list[dict[str, Any]]:
             if artifacts_dir.exists():
                 artifacts = [file_card(p) for p in artifacts_dir.rglob("*") if p.is_file() and p.name != ".gitkeep"]
             checkpoint_path = trial_checkpoint_dir(trial_dir.name)
+            manuscript_snapshot_path = checkpoint_path / "manuscript" / "BLUEPRINT.md"
+            manuscript_snapshot_exists = manuscript_snapshot_path.exists()
             progress = trial_progress_summary(trial_dir, plan, report, artifacts, state_text)
             trials.append(
                 {
@@ -5443,6 +5457,9 @@ def collect_trials() -> list[dict[str, Any]]:
                     "manuscript_implications": first_meaningful_line(extract_section(report, "Manuscript Implications"), "No manuscript implications recorded"),
                     "checkpoint_path": rel_path(checkpoint_path) if checkpoint_path.exists() else "",
                     "checkpoint_exists": checkpoint_path.exists(),
+                    "manuscript_snapshot_path": rel_path(manuscript_snapshot_path) if manuscript_snapshot_exists else "",
+                    "manuscript_snapshot_exists": manuscript_snapshot_exists,
+                    "manuscript_snapshot_source": "checkpoint" if manuscript_snapshot_exists else "",
                     "artifacts": artifacts,
                     "progress": progress,
                 }
@@ -10613,6 +10630,8 @@ User brief:
 Target venue / audience:
 {target_venue or "Not provided"}
 
+{response_language_prompt_section()}
+
 Resource locations to inspect:
 - ongoing work: resources/ongoing_work/
 - proposals: resources/proposals/
@@ -10650,6 +10669,8 @@ User brief:
 
 Target venue / audience:
 {target_venue or "Not provided"}
+
+{response_language_prompt_section()}
 
 Resource locations to inspect:
 - ongoing work: resources/ongoing_work/
@@ -10860,6 +10881,16 @@ def queued_chat_prompt_section(queued_messages: Any = None) -> str:
     return "\n".join(lines)
 
 
+def response_language_prompt_section() -> str:
+    return """
+Response language:
+- Match the user's latest message's primary language for user-facing final replies and brief progress updates.
+- If the latest user message is mostly Chinese, reply in Chinese while preserving technical terms, file paths, code identifiers, titles, and quoted text in their original language.
+- If the user explicitly asks for another language, follow that request.
+- Do not translate repository artifacts unless the user explicitly asks; keep project files in their established language.
+"""
+
+
 def chat_research_prompt(
     message: str = "",
     conversation_history: Any = None,
@@ -10874,6 +10905,7 @@ User message:
 {chat_history_prompt_section(conversation_history)}
 {resend_prompt_section(resend_context)}
 {queued_chat_prompt_section(queued_messages)}
+{response_language_prompt_section()}
 
 Hard boundary:
 - Do not create, edit, delete, rename, or summarize as newly completed anything under `research_trajectory/trials/`.
@@ -10917,6 +10949,7 @@ User request:
 {extra or "(No text; attached resources may have been saved by the UI.)"}
 {chat_history_prompt_section(conversation_history)}
 {revision_section}
+{response_language_prompt_section()}
 
 Rules:
 - Read the project files and supplied conversation context only as needed to produce a concrete plan.
@@ -10946,6 +10979,7 @@ Original user request:
 Approved plan:
 {plan_text}
 {extra_section}
+{response_language_prompt_section()}
 
 Implementation rules:
 - Treat the approved plan as the user's authorization to make the described changes.
@@ -10962,12 +10996,16 @@ def continue_research_prompt(message: str = "") -> str:
 User instruction:
 {extra}
 
+{response_language_prompt_section()}
+
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached.
 
 For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
 
 If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
-    return """Continue the next coherent CoAutoResearch iteration in this same agent session.
+    return f"""Continue the next coherent CoAutoResearch iteration in this same agent session.
+
+{response_language_prompt_section()}
 
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 

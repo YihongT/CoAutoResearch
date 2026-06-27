@@ -117,6 +117,7 @@ let fileViewerReturnPath = "";
 let viewScrollPersistTimer = null;
 let suppressViewScrollPersistence = false;
 let viewScrollRestoreToken = 0;
+let chatScrollRestoredProjectId = "";
 let composerDraft = "";
 let autoresearchDockElement = null;
 let lastAutoresearchDockHtml = "";
@@ -1150,6 +1151,18 @@ function restoreActiveViewScrollPosition({ defaultTop = 0 } = {}) {
       }
     });
   });
+}
+
+function markChatScrollRestoredForCurrentProject() {
+  chatScrollRestoredProjectId = activeProjectId || "default";
+}
+
+function restoreInitialChatScrollPosition() {
+  if (activeView !== "chat") return;
+  const projectId = activeProjectId || "default";
+  if (chatScrollRestoredProjectId === projectId) return;
+  chatScrollRestoredProjectId = projectId;
+  restoreActiveViewScrollPosition();
 }
 
 function normalizeAgentBackend(value) {
@@ -2261,6 +2274,7 @@ function resetProjectClientState() {
   projectDraftEditMode = false;
   editingFramingId = "";
   lastFramingHtml = "";
+  chatScrollRestoredProjectId = "";
   framingMessagesSaveVersion += 1;
   framingMessagesPersisting = false;
   framingReplyPending = false;
@@ -3327,7 +3341,7 @@ function runActivityOpenAttribute(key) {
 }
 
 function autoresearchPanelCollapsed() {
-  return scopedGet(AUTORESEARCH_PANEL_COLLAPSED_KEY, "true", { legacyFallback: false }) !== "false";
+  return scopedGet(AUTORESEARCH_PANEL_COLLAPSED_KEY, "false", { legacyFallback: false }) === "true";
 }
 
 function setAutoresearchPanelCollapsed(collapsed) {
@@ -4221,38 +4235,31 @@ function framingThinkingHtml() {
 }
 
 function currentRunLiveStatusHtml() {
-  const mode = String(sessionState().mode || "").toLowerCase();
-  const status = mode === "plan"
-    ? "Planning response"
-    : hasLaunched() || ["chat", "command"].includes(mode)
-    ? activeRunStatusLabel()
-    : isSessionRunning()
-      ? "Drafting PROJECT.md"
-      : `Starting ${agentLabel(sessionBackend())}`;
   const entries = currentProgressEntries();
-  const summary = currentRunReadableSummary(entries);
+  const processUpdates = currentRunProcessUpdatesHtml(entries);
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice);
+  const placeholder = !showWaitNotice ? currentRunPendingPlaceholderHtml(entries) : "";
   const eventLabel = currentRunActivityEventLabel(entries.length);
   return `
     <article class="framing-message assistant is-thinking" aria-live="polite">
       <div class="transcript-meta">CoAutoResearch</div>
       <div class="transcript-body thinking-bubble">
-        <section class="run-live-status" aria-live="polite">
+        <section class="run-live-status" aria-live="polite" aria-label="Current run status">
           <div class="run-live-status-head">
             <div class="thinking-status-row run-live-status-title">
               <span class="thinking-dot"></span>
               <span class="thinking-dot"></span>
               <span class="thinking-dot"></span>
-              <strong>${escapeHtml(status)}</strong>
-              ${isSessionRunning() ? workingDurationHtml() : ""}
+              ${isRunVisiblyPending() ? workingDurationHtml() : ""}
             </div>
             <div class="run-live-status-actions">
               <span>${escapeHtml(eventLabel)}</span>
               ${runControlButtonsHtml()}
             </div>
           </div>
-          <p class="run-live-summary">${escapeHtml(summary)}</p>
+          ${processUpdates}
+          ${placeholder}
           ${showWaitNotice ? waitNotice : ""}
           ${currentRunActivityDetailsHtml(entries)}
         </section>
@@ -4281,7 +4288,7 @@ function framingProgressContent(entry) {
   const content = String(entry?.content || "").trim();
   if (!content) return "";
   if (rawType.includes("reasoning") || kind === "reasoning") {
-    return "Reasoning about the project framing.";
+    return compactText(content, 220);
   }
   if (content.includes("file_change")) {
     const lines = content.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -4293,6 +4300,18 @@ function framingProgressContent(entry) {
   return compactText(content.replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, ""), 220);
 }
 
+function hasLocalPendingRunScope() {
+  return Boolean(Number(framingPendingSince || 0) && (framingReplyPending || framingDraftPending || pendingFramingUserMessageId));
+}
+
+function isRunVisiblyPending() {
+  return isSessionRunning() || hasLocalPendingRunScope();
+}
+
+function currentProgressLeewayMs() {
+  return hasLocalPendingRunScope() ? 0 : 1000;
+}
+
 function currentProgressStartTime(transcript) {
   const sessionStarted = entryTimeValue({ created_at: sessionState().started_at });
   const activeRunStarted = entryTimeValue({ created_at: activeRun().started_at });
@@ -4301,16 +4320,19 @@ function currentProgressStartTime(transcript) {
     return Math.max(latest, entryTimeValue(entry));
   }, 0);
   const pendingSince = Number(framingPendingSince || 0);
-  return Math.max(sessionStarted, activeRunStarted, latestRunStart, pendingSince);
+  const explicitRunStart = Math.max(activeRunStarted, latestRunStart);
+  if (hasLocalPendingRunScope()) return Math.max(pendingSince, explicitRunStart || 0);
+  return explicitRunStart || pendingSince || sessionStarted;
 }
 
 function currentRunScopedEntries(entries) {
   const transcript = Array.isArray(sessionState().transcript) ? sessionState().transcript : [];
   const progressStart = currentProgressStartTime(transcript);
+  const leeway = currentProgressLeewayMs();
   if (!progressStart) return entries || [];
   return (entries || []).filter((entry) => {
     const createdAt = entryTimeValue(entry);
-    return !createdAt || createdAt >= progressStart - 1000;
+    return !createdAt || createdAt >= progressStart - leeway;
   });
 }
 
@@ -4318,6 +4340,7 @@ function currentProgressEntries() {
   const session = sessionState();
   const transcript = Array.isArray(session.transcript) ? session.transcript : [];
   const progressStart = currentProgressStartTime(transcript);
+  const leeway = currentProgressLeewayMs();
   return transcript
     .filter((entry) => {
       const role = transcriptRole(entry);
@@ -4325,7 +4348,7 @@ function currentProgressEntries() {
       const rawType = String(entry?.raw_type || "").toLowerCase();
       if (progressStart) {
         const createdAt = entryTimeValue(entry);
-        if (createdAt && createdAt < progressStart - 1000) return false;
+        if (createdAt && createdAt < progressStart - leeway) return false;
       }
       return content && role !== "user" && rawType !== "turn.completed";
     })
@@ -4345,10 +4368,15 @@ function currentRunActivityEventLabel(count) {
 }
 
 function currentRunReadableEntry(entries) {
-  const readableTitles = new Set(["Error", "Done", "Update", "File change"]);
+  const primaryTitles = new Set(["Error", "Done", "Update", "File change"]);
+  const primary = [...(entries || [])].reverse().find((entry) => {
+    const title = framingProgressTitle(entry);
+    return primaryTitles.has(title) && framingProgressContent(entry);
+  });
+  if (primary) return primary;
   return [...(entries || [])].reverse().find((entry) => {
     const title = framingProgressTitle(entry);
-    return readableTitles.has(title) && framingProgressContent(entry);
+    return title === "Reasoning" && framingProgressContent(entry);
   }) || null;
 }
 
@@ -4356,6 +4384,57 @@ function currentRunReadableSummary(entries = currentProgressEntries()) {
   const entry = currentRunReadableEntry(entries);
   if (entry) return `${framingProgressTitle(entry)}: ${framingProgressContent(entry)}`;
   return agentWaitStateText() || (isSessionRunning() ? "Waiting for Codex events..." : "Waiting for agent events...");
+}
+
+function isVisibleProcessUpdateEntry(entry) {
+  const title = framingProgressTitle(entry);
+  if (!["Update", "Reasoning"].includes(title)) return false;
+  const role = transcriptRole(entry);
+  if (title === "Update" && role !== "assistant") return false;
+  const rawType = String(entry?.raw_type || "").toLowerCase();
+  if (rawType.startsWith("turn.") || rawType.startsWith("session.")) return false;
+  const content = framingProgressContent(entry);
+  if (!content) return false;
+  if (/^(turn|session|run|response)\.[a-z_.-]+$/i.test(content.trim())) return false;
+  return true;
+}
+
+function visibleProcessUpdateText(entry) {
+  return framingProgressContent(entry).replace(/^(?:update|reasoning)\s*:\s*/i, "").trim();
+}
+
+function currentRunProcessUpdateEntries(entries = currentProgressEntries(), limit = 3) {
+  const seen = new Set();
+  return (entries || [])
+    .filter((entry) => {
+      if (!isVisibleProcessUpdateEntry(entry)) return false;
+      const content = visibleProcessUpdateText(entry);
+      if (!content || seen.has(content)) return false;
+      seen.add(content);
+      return true;
+    })
+    .slice(-limit);
+}
+
+function currentRunProcessUpdatesHtml(entries = currentProgressEntries(), options = {}) {
+  const updates = currentRunProcessUpdateEntries(entries, options.limit || 3);
+  if (!updates.length) return "";
+  const className = options.className || "run-live-updates";
+  return `
+    <div class="${escapeHtml(className)}" aria-label="${escapeHtml(options.label || "Codex updates")}">
+      ${updates
+        .map((entry) => `<p>${escapeHtml(compactText(visibleProcessUpdateText(entry), options.maxLength || 360))}</p>`)
+        .join("")}
+    </div>
+  `;
+}
+
+function currentRunPendingPlaceholderHtml(entries = currentProgressEntries(), options = {}) {
+  if (!isRunVisiblyPending()) return "";
+  if (currentRunProcessUpdateEntries(entries, 1).length) return "";
+  const className = options.className || "run-live-placeholder";
+  const text = options.text || "Preparing response...";
+  return `<p class="${escapeHtml(className)}">${escapeHtml(text)}</p>`;
 }
 
 function framingProgressRowsHtml(entries) {
@@ -4504,6 +4583,7 @@ function renderFramingConversation() {
       });
     }
   }
+  restoreInitialChatScrollPosition();
   thread.hidden = !hasInlineThreadContent;
   $("#cold-start-workspace")?.classList.toggle("has-framing-thread", hasThreadContent);
   $("#framing-project-panel")?.toggleAttribute("hidden", true);
@@ -5531,13 +5611,15 @@ async function clearSavedClaudeSecret(key) {
   showToast(`${key} cleared.`);
 }
 
-function setPanel(panel) {
+function setPanel(panel, options = {}) {
   const targetPanel = normalizeNavigationPanel(panel);
   if (appState && visiblePanels()[targetPanel] === false) {
     showToast(`${panelTitles[targetPanel] || targetPanel} has no content yet.`);
     return;
   }
-  persistActiveViewScrollPosition();
+  const previousPanel = activeNavigationPanel();
+  const enteringChatFromOtherPanel = targetPanel === "chat" && previousPanel !== "chat";
+  if (targetPanel !== previousPanel) persistActiveViewScrollPosition();
   activeView = targetPanel === "chat" ? "chat" : "materials";
   if (targetPanel !== "chat") activePanel = normalizeMaterialPanel(targetPanel);
   persistNavigationState({ updateUrl: true });
@@ -5545,8 +5627,10 @@ function setPanel(panel) {
   renderRailVisibility();
 
   if (activeView === "chat") {
+    if (options.scrollToLatest ?? enteringChatFromOtherPanel) markChatScrollRestoredForCurrentProject();
     renderFramingConversation();
-    restoreActiveViewScrollPosition();
+    if (options.scrollToLatest ?? enteringChatFromOtherPanel) scrollFramingToBottomSoon();
+    else restoreActiveViewScrollPosition();
     return;
   }
   syncBriefComposerDock(false);
@@ -6296,9 +6380,13 @@ function trialArtifactActionButtonHtml(path, kind, label) {
   return `<button class="secondary-button small-button trial-artifact-button" type="button" data-inline-fullscreen="${escapeHtml(path)}" aria-label="Open ${escapeHtml(label.toLowerCase())}">${trialArtifactIconHtml(kind)}<span>${escapeHtml(label)}</span></button>`;
 }
 
+function trialManuscriptPath(report) {
+  return cleanText(report?.manuscript_snapshot_path, "") || LATEST_MANUSCRIPT_PATH;
+}
+
 function trialOpenActionButtonsHtml(report, options = {}) {
   return [
-    options.includeManuscript ? trialArtifactActionButtonHtml(LATEST_MANUSCRIPT_PATH, "manuscript", "Manuscript") : "",
+    options.includeManuscript ? trialArtifactActionButtonHtml(trialManuscriptPath(report), "manuscript", "Manuscript") : "",
     report?.report_path ? trialArtifactActionButtonHtml(report.report_path, "report", "Report") : "",
     report?.review_path ? trialArtifactActionButtonHtml(report.review_path, "review", "Review") : "",
   ].filter(Boolean).join("");
@@ -6307,8 +6395,16 @@ function trialOpenActionButtonsHtml(report, options = {}) {
 function cleanTrialReportSummaryText(value) {
   const text = cleanText(value, "");
   if (!text) return "";
-  if (/^Created\s+Trial\s+[`'"]?0*\d{1,6}_[a-z0-9_ -]+[`'"]?\.?$/i.test(text)) return "";
+  if (/^Created\s+Trial\s+[`'"]?0*\d{1,6}_[a-z0-9_ -]+[`'"]?(?:\.|\s+as\s+the\s+next\b.*)?$/i.test(text)) return "";
   return text;
+}
+
+function comparableTrialReportText(value) {
+  return normalizedTranscriptText(value)
+    .toLowerCase()
+    .replace(/[`"']/g, "")
+    .replace(/[.。]+$/g, "")
+    .trim();
 }
 
 function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
@@ -6326,6 +6422,9 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const progress = trialProgressForIteration(iteration, report);
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
+  const summaryDuplicatesProgress = summary
+    && progressSummary
+    && comparableTrialReportText(summary) === comparableTrialReportText(progressSummary);
   const openActions = trialOpenActionButtonsHtml(report, { includeManuscript: true });
   const controlActions = trialLifecycleActionButtonsHtml(iteration, report, running);
   return `
@@ -6341,7 +6440,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
       ${trialProgressStepperHtml(progress)}
       ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
       ${trialHumanResponseHtml(iteration)}
-      ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+      ${summary && !summaryDuplicatesProgress ? `<p>${escapeHtml(summary)}</p>` : ""}
       <div class="trial-report-actions">
         ${openActions ? `<div class="trial-report-open-actions">${openActions}</div>` : ""}
         ${controlActions ? `<div class="trial-report-control-actions">${controlActions}</div>` : ""}
@@ -6372,7 +6471,8 @@ function latestTrialProgressEntry(entries) {
     const rawType = String(entry?.raw_type || "").toLowerCase();
     return role !== "user" && rawType !== "turn.completed" && String(entry?.content || "").trim();
   });
-  return candidates.find((entry) => ["Error", "Done", "Update", "File change"].includes(framingProgressTitle(entry))) || null;
+  const primary = candidates.find((entry) => ["Error", "Done", "Update", "File change"].includes(framingProgressTitle(entry)));
+  return primary || candidates.find((entry) => framingProgressTitle(entry) === "Reasoning") || null;
 }
 
 function latestTrialUpdateText(activeTrialData, runningTrialData = null) {
@@ -6392,42 +6492,34 @@ function runningTrialStatusHtml(trial) {
   // Trial activity reflects agent/tool work only — never the human's steering messages.
   const activity = trialActivityEntries(liveEntries);
   const report = trial?.report || reportForIteration(iteration);
-  const reportSummary = cleanText(report?.report_summary, "");
   const progress = trialProgressForIteration(iteration, report);
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
-  const latestEntry = latestTrialProgressEntry(liveEntries);
-  const latestText = latestEntry
-    ? `${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`
-    : reportSummary || progressSummary || agentWaitStateText() || "";
+  const processUpdates = currentRunProcessUpdatesHtml(liveEntries, { className: "trial-live-updates", label: "Codex trial updates", limit: 1, maxLength: 260 });
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice);
-  const openActions = trialOpenActionButtonsHtml(report, { includeManuscript: true });
   return `
-    <section class="trial-live-status" aria-live="polite">
-      <div class="trial-live-status-head">
-        <div class="thinking-status-row trial-live-status-title">
-          <span class="thinking-dot"></span>
-          <span class="thinking-dot"></span>
-          <span class="thinking-dot"></span>
-          <strong>${escapeHtml(activeRunStatusLabel())}</strong>
+    <article class="trial-report-card is-running" data-trial-panel="${escapeHtml(iteration)}" aria-live="polite">
+      <div class="trial-report-head">
+        <div>
+          <strong>Trial ${escapeHtml(iteration)}</strong>
+          <em>Running</em>
           ${workingDurationHtml()}
-        </div>
-        <div class="trial-live-status-actions">
-          <span>${escapeHtml(eventLabel)}</span>
-          ${runControlButtonsHtml()}
+          ${progressDetail ? `<span class="trial-report-head-progress">${escapeHtml(progressDetail)}</span>` : ""}
         </div>
       </div>
       ${trialProgressStepperHtml(progress)}
-      ${latestText ? `<p>${escapeHtml(compactText(latestText, 240))}</p>` : ""}
-      ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
+      ${!processUpdates && progressSummary ? `<p class="trial-progress-summary">${escapeHtml(compactText(progressSummary, 220))}</p>` : ""}
+      ${processUpdates}
       ${trialHumanResponseHtml(iteration)}
       ${showWaitNotice ? waitNotice : ""}
-      ${openActions ? `<div class="trial-report-actions"><div class="trial-report-open-actions">${openActions}</div></div>` : ""}
+      <div class="trial-report-actions">
+        <div class="trial-report-control-actions">${runControlButtonsHtml()}</div>
+      </div>
       ${
         activity.length
-          ? `<details class="trial-live-details" data-run-activity-details="trial-live-${escapeHtml(iteration)}"${runActivityOpenAttribute(`trial-live-${iteration}`)}>
+          ? `<details class="trial-detail-activity" data-run-activity-details="trial-live-${escapeHtml(iteration)}"${runActivityOpenAttribute(`trial-live-${iteration}`)}>
               <summary>
                 <span>Live trial activity</span>
                 <strong>${escapeHtml(eventLabel)}</strong>
@@ -6436,7 +6528,7 @@ function runningTrialStatusHtml(trial) {
             </details>`
           : ""
       }
-    </section>
+    </article>
   `;
 }
 
@@ -6547,7 +6639,23 @@ function trialStripManualActive() {
   return true;
 }
 
-function rememberTrialStripScroll(strip = document.querySelector(".trial-strip-scroll"), options = {}) {
+function currentAutoresearchTrialStrip() {
+  const selectors = [
+    "#autoresearch-dock .trial-strip:not(.review-trial-strip) .trial-strip-scroll",
+    ".autoresearch-dock .trial-strip:not(.review-trial-strip) .trial-strip-scroll",
+    ".trial-history-card .trial-strip:not(.review-trial-strip) .trial-strip-scroll",
+    ".trial-strip:not(.review-trial-strip) .trial-strip-scroll",
+    ".trial-strip-scroll:not(.review-trial-strip-scroll)",
+    ".trial-strip-scroll",
+  ];
+  for (const selector of selectors) {
+    const strip = document.querySelector(selector);
+    if (strip) return strip;
+  }
+  return null;
+}
+
+function rememberTrialStripScroll(strip = currentAutoresearchTrialStrip(), options = {}) {
   if (!strip) return;
   if (options.manual) markTrialStripManual(strip, options);
 }
@@ -6574,17 +6682,36 @@ function activeTrialChip(strip) {
   return strip.querySelector(".trial-chip.is-running") || strip.querySelector(".trial-chip.is-active");
 }
 
-function scrollTrialStripToActive(strip) {
-  const chip = activeTrialChip(strip);
-  if (!chip) return false;
+function trialChipForIteration(strip, iteration) {
+  const target = Number(iteration || 0);
+  if (!strip || !target) return null;
+  const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(String(target))
+    : String(target);
+  return strip.querySelector(`[data-trial-select="${escaped}"]`);
+}
+
+function scrollTrialStripToChip(strip, chip, options = {}) {
+  if (!strip || !chip) return false;
   const stripRect = strip.getBoundingClientRect();
   const chipRect = chip.getBoundingClientRect();
   const pad = 14;
-  if (chipRect.left >= stripRect.left + pad && chipRect.right <= stripRect.right - pad) {
+  if (!options.force && chipRect.left >= stripRect.left + pad && chipRect.right <= stripRect.right - pad) {
     return false;
   }
-  const nextLeft = strip.scrollLeft + chipRect.left - stripRect.left - Math.max(0, (strip.clientWidth - chip.offsetWidth) / 2);
+  const stripWidth = Number(strip.clientWidth || 0);
+  const chipWidth = Number(chip.offsetWidth || chipRect.width || 0);
+  const offsetLeft = Number(chip.offsetLeft);
+  const nextLeft = Number.isFinite(offsetLeft) && stripWidth
+    ? offsetLeft - Math.max(0, (stripWidth - chipWidth) / 2)
+    : strip.scrollLeft + chipRect.left - stripRect.left - Math.max(0, (stripWidth - chipWidth) / 2);
   strip.scrollLeft = clampTrialStripScrollLeft(strip, nextLeft);
+  return true;
+}
+
+function scrollTrialStripToActive(strip) {
+  const chip = activeTrialChip(strip);
+  if (!scrollTrialStripToChip(strip, chip)) return false;
   trialStripScrollState = {
     ...trialStripScrollState,
     mode: "auto",
@@ -6594,12 +6721,40 @@ function scrollTrialStripToActive(strip) {
   return true;
 }
 
-function restoreTrialStripScroll() {
-  const strip = document.querySelector(".trial-strip-scroll");
+function restoreTrialStripScroll(options = {}) {
+  const strip = options.strip || currentAutoresearchTrialStrip();
   if (!strip) return;
   bindTrialStripScrollState(strip);
+  const forcedSelection = Number(options.selectedIteration || 0);
+  if (forcedSelection) {
+    const selectedChip = trialChipForIteration(strip, forcedSelection);
+    if (selectedChip && scrollTrialStripToChip(strip, selectedChip, { force: true })) {
+      trialStripScrollState = {
+        ...trialStripScrollState,
+        mode: "manual",
+        left: clampTrialStripScrollLeft(strip, strip.scrollLeft),
+        selectedIteration: forcedSelection,
+        liveIteration: liveTrialStripIteration(),
+        touchedAt: Date.now(),
+      };
+      return;
+    }
+  }
   updateTrialStripLiveScope();
   if (trialStripManualActive()) {
+    const selectedIteration = Number(trialStripScrollState.selectedIteration || 0);
+    const shouldCenterSelection = selectedIteration && selectedIteration === Number(selectedTrialIndex || 0);
+    const selectedChip = shouldCenterSelection ? trialChipForIteration(strip, selectedIteration) : null;
+    if (selectedChip && scrollTrialStripToChip(strip, selectedChip, { force: true })) {
+      trialStripScrollState = {
+        ...trialStripScrollState,
+        mode: "manual",
+        left: clampTrialStripScrollLeft(strip, strip.scrollLeft),
+        selectedIteration,
+        liveIteration: liveTrialStripIteration(),
+      };
+      return;
+    }
     strip.scrollLeft = clampTrialStripScrollLeft(strip, trialStripScrollState.left);
     return;
   }
@@ -6720,14 +6875,28 @@ function formatWorkedDuration(seconds) {
   return parts.join(" ");
 }
 
-function workingDurationText(startedAt = activeRun().started_at || sessionState().started_at) {
-  const start = Date.parse(String(startedAt || ""));
+function currentRunStartedAtMs() {
+  const transcript = Array.isArray(sessionState().transcript) ? sessionState().transcript : [];
+  return currentProgressStartTime(transcript);
+}
+
+function currentRunStartedAtString(fallback = "") {
+  const text = String(fallback || "").trim();
+  if (text) return text;
+  const start = currentRunStartedAtMs();
+  return start ? new Date(start).toISOString() : "";
+}
+
+function workingDurationText(startedAt = "") {
+  const explicit = String(startedAt || "").trim();
+  const start = explicit ? Date.parse(explicit) : currentRunStartedAtMs();
   if (!Number.isFinite(start) || start <= 0) return "Working";
   return `Working for ${formatWorkedDuration((Date.now() - start) / 1000)}`;
 }
 
-function workingDurationHtml(startedAt = activeRun().started_at || sessionState().started_at) {
-  const started = String(startedAt || "");
+function workingDurationHtml(startedAt = "") {
+  const fallback = hasLocalPendingRunScope() ? "" : activeRun().started_at || "";
+  const started = currentRunStartedAtString(startedAt || fallback);
   return `<span class="working-duration" data-working-started-at="${escapeHtml(started)}">${escapeHtml(workingDurationText(started))}</span>`;
 }
 
@@ -6735,6 +6904,7 @@ function workedDurationLabel(userEntry, entries) {
   const start = entryTimeValue(userEntry);
   const end = entries.reduce((latest, entry) => Math.max(latest, entryTimeValue(entry)), start);
   if (!start || !end || end < start) return "Worked";
+  if (end - start < 2000 && entries.length > 1) return "Worked";
   return `Worked for ${formatWorkedDuration((end - start) / 1000)}`;
 }
 
@@ -6771,13 +6941,17 @@ function normalizedTranscriptText(value) {
 function transcriptRunGroups(entries) {
   const groups = [];
   let current = null;
-  entries.forEach((entry) => {
+  entries.forEach((entry, index) => {
     if (transcriptRunStart(entry)) {
-      current = { userEntry: entry, entries: [] };
+      if (current) current.endIndex = index;
+      current = { userEntry: entry, entries: [], startIndex: index, endIndex: entries.length, completed: false };
       groups.push(current);
       return;
     }
     if (current) current.entries.push(entry);
+  });
+  groups.forEach((group, index) => {
+    group.completed = index < groups.length - 1 || !isSessionRunning();
   });
   return groups.filter((group) => group.userEntry && group.entries.length);
 }
@@ -6789,6 +6963,7 @@ function buildFramingActivityByMessage(messages, entries) {
   const cutWindows = editedTranscriptCutWindows(messages);
   const visibleEntries = entries.filter((entry) => !isEntryInsideEditedCut(entry, cutWindows));
   transcriptRunGroups(visibleEntries).forEach((group) => {
+    if (!group.completed) return;
     const prompt = normalizedTranscriptText(group.userEntry?.content);
     if (!prompt) return;
     const finalEntry = [...group.entries].reverse().find((entry) => {
@@ -6875,9 +7050,11 @@ function trialTimelineContentHtml(entries, options = {}) {
     }));
   const selected = selectedTrial(trials);
   const manuallySelected = Number(selectedTrialIndex || 0) > 0 && trialStripManualActive();
-  const activeTrial = liveIteration || (manuallySelected ? selected : (pendingExpected || selected));
+  const activeTrial = manuallySelected ? selected : (liveIteration || pendingExpected || selected);
   const activeTrialData = trials.find((trial) => Number(trial.iteration) === Number(activeTrial));
-  const runningTrialData = liveIteration ? trials.find((trial) => isTrialLive(trial.iteration)) : null;
+  const runningTrialData = liveIteration && Number(activeTrial) === Number(liveIteration)
+    ? trials.find((trial) => isTrialLive(trial.iteration))
+    : null;
   return trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData);
 }
 
@@ -13216,7 +13393,7 @@ function bindEvents() {
       selectedTrialIndex = Number(trialSelect.dataset.trialSelect || 0);
       rememberTrialStripScroll(strip, { manual: true, selectedIteration: selectedTrialIndex });
       renderFramingConversation();
-      requestAnimationFrame(restoreTrialStripScroll);
+      requestAnimationFrame(() => restoreTrialStripScroll({ selectedIteration: selectedTrialIndex }));
       return;
     }
     const reviewTrialScroll = event.target.closest("[data-review-trial-scroll]");
