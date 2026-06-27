@@ -566,7 +566,7 @@ function loadAppContext() {
     api = async (endpoint, options = {}) => {
       if (globalThis.__apiError) throw new Error(globalThis.__apiError);
       const body = options.body ? JSON.parse(options.body) : {};
-      globalThis.__apiCalls.push({ endpoint, body });
+      globalThis.__apiCalls.push({ endpoint, body, method: options.method || "GET" });
       if (globalThis.__apiHandler) return globalThis.__apiHandler(endpoint, body, options);
       if (endpoint === "/api/resource-import/start") {
         return {
@@ -1023,6 +1023,15 @@ function loadAppContext() {
     };
     globalThis.__messageHtml = (index = 0) => framingMessageHtml(localMessages[index]);
     globalThis.__sessionTimelineProbe = () => sessionTimelineHtml(sessionTranscriptEntries());
+    globalThis.__autoresearchPanelCollapseProbe = () => ({
+      collapsed: autoresearchPanelCollapsed(),
+      stored: localStorage.getItem(scopedStorageKey(AUTORESEARCH_PANEL_COLLAPSED_KEY)),
+      html: sessionTimelineHtml(sessionTranscriptEntries()),
+    });
+    globalThis.__toggleAutoresearchPanelCollapse = () => {
+      toggleAutoresearchPanelCollapsed();
+      return globalThis.__autoresearchPanelCollapseProbe();
+    };
     globalThis.__framingThreadHtmlProbe = () => {
       const thread = $("#framing-thread");
       renderFramingConversation();
@@ -1037,6 +1046,10 @@ function loadAppContext() {
       const row = document.querySelector("#composer-suggestions");
       return { hidden: Boolean(row?.hidden), html: row?.innerHTML || "", className: row?.className || "" };
     };
+    globalThis.__queuedItems = () => queuedChatItems().map((item) => ({ ...item }));
+    globalThis.__moveQueuedItem = async (id, direction) => moveQueuedChatItem(id, direction);
+    globalThis.__deleteQueuedItem = async (id) => deleteQueuedChatItem(id);
+    globalThis.__stopAndSendQueued = async () => handleStopAndSendQueuedComposer();
     globalThis.__progressSummaryProbe = () => {
       const entries = currentProgressEntries();
       return currentRunReadableSummary(entries);
@@ -1106,6 +1119,40 @@ function loadAppContext() {
     globalThis.__renderManuscriptPanelProbe = (payload) => {
       appState.summaries = { ...(appState.summaries || {}), manuscript: payload };
       return renderManuscriptPanel();
+    };
+    globalThis.__autoFigureImageProbe = async (payload, options = {}) => {
+      appState.summaries = { ...(appState.summaries || {}), manuscript: payload };
+      activeView = "materials";
+      activePanel = "manuscript";
+      document.querySelector("#session-settings-form").elements.backend.value = options.backend || "codex";
+      uiSettings = {
+        ...(uiSettings || {}),
+        agent_status: options.envOverride ? { env_override: options.envOverride } : {},
+      };
+      figureImageJobs.clear();
+      figureImageAutoStarted.clear();
+      figureImagePollTimers.forEach((timer) => clearTimeout(timer));
+      figureImagePollTimers.clear();
+      clearTimeout(figureImageAutoTimer);
+      globalThis.__apiCalls = [];
+      let title = "";
+      globalThis.__apiHandler = (endpoint, body) => {
+        if (endpoint === "/api/manuscript/figure-image/start") {
+          title = body.title;
+          return { ok: true, job: { id: "figure_job_1", title, status: "running" } };
+        }
+        if (endpoint.startsWith("/api/manuscript/figure-image/status")) {
+          return { ok: true, job: { id: "figure_job_1", title, status: options.status || "failed", error: "fake stop" } };
+        }
+        return { ok: true };
+      };
+      renderContext();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const calls = globalThis.__apiCalls.slice();
+      globalThis.__apiHandler = null;
+      figureImagePollTimers.forEach((timer) => clearTimeout(timer));
+      figureImagePollTimers.clear();
+      return { calls, html: document.querySelector("#context-content").innerHTML };
     };
     globalThis.__renderReviewsPanelProbe = (reviews) => {
       appState.reviews = reviews;
@@ -1560,8 +1607,9 @@ async function testRunningChatMessageIsQueued() {
   };
   const sent = await app.run('sendSessionComposerMessage("Can you show progress?")');
   assert.equal(sent, true, "ordinary chat should queue while an autoresearch run is active");
-  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/queue");
   assert.equal(app.context.__apiCalls[0].body.message, "Can you show progress?");
+  assert.equal(app.context.__messages().length, 0, "queued chat should not render as a sent transcript turn");
   assert.equal(app.context.__toastMessages.at(-1).message, "Queued; CoAutoResearch will reply after the current run finishes.");
   assert.equal(app.context.__pendingState().reply, false, "queued chat should not leave a visible chat run pending");
 }
@@ -1569,6 +1617,7 @@ async function testRunningChatMessageIsQueued() {
 async function testRunningSteeringLookingMessageIsQueuedTheSameWay() {
   const app = loadAppContext();
   app.run('__setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] })');
+  app.run('__setMessages([{ id: "u1", role: "user", kind: "text", text: "previous visible message", created_at: "2026-06-17T09:58:00.000Z" }])');
   app.context.__apiResponse = {
     ok: true,
     result: {
@@ -1578,9 +1627,89 @@ async function testRunningSteeringLookingMessageIsQueuedTheSameWay() {
   };
   const sent = await app.run('sendSessionComposerMessage("intervention: change target venue to Nature Machine Intelligence")');
   assert.equal(sent, true, "steering-looking text should use the same queued chat path while autoresearch is active");
-  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/queue");
   assert.equal(app.context.__apiCalls[0].body.message, "intervention: change target venue to Nature Machine Intelligence");
   assert.equal(app.context.__apiCalls[0].body.conversationHistory.length, 1, "queued chat request should still send the authoritative visible history");
+  assert.equal(app.context.__apiCalls[0].body.conversationHistory[0].text, "previous visible message");
+}
+
+async function testQueuedChatCanReorderAndDelete() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "goal",
+      queued_chat_items: [
+        { id: "q1", text: "first queued item", created_at: "2026-06-17T10:00:00.000Z", priority: "normal" },
+        { id: "q2", text: "second queued item", created_at: "2026-06-17T10:01:00.000Z", priority: "normal" }
+      ],
+      transcript: []
+    });
+  `);
+  app.context.__apiHandler = (endpoint, body, options) => {
+    if (endpoint === "/api/research/queue/reorder") {
+      return {
+        ok: true,
+        result: {},
+        queued_chat_items: body.ids.map((id) => ({ id, text: id === "q2" ? "second queued item" : "first queued item", priority: "normal" })),
+      };
+    }
+    if (endpoint === "/api/research/queue") {
+      return {
+        ok: true,
+        result: {},
+        queued_chat_items: [{ id: "q2", text: "second queued item", priority: "normal" }],
+      };
+    }
+    throw new Error(`unexpected endpoint ${endpoint}`);
+  };
+  await app.run('__moveQueuedItem("q2", -1)');
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/queue/reorder");
+  assertJsonEqual(app.context.__apiCalls[0].body.ids, ["q2", "q1"], "queue move should submit full ordered ids");
+  assertJsonEqual(app.context.__queuedItems().map((item) => item.id), ["q2", "q1"], "queue order should update from API response");
+  await app.run('__deleteQueuedItem("q1")');
+  assert.equal(app.context.__apiCalls[1].endpoint, "/api/research/queue");
+  assert.equal(app.context.__apiCalls[1].method, "DELETE");
+  assert.equal(app.context.__apiCalls[1].body.id, "q1");
+}
+
+async function testStopAndSendQueuesPriorityThenStops() {
+  const app = loadAppContext();
+  app.run('__setSession({ id: "s1", session_id: "sid", status: "running", mode: "goal", loop_active: true, started_at: "2026-06-17T10:00:00.000Z", transcript: [] })');
+  app.coldEditor.value = "Run this immediately after stopping.";
+  app.context.__apiHandler = (endpoint, body) => {
+    if (endpoint === "/api/research/queue") {
+      return {
+        ok: true,
+        result: {
+          files: { queued_chat: { queued: true, count: 1, run_after_current: true } },
+          session: {
+            id: "s1",
+            session_id: "sid",
+            status: "running",
+            mode: "goal",
+            queued_chat_items: [{ id: "q1", text: body.message, priority: body.priority }],
+            transcript: [],
+          },
+        },
+      };
+    }
+    if (endpoint === "/api/research/stop") {
+      return {
+        ok: true,
+        result: {
+          session: { id: "s1", session_id: "sid", status: "stopping", mode: "goal", transcript: [] },
+        },
+      };
+    }
+    throw new Error(`unexpected endpoint ${endpoint}`);
+  };
+  await app.run("__stopAndSendQueued()");
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/queue");
+  assert.equal(app.context.__apiCalls[0].body.priority, "send_after_stop");
+  assert.equal(app.context.__apiCalls[1].endpoint, "/api/research/stop");
 }
 
 async function testAttachmentOnlyMessage() {
@@ -2170,6 +2299,29 @@ function testChatGeneratedProjectDraftIsSurfaced() {
   assert.equal(html.includes('data-inline-fullscreen="PROJECT.md"'), true, "chat-generated PROJECT.md card should expose fullscreen preview");
 }
 
+function testMarkdownSoftBreakRendersAsSeparator() {
+  const app = loadAppContext();
+  const html = app.run('markdownToHtml("# Project\\n\\nIntro text.\\n\\n...\\n\\nNext section.\\n\\n---\\n\\nFinal section.")');
+  assert.equal(html.includes("<p>...</p>"), false, "standalone ellipsis should not render as a bulky paragraph");
+  assert.equal(html.includes('class="markdown-section-break"'), true, "standalone ellipsis should render as a styled separator");
+  assert.equal(html.includes("<hr>"), true, "markdown horizontal rules should keep semantic hr markup");
+}
+
+function testMarkdownOrderedListsPreserveExplicitNumbers() {
+  const app = loadAppContext();
+  const html = app.run('markdownToHtml("1. **First**\\n\\nBody text.\\n\\n2. **Second**\\n\\n- detail\\n\\n3. **Third**")');
+  assert.equal(html.includes('<ol class="is-explicit-markers"><li value="1" data-marker="1"><strong>First</strong></li></ol>'), true, "first ordered segment should render marker 1");
+  assert.equal(html.includes('<ol class="is-explicit-markers" start="2"><li value="2" data-marker="2"><strong>Second</strong></li></ol>'), true, "second ordered segment should preserve marker 2 after a paragraph break");
+  assert.equal(html.includes('<ol class="is-explicit-markers" start="3"><li value="3" data-marker="3"><strong>Third</strong></li></ol>'), true, "third ordered segment should preserve marker 3 after a bullet block");
+  assert.equal(html.includes('data-marker="2"'), true, "ordered markers should be available to the custom CSS counter");
+  assert.equal(html.includes('data-marker="3"'), true, "later ordered markers should be available to the custom CSS counter");
+
+  const jump = app.run('markdownToHtml("7. Seven\\n8. Eight")');
+  assert.equal(jump.includes('<ol class="is-explicit-markers" start="7">'), true, "ordered lists that start above 1 should keep their semantic start value");
+  assert.equal(jump.includes('<li value="7" data-marker="7">Seven</li>'), true, "first explicit marker should be preserved");
+  assert.equal(jump.includes('<li value="8" data-marker="8">Eight</li>'), true, "subsequent explicit marker should be preserved");
+}
+
 function testMessagesExposeCopyButtons() {
   const app = loadAppContext();
   app.run(`
@@ -2269,6 +2421,8 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(html.includes("Current session activity"), false, "trial timeline must not append the old current-session activity card");
   assert.equal(html.includes("Latest session activity"), false, "trial timeline must not append legacy session activity labels");
   assert.equal(html.includes("Codex is working on Trial 1"), true, "running trials should use the server-provided active run label");
+  assert.equal(html.includes("trial-history-micro-spinner"), true, "running autoresearch header should show the micro spinner");
+  assert.equal(html.includes("trial-history-card is-collapsed is-running"), true, "running autoresearch header should expose running state");
   assert.equal(html.includes("Pause after current turn"), true, "running trial live status should expose a loop pause button");
   assert.equal(html.includes("data-pause-autoresearch"), true, "contextual pause button should pause the loop after the current turn");
   assert.equal(html.includes("Stop current run"), true, "running trial live status should expose a contextual stop button");
@@ -2333,10 +2487,81 @@ function testRunningTrialOpenButtonsStayGroupedLeft() {
   `);
   const html = app.run("__sessionTimelineProbe()");
   const openGroup = html.match(/<div class="trial-report-open-actions">([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.equal(html.includes("Open latest manuscript"), false, "latest manuscript action should no longer live in the header");
+  assert.equal(openGroup.includes("Open manuscript"), true, "running trial open group should contain Open manuscript");
   assert.equal(openGroup.includes("Open report"), true, "running trial open group should contain Open report");
   assert.equal(openGroup.includes("Open review"), true, "running trial open group should contain Open review");
+  assert.ok(openGroup.indexOf("Open manuscript") < openGroup.indexOf("Open report"), "Open manuscript should lead the artifact actions");
   assert.equal(html.includes('<div class="trial-report-actions"><div class="trial-report-open-actions">'), true, "running trial should keep open buttons in the left open-action group");
   assert.equal(html.includes('<div class="trial-report-control-actions">Open review'), false, "running trial must not place Open review in the right control group");
+}
+
+function testAutoresearchPanelCollapsePersists() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000018_best_effect_analysis_method_design",
+      iteration: 18,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/REPORT.md",
+      review_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Gate complete."
+    }];
+    __setSession({
+      id: "s18",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      transcript: [{
+        id: "assistant-progress-18",
+        role: "assistant",
+        raw_type: "item.message",
+        content: "Synthesizing the latest evidence table.",
+        created_at: "2026-01-01T00:00:00Z"
+      }]
+    });
+  `);
+  const initial = app.run("__autoresearchPanelCollapseProbe()");
+  assert.equal(initial.collapsed, true, "autoresearch panel should default to collapsed");
+  assert.equal(initial.html.includes('data-autoresearch-panel-collapsed="true"'), true, "collapsed state should render on the trial card");
+  assert.equal(initial.html.includes("trial-history-title-row"), false, "trial history header should not render the redundant title/count row");
+  assert.equal(initial.html.includes("trial-history-kicker-icon"), true, "trial history header should render the autoresearch glyph");
+  assert.equal(initial.html.includes('href="#brand-mark-glyph"'), true, "trial history header should reuse the app brand glyph");
+  assert.equal(initial.html.includes("trial-history-micro-spinner"), false, "completed autoresearch header should not animate");
+  assert.equal(initial.html.includes("trial-history-kicker-status"), true, "trial history header should render inline trial status");
+  assert.equal(initial.html.includes("Trial 18: Done"), true, "trial status should sit beside the autoresearch label");
+  assert.equal(initial.html.includes("trial-history-collapsed-summary"), false, "collapsed state should not render the old compact summary row");
+  assert.equal(initial.html.includes("trial-history-latest\">Latest:"), false, "collapsed state should not render the redundant latest artifact line");
+  assert.equal(initial.html.includes("trial-history-mini-axis"), false, "collapsed state should not render a right-side mini trial axis");
+  assert.equal(initial.html.includes("trial-history-disclosure"), true, "collapsed state should expose the inline disclosure cue");
+  assert.equal(initial.html.includes("Show all trials"), false, "collapsed state should not render the old right-side expand label");
+  assert.equal(initial.html.includes("trial-history-toggle-icon"), false, "collapsed state should not render the old standalone chevron button");
+  assert.equal(initial.html.includes("trial-history-latest-update"), true, "collapsed state should render the latest process update");
+  assert.equal(initial.html.includes("Synthesizing the latest evidence table."), true, "collapsed state should include the latest agent progress text");
+  const expanded = app.run("__toggleAutoresearchPanelCollapse()");
+  assert.equal(expanded.collapsed, false, "toggle should expand the autoresearch panel");
+  assert.equal(expanded.stored, "false", "expanded state should persist in scoped localStorage");
+  assert.equal(expanded.html.includes('data-autoresearch-panel-collapsed="false"'), true, "expanded state should render on the trial card");
+  const collapsed = app.run("__toggleAutoresearchPanelCollapse()");
+  assert.equal(collapsed.collapsed, true, "second toggle should collapse the autoresearch panel again");
+  assert.equal(collapsed.stored, "true", "collapsed state should persist in scoped localStorage");
+  app.run(`
+    appState.trials[0].is_closed = false;
+    appState.trials[0].progress = {
+      stage: "reviewing",
+      stage_label: "Reviewing",
+      stage_index: 5,
+      total_stages: 6,
+      reviewer_count: 3,
+      reviewer_total: 8
+    };
+  `);
+  const reviewing = app.run("__autoresearchPanelCollapseProbe()");
+  assert.equal(reviewing.html.includes("Trial 18: Reviewing"), true, "trial header should use the selected trial's real progress label when it is not complete");
+  assert.equal(reviewing.html.includes("Trial 18: Incomplete"), false, "trial header should not collapse active progress into a generic incomplete status");
 }
 
 function testPausedAutoresearchActionsRenderInTrialPanel() {
@@ -2362,12 +2587,16 @@ function testPausedAutoresearchActionsRenderInTrialPanel() {
   `);
   const html = app.run("__sessionTimelineProbe()");
   assert.equal(html.includes("data-resume-autoresearch"), true, "paused incomplete autoresearch should show Resume Autoresearch in the selected trial row");
-  assert.equal(html.includes("Resume autoresearch"), true, "paused incomplete autoresearch should label the loop resume action");
-  assert.equal(html.includes("trial-report-open-actions"), false, "incomplete trials without report/review links should not render an empty open-action group");
+  assert.equal(html.includes("<span>Resume</span>"), true, "paused incomplete autoresearch should use the short Resume label");
+  assert.equal(html.includes("trial-action-icon-resume"), true, "paused incomplete autoresearch should render a Resume icon");
+  assert.equal(html.includes("trial-report-open-actions"), true, "incomplete trials should still show manuscript artifact actions");
+  assert.equal(html.includes("Open manuscript"), true, "incomplete trials should expose the manuscript from the artifact action group");
   assert.equal(html.includes("trial-report-control-actions"), true, "autoresearch controls should be grouped on the right side of the trial action row");
   assert.equal(html.includes('data-trial-continue="1"'), false, "incomplete trials without a report boundary should not show fork-style continue");
   assert.equal(html.includes("data-restart-autoresearch"), true, "paused incomplete autoresearch should keep Restart beside the trial actions");
-  assert.equal(html.includes("trial-danger-button"), true, "Restart autoresearch should use the danger treatment");
+  assert.equal(html.includes("<span>Restart</span>"), true, "paused incomplete autoresearch should use the short Restart label");
+  assert.equal(html.includes("trial-action-icon-restart"), true, "paused incomplete autoresearch should render a Restart icon");
+  assert.equal(html.includes("trial-danger-button"), true, "Restart should use the caution treatment");
   assert.equal(html.includes("trial-history-actions"), false, "autoresearch lifecycle actions should not render as a separate bottom row");
   assert.equal(html.includes("Show autoresearch"), false, "Trials panel should not expose the old Show autoresearch chip");
   assert.equal(html.includes(">Status<"), false, "Trials panel should not expose the old Status chip");
@@ -2434,7 +2663,8 @@ function testAutoresearchPanelPersistsAfterFramingReply() {
   assert.equal(html.includes("Trial 18"), true, "pending expected trial should remain visible after a framing reply");
   assert.equal(html.includes("Pending autoresearch step with I0008."), true, "pending intervention should be summarized in the trial panel");
   assert.equal(html.includes("data-resume-autoresearch"), true, "pending expected trial should expose Resume autoresearch");
-  assert.equal(html.includes("Latest: 000017_table_appendix_provenance_repair"), true, "latest reported trial context should remain visible");
+  assert.equal(html.includes('data-trial-select="17"'), true, "latest reported trial should remain available in the trial axis");
+  assert.equal(html.includes("Latest: 000017_table_appendix_provenance_repair"), false, "redundant latest header context should not render");
 }
 
 function testReportedTrialShowsContinueFromThisTrial() {
@@ -2447,7 +2677,11 @@ function testReportedTrialShowsContinueFromThisTrial() {
       is_closed: true,
       report_path: "research_trajectory/trials/000001_method_design/REPORT.md",
       review_path: "research_trajectory/trials/000001_method_design/reviews/FINAL_GATE_REVIEW.md",
-      report_summary: "Method design reported."
+      report_summary: "Method design reported.",
+      progress: {
+        detail: "3/8 reviewer gates are pass.",
+        updated_at: "2026-06-25T07:01:00.000Z"
+      }
     }];
     __setSession({
       id: "s1",
@@ -2468,10 +2702,23 @@ function testReportedTrialShowsContinueFromThisTrial() {
   assert.equal(html.includes("data-resume-autoresearch"), false, "reported trial boundary should not show generic Resume Autoresearch");
   assert.equal(html.includes('data-trial-continue="1"'), true, "reported trial boundary should keep the fork-style continue action");
   assert.equal(html.includes("Continue from this trial"), true, "reported trial boundary should use Continue copy");
+  assert.equal(html.includes("trial-action-icon-continue"), true, "reported trial boundary should render a Continue icon");
+  assert.equal(html.includes("trial-report-head-progress"), true, "reported trial progress detail should render in the header row");
+  assert.equal(html.includes("3/8 reviewer gates are pass."), true, "reported trial progress detail should stay visible");
+  assert.equal(html.includes('<p class="trial-progress-detail">3/8 reviewer gates are pass.'), false, "reported trial progress detail should not render as a separate row");
+  assert.equal(html.includes("Open latest manuscript"), false, "reported trial boundary should not show the old header manuscript action");
+  assert.equal(html.includes("Open manuscript"), true, "reported trial boundary should keep Open manuscript in artifact actions");
   assert.equal(html.includes("Open report"), true, "reported trial boundary should keep Open report");
   assert.equal(html.includes("Open review"), true, "reported trial boundary should keep Open review");
+  assert.equal(
+    html.includes("000001_method_design / research_trajectory/trials/000001_method_design/REPORT.md"),
+    false,
+    "reported trial header should not expose the long report path"
+  );
   assert.equal(html.includes("trial-report-open-actions"), true, "Open actions should render in their own left-side group");
   assert.equal(html.includes("trial-report-control-actions"), true, "Autoresearch controls should render in their own right-side group");
+  const openGroup = html.match(/<div class="trial-report-open-actions">([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.ok(openGroup.indexOf("Open manuscript") < openGroup.indexOf("Open report"), "Open manuscript should lead report artifacts");
   assert.ok(
     html.indexOf("trial-report-open-actions") < html.indexOf("trial-report-control-actions"),
     "Open actions should be ordered before autoresearch controls in the row"
@@ -2516,7 +2763,8 @@ function testLatestClosedTrialShowsResumeAutoresearch() {
   `);
   const html = app.run("__sessionTimelineProbe()");
   assert.equal(html.includes("data-resume-autoresearch"), true, "latest closed non-pass boundary should expose Resume autoresearch for the next trial");
-  assert.equal(html.includes("Resume autoresearch"), true, "latest closed non-pass boundary should use Resume copy");
+  assert.equal(html.includes("<span>Resume</span>"), true, "latest closed non-pass boundary should use short Resume copy");
+  assert.equal(html.includes("trial-action-icon-resume"), true, "latest closed non-pass boundary should render a Resume icon");
   assert.equal(html.includes("Needs human input"), true, "latest closed needs_human boundary should show the human-facing prompt");
   assert.equal(html.includes("Should the next trial run the CSEUA pilot now, or explicitly defer it?"), true, "latest closed boundary should show response_to_human");
   assert.equal(html.includes('data-trial-continue="18"'), false, "latest boundary should not use fork-style Continue from this trial");
@@ -2586,8 +2834,9 @@ function testPassedAutoresearchPanelHidesResumeAllowsRestart() {
   assert.equal(html.includes("data-resume-autoresearch"), false, "passed autoresearch should not show Resume");
   assert.equal(html.includes("data-trial-continue"), false, "passed autoresearch should not show trial-boundary resume");
   assert.equal(html.includes("data-restart-autoresearch"), true, "passed autoresearch should still allow Restart");
-  assert.equal(html.includes("Restart autoresearch"), true, "passed autoresearch should label the restart action");
-  assert.equal(html.includes("trial-danger-button"), true, "passed autoresearch Restart should use the danger treatment");
+  assert.equal(html.includes("<span>Restart</span>"), true, "passed autoresearch should use the short Restart label");
+  assert.equal(html.includes("trial-action-icon-restart"), true, "passed autoresearch Restart should render an icon");
+  assert.equal(html.includes("trial-danger-button"), true, "passed autoresearch Restart should use the caution treatment");
   const composer = app.run("__composerSuggestionsProbe()");
   assert.equal(composer.hidden, true, "composer suggestion row should stay hidden for passed autoresearch");
   assert.equal(composer.html.includes("Restart autoresearch"), false, "Restart should move out of composer suggestions");
@@ -2757,7 +3006,7 @@ function testPassedGoalDoesNotShowStaleRunningTrial() {
   assert.equal(html.includes("Live trial activity"), false, "passed goals must not show live activity for stale trial events");
   assert.equal(html.includes(">Running<"), false, "reported trials must not retain the Running chip label after gates pass");
   assert.equal(html.includes("Trial 6"), true, "passed goals should default to the latest reported trial");
-  assert.equal(html.includes("Open latest manuscript"), true, "reported trials should expose the latest manuscript shortcut");
+  assert.equal(html.includes("Open manuscript"), true, "reported trials should expose the latest manuscript shortcut in artifact actions");
   assert.equal(html.includes("Autoresearch complete"), true, "passed goals should mark the whole autoresearch trajectory complete");
   app.run(`
     appState.research_session.gate = { status: "continue" };
@@ -2830,7 +3079,8 @@ function testOnlyLatestClosedTrialUsesDoneStatus() {
     });
   `);
   const html = app.run("__sessionTimelineProbe()");
-  const chipStatuses = [...html.matchAll(/<span class="trial-chip-status">([^<]+)<\/span>/g)].map((match) => match[1]);
+  const trialStrip = html.match(/<div class="trial-strip-scroll">([\s\S]*?)<\/div>/)?.[1] || "";
+  const chipStatuses = [...trialStrip.matchAll(/<span class="trial-chip-status">([^<]+)<\/span>/g)].map((match) => match[1]);
   assert.deepEqual(chipStatuses, ["Continued", "Reported", "Done"], "only explicit continue base and latest closed trial should get special labels");
 }
 
@@ -3229,7 +3479,7 @@ function testComposerPlaceholderBecomesGeneralAfterLaunch() {
   `);
   const launchedPlaceholder = app.run("coldComposerPlaceholder(true)");
   assert.equal(launchedPlaceholder.includes("PROJECT.md"), false, "launched placeholder should not be limited to PROJECT.md edits");
-  assert.equal(launchedPlaceholder.includes("current research"), true, "launched placeholder should describe general research-session chat");
+  assert.equal(launchedPlaceholder, "Message the research agent...", "launched placeholder should stay concise");
 }
 
 function testSettingsRenderPreservesComposerDraft() {
@@ -5115,7 +5365,7 @@ function testSettingsDialogResizeHandlePersistsSize() {
   assert.deepEqual(JSON.parse(state.persisted), { width: 760, height: 520 });
 }
 
-function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
+async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   const app = loadAppContext();
   const payload = {
     target: "Nature Machine Intelligence",
@@ -5190,6 +5440,26 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "Remaining blocker: none."
       ].join("\n")
     }, {
+      title: "Figure F000002: Rendered Image",
+      level: 4,
+      kind: "figure",
+      is_artifact: true,
+      path: "Section 2: Calibration result / Figure F000002: Rendered Image",
+      body: [
+        "Placement: Section 2 paragraph P2.",
+        "Inclusion status: active",
+        "Purpose or result role: Shows the generated manuscript image.",
+        "Reader takeaway: The generated image is displayed inline.",
+        "Content and panel layout: Single panel visual.",
+        "Visual style: restrained.",
+        "Caption draft or current caption: Rendered image caption.",
+        "Source artifact or spec path: `manuscript/figures/generated/rendered_image.png`",
+        "Result shown or conceptual basis: Evidence E2.",
+        "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
+        "Target-venue fit rationale: Fits an image-led display.",
+        "Remaining blocker: none."
+      ].join("\n")
+    }, {
       title: "Table T000001: Evidence Matrix",
       level: 4,
       kind: "table",
@@ -5248,12 +5518,24 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
     }]
   };
   const html = app.run(`__renderManuscriptPanelProbe(${JSON.stringify(payload)})`);
+  assert.equal(html.includes("manuscript-layout"), true, "manuscript panel should render the outline/reader layout shell");
+  assert.equal(html.includes("manuscript-outline-panel"), true, "manuscript panel should render a left outline panel");
+  assert.equal(html.includes("manuscript-reader"), true, "manuscript panel should render a centered reader column");
+  assert.equal(html.indexOf("manuscript-outline-panel") < html.indexOf("manuscript-reader"), true, "outline should render before the reader column");
+  assert.equal(html.includes('href="#manuscript-story-map"'), true, "outline should link to the story map");
+  assert.equal(html.includes('href="#section-2-calibration-result"'), true, "outline should link to manuscript sections");
+  assert.equal(html.includes('href="#table-t000001-evidence-matrix"'), true, "outline should link to table artifacts");
   assert.equal(html.includes("manuscript-export-bar"), true);
   assert.equal(html.includes("Download BLUEPRINT.md"), true);
   assert.equal(html.includes('data-download-single-file="manuscript/BLUEPRINT.md"'), true);
   assert.equal(html.includes("Download blueprint pack"), true);
   assert.equal(html.includes("Download final project pack"), true);
   assert.equal(html.indexOf("manuscript-export-bar") < html.indexOf("context-card"), true, "export controls should render before manuscript context cards");
+  assert.equal(
+    html.indexOf('class="export-note"') < html.indexOf('<div class="export-panel">'),
+    true,
+    "export explanatory note should live with the left-side copy, not under the right-side buttons"
+  );
   assert.equal(html.includes("Manuscript story map"), true);
   assert.equal(html.includes("manuscript-story-map"), true);
   assert.equal(html.includes("Finished-results blueprint"), true);
@@ -5290,8 +5572,17 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("compact visual result"), true);
   assert.equal(html.includes("Calibration map caption"), true);
   assert.equal(html.includes("Copy description"), true);
+  assert.equal(html.includes("Generate image"), false, "image generation should run automatically without rendering a Generate image button");
   assert.equal(html.includes("Open source"), true);
   assert.equal(html.includes("manuscript/figures/calibration_map.pdf"), true);
+  assert.equal(html.includes("manuscript/figures/generated/rendered_image.png"), true);
+  assert.equal(html.includes('src="/api/file/raw?path=manuscript%2Ffigures%2Fgenerated%2Frendered_image.png'), true, "image source paths should render inline previews");
+  assert.equal(html.includes('src="/api/file/raw?path=manuscript%2Ffigures%2Fcalibration_map.pdf'), false, "PDF source paths should not render as inline images");
+  const tableBlockIndex = html.indexOf("Table block");
+  assert.equal(tableBlockIndex >= 0, true);
+  const tableBlockEnd = html.indexOf("</article>", tableBlockIndex);
+  const tableBlockHtml = html.slice(tableBlockIndex, tableBlockEnd);
+  assert.equal(tableBlockHtml.includes("Generate image"), false, "table blocks should not render figure image generation actions");
   assert.equal(html.includes("No active tables are present because the current evidence is figure-led."), true);
   assert.equal(html.includes("Claim C1 maps to calibration evidence E1."), true);
   assert.equal(html.includes("Appendix A carries source provenance"), true);
@@ -5304,6 +5595,73 @@ function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("Table 1. Evidence matrix for the calibration claim."), true);
   assert.equal(html.includes("E1 denotes the accepted source audit."), true);
   assert.equal(html.includes("table-missing-warning"), false);
+
+  app.run('document.querySelector("#session-settings-form").elements.backend.value = "claude"');
+  const claudeHtml = app.run(`__renderManuscriptPanelProbe(${JSON.stringify(payload)})`);
+  assert.equal(claudeHtml.includes("Copy description"), true);
+  assert.equal(claudeHtml.includes("Generate image"), false, "Claude Code backend should not render Codex image generation actions");
+
+  const codexAuto = await app.run(`__autoFigureImageProbe(${JSON.stringify(payload)}, { backend: "codex" })`);
+  const codexStart = codexAuto.calls.find((call) => call.endpoint === "/api/manuscript/figure-image/start");
+  assert.equal(Boolean(codexStart), true, "Codex backend should auto-start figure image generation");
+  assert.equal(codexStart.body.title, "Figure F000001: Calibration Map");
+  assert.equal(codexStart.body.sourcePath, "manuscript/figures/calibration_map.pdf");
+
+  const fourMissingPayload = JSON.parse(JSON.stringify(payload));
+  fourMissingPayload.architecture[3].body = fourMissingPayload.architecture[3].body
+    .replace("manuscript/figures/generated/rendered_image.png", "manuscript/figures/rendered_image.pdf");
+  fourMissingPayload.architecture.splice(4, 0, {
+    title: "Figure F000003: Third Missing Image",
+    level: 4,
+    kind: "figure",
+    is_artifact: true,
+    body: [
+      "Placement: Section 2 paragraph P3.",
+      "Inclusion status: active",
+      "Purpose or result role: Shows a third missing figure.",
+      "Content and panel layout: Single panel visual.",
+      "Visual style: restrained.",
+      "Caption draft or current caption: Third image caption.",
+      "Source artifact or spec path: `manuscript/figures/third_missing.pdf`",
+    ].join("\n")
+  }, {
+    title: "Figure F000004: Fourth Missing Image",
+    level: 4,
+    kind: "figure",
+    is_artifact: true,
+    body: [
+      "Placement: Section 2 paragraph P4.",
+      "Inclusion status: active",
+      "Purpose or result role: Shows a fourth missing figure.",
+      "Content and panel layout: Single panel visual.",
+      "Visual style: restrained.",
+      "Caption draft or current caption: Fourth image caption.",
+      "Source artifact or spec path: `manuscript/figures/fourth_missing.pdf`",
+    ].join("\n")
+  });
+  const fourMissingAuto = await app.run(`__autoFigureImageProbe(${JSON.stringify(fourMissingPayload)}, { backend: "codex", status: "running" })`);
+  const fourMissingStarts = fourMissingAuto.calls.filter((call) => call.endpoint === "/api/manuscript/figure-image/start");
+  assert.equal(fourMissingStarts.length, 3, "automatic figure image generation should cap concurrent Codex jobs at three");
+  assertJsonEqual(
+    fourMissingStarts.map((call) => call.body.title),
+    ["Figure F000001: Calibration Map", "Figure F000002: Rendered Image", "Figure F000003: Third Missing Image"],
+    "automatic figure image generation should start the first three eligible missing figures"
+  );
+
+  const claudeAuto = await app.run(`__autoFigureImageProbe(${JSON.stringify(payload)}, { backend: "claude" })`);
+  assert.equal(claudeAuto.calls.some((call) => call.endpoint === "/api/manuscript/figure-image/start"), false, "Claude Code backend should not auto-start Codex image generation");
+
+  const forcedCodexAuto = await app.run(`__autoFigureImageProbe(${JSON.stringify(payload)}, { backend: "claude", envOverride: "codex" })`);
+  assert.equal(forcedCodexAuto.calls.some((call) => call.endpoint === "/api/manuscript/figure-image/start"), true, "Codex env override should auto-start generation even if the form shows Claude");
+
+  const forcedClaudeAuto = await app.run(`__autoFigureImageProbe(${JSON.stringify(payload)}, { backend: "codex", envOverride: "claude" })`);
+  assert.equal(forcedClaudeAuto.calls.some((call) => call.endpoint === "/api/manuscript/figure-image/start"), false, "Claude env override should block Codex image generation even if the form shows Codex");
+
+  const invalidOverrideAuto = await app.run(`__autoFigureImageProbe(${JSON.stringify(payload)}, { backend: "claude", envOverride: "bad-agent" })`);
+  assert.equal(invalidOverrideAuto.calls.some((call) => call.endpoint === "/api/manuscript/figure-image/start"), false, "Invalid env override should not default into Codex image generation");
+
+  app.run('uiSettings = { ...(uiSettings || {}), agent_status: {} }');
+  app.run('document.querySelector("#session-settings-form").elements.backend.value = "codex"');
 
   const missingTableHtml = app.run(`__renderManuscriptPanelProbe(${JSON.stringify({
     architecture: [{
@@ -5382,6 +5740,8 @@ await testFreshRemoteProjectFirstMessageSends();
 await testFreshRemoteProjectStaleRunningSnapshotStillSends();
 await testRunningChatMessageIsQueued();
 await testRunningSteeringLookingMessageIsQueuedTheSameWay();
+await testQueuedChatCanReorderAndDelete();
+await testStopAndSendQueuesPriorityThenStops();
 await testAttachmentOnlyMessage();
 await testResourceLinksDoNotRepeatAcrossMessages();
 await testResumeFromTrialRequiresConfirmationAndSendsPayload();
@@ -5407,10 +5767,13 @@ await testEditAttachmentsCanRemoveRetainAndAdd();
 await testLaunchGoalMessageBeforeBackendWork();
 testStartAutoresearchOnlyAppearsOnProjectDraftCard();
 testChatGeneratedProjectDraftIsSurfaced();
+testMarkdownSoftBreakRendersAsSeparator();
+testMarkdownOrderedListsPreserveExplicitNumbers();
 testMessagesExposeCopyButtons();
 testFileTreePdfPreviewControls();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
 testRunningTrialOpenButtonsStayGroupedLeft();
+testAutoresearchPanelCollapsePersists();
 testPausedAutoresearchActionsRenderInTrialPanel();
 testAutoresearchPanelPersistsAfterFramingReply();
 testReportedTrialShowsContinueFromThisTrial();
@@ -5469,6 +5832,6 @@ await testExportBundleFlow();
 testBlueprintInspectorRendersSidebarForLatestManuscriptOnly();
 testFileViewerResizeZonesRespectDragAxis();
 testSettingsDialogResizeHandlePersistsSize();
-testManuscriptPanelRendersPaperFiguresTablesAndTraceability();
+await testManuscriptPanelRendersPaperFiguresTablesAndTraceability();
 
 console.log("UI flow test passed.");

@@ -77,6 +77,9 @@ let pendingFramingUserMessageId = "";
 let framingPendingSince = 0;
 let projectDraftEditMode = false;
 let editingFramingId = "";
+let editingQueuedChatId = "";
+let draggingQueuedChatId = "";
+let queueActionMenuOpen = false;
 const editAttachmentDrafts = new Map();
 let activeEditResourceTargetId = "";
 let pendingPreProjectResendConfirm = null;
@@ -126,12 +129,18 @@ const coldFiles = {};
 const inlineFiles = {};
 const inlineFilePayloads = {};
 const inlineFileModes = {};
+const figureImageJobs = new Map();
+const figureImagePollTimers = new Map();
+const figureImageAutoStarted = new Set();
+let figureImageAutoTimer = null;
+const MAX_AUTO_FIGURE_IMAGE_JOBS = 3;
 const COLD_AUTOSAVE_DELAY = 900;
 const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024;
 const LARGE_RESOURCE_CHUNK_BYTES = 8 * 1024 * 1024;
 const FILE_VIEWER_SIZE_KEY = "coAutoResearchFileViewerSize";
 const SETTINGS_DIALOG_SIZE_KEY = "coAutoResearchSettingsDialogSize";
 const INITIAL_PREFLIGHT_DISMISSED_KEY = "coAutoResearchInitialPreflightDismissed";
+const AUTORESEARCH_PANEL_COLLAPSED_KEY = "autoresearchPanelCollapsed";
 const LATEST_MANUSCRIPT_PATH = "manuscript/BLUEPRINT.md";
 
 const panelTitles = {
@@ -758,7 +767,16 @@ function markdownToHtml(text, options = {}) {
   };
   const flushList = () => {
     if (!list.length) return;
-    html.push(`<${listType}>${list.map((item) => `<li>${inlineMarkup(item)}</li>`).join("")}</${listType}>`);
+    if (listType === "ol") {
+      const start = Math.max(1, Number(list[0]?.marker || 1));
+      const startAttr = start === 1 ? "" : ` start="${escapeHtml(start)}"`;
+      html.push(`<ol class="is-explicit-markers"${startAttr}>${list.map((item) => {
+        const marker = Math.max(1, Number(item.marker || 1));
+        return `<li value="${escapeHtml(marker)}" data-marker="${escapeHtml(marker)}">${inlineMarkup(item.text)}</li>`;
+      }).join("")}</ol>`);
+    } else {
+      html.push(`<ul>${list.map((item) => `<li>${inlineMarkup(item.text)}</li>`).join("")}</ul>`);
+    }
     list = [];
     listType = "ul";
   };
@@ -779,6 +797,7 @@ function markdownToHtml(text, options = {}) {
     return withoutTail.split("|").map((cell) => cell.trim());
   };
   const isRule = (line) => /^ {0,3}([-*_])(?:\s*\1){1,}\s*$/.test(line);
+  const isSoftBreak = (line) => /^ {0,3}(?:\.{3}|…)\s*$/.test(line);
   const isTableDivider = (line) => {
     const cells = splitTableRow(line);
     return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
@@ -837,6 +856,12 @@ function markdownToHtml(text, options = {}) {
       continue;
     }
     if (quote.length) flushQuote();
+    if (isSoftBreak(line)) {
+      flushParagraph();
+      flushList();
+      html.push('<div class="markdown-section-break" aria-hidden="true"></div>');
+      continue;
+    }
     if (isRule(line)) {
       flushParagraph();
       flushList();
@@ -873,14 +898,16 @@ function markdownToHtml(text, options = {}) {
       html.push(`<h${level}${idAttr}>${inlineMarkup(heading[2])}</h${level}>`);
       continue;
     }
-    const orderedItem = line.match(/^\d{1,9}\.\s+(.+)$/);
+    const orderedItem = line.match(/^(\d{1,9})\.\s+(.+)$/);
     const bulletItem = line.match(/^[-*]\s+(.+)$/);
     if (orderedItem || bulletItem) {
       flushParagraph();
       const nextType = orderedItem ? "ol" : "ul";
       if (list.length && listType !== nextType) flushList();
       listType = nextType;
-      list.push((orderedItem || bulletItem)[1]);
+      list.push(orderedItem
+        ? { marker: Number(orderedItem[1]), text: orderedItem[2] }
+        : { text: bulletItem[1] });
       continue;
     }
     paragraph.push(line.trim());
@@ -1128,6 +1155,11 @@ function normalizeAgentBackend(value) {
   return allowedAgentBackends.has(backend) ? backend : defaultAgentSettings.backend;
 }
 
+function validAgentBackend(value) {
+  const backend = String(value || "").trim().toLowerCase();
+  return allowedAgentBackends.has(backend) ? backend : "";
+}
+
 function normalizeCodexProvider(value) {
   const raw = String(value || "").trim().toLowerCase().replaceAll("-", "_");
   const aliases = {
@@ -1216,7 +1248,7 @@ function agentStatusEnvelope(settings = uiSettings || {}) {
 
 function envForcedBackend(settings = uiSettings || {}) {
   const raw = agentStatusEnvelope(settings).env_override || settings?.agent_env_override || "";
-  return raw ? normalizeAgentBackend(raw) : "";
+  return raw ? validAgentBackend(raw) : "";
 }
 
 function effectiveBackend(backend, settings = uiSettings || {}) {
@@ -2246,6 +2278,12 @@ function resetProjectClientState() {
   clearObject(inlineFiles);
   clearObject(inlineFilePayloads);
   clearObject(inlineFileModes);
+  figureImageJobs.clear();
+  figureImageAutoStarted.clear();
+  figureImagePollTimers.forEach((timer) => clearTimeout(timer));
+  figureImagePollTimers.clear();
+  clearTimeout(figureImageAutoTimer);
+  figureImageAutoTimer = null;
   const coldEditor = $("#cold-file-editor");
   if (coldEditor) coldEditor.value = "";
   const targetVenue = $("#target-venue");
@@ -3027,6 +3065,241 @@ function activeRunScopeLabel() {
   return "Current run";
 }
 
+function queuedChatItems() {
+  const items = sessionState().queued_chat_items;
+  return Array.isArray(items) ? items.filter((item) => item && typeof item === "object") : [];
+}
+
+function canQueueComposerWhileRunning() {
+  return isSessionRunning() && hasActiveProject();
+}
+
+function queuedChatAttachmentCount(item) {
+  const clientAttachments = Array.isArray(item?.client_attachments) ? item.client_attachments.length : 0;
+  if (clientAttachments) return clientAttachments;
+  const attachments = item?.attachments && typeof item.attachments === "object" ? item.attachments : {};
+  return ["saved_files", "resource_links", "retained_attachments", "resource_clues", "metadata_files"]
+    .reduce((count, key) => count + (Array.isArray(attachments[key]) ? attachments[key].length : 0), 0);
+}
+
+function queuedChatDispatchId(items = queuedChatItems()) {
+  const priority = items.find((item) => String(item.priority || "") === "send_after_stop");
+  return String((priority || items[0] || {}).id || "");
+}
+
+function queuedChatSummaryText(item) {
+  return compactText(String(item?.text || item?.prepared_message || "Queued message").trim(), 180);
+}
+
+function queuedChatItemHtml(item, index, items) {
+  const id = String(item?.id || "");
+  const active = id && id === queuedChatDispatchId(items);
+  const attachments = queuedChatAttachmentCount(item);
+  const created = item?.created_at ? formatTimestamp(item.created_at) : "";
+  const priority = String(item?.priority || "") === "send_after_stop" ? "Stop and send" : "Queued";
+  if (editingQueuedChatId === id) {
+    return `
+      <div class="queue-item is-editing" data-queue-item="${escapeHtml(id)}">
+        <textarea class="queue-edit-textarea" data-queue-edit-text="${escapeHtml(id)}" rows="2">${escapeHtml(String(item.text || ""))}</textarea>
+        <div class="queue-edit-actions">
+          <button class="secondary-button small-button" type="button" data-queue-edit-cancel="${escapeHtml(id)}">Cancel</button>
+          <button class="primary-button small-button" type="button" data-queue-edit-save="${escapeHtml(id)}">Save</button>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="queue-item ${active ? "is-next" : ""}" draggable="true" data-queue-item="${escapeHtml(id)}" data-queue-index="${escapeHtml(index)}">
+      <span class="queue-drag-handle" aria-hidden="true" title="Drag to reorder" data-queue-drag-handle>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01"/></svg>
+      </span>
+      <div class="queue-item-copy">
+        <div class="queue-item-text">${escapeHtml(queuedChatSummaryText(item))}</div>
+        <div class="queue-item-meta">
+          <span>${escapeHtml(priority)}</span>
+          ${attachments ? `<span>${escapeHtml(attachments)} attachment${attachments === 1 ? "" : "s"}</span>` : ""}
+          ${created ? `<span>${escapeHtml(created)}</span>` : ""}
+        </div>
+      </div>
+      <div class="queue-item-actions">
+        <button class="queue-icon-button" type="button" data-queue-move="${escapeHtml(id)}" data-queue-direction="-1" aria-label="Move queued message up" title="Move up"${index === 0 ? " disabled" : ""}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>
+        </button>
+        <button class="queue-icon-button" type="button" data-queue-move="${escapeHtml(id)}" data-queue-direction="1" aria-label="Move queued message down" title="Move down"${index >= items.length - 1 ? " disabled" : ""}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 6-6m-6 6-6-6"/></svg>
+        </button>
+        <button class="queue-icon-button" type="button" data-queue-edit="${escapeHtml(id)}" aria-label="Edit queued message" title="Edit">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z M13.5 7.5l3 3"/></svg>
+        </button>
+        <button class="queue-icon-button" type="button" data-queue-delete="${escapeHtml(id)}" aria-label="Delete queued message" title="Delete">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function ensureQueuedChatPanel() {
+  const workbench = $("#cold-editor-workbench");
+  const row = workbench?.querySelector(".brief-composer-row");
+  if (!workbench || !row) return null;
+  let panel = $("#queue-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "queue-panel";
+    panel.className = "queue-panel";
+    panel.setAttribute("aria-label", "Queued messages");
+    row.insertAdjacentElement("beforebegin", panel);
+  }
+  return panel;
+}
+
+function ensureQueueActionMenu() {
+  const row = $("#brief-editor-shell .brief-composer-row");
+  const send = $("#prepare-cold-start");
+  if (!row || !send) return null;
+  let button = $("#queue-action-menu-toggle");
+  if (!button) {
+    button = document.createElement("button");
+    button.id = "queue-action-menu-toggle";
+    button.className = "queue-action-menu-toggle";
+    button.type = "button";
+    button.dataset.queueActionMenuToggle = "true";
+    button.setAttribute("aria-label", "Queue send options");
+    button.setAttribute("aria-haspopup", "menu");
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"/></svg>';
+    send.insertAdjacentElement("beforebegin", button);
+  }
+  let menu = $("#queue-action-menu");
+  if (!menu) {
+    menu = document.createElement("div");
+    menu.id = "queue-action-menu";
+    menu.className = "queue-action-menu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = `
+      <button type="button" role="menuitem" data-queue-action="queue">Queue</button>
+      <button type="button" role="menuitem" data-queue-action="stop-send">Stop and Send</button>
+    `;
+    button.insertAdjacentElement("afterend", menu);
+  }
+  return { button, menu };
+}
+
+function renderQueuedChatPanel() {
+  const items = queuedChatItems();
+  const panel = ensureQueuedChatPanel();
+  if (!panel) return;
+  const visible = items.slice(0, 3);
+  const extra = Math.max(0, items.length - visible.length);
+  panel.hidden = !items.length;
+  panel.innerHTML = items.length
+    ? `
+      <div class="queue-panel-inner">
+        <div class="queue-panel-head">
+          <span>Queued</span>
+          <strong>${escapeHtml(items.length)} message${items.length === 1 ? "" : "s"}</strong>
+        </div>
+        <div class="queue-list">
+          ${visible.map((item, index) => queuedChatItemHtml(item, index, items)).join("")}
+        </div>
+        ${extra ? `<div class="queue-more">${escapeHtml(extra)} more queued</div>` : ""}
+      </div>
+    `
+    : "";
+  requestAnimationFrame(updateBriefDockGeometry);
+}
+
+function renderQueueActionMenu() {
+  const controls = ensureQueueActionMenu();
+  if (!controls) return;
+  const show = canQueueComposerWhileRunning();
+  controls.button.hidden = !show;
+  controls.menu.hidden = !show || !queueActionMenuOpen;
+  controls.button.setAttribute("aria-expanded", show && queueActionMenuOpen ? "true" : "false");
+}
+
+function updateQueuedChatSessionFromPayload(payload) {
+  const session =
+    payload?.result?.session ||
+    payload?.session ||
+    payload?.result?.result?.session ||
+    null;
+  const queueSummary =
+    (Array.isArray(payload?.result?.queued_chat_items) ? payload.result : null) ||
+    (Array.isArray(payload?.queued_chat_items) ? payload : null) ||
+    (Array.isArray(payload?.result?.result?.queued_chat_items) ? payload.result.result : null);
+  if (session) {
+    if (!appState) appState = {};
+    appState.research_session = {
+      ...session,
+      ...(queueSummary || {}),
+    };
+  } else if (queueSummary) {
+    if (!appState) appState = {};
+    const current = appState.research_session || {};
+    appState.research_session = {
+      ...current,
+      ...queueSummary,
+    };
+  }
+  renderComposerActionButtons();
+  renderComposerSuggestions();
+}
+
+async function reorderQueuedChatItems(ids) {
+  const response = await api("/api/research/queue/reorder", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+  updateQueuedChatSessionFromPayload(response);
+  return response;
+}
+
+function queuedChatIds() {
+  return queuedChatItems().map((item) => String(item.id || "")).filter(Boolean);
+}
+
+async function moveQueuedChatItem(id, direction) {
+  const ids = queuedChatIds();
+  const index = ids.indexOf(String(id || ""));
+  const target = index + Number(direction || 0);
+  if (index < 0 || target < 0 || target >= ids.length) return;
+  const next = [...ids];
+  [next[index], next[target]] = [next[target], next[index]];
+  await reorderQueuedChatItems(next);
+}
+
+async function saveQueuedChatEdit(id) {
+  const textarea = document.querySelector(`[data-queue-edit-text="${CSS.escape(id)}"]`);
+  const text = String(textarea?.value || "").trim();
+  if (!text) {
+    showToast("Queued message text is required.", true);
+    return;
+  }
+  const response = await api("/api/research/queue", {
+    method: "PATCH",
+    body: JSON.stringify({ id, text }),
+  });
+  editingQueuedChatId = "";
+  updateQueuedChatSessionFromPayload(response);
+  showToast("Updated queued message.");
+}
+
+async function deleteQueuedChatItem(id) {
+  const response = await api("/api/research/queue", {
+    method: "DELETE",
+    body: JSON.stringify({ id }),
+  });
+  if (editingQueuedChatId === id) editingQueuedChatId = "";
+  updateQueuedChatSessionFromPayload(response);
+  showToast("Removed queued message.");
+}
+
+async function queueCurrentComposerMessage(priority = "normal") {
+  const text = String($("#cold-file-editor")?.value || "").trim();
+  return sendSessionComposerMessage(text, { forceQueue: true, queuePriority: priority });
+}
+
 function activeRunActivityDetailsKey() {
   const run = activeRun();
   const session = sessionState();
@@ -3041,6 +3314,21 @@ function activeRunActivityDetailsKey() {
 
 function runActivityOpenAttribute(key) {
   return openRunActivityDetails.has(key) ? " open" : "";
+}
+
+function autoresearchPanelCollapsed() {
+  return scopedGet(AUTORESEARCH_PANEL_COLLAPSED_KEY, "true", { legacyFallback: false }) !== "false";
+}
+
+function setAutoresearchPanelCollapsed(collapsed) {
+  scopedSet(AUTORESEARCH_PANEL_COLLAPSED_KEY, collapsed ? "true" : "false");
+}
+
+function toggleAutoresearchPanelCollapsed() {
+  const collapsed = !autoresearchPanelCollapsed();
+  setAutoresearchPanelCollapsed(collapsed);
+  renderFramingConversation();
+  if (!collapsed) requestAnimationFrame(restoreTrialStripScroll);
 }
 
 function rememberRunActivityDetailsState(details) {
@@ -3083,27 +3371,37 @@ function syncComposerActionButton(button, { stopMode, disabled, sendHtml, sendLa
 
 function renderComposerActionButtons() {
   renderComposerModeControls();
-  const stopMode = canStopCurrentRun();
+  const stopMode = false;
+  const queueMode = canQueueComposerWhileRunning();
   const resourceBlocked = hasBlockingResourceImports();
   const blockedMessage = blockingResourceImportMessage();
   syncComposerActionButton($("#prepare-cold-start"), {
     stopMode,
     disabled: hasNoProject() || resourceBlocked,
     sendHtml: composerSendIconHtml(),
+    sendLabel: queueMode ? "Queue follow-up" : "Send",
   });
   const coldButton = $("#prepare-cold-start");
-  if (coldButton && !stopMode && resourceBlocked) coldButton.title = blockedMessage;
+  if (coldButton && !stopMode) {
+    if (resourceBlocked) coldButton.title = blockedMessage;
+    else if (queueMode) coldButton.title = "Queue follow-up";
+    coldButton.dataset.queueMode = queueMode ? "true" : "false";
+  }
 
   const send = $("#chat-form .send-button");
   syncComposerActionButton(send, {
     stopMode,
-    disabled: !canMessage() || resourceBlocked || hasNoProject(),
-    sendHtml: "Send",
+    disabled: !(canMessage() || queueMode) || resourceBlocked || hasNoProject(),
+    sendHtml: queueMode ? "Queue" : "Send",
+    sendLabel: queueMode ? "Queue follow-up" : "Send",
   });
   if (send) {
-    send.type = stopMode ? "button" : "submit";
-    if (!stopMode && resourceBlocked) send.title = blockedMessage;
+    send.type = "submit";
+    if (resourceBlocked) send.title = blockedMessage;
+    else if (queueMode) send.title = "Queue follow-up";
   }
+  renderQueuedChatPanel();
+  renderQueueActionMenu();
 }
 
 function canMessage() {
@@ -3153,15 +3451,13 @@ function canSendLocalSlashControl(text) {
 }
 
 function canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial) {
-  const mode = String(sessionState().mode || "").toLowerCase();
- return (
-   isSessionRunning() &&
-   ["goal", "research", "command"].includes(mode) &&
-   !resumeFromTrial &&
+  return (
+    isSessionRunning() &&
+    !resumeFromTrial &&
     !String(text || "").trim().startsWith("/") &&
-   Array.isArray(attachments) &&
-   (String(text || "").trim() || attachments.length)
- );
+    Array.isArray(attachments) &&
+    (String(text || "").trim() || attachments.length)
+  );
 }
 
 function isUiLocalTranscript(entry) {
@@ -4417,13 +4713,12 @@ function measureSelectOptionLabel(select, label) {
 
 function fitComposerSelectWidth(select) {
   if (!select?.options?.length || !select.style?.setProperty) return;
-  const maxTextWidth = Array.from(select.options).reduce((maxWidth, option) => {
-    const label = option.textContent || option.label || option.value || "";
-    return Math.max(maxWidth, measureSelectOptionLabel(select, label));
-  }, 0);
-  if (!maxTextWidth) return;
+  const selected = select.selectedOptions?.[0] || Array.from(select.options).find((option) => option.value === select.value) || select.options[0];
+  const label = selected?.textContent || selected?.label || selected?.value || "";
+  const textWidth = measureSelectOptionLabel(select, label);
+  if (!textWidth) return;
   const arrowAndPadding = 28;
-  const width = Math.ceil(Math.max(48, Math.min(190, maxTextWidth + arrowAndPadding)));
+  const width = Math.ceil(Math.max(52, Math.min(176, textWidth + arrowAndPadding)));
   select.style.setProperty("--select-fit-width", `${width}px`);
 }
 
@@ -4572,6 +4867,7 @@ function updateSessionSettingsFromComposer() {
   syncReasoningSelectOptions(form.elements.reasoningEffort, backend, model.value, reasoning.value);
   form.elements.reasoningEffort.value = normalizeReasoningEffort(reasoning.value, backend, model.value);
   settingsFromForm();
+  fitComposerSelectWidths();
 }
 
 function normalizeReasoningEffort(value, backend = "", model = "") {
@@ -4679,6 +4975,7 @@ function switchSessionBackend(backend) {
     ...providerSettingsFromScoped(scoped, normalized),
     backend: normalized,
   }, true);
+  if (activePanel === "manuscript") renderContext();
 }
 
 function restoreSessionSettings() {
@@ -5286,18 +5583,26 @@ function renderChatState() {
   const send = $("#chat-form .send-button");
   const cont = $("#continue-research");
   const resourceBlocked = hasBlockingResourceImports();
-  textarea.disabled = !canMessage();
-  send.disabled = !canMessage() || resourceBlocked;
+  const canQueue = canQueueComposerWhileRunning();
+  textarea.disabled = !(canMessage() || canQueue);
+  send.disabled = !(canMessage() || canQueue) || resourceBlocked;
   cont.disabled = !canMessage() || resourceBlocked;
-  textarea.placeholder = canMessage() ? "Message the current agent session..." : "Run cold start before messaging...";
+  textarea.placeholder = canQueue
+    ? "Queue a follow-up for when the agent finishes..."
+    : canMessage()
+      ? "Message the current agent session..."
+      : "Run cold start before messaging...";
   renderComposerActionButtons();
   renderComposerSuggestions();
   renderChatSummary();
 }
 
 function coldComposerPlaceholder(hasFramingThread) {
+  if (canQueueComposerWhileRunning()) {
+    return "Queue a follow-up for when the agent finishes...";
+  }
   if (hasLaunched()) {
-    return "Message the agent about the current research, ask for status, attach resources, or steer the next step...";
+    return "Message the research agent...";
   }
   if (hasProjectDraftReady()) {
     return "Ask the agent to revise PROJECT.md, narrow the scope, change the target venue, or add constraints...";
@@ -5880,13 +6185,22 @@ function trialProgressStepperHtml(progress) {
   `;
 }
 
+function trialActionIconHtml(kind) {
+  const icons = {
+    continue: '<path d="M5 7h6a5 5 0 0 1 5 5v5" /><path d="M13 14l3 3 3-3" />',
+    resume: '<polygon points="7 5 18 12 7 19 7 5" />',
+    restart: '<path d="M4 12a8 8 0 1 0 2.34-5.66" /><path d="M4 4v6h6" />',
+  };
+  return `<span class="trial-action-icon trial-action-icon-${escapeHtml(kind)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${icons[kind] || ""}</svg></span>`;
+}
+
 function trialLifecycleActionButtonsHtml(iteration, report, running) {
   if (running || !hasAutoresearchTrajectory()) return "";
   const actions = [];
   const resumeFromTrial = selectedResumeTrialPayload();
   if (resumeFromTrial) {
-    actions.push(`<button class="primary-button small-button" type="button" data-resume-trial-submit>Continue from ${escapeHtml(resumeTrialLabel(resumeFromTrial))}</button>`);
-    actions.push('<button class="secondary-button small-button" type="button" data-resume-trial-remove>Cancel</button>');
+    actions.push(`<button class="primary-button small-button trial-flow-button" type="button" data-resume-trial-submit>Continue from ${escapeHtml(resumeTrialLabel(resumeFromTrial))}</button>`);
+    actions.push('<button class="secondary-button small-button trial-flow-button" type="button" data-resume-trial-remove>Cancel</button>');
   } else if (!isGoalPassed()) {
     const reportPath = String(report?.report_path || "").trim();
     const latestBoundary = Number(iteration || 0) > 0
@@ -5894,19 +6208,33 @@ function trialLifecycleActionButtonsHtml(iteration, report, running) {
       && report?.is_closed === true
       && reportPath;
     if ((report && report?.is_closed !== true && !reportPath) || latestBoundary) {
-      actions.push('<button class="primary-button small-button" type="button" data-resume-autoresearch>Resume autoresearch</button>');
+      actions.push(`<button class="primary-button small-button trial-flow-button" type="button" data-resume-autoresearch aria-label="Resume">${trialActionIconHtml("resume")}<span>Resume</span></button>`);
     } else if (resumeTrialContextFromReport(iteration, report)) {
-      actions.push(`<button class="secondary-button small-button" type="button" data-trial-continue="${escapeHtml(iteration)}">Continue from this trial</button>`);
+      actions.push(`<button class="secondary-button small-button trial-flow-button" type="button" data-trial-continue="${escapeHtml(iteration)}" aria-label="Continue from this trial">${trialActionIconHtml("continue")}<span>Continue from this trial</span></button>`);
     }
   }
-  actions.push('<button class="secondary-button small-button trial-danger-button" type="button" data-restart-autoresearch>Restart autoresearch</button>');
+  actions.push(`<button class="secondary-button small-button trial-danger-button" type="button" data-restart-autoresearch aria-label="Restart">${trialActionIconHtml("restart")}<span>Restart</span></button>`);
   return actions.join("");
 }
 
-function trialOpenActionButtonsHtml(report) {
+function trialArtifactIconHtml(kind) {
+  const icons = {
+    manuscript: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h6" /><path d="M8 9h2" />',
+    report: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 18v-4" /><path d="M12 18v-7" /><path d="M16 18v-2" />',
+    review: '<circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="m8 11 2 2 4-4" />',
+  };
+  return `<span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${icons[kind] || icons.report}</svg></span>`;
+}
+
+function trialArtifactActionButtonHtml(path, kind, label) {
+  return `<button class="secondary-button small-button trial-artifact-button" type="button" data-inline-fullscreen="${escapeHtml(path)}" aria-label="Open ${escapeHtml(label.toLowerCase())}">${trialArtifactIconHtml(kind)}<span>${escapeHtml(label)}</span></button>`;
+}
+
+function trialOpenActionButtonsHtml(report, options = {}) {
   return [
-    report?.report_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.report_path)}">Open report</button>` : "",
-    report?.review_path ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(report.review_path)}">Open review</button>` : "",
+    options.includeManuscript ? trialArtifactActionButtonHtml(LATEST_MANUSCRIPT_PATH, "manuscript", "Manuscript") : "",
+    report?.report_path ? trialArtifactActionButtonHtml(report.report_path, "report", "Report") : "",
+    report?.review_path ? trialArtifactActionButtonHtml(report.review_path, "review", "Review") : "",
   ].filter(Boolean).join("");
 }
 
@@ -5924,13 +6252,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const progress = trialProgressForIteration(iteration, report);
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
-  const hasReport = Boolean(String(report?.report_path || "").trim());
-  const headerPath = hasReport
-    ? `${escapeHtml(report.id)} / ${escapeHtml(report.report_path)}`
-    : report
-      ? `${escapeHtml(report.id || `Trial ${iteration}`)} / Report pending`
-      : "Report pending";
-  const openActions = trialOpenActionButtonsHtml(report);
+  const openActions = trialOpenActionButtonsHtml(report, { includeManuscript: true });
   const controlActions = trialLifecycleActionButtonsHtml(iteration, report, running);
   return `
     <article class="trial-report-card ${running ? "is-running" : report?.is_closed === true ? "is-complete" : "is-pending"}" data-trial-panel="${escapeHtml(iteration)}">
@@ -5939,12 +6261,11 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
           <strong>Trial ${escapeHtml(iteration)}</strong>
           <em>${escapeHtml(status)}</em>
           ${marksAutoresearchComplete ? `<em class="is-autoresearch-complete">Autoresearch complete</em>` : ""}
+          ${progressDetail ? `<span class="trial-report-head-progress">${escapeHtml(progressDetail)}</span>` : ""}
         </div>
-        <span>${headerPath}</span>
       </div>
       ${trialProgressStepperHtml(progress)}
       ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
-      ${progressDetail ? `<p class="trial-progress-detail">${escapeHtml(progressDetail)}</p>` : ""}
       ${trialHumanResponseHtml(iteration)}
       <p>${escapeHtml(summary)}</p>
       <div class="trial-report-actions">
@@ -5980,6 +6301,15 @@ function latestTrialProgressEntry(entries) {
   return candidates.find((entry) => ["Error", "Done", "Update", "File change"].includes(framingProgressTitle(entry))) || null;
 }
 
+function latestTrialUpdateText(activeTrialData, runningTrialData = null) {
+  const source = runningTrialData || activeTrialData;
+  const rawEntries = Array.isArray(source?.entries) ? source.entries : [];
+  const entries = runningTrialData ? currentRunScopedEntries(rawEntries) : rawEntries;
+  const latestEntry = latestTrialProgressEntry(trialActivityEntries(entries));
+  if (!latestEntry) return "";
+  return compactText(`${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`, 180);
+}
+
 function runningTrialStatusHtml(trial) {
   const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
   if (!iteration || !isTrialLive(iteration)) return "";
@@ -5999,7 +6329,7 @@ function runningTrialStatusHtml(trial) {
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice);
-  const openActions = trialOpenActionButtonsHtml(report);
+  const openActions = trialOpenActionButtonsHtml(report, { includeManuscript: true });
   return `
     <section class="trial-live-status" aria-live="polite">
       <div class="trial-live-status-head">
@@ -6093,6 +6423,17 @@ function trialStatusLabel(iteration, trial) {
   if (String(trial?.report_path || "").trim()) return "Incomplete";
   if (trial) return "Incomplete";
   return "Active";
+}
+
+function trialHeaderStatusLabel(iteration, trial) {
+  const target = Number(iteration || trialIterationValue(trial) || 0);
+  const lifecycleLabel = trialStatusLabel(target, trial);
+  if (["Blocked", "Continued", "Done", "Reported"].includes(lifecycleLabel)) {
+    return lifecycleLabel;
+  }
+  const progress = target ? trialProgressForIteration(target, trial) : {};
+  const progressLabel = cleanText(progress?.stage_label, "");
+  return progressLabel || lifecycleLabel;
 }
 
 function resetTrialStripToAuto(liveIteration = liveTrialStripIteration()) {
@@ -6208,12 +6549,13 @@ function iterationNavHtml(trials, activeTrial) {
           .map(({ iteration, entries, report }) => {
             const running = isTrialLive(iteration, report);
             const incomplete = isDisplayIncompleteTrial(iteration, report, running);
+            const continued = isContinuedTrial(iteration, report);
             const label = trialStatusLabel(iteration, report);
             const title = report ? cleanText(report.id, `Trial ${iteration}`) : `Trial ${iteration}`;
             const active = Number(iteration) === Number(activeTrial);
             const summary = report ? cleanText(report.report_summary, cleanText(report.objective, title)) : title;
             return `
-              <button class="trial-chip ${active ? "is-active" : ""} ${running ? "is-running" : ""} ${incomplete ? "is-incomplete" : ""}" type="button" data-trial-select="${escapeHtml(iteration)}" title="${escapeHtml(compactText(summary, 180))}">
+              <button class="trial-chip ${active ? "is-active" : ""} ${running ? "is-running" : ""} ${incomplete ? "is-incomplete" : ""} ${continued ? "is-continued" : ""}" type="button" data-trial-select="${escapeHtml(iteration)}" title="${escapeHtml(compactText(summary, 180))}">
                 <strong class="trial-chip-index">${escapeHtml(iteration)}</strong>
                 <span class="trial-chip-status">${escapeHtml(label)}</span>
               </button>
@@ -6228,30 +6570,46 @@ function iterationNavHtml(trials, activeTrial) {
 
 function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData = null) {
   if (!trials.length) return "";
-  const selectedLabel = activeTrial ? `Trial ${activeTrial}` : "No trial selected";
-  const reportedCount = trials.filter((trial) => trial.report?.report_path).length;
-  const incompleteCount = trials.filter((trial) => isDisplayIncompleteTrial(trial.iteration, trial.report, isTrialLive(trial.iteration, trial.report))).length;
-  const countParts = [`${trials.length} active trial${trials.length === 1 ? "" : "s"}`];
-  if (reportedCount) countParts.push(`${reportedCount} reported`);
-  if (incompleteCount) countParts.push(`${incompleteCount} incomplete`);
-  const countLabel = countParts.join(" · ");
   const latest = trials[trials.length - 1];
-  const latestReported = [...trials].reverse().find((trial) => trial.report?.report_path);
-  const latestReport = latestReported?.report?.id ? cleanText(latestReported.report.id, "") : "";
+  const collapsed = autoresearchPanelCollapsed();
+  const miniTrialData = activeTrialData || latest || null;
+  const miniTrialIteration = miniTrialData?.iteration || activeTrial || 0;
+  const miniTrialReport = miniTrialData?.report || null;
+  const miniTrialLabel = miniTrialIteration ? trialHeaderStatusLabel(miniTrialIteration, miniTrialReport) : "Active";
+  const kickerStatus = miniTrialIteration
+    ? `<span class="trial-history-kicker-status">Trial ${escapeHtml(miniTrialIteration)}: ${escapeHtml(miniTrialLabel)}</span>`
+    : "";
+  const latestUpdate = latestTrialUpdateText(activeTrialData, runningTrialData);
+  const running = Boolean(runningTrialData);
   const activeTrialIsRunning = runningTrialData
     && activeTrialData
     && Number(runningTrialData.iteration) === Number(activeTrialData.iteration);
   const shouldShowActiveTrialReport = activeTrialData && !activeTrialIsRunning;
   return `
-    <section class="trial-history-card" aria-label="Autoresearch trials">
+    <section class="trial-history-card ${collapsed ? "is-collapsed" : "is-expanded"} ${running ? "is-running" : ""}" aria-label="Autoresearch trials" data-autoresearch-panel-collapsed="${collapsed ? "true" : "false"}">
       <header class="trial-history-head">
-        <div>
-          <strong>Trials</strong>
-          <span>${escapeHtml(countLabel)} · ${escapeHtml(selectedLabel)}</span>
-          ${autoresearchCompleteBadgeHtml()}
-          ${reportedCount ? `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>` : ""}
+        <div class="trial-history-kicker" aria-label="Autoresearch">
+          ${
+            running
+              ? `<span class="trial-history-micro-spinner" aria-hidden="true"></span>`
+              : `<span class="trial-history-kicker-icon" aria-hidden="true">
+                  <svg class="brand-glyph" viewBox="0 0 32 32" focusable="false">
+                    <use href="#brand-mark-glyph"></use>
+                  </svg>
+                </span>`
+          }
+          <span>Autoresearch</span>
+          ${kickerStatus}
         </div>
-        ${latestReport ? `<p>Latest: ${escapeHtml(latestReport)}</p>` : ""}
+        <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="${collapsed ? "false" : "true"}">
+          <span class="trial-history-toggle-copy">
+            <span class="trial-history-latest-update">
+              <span class="trial-history-disclosure" aria-hidden="true">›</span>
+              <span>Agent update</span>
+              <em>${escapeHtml(latestUpdate || "No recent agent update.")}</em>
+            </span>
+          </span>
+        </button>
       </header>
       <div class="trial-history-body">
         ${iterationNavHtml(trials, activeTrial)}
@@ -7163,6 +7521,64 @@ function normalizeManuscriptKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function figureImageJobKey(title) {
+  return normalizeManuscriptKey(title) || String(title || "").trim();
+}
+
+function figureImageAutoKey(title, sourcePath = "") {
+  return `${figureImageJobKey(title)}::${repoRelativePath(sourcePath)}`;
+}
+
+function figureImageGenerationAvailable() {
+  return effectiveBackend(currentLaunchBackend()) === "codex";
+}
+
+function isFigureImagePath(path) {
+  return [".png", ".jpg", ".jpeg", ".webp"].includes(extension(path));
+}
+
+function figureSourceImageHtml(path, title = "Figure image") {
+  const value = repoRelativePath(path);
+  if (!value || !isFigureImagePath(value)) return "";
+  return `
+    <figure class="figure-source-preview">
+      <img src="${escapeHtml(rawFileUrl(value))}" alt="${escapeHtml(title)}" loading="lazy">
+      <figcaption>${escapeHtml(value)}</figcaption>
+    </figure>
+  `;
+}
+
+function figureImageStatusHtml(title) {
+  const key = figureImageJobKey(title);
+  const job = figureImageJobs.get(key);
+  if (!job) return "";
+  const status = String(job.status || "").toLowerCase();
+  const text = status === "succeeded"
+    ? `Generated ${job.output_path || ""}`.trim()
+    : status === "failed"
+      ? (job.error || "Image generation failed.")
+      : "Generating image...";
+  return `<p class="figure-image-job-status is-${escapeHtml(status || "running")}" data-figure-image-status="${escapeHtml(key)}">${escapeHtml(text)}</p>`;
+}
+
+function figureImageInFlightCount() {
+  return [...figureImageJobs.values()]
+    .filter((job) => ["pending", "running"].includes(String(job?.status || "").toLowerCase()))
+    .length;
+}
+
+function shouldAutoGenerateFigureImage(candidate) {
+  if (!figureImageGenerationAvailable()) return false;
+  const title = cleanText(candidate?.title, "");
+  const description = cleanText(candidate?.description, "");
+  const sourcePath = repoRelativePath(candidate?.sourcePath || "");
+  if (!title || !description) return false;
+  if (sourcePath && isFigureImagePath(sourcePath)) return false;
+  const job = figureImageJobs.get(figureImageJobKey(title));
+  if (job) return false;
+  return !figureImageAutoStarted.has(figureImageAutoKey(title, sourcePath));
+}
+
 function normalizeFieldLabel(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/:$/, "");
 }
@@ -7368,6 +7784,7 @@ function figureSpecCardHtml(section, options = {}) {
       ${figureSpecDetail("Purpose", fields.Purpose)}
       ${figureSpecDetail("Content", fields["Content and panel layout"] || fields.Content, compact ? 220 : 340)}
       ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, compact ? 240 : 420))}</blockquote>` : ""}
+      ${figureSourceImageHtml(sourcePath, section.title)}
       ${figureSpecDetail("Evidence / conceptual basis", fields["Evidence / conceptual basis"] || fields["Linked evidence"], compact ? 220 : 300)}
       ${figureSpecDetail("Target-venue fit", fields["Target-venue fit"] || fields["Target-venue fit rationale"], compact ? 180 : 260)}
       ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
@@ -7599,6 +8016,40 @@ function manuscriptArtifactBlocks(manuscript) {
     .filter((block) => block?.is_artifact);
 }
 
+function manuscriptBlueprintArtifactBlocks(manuscript) {
+  return dedupeManuscriptBlocks([
+    ...(manuscript?.inline_artifacts || []),
+    ...(manuscript?.architecture || []).filter((block) => block?.is_artifact),
+  ])
+    .filter(sectionHasRealContent)
+    .filter((block) => block?.is_artifact);
+}
+
+function figureImageCandidateFromBlock(block) {
+  if (String(block?.kind || "").toLowerCase() !== "figure") return null;
+  const title = cleanText(block?.title, "Untitled figure");
+  const description = figureDescriptionPayload(block);
+  const sourcePath = firstArtifactPath([
+    manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source code or artifact links", "Source artifact"]),
+    block?.body,
+  ].filter(Boolean).join("\n"));
+  if (!title || !description) return null;
+  return { title, description, sourcePath };
+}
+
+function automaticManuscriptFigureImageCandidates(manuscript) {
+  const seen = new Set();
+  return manuscriptBlueprintArtifactBlocks(manuscript || {})
+    .map(figureImageCandidateFromBlock)
+    .filter(Boolean)
+    .filter((candidate) => {
+      const key = figureImageJobKey(candidate.title);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function normalizedPathCandidates(block) {
   const values = [
     block?.path,
@@ -7761,6 +8212,7 @@ function artifactTakeawayHtml(block) {
     manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source code or artifact links", "Source artifact"]),
     block.body,
   ].filter(Boolean).join("\n"));
+  const description = !isTable ? figureDescriptionPayload(block) : "";
   const tableBody = isTable ? publicationReadyTableMarkdown(block) : "";
   const notes = isTable ? manuscriptFieldValue(block, ["Table notes / definitions / abbreviations", "Table notes", "Notes"]) : "";
   return `
@@ -7775,7 +8227,7 @@ function artifactTakeawayHtml(block) {
       ${manuscriptActionsHtml([
         !isTable
           ? copyButton(
-              figureDescriptionPayload(block),
+              description,
               "Copy description",
               "Figure description copied.",
             )
@@ -7784,6 +8236,8 @@ function artifactTakeawayHtml(block) {
       ])}
       ${storyPointHtml("Reader takeaway", takeaway, "is-takeaway")}
       ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
+      ${!isTable ? figureSourceImageHtml(sourcePath, title) : ""}
+      ${!isTable ? figureImageStatusHtml(title) : ""}
       ${isTable ? (tableBody ? `<div class="publication-table-preview markdown-preview">${markdownToHtml(tableBody)}</div>` : `<p class="table-missing-warning">Missing publication-ready table body. Active tables must include a Markdown table in this block.</p>`) : ""}
       ${hasRealText(notes) ? `<div class="table-notes markdown-preview"><strong>Notes.</strong> ${markdownToHtml(notes)}</div>` : ""}
       ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
@@ -7877,7 +8331,7 @@ function renderManuscriptStoryMap(manuscript) {
     return empty("No manuscript story map is available yet.");
   }
   return `
-    <section class="manuscript-story-map">
+    <section class="manuscript-story-map" id="manuscript-story-map">
       ${storyMapMetaHtml(manuscript)}
       ${storyMapNavHtml(manuscript, map)}
       <div class="story-section-list">
@@ -8042,10 +8496,12 @@ function manuscriptArtifactCardHtml(block) {
   const placement = manuscriptFieldValue(block, ["Placement"]);
   const role = manuscriptFieldValue(block, ["Purpose or result role", "Argument or result role", "Purpose"]);
   const caption = manuscriptFieldValue(block, ["Caption draft or current caption", "Caption draft", "Caption"]);
+  const isFigure = String(block.kind || "").toLowerCase() === "figure";
   const sourcePath = firstArtifactPath([
     manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source code or artifact links", "Source artifact"]),
     block.body,
   ].filter(Boolean).join("\n"));
+  const description = isFigure ? figureDescriptionPayload(block) : "";
   const details = [
     ["Placement", placement],
     ["Purpose / role", role],
@@ -8065,9 +8521,12 @@ function manuscriptArtifactCardHtml(block) {
         ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
       </header>
       ${manuscriptActionsHtml([
+        isFigure ? copyButton(description, "Copy description", "Figure description copied.") : "",
         sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
       ])}
       ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
+      ${isFigure ? figureSourceImageHtml(sourcePath, block.title) : ""}
+      ${isFigure ? figureImageStatusHtml(block.title) : ""}
       ${details.length ? `
         <dl class="paper-field-grid artifact-field-grid">
           ${details
@@ -8215,6 +8674,120 @@ function renderManuscriptReferences(manuscript) {
   `;
 }
 
+function manuscriptOutlineItemHtml(item) {
+  return `
+    <a class="manuscript-outline-link depth-${Math.max(1, Math.min(6, Number(item.depth || 1)))}" href="${escapeHtml(item.href)}">
+      <span>${escapeHtml(item.type || "")}</span>
+      <strong>${escapeHtml(item.label)}</strong>
+      ${item.meta ? `<em>${escapeHtml(item.meta)}</em>` : ""}
+    </a>
+  `;
+}
+
+function manuscriptOutlineGroupHtml(label, items, options = {}) {
+  const values = (items || []).filter((item) => item?.href && hasRealText(item?.label));
+  if (!values.length) return "";
+  return `
+    <details class="manuscript-outline-group" ${options.open ? "open" : ""}>
+      <summary>
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(values.length)}</strong>
+      </summary>
+      <div class="manuscript-outline-links">
+        ${values.map(manuscriptOutlineItemHtml).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function manuscriptOutlineHtml(manuscript) {
+  manuscript = manuscript || {};
+  const map = buildManuscriptStoryMap(manuscript);
+  const artifacts = [
+    ...map.sections.flatMap((node) => node.artifacts || []),
+    ...(map.unplaced || []),
+  ];
+  const sectionItems = (map.sections || []).map(({ section }) => ({
+    href: `#${blueprintAnchorForTitle(section.title)}`,
+    type: isAbstractArchitectureBlock(section) ? "Abstract" : "Section",
+    label: cleanText(section.title, "Untitled section"),
+    depth: section.level || 3,
+  }));
+  const artifactItems = (kind) => artifacts
+    .filter((block) => String(block.kind || "").toLowerCase() === kind)
+    .map((block) => ({
+      href: `#${blueprintAnchorForTitle(block.title)}`,
+      type: artifactKindLabel(block.kind),
+      label: cleanText(block.title, `Untitled ${kind}`),
+      meta: manuscriptFieldValue(block, ["Inclusion status", "Status"]),
+      depth: block.level || 4,
+    }));
+  const methodItems = artifacts
+    .filter((block) => !["figure", "table"].includes(String(block.kind || "").toLowerCase()))
+    .map((block) => ({
+      href: `#${blueprintAnchorForTitle(block.title)}`,
+      type: artifactKindLabel(block.kind),
+      label: cleanText(block.title, "Untitled result"),
+      meta: manuscriptFieldValue(block, ["Inclusion status", "Status"]),
+      depth: block.level || 4,
+    }));
+  const appendixFiles = (manuscript.appendix_files || []).filter((file) => hasRealText(file?.path) || hasRealText(file?.title));
+  const appendixItems = hasRealText(manuscript.appendix_plan) || appendixFiles.length
+    ? [{
+        href: "#manuscript-appendix-section",
+        type: "Appendix",
+        label: "Appendix / supplement",
+        meta: appendixFiles.length ? `${appendixFiles.length} file${appendixFiles.length === 1 ? "" : "s"}` : "Plan",
+      }]
+    : [];
+  const references = (manuscript.references || []).filter((ref) => hasRealText(ref?.reference) || hasRealText(ref?.key));
+  const referenceItems = references.length
+    ? [{ href: "#manuscript-references-section", type: "References", label: "Resolved references", meta: `${references.length} reference${references.length === 1 ? "" : "s"}` }]
+    : [];
+  const auditItems = hasRealText(manuscript.provenance || manuscript.traceability) || (manuscript.figure_specs || []).some(sectionHasRealContent)
+    ? [{ href: "#manuscript-audit-section", type: "Audit", label: "Audit / provenance", meta: "Traceability" }]
+    : [];
+  const missingEvidence = (manuscript.missing_evidence || []).filter((item) => !looksPlaceholder(item));
+  const missingItems = missingEvidence.length
+    ? [{ href: "#manuscript-missing-evidence-section", type: "Evidence", label: "Missing evidence", meta: `${missingEvidence.length} item${missingEvidence.length === 1 ? "" : "s"}` }]
+    : [];
+
+  return `
+    <aside class="manuscript-outline-panel" aria-label="Manuscript outline">
+      <div class="manuscript-outline-brand">
+        <span class="manuscript-outline-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M5 18V6" />
+            <path d="M5 8h10" />
+            <path d="M5 13h7" />
+            <path d="M5 18h12" />
+            <circle cx="5" cy="8" r="1.4" />
+            <circle cx="5" cy="13" r="1.4" />
+            <circle cx="5" cy="18" r="1.4" />
+          </svg>
+        </span>
+        <div>
+          <p>Manuscript map</p>
+          <strong>Outline</strong>
+        </div>
+      </div>
+      <nav class="manuscript-outline-nav">
+        ${manuscriptOutlineGroupHtml("Overview", [
+          { href: "#manuscript-export", type: "Export", label: "Final bundles", meta: "Downloads" },
+          { href: "#manuscript-story-map", type: "Story", label: "Manuscript story map", meta: map.sections.length ? `${map.sections.length} sections` : "" },
+        ], { open: true })}
+        ${manuscriptOutlineGroupHtml("Outline", sectionItems, { open: true })}
+        ${manuscriptOutlineGroupHtml("Figures", artifactItems("figure"))}
+        ${manuscriptOutlineGroupHtml("Tables", artifactItems("table"))}
+        ${manuscriptOutlineGroupHtml("Results / methods", methodItems)}
+        ${manuscriptOutlineGroupHtml("Appendix", appendixItems)}
+        ${manuscriptOutlineGroupHtml("References", referenceItems)}
+        ${manuscriptOutlineGroupHtml("Audit", [...auditItems, ...missingItems])}
+      </nav>
+    </aside>
+  `;
+}
+
 function renderManuscriptPanel() {
   const manuscript = appState.summaries?.manuscript || {};
   const blueprintViewer = `
@@ -8222,27 +8795,57 @@ function renderManuscriptPanel() {
       <div class="tree-empty">Loading blueprint...</div>
     </div>
   `;
-  return [
+  const reader = [
     renderManuscriptExportBar(),
-    contextCard("Manuscript story map", renderManuscriptArchitecture(manuscript), "Finished-results paper map in manuscript reading order."),
-    contextCard("Appendix / supplement", renderManuscriptAppendixPanel(manuscript), "Supporting material and supplement files tied to the manuscript deliverable."),
-    contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs")),
-    contextCard("References", renderManuscriptReferences(manuscript), "Resolved reference list for the current source candidate.", inlineOpenButton("manuscript/references.bib", "Open .bib")),
-    contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet.")),
-    contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`),
+    `<div id="manuscript-story-section">${contextCard("Manuscript story map", renderManuscriptArchitecture(manuscript), "Finished-results paper map in manuscript reading order.")}</div>`,
+    `<div id="manuscript-appendix-section">${contextCard("Appendix / supplement", renderManuscriptAppendixPanel(manuscript), "Supporting material and supplement files tied to the manuscript deliverable.")}</div>`,
+    `<div id="manuscript-audit-section">${contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs"))}</div>`,
+    `<div id="manuscript-references-section">${contextCard("References", renderManuscriptReferences(manuscript), "Resolved reference list for the current source candidate.", inlineOpenButton("manuscript/references.bib", "Open .bib"))}</div>`,
+    `<div id="manuscript-missing-evidence-section">${contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet."))}</div>`,
+    `<div id="manuscript-blueprint-section">${contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`)}</div>`,
   ].join("");
+  return `
+    <section class="manuscript-layout">
+      ${manuscriptOutlineHtml(manuscript)}
+      <div class="manuscript-reader">
+        ${reader}
+      </div>
+    </section>
+  `;
 }
 
 function renderManuscriptExportBar() {
   return `
-    <section class="manuscript-export-bar" aria-label="Final result export">
+    <section class="manuscript-export-bar" id="manuscript-export" aria-label="Final result export">
       <div class="manuscript-export-copy">
         <strong>Export final results</strong>
         <span>Clean final bundles without autoresearch trajectory.</span>
+        <p class="export-note">Markdown is one file. Packs add final referenced files; trajectory, runtime, archive, secrets, caches, and agent instructions stay out.</p>
       </div>
       ${renderExportPanel()}
     </section>
   `;
+}
+
+function scheduleAutomaticManuscriptFigureImages() {
+  clearTimeout(figureImageAutoTimer);
+  figureImageAutoTimer = null;
+  if (activeView !== "materials" || activePanel !== "manuscript") return;
+  if (!figureImageGenerationAvailable()) return;
+  const slots = Math.max(0, MAX_AUTO_FIGURE_IMAGE_JOBS - figureImageInFlightCount());
+  if (!slots) return;
+  const manuscript = appState?.summaries?.manuscript || {};
+  const candidates = automaticManuscriptFigureImageCandidates(manuscript)
+    .filter(shouldAutoGenerateFigureImage)
+    .slice(0, slots);
+  if (!candidates.length) return;
+  figureImageAutoTimer = setTimeout(() => {
+    figureImageAutoTimer = null;
+    candidates.forEach((candidate) => {
+      startFigureImageGeneration(candidate, { automatic: true, suppressPendingRender: true }).catch((error) => showToast(error.message, true));
+    });
+    if (activePanel === "manuscript") renderContext();
+  }, 0);
 }
 
 function autoloadInlineFiles(root) {
@@ -8256,6 +8859,9 @@ function autoloadInlineFiles(root) {
 function renderContext() {
   if (!appState || activeView !== "materials") return;
   const content = $("#context-content");
+  const materialView = $("#material-view");
+  if (materialView) materialView.dataset.panel = activePanel;
+  content.dataset.panel = activePanel;
   suppressViewScrollPersistence = true;
   if (activePanel === "workspace") content.innerHTML = renderWorkspacePanel();
   if (activePanel === "resources") content.innerHTML = renderResourcesPanel();
@@ -8263,6 +8869,7 @@ function renderContext() {
   if (activePanel === "reviews") content.innerHTML = renderReviewsPanel();
   if (activePanel === "manuscript") content.innerHTML = renderManuscriptPanel();
   autoloadInlineFiles(content);
+  if (activePanel === "manuscript") scheduleAutomaticManuscriptFigureImages();
   if (activePanel === "reviews") requestAnimationFrame(restoreReviewTrialStripScroll);
   restoreActiveViewScrollPosition();
 }
@@ -8506,7 +9113,6 @@ function renderExportPanel() {
         <button class="secondary-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download blueprint pack</button>
         <button class="secondary-button" type="button" data-export-kind="final_project" ${busy ? "disabled" : ""}>Download final project pack</button>
       </div>
-      <p class="export-note">Markdown is one file. Packs add final referenced files; trajectory, runtime, archive, secrets, caches, and agent instructions stay out.</p>
       ${renderExportProgress(activeExportJob)}
     </div>
   `;
@@ -10331,6 +10937,90 @@ async function saveInlineFile(path, root = document) {
   }
 }
 
+function codexFigureImageSettingsPayload() {
+  const backend = effectiveBackend(currentLaunchBackend());
+  return {
+    agent: { backend },
+    codex: stripBackendSetting(normalizeSessionSettings({
+      ...(uiSettings?.codex || defaultCodexSessionSettings),
+      backend: "codex",
+    })),
+  };
+}
+
+function rememberFigureImageJob(job) {
+  if (!job?.title) return;
+  figureImageJobs.set(figureImageJobKey(job.title), job);
+}
+
+async function pollFigureImageJob(jobId, title) {
+  const key = figureImageJobKey(title);
+  const existing = figureImagePollTimers.get(key);
+  if (existing) clearTimeout(existing);
+  try {
+    const payload = await api(`/api/manuscript/figure-image/status?id=${encodeURIComponent(jobId)}`);
+    const job = payload.job || payload;
+    rememberFigureImageJob(job);
+    if (job.status === "succeeded") {
+      figureImagePollTimers.delete(key);
+      showToast(`Generated ${job.output_path || "figure image"}.`);
+      await loadOverview(true);
+      if (activePanel === "manuscript") renderContext();
+      return;
+    }
+    if (job.status === "failed") {
+      figureImagePollTimers.delete(key);
+      showToast(job.error || "Image generation failed.", true);
+      if (activePanel === "manuscript") renderContext();
+      return;
+    }
+    const timer = setTimeout(() => {
+      pollFigureImageJob(jobId, title).catch((error) => {
+        figureImagePollTimers.delete(key);
+        showToast(error.message, true);
+      });
+    }, 1500);
+    figureImagePollTimers.set(key, timer);
+  } catch (error) {
+    figureImagePollTimers.delete(key);
+    showToast(error.message, true);
+  }
+}
+
+async function startFigureImageGeneration(candidate, options = {}) {
+  if (!candidate) return;
+  if (!figureImageGenerationAvailable()) return;
+  const title = cleanText(candidate.title, "");
+  const description = cleanText(candidate.description, "");
+  const sourcePath = repoRelativePath(candidate.sourcePath || "");
+  if (!title || !description) {
+    showToast("Figure title and description are required.", true);
+    return;
+  }
+  if (options.automatic) figureImageAutoStarted.add(figureImageAutoKey(title, sourcePath));
+  rememberFigureImageJob({ id: "", title, status: "pending", output_path: "", error: "" });
+  if (!options.suppressPendingRender && activePanel === "manuscript") renderContext();
+  try {
+    const payload = await api("/api/manuscript/figure-image/start", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        description,
+        sourcePath,
+        settings: codexFigureImageSettingsPayload(),
+      }),
+    });
+    const job = payload.job || payload;
+    rememberFigureImageJob(job);
+    if (activePanel === "manuscript") renderContext();
+    await pollFigureImageJob(job.id, title);
+  } catch (error) {
+    rememberFigureImageJob({ id: "", title, status: "failed", output_path: "", error: error.message });
+    if (activePanel === "manuscript") renderContext();
+    showToast(error.message, true);
+  }
+}
+
 function clampSettingsDialogSize(width, height) {
   const maxWidth = Math.max(360, Number(window.innerWidth || 0) - 70);
   const maxHeight = Math.max(320, Number(window.innerHeight || 0) - 70);
@@ -11250,7 +11940,7 @@ async function launchAutoresearch() {
   }
 }
 
-async function sendSessionComposerMessage(message) {
+async function sendSessionComposerMessage(message, options = {}) {
   if (!ensureResourceImportsReady()) return false;
   if (!hasActiveProject()) {
     openProjectCreateDialog();
@@ -11271,7 +11961,11 @@ async function sendSessionComposerMessage(message) {
     showToast("Wait for the current agent run to finish before starting a plan.", true);
     return false;
   }
-  const queueChatDuringRun = !isPlanRequest && canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial);
+  if (options.forceQueue && (isPlanRequest || isCommand || resumeFromTrial)) {
+    showToast("Only ordinary chat messages can be queued in this version.", true);
+    return false;
+  }
+  const queueChatDuringRun = !isPlanRequest && !isCommand && canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial);
   if (!canSendSessionComposerMessage() && !localControl && !queueChatDuringRun) {
     showToast("Wait for the current agent run to finish before sending another message.", true);
     return false;
@@ -11296,6 +11990,38 @@ async function sendSessionComposerMessage(message) {
   }
   const composerSnapshot = snapshotFramingComposerState();
   const displayText = isCommand ? text : messageText || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
+  if (queueChatDuringRun || options.forceQueue) {
+    try {
+      const files = await collectUploadFiles(uploadItemsForRequest);
+      const response = await api("/api/research/queue", {
+        method: "POST",
+        body: JSON.stringify({
+          message: messageText || displayText,
+          displayMessage: displayText,
+          clientMessageId: newMessageId("queued"),
+          clientAttachments: attachments,
+          conversationHistory: conversationHistoryForRequest(localMessages),
+          files,
+          resourceLinks: resourceLinksForRequest,
+          settings: settingsFromForm(),
+          priority: options.queuePriority === "send_after_stop" ? "send_after_stop" : "normal",
+        }),
+      });
+      mergeSessionFromApiResponse(response);
+      updateQueuedChatSessionFromPayload(response);
+      await notifyResourceHandlingFromResponse(response);
+      clearFramingComposerText(text || displayText);
+      clearFramingComposerAttachments();
+      selectedResumeTrialContext = null;
+      renderAttachmentTrays();
+      renderFramingConversation();
+      renderSelectedResources();
+      return true;
+    } catch (error) {
+      restoreFramingComposerState(composerSnapshot);
+      throw error;
+    }
+  }
   let appendedMessage = null;
   if (!isCommand) {
     appendedMessage = appendFramingMessage("user", displayText, {
@@ -11647,6 +12373,16 @@ async function handleStopSession() {
   }
 }
 
+async function handleStopAndSendQueuedComposer() {
+  if (!canStopCurrentRun()) {
+    showToast("No active agent run to stop.", true);
+    return;
+  }
+  const queued = await queueCurrentComposerMessage("send_after_stop");
+  if (!queued) return;
+  await handleStopSession();
+}
+
 async function handlePauseAutoresearch() {
   try {
     const response = await api("/api/research/pause", {
@@ -11794,11 +12530,6 @@ function bindEvents() {
     if (pendingRestartAutoresearchConfirm) closeRestartAutoresearchDialog(false);
   });
   $("#prepare-cold-start").addEventListener("click", (event) => {
-    if (event.currentTarget?.dataset?.stopMode === "true") {
-      event.preventDefault();
-      handleStopSession();
-      return;
-    }
     coldStartFromPrepare();
   });
   $("#save-project-draft").addEventListener("click", (event) => {
@@ -11833,10 +12564,11 @@ function bindEvents() {
   $("#continue-research").addEventListener("click", handleContinue);
   $("#stop-session").addEventListener("click", handleStopSession);
   $("#chat-form .send-button").addEventListener("click", (event) => {
-    if (event.currentTarget?.dataset?.stopMode !== "true") return;
-    event.preventDefault();
-    event.stopPropagation();
-    handleStopSession();
+    if (event.currentTarget?.dataset?.stopMode === "true") {
+      event.preventDefault();
+      event.stopPropagation();
+      handleStopSession();
+    }
   });
   $("#chat-form").addEventListener("submit", handleChat);
   $("#session-settings-form").addEventListener("input", () => settingsFromForm());
@@ -11959,6 +12691,41 @@ function bindEvents() {
   });
   document.addEventListener("drop", handleAttachmentDrop);
 
+  document.body.addEventListener("dragstart", (event) => {
+    const item = event.target.closest?.("[data-queue-item]");
+    if (!item || !item.closest("#queue-panel")) return;
+    draggingQueuedChatId = item.dataset.queueItem || "";
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", draggingQueuedChatId);
+    item.classList.add("is-dragging");
+  });
+  document.body.addEventListener("dragend", (event) => {
+    const item = event.target.closest?.("[data-queue-item]");
+    if (item) item.classList.remove("is-dragging");
+    draggingQueuedChatId = "";
+  });
+  document.body.addEventListener("dragover", (event) => {
+    const item = event.target.closest?.("[data-queue-item]");
+    if (!draggingQueuedChatId || !item || !item.closest("#queue-panel")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  });
+  document.body.addEventListener("drop", (event) => {
+    const item = event.target.closest?.("[data-queue-item]");
+    if (!draggingQueuedChatId || !item || !item.closest("#queue-panel")) return;
+    event.preventDefault();
+    const targetId = item.dataset.queueItem || "";
+    if (!targetId || targetId === draggingQueuedChatId) return;
+    const ids = queuedChatIds();
+    const from = ids.indexOf(draggingQueuedChatId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...ids];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    reorderQueuedChatItems(next).catch((error) => showToast(error.message, true));
+  });
+
   document.body.addEventListener("click", (event) => {
     const projectMenuButton = event.target.closest("[data-project-menu]");
     if (projectMenuButton) {
@@ -11986,6 +12753,60 @@ function bindEvents() {
     if (openProjectMenuId && !event.target.closest(".project-menu-popover")) {
       openProjectMenuId = "";
       renderProjectList();
+    }
+    const queueMenuToggle = event.target.closest("[data-queue-action-menu-toggle]");
+    if (queueMenuToggle) {
+      event.preventDefault();
+      queueActionMenuOpen = !queueActionMenuOpen;
+      renderQueueActionMenu();
+      return;
+    }
+    const queueAction = event.target.closest("[data-queue-action]");
+    if (queueAction) {
+      event.preventDefault();
+      const action = queueAction.dataset.queueAction || "";
+      queueActionMenuOpen = false;
+      renderQueueActionMenu();
+      if (action === "queue") {
+        coldStartFromPrepare();
+      } else if (action === "stop-send") {
+        handleStopAndSendQueuedComposer().catch((error) => showToast(error.message, true));
+      }
+      return;
+    }
+    if (queueActionMenuOpen && !event.target.closest("#queue-action-menu") && !event.target.closest("#queue-action-menu-toggle")) {
+      queueActionMenuOpen = false;
+      renderQueueActionMenu();
+    }
+    const queueMove = event.target.closest("[data-queue-move]");
+    if (queueMove) {
+      event.preventDefault();
+      moveQueuedChatItem(queueMove.dataset.queueMove, Number(queueMove.dataset.queueDirection || 0))
+        .catch((error) => showToast(error.message, true));
+      return;
+    }
+    const queueEdit = event.target.closest("[data-queue-edit]");
+    if (queueEdit) {
+      editingQueuedChatId = queueEdit.dataset.queueEdit || "";
+      renderQueuedChatPanel();
+      requestAnimationFrame(() => document.querySelector(`[data-queue-edit-text="${CSS.escape(editingQueuedChatId)}"]`)?.focus());
+      return;
+    }
+    const queueEditCancel = event.target.closest("[data-queue-edit-cancel]");
+    if (queueEditCancel) {
+      editingQueuedChatId = "";
+      renderQueuedChatPanel();
+      return;
+    }
+    const queueEditSave = event.target.closest("[data-queue-edit-save]");
+    if (queueEditSave) {
+      saveQueuedChatEdit(queueEditSave.dataset.queueEditSave || "").catch((error) => showToast(error.message, true));
+      return;
+    }
+    const queueDelete = event.target.closest("[data-queue-delete]");
+    if (queueDelete) {
+      deleteQueuedChatItem(queueDelete.dataset.queueDelete || "").catch((error) => showToast(error.message, true));
+      return;
     }
     const attachmentButton = event.target.closest("#composer-attach-button");
     if (attachmentButton) {
@@ -12285,6 +13106,13 @@ function bindEvents() {
     const composerPrompt = event.target.closest("[data-composer-prompt]");
     if (composerPrompt) {
       insertComposerPrompt(composerPrompt.dataset.composerPrompt);
+      return;
+    }
+    const autoresearchPanelToggle = event.target.closest("[data-autoresearch-panel-toggle]");
+    if (autoresearchPanelToggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleAutoresearchPanelCollapsed();
       return;
     }
     const command = event.target.closest("[data-command]");

@@ -47,6 +47,7 @@ EXPORT_CONFIRMATION_BYTES = 1 * 1024 * 1024 * 1024
 EXPORT_CHUNK_BYTES = 1024 * 1024
 EXPORT_JOB_TTL_SECONDS = 24 * 60 * 60
 EXPORT_STORE_WITHOUT_COMPRESSION_BYTES = 16 * 1024 * 1024
+FIGURE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 REMOTE_AUTH_TOKEN = os.environ.get("COAUTO_REMOTE_AUTH_TOKEN", "").strip()
 REMOTE_AUTH_QUERY = "coauto_token"
 REMOTE_AUTH_COOKIE = "coauto_remote_auth"
@@ -1664,6 +1665,9 @@ RESEARCH_SESSION = DynamicDict(lambda: current_project_context().session)
 RESEARCH_LOCK = DynamicLock()
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_LOCK = threading.Lock()
+FIGURE_IMAGE_JOBS: dict[str, dict[str, Any]] = {}
+FIGURE_IMAGE_LOCK = threading.Lock()
+FIGURE_BLUEPRINT_LOCK = threading.Lock()
 SESSION_STARTUP_GRACE_SECONDS = 5
 
 
@@ -8301,6 +8305,371 @@ def settings_to_codex_args(settings: dict[str, Any], resume: bool) -> list[str]:
     return args
 
 
+def codex_settings_for_figure_image(raw: Any = None) -> dict[str, Any]:
+    payload = raw if isinstance(raw, dict) else {}
+    saved = load_ui_settings()
+    values: dict[str, Any] = {}
+    if isinstance(payload.get("codex"), dict):
+        values = payload["codex"]
+    else:
+        requested_backend = (
+            payload.get("backend")
+            or (payload.get("agent", {}) if isinstance(payload.get("agent"), dict) else {}).get("backend")
+            or ""
+        )
+        if not requested_backend or normalize_agent_backend(requested_backend) == "codex":
+            values = payload
+    settings = normalize_codex_settings(values, saved.get("codex", {}))
+    settings["backend"] = "codex"
+    settings["sandbox"] = "read-only"
+    settings["approvalPolicy"] = "never"
+    settings["webSearch"] = False
+    settings["extraConfig"] = ""
+    settings["preExecScript"] = ""
+    return settings
+
+
+def figure_image_requested_backend(payload: dict[str, Any]) -> str:
+    settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+    agent = settings.get("agent") if isinstance(settings.get("agent"), dict) else {}
+    candidates = (payload.get("agentBackend"), payload.get("backend"), agent.get("backend"), settings.get("backend"))
+    for value in candidates:
+        text = str(value or "").strip().lower()
+        if not text:
+            continue
+        return text if text in ALLOWED_AGENT_BACKENDS else ""
+    return normalize_agent_backend(load_ui_settings().get("agent", {}).get("backend"))
+
+
+def figure_image_codex_command(settings: dict[str, Any], env: dict[str, str]) -> list[str]:
+    executable = resolve_agent_executable("codex", env)
+    command = [
+        executable,
+        "exec",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "-c",
+        'approval_policy="never"',
+    ]
+    model = normalize_codex_model(settings.get("model"), "")
+    if model:
+        command.extend(["--model", model])
+    reasoning = normalize_reasoning_effort(settings.get("reasoningEffort"), "codex", model)
+    if reasoning:
+        command.extend(["-c", f"model_reasoning_effort={toml_string(reasoning)}"])
+    command.extend(["--json", "-"])
+    return command
+
+
+def normalize_figure_source_path(value: Any) -> str:
+    text = str(value or "").strip().strip("`").replace("\\", "/").lstrip("/")
+    if not text or "*" in text or "/../" in f"/{text}/":
+        return ""
+    try:
+        path = repo_path(text)
+        root = REPO_ROOT.resolve()
+        resolved = path.resolve()
+        if resolved != root and root not in resolved.parents:
+            return ""
+        return rel_path(path)
+    except (OSError, ValueError):
+        return ""
+
+
+def figure_image_output_path(title: str, source_path: Any = "") -> str:
+    existing = normalize_figure_source_path(source_path)
+    if existing and Path(existing).suffix.lower() in FIGURE_IMAGE_SUFFIXES:
+        return existing
+    slug = slugify(str(title or "figure").lower(), "figure")
+    return f"manuscript/figures/generated/{slug}.png"
+
+
+def figure_image_prompt(title: str, description: str, output_path: str) -> str:
+    return f"""Use your built-in image generation tool only. Do not run shell commands, do not edit files, and do not call external APIs.
+
+Create one manuscript figure image from the description below.
+
+Intended CoAutoResearch output path:
+{output_path}
+
+CoAutoResearch will copy the generated image to that path after this Codex session. Generate the image only.
+
+Figure title:
+{title}
+
+Figure description:
+{description}
+""".strip()
+
+
+def codex_generated_image_dirs(env: dict[str, str], thread_id: str) -> list[Path]:
+    candidates: list[Path] = []
+    codex_home = str(env.get("CODEX_HOME") or "").strip()
+    if codex_home:
+        candidates.append(Path(os.path.expandvars(codex_home)).expanduser() / "generated_images" / thread_id)
+    candidates.append(Path.home() / ".codex" / "generated_images" / thread_id)
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in candidates:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
+def newest_generated_png(env: dict[str, str], thread_id: str) -> Path | None:
+    for directory in codex_generated_image_dirs(env, thread_id):
+        if not directory.is_dir():
+            continue
+        files = [path for path in directory.glob("*.png") if path.is_file()]
+        if files:
+            return max(files, key=lambda path: path.stat().st_mtime)
+    return None
+
+
+def markdown_line_is_field(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if re.match(r"^#{1,6}\s+", stripped):
+        return True
+    match = re.match(r"^([^:]{2,90}):\s*", stripped)
+    if not match:
+        return False
+    label = match.group(1).strip()
+    return bool(re.match(r"^[A-Z]", label)) and not re.search(r"[.;!?]", label)
+
+
+def replace_or_insert_source_path(block: str, output_path: str) -> str:
+    lines = block.splitlines()
+    source_line = f"Source artifact or spec path: `{output_path}`"
+    source_re = re.compile(r"^\s*(Source artifact or spec path|Source artifact path):\s*.*$", re.IGNORECASE)
+    for index, line in enumerate(lines):
+        if not source_re.match(line):
+            continue
+        end = index + 1
+        while end < len(lines) and not markdown_line_is_field(lines[end]):
+            end += 1
+        return "\n".join([*lines[:index], source_line, *lines[end:]]).strip()
+
+    insert_at = len(lines)
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*(Result shown or conceptual basis|Provenance links|Target-venue fit rationale|Remaining blocker):", line, re.IGNORECASE):
+            insert_at = index
+            break
+    if insert_at == len(lines):
+        for index, line in enumerate(lines):
+            if not re.match(r"^\s*(Caption draft or current caption|Caption draft|Caption):", line, re.IGNORECASE):
+                continue
+            insert_at = index + 1
+            while insert_at < len(lines) and not markdown_line_is_field(lines[insert_at]):
+                insert_at += 1
+            break
+    insert = [source_line]
+    if insert_at > 0 and lines[insert_at - 1].strip():
+        insert.insert(0, "")
+    if insert_at < len(lines) and lines[insert_at].strip():
+        insert.append("")
+    return "\n".join([*lines[:insert_at], *insert, *lines[insert_at:]]).strip()
+
+
+def update_blueprint_figure_source_path(title: str, output_path: str) -> bool:
+    blueprint = REPO_ROOT / "manuscript" / "BLUEPRINT.md"
+    if not blueprint.exists():
+        raise ValueError("manuscript/BLUEPRINT.md is missing.")
+    text = blueprint.read_text(encoding="utf-8", errors="replace")
+    heading_re = re.compile(rf"^(?P<marks>#{{3,6}})\s+{re.escape(str(title).strip())}\s*$", re.MULTILINE)
+    match = heading_re.search(text)
+    if not match:
+        raise ValueError(f"Could not find figure heading in BLUEPRINT.md: {title}")
+    level = len(match.group("marks"))
+    body_start = match.end()
+    next_heading = re.search(rf"^#{{1,{level}}}\s+.+$", text[body_start:], re.MULTILINE)
+    body_end = body_start + next_heading.start() if next_heading else len(text)
+    body = text[body_start:body_end].strip()
+    updated_body = replace_or_insert_source_path(body, output_path)
+    updated_text = f"{text[:body_start]}\n\n{updated_body}\n\n{text[body_end:].lstrip()}"
+    if updated_text != text:
+        blueprint.write_text(updated_text, encoding="utf-8")
+        return True
+    return False
+
+
+def figure_image_public_job(job: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(job, dict):
+        return {}
+    return {
+        "id": str(job.get("id") or ""),
+        "project_id": str(job.get("project_id") or ""),
+        "status": str(job.get("status") or "pending"),
+        "title": str(job.get("title") or ""),
+        "output_path": str(job.get("output_path") or ""),
+        "thread_id": str(job.get("thread_id") or ""),
+        "source_generated_path": str(job.get("source_generated_path") or ""),
+        "blueprint_updated": bool(job.get("blueprint_updated")),
+        "error": str(job.get("error") or ""),
+        "logs": list(job.get("logs") or [])[-40:],
+        "created_at": str(job.get("created_at") or ""),
+        "updated_at": str(job.get("updated_at") or ""),
+        "finished_at": str(job.get("finished_at") or ""),
+    }
+
+
+def set_figure_image_job(job_id: str, **updates: Any) -> dict[str, Any]:
+    with FIGURE_IMAGE_LOCK:
+        job = FIGURE_IMAGE_JOBS.get(job_id)
+        if not job:
+            return {}
+        job.update(updates)
+        job["updated_at"] = now_iso()
+        return dict(job)
+
+
+def append_figure_image_log(job_id: str, line: str) -> None:
+    text = str(line or "").rstrip("\n")
+    if not text:
+        return
+    with FIGURE_IMAGE_LOCK:
+        job = FIGURE_IMAGE_JOBS.get(job_id)
+        if not job:
+            return
+        logs = list(job.get("logs") or [])
+        logs.append(text[:1000])
+        job["logs"] = logs[-120:]
+        job["updated_at"] = now_iso()
+
+
+def finish_figure_image_job(job_id: str, status: str, error: str = "", **updates: Any) -> dict[str, Any]:
+    payload = {"status": status, "finished_at": now_iso(), "error": error, **updates}
+    return set_figure_image_job(job_id, **payload)
+
+
+def process_figure_image_job(job_id: str) -> None:
+    with FIGURE_IMAGE_LOCK:
+        job = dict(FIGURE_IMAGE_JOBS.get(job_id) or {})
+    if not job:
+        return
+    env = agent_process_env("codex")
+    command = list(job.get("command") or [])
+    prompt = str(job.get("prompt") or "")
+    thread_id = ""
+    try:
+        set_figure_image_job(job_id, status="running")
+        proc = subprocess.Popen(
+            command,
+            cwd=REPO_ROOT,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            start_new_session=os.name != "nt",
+        )
+        assert proc.stdin is not None
+        proc.stdin.write(prompt)
+        proc.stdin.write("\n")
+        proc.stdin.close()
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            append_figure_image_log(job_id, line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            candidate = str(event.get("thread_id") or event.get("threadId") or "").strip()
+            if not candidate and isinstance(event.get("thread"), dict):
+                candidate = str(event["thread"].get("id") or "").strip()
+            if candidate and not thread_id:
+                thread_id = candidate
+                set_figure_image_job(job_id, thread_id=thread_id)
+        returncode = proc.wait()
+        if returncode != 0:
+            finish_figure_image_job(job_id, "failed", f"codex exec exited with status {returncode}.")
+            return
+        if not thread_id:
+            finish_figure_image_job(job_id, "failed", "codex exec did not report a thread id.")
+            return
+        generated = newest_generated_png(env, thread_id)
+        if not generated:
+            finish_figure_image_job(job_id, "failed", f"No generated PNG found for Codex thread {thread_id}.")
+            return
+        output_path = str(job.get("output_path") or "")
+        destination = repo_path(output_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(generated, destination)
+        with FIGURE_BLUEPRINT_LOCK:
+            blueprint_updated = update_blueprint_figure_source_path(str(job.get("title") or ""), rel_path(destination))
+            record_ui_file_edit("manuscript/BLUEPRINT.md")
+            record_ui_file_edit(rel_path(destination))
+        finish_figure_image_job(
+            job_id,
+            "succeeded",
+            output_path=rel_path(destination),
+            source_generated_path=str(generated),
+            blueprint_updated=blueprint_updated,
+        )
+    except Exception as exc:
+        finish_figure_image_job(job_id, "failed", str(exc))
+
+
+def start_manuscript_figure_image(payload: dict[str, Any]) -> dict[str, Any]:
+    if figure_image_requested_backend(payload) != "codex":
+        raise ValueError("Figure image generation is only available when the active agent backend is Codex.")
+    title = str(payload.get("title") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    if not title:
+        raise ValueError("Figure title is required.")
+    if not description:
+        raise ValueError("Figure description is required.")
+    source_path = str(payload.get("sourcePath") or payload.get("source_path") or "").strip()
+    output_path = figure_image_output_path(title, source_path)
+    settings = codex_settings_for_figure_image(payload.get("settings"))
+    env = agent_process_env("codex")
+    ensure_agent_ready("codex", env=env, settings=settings)
+    command = figure_image_codex_command(settings, env)
+    prompt = figure_image_prompt(title, description, output_path)
+    job_id = f"IMG{now_id()}_{uuid.uuid4().hex[:8]}"
+    context = current_project_context()
+    job = {
+        "id": job_id,
+        "project_id": context.id,
+        "status": "pending",
+        "title": title,
+        "description": description,
+        "source_path": source_path,
+        "output_path": output_path,
+        "settings": settings,
+        "command": command,
+        "prompt": prompt,
+        "thread_id": "",
+        "logs": [],
+        "error": "",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "finished_at": "",
+    }
+    with FIGURE_IMAGE_LOCK:
+        FIGURE_IMAGE_JOBS[job_id] = job
+    thread = threading.Thread(target=run_in_project, args=(context, process_figure_image_job, job_id), daemon=True)
+    thread.start()
+    return figure_image_public_job(job)
+
+
+def manuscript_figure_image_status(job_id: str) -> dict[str, Any]:
+    clean_id = str(job_id or "").strip()
+    if not clean_id:
+        raise ValueError("Figure image job id is required.")
+    with FIGURE_IMAGE_LOCK:
+        job = dict(FIGURE_IMAGE_JOBS.get(clean_id) or {})
+    if not job or str(job.get("project_id") or "") != current_project_context().id:
+        raise ValueError("Unknown figure image job.")
+    return figure_image_public_job(job)
+
+
 def settings_to_claude_args(settings: dict[str, Any], resume: bool) -> list[str]:
     args: list[str] = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
     raw_model = str(settings.get("model") or "").strip()
@@ -9428,43 +9797,12 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
 
 
 def maybe_start_queued_chat_after_run(previous_mode: str, returncode: int | None) -> bool:
-    if previous_mode not in {"goal", "research", "command"}:
+    if previous_mode not in {"cold_start", "framing", "goal", "research", "command", "chat", "plan"}:
         return False
-    queued = read_queued_chat_messages()
-    if not queued:
+    if not read_queued_chat_messages():
         return False
-    settings = dict(RESEARCH_SESSION.get("settings") or {})
-    for item in reversed(queued):
-        if isinstance(item.get("settings"), dict):
-            settings = dict(item["settings"])
-            break
-    with RESEARCH_LOCK:
-        RESEARCH_SESSION["loop_active"] = False
-        RESEARCH_SESSION["loop_stop_reason"] = "queued_chat_after_current_run"
-    persist_research_session()
-    display = "Reply to queued chat messages."
-    prompt_message = "\n\n".join(str(item.get("prepared_message") or item.get("text") or "").strip() for item in queued if str(item.get("prepared_message") or item.get("text") or "").strip())
-    try:
-        session = start_research_run(
-            chat_research_prompt(
-                prompt_message or "Reply to queued chat messages.",
-                queued_messages=queued,
-            ),
-            "chat",
-            resume=False,
-            settings_payload=settings,
-            display_prompt=display,
-            loop_active=False,
-        )
-        archive_path = archive_queued_chat_messages(queued, "started_chat_after_current_run")
-        clear_queued_chat_messages()
-        append_research_log(
-            f"Started queued chat reply after current run; autoresearch loop is paused until Resume is clicked. Archived queue: {archive_path or 'none'}"
-        )
-        return bool(session)
-    except Exception as exc:  # pragma: no cover - defensive queue handling
-        append_research_log(f"Queued chat could not start after current run; autoresearch loop remains paused: {exc}")
-        return True
+    result = dispatch_next_queued_chat()
+    return bool(result.get("started") or result.get("reason") in {"error", "not_running"})
 
 
 def process_research_run(proc: subprocess.Popen[str]) -> None:
@@ -11211,6 +11549,122 @@ def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str
     }
 
 
+def message_with_attachment_summary(message: str, attachments: dict[str, Any]) -> str:
+    if not isinstance(attachments, dict):
+        return message
+    saved_files = [str(path) for path in attachments.get("saved_files", []) if str(path).strip()] if isinstance(attachments.get("saved_files"), list) else []
+    linked_resources = [item for item in attachments.get("resource_links", []) if isinstance(item, dict)] if isinstance(attachments.get("resource_links"), list) else []
+    retained_attachments = [item for item in attachments.get("retained_attachments", []) if isinstance(item, dict)] if isinstance(attachments.get("retained_attachments"), list) else []
+    resolutions = [item for item in attachments.get("resource_clues", []) if isinstance(item, dict)] if isinstance(attachments.get("resource_clues"), list) else []
+    metadata_files = [str(path) for path in attachments.get("metadata_files", []) if str(path).strip()] if isinstance(attachments.get("metadata_files"), list) else []
+    if not saved_files and not linked_resources and not retained_attachments and not resolutions and not metadata_files:
+        return message
+    lines = ["", "", "Resource handling for this message:"]
+    for path in saved_files:
+        lines.append(f"- uploaded file: {path}")
+    for item in linked_resources:
+        lines.append(f"- {item.get('mode', 'linked')} {item.get('category', 'resource')}: {item.get('path')} (source: {item.get('source')})")
+    for item in retained_attachments:
+        label = item.get("path") or item.get("name") or "attachment"
+        lines.append(f"- retained prior {item.get('kind') or 'attachment'}: {label} ({item.get('category') or 'resource'})")
+    for item in resolutions:
+        reference = str(item.get("reference", "")).strip()
+        path = str(item.get("path", "")).strip()
+        candidates = item.get("candidates", [])
+        if path:
+            lines.append(f"- inferred resource clue `{reference}` has candidate `{path}`; run Resource Intake before treating it as attached")
+        elif isinstance(candidates, list) and candidates:
+            lines.append(f"- typed reference `{reference}` was ambiguous; inspect RESOURCE_MANIFEST.md")
+        elif reference:
+            lines.append(f"- typed reference `{reference}` was not found; inspect RESOURCE_MANIFEST.md")
+    for path in metadata_files:
+        lines.append(f"- resource manifest updated: {path}")
+    return f"{message}{chr(10).join(lines)}"
+
+
+def normalize_queued_chat_priority(value: Any = "") -> str:
+    priority = str(value or "").strip().lower()
+    return "send_after_stop" if priority == "send_after_stop" else "normal"
+
+
+def queued_chat_settings_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+    if raw_settings:
+        return normalize_research_settings(raw_settings)
+    session_settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
+    if session_settings:
+        return normalize_research_settings(session_settings)
+    return normalize_research_settings({})
+
+
+def normalize_queued_chat_message(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    text = str(item.get("text") or item.get("display_message") or item.get("prepared_message") or "").strip()
+    prepared = str(item.get("prepared_message") or item.get("message") or text).strip()
+    if not text and not prepared:
+        return None
+    created_at = str(item.get("created_at") or "").strip()
+    updated_at = str(item.get("updated_at") or created_at).strip()
+    item_id = str(item.get("id") or item.get("clientMessageId") or item.get("client_message_id") or "").strip()[:120]
+    if not item_id:
+        seed = json.dumps(
+            {
+                "text": text,
+                "prepared_message": prepared,
+                "created_at": created_at,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        item_id = f"queued_{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]}"
+    raw_settings = item.get("settings") if isinstance(item.get("settings"), dict) else {}
+    conversation_history = item.get("conversation_history") if isinstance(item.get("conversation_history"), list) else item.get("conversationHistory")
+    if not isinstance(conversation_history, list):
+        conversation_history = []
+    client_attachments = item.get("client_attachments") if isinstance(item.get("client_attachments"), list) else item.get("clientAttachments")
+    if not isinstance(client_attachments, list):
+        client_attachments = []
+    attachments = item.get("attachments") if isinstance(item.get("attachments"), dict) else {}
+    return {
+        "id": item_id,
+        "role": "user",
+        "kind": "chat",
+        "text": text or prepared or "Attached resources.",
+        "prepared_message": prepared or text or "Attached resources.",
+        "attachments": attachments,
+        "client_attachments": [entry for entry in client_attachments if isinstance(entry, dict)],
+        "conversation_history": [entry for entry in conversation_history if isinstance(entry, dict)][-80:],
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "settings": normalize_research_settings(raw_settings) if raw_settings else {},
+        "priority": normalize_queued_chat_priority(item.get("priority")),
+        "status": "queued",
+    }
+
+
+def sorted_queued_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    priority = [item for item in messages if normalize_queued_chat_priority(item.get("priority")) == "send_after_stop"]
+    normal = [item for item in messages if normalize_queued_chat_priority(item.get("priority")) != "send_after_stop"]
+    return [*priority, *normal]
+
+
+def public_queued_chat_item(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = normalize_queued_chat_message(item) or {}
+    return {
+        "id": normalized.get("id", ""),
+        "role": "user",
+        "kind": "chat",
+        "text": normalized.get("text", ""),
+        "attachments": normalized.get("attachments", {}),
+        "client_attachments": normalized.get("client_attachments", []),
+        "created_at": normalized.get("created_at", ""),
+        "updated_at": normalized.get("updated_at", ""),
+        "priority": normalize_queued_chat_priority(normalized.get("priority")),
+        "status": "queued",
+    }
+
+
 def read_queued_chat_messages() -> list[dict[str, Any]]:
     path = queued_chat_messages_path()
     if not path.exists():
@@ -11222,13 +11676,27 @@ def read_queued_chat_messages() -> list[dict[str, Any]]:
     items = payload.get("messages") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
         return []
-    return [item for item in items if isinstance(item, dict)]
+    normalized = [normalize_queued_chat_message(item) for item in items]
+    messages = [item for item in normalized if item]
+    seen: dict[str, int] = {}
+    unique: list[dict[str, Any]] = []
+    for index, item in enumerate(messages):
+        base_id = str(item.get("id") or f"queued_{index + 1}").strip()
+        count = seen.get(base_id, 0)
+        seen[base_id] = count + 1
+        if count:
+            suffix = hashlib.sha1(f"{base_id}:{index}".encode("utf-8")).hexdigest()[:8]
+            item = {**item, "id": f"{base_id[:110]}_{suffix}"}
+        unique.append(item)
+    return unique
 
 
 def write_queued_chat_messages(messages: list[dict[str, Any]]) -> None:
     path = queued_chat_messages_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema_version": 1, "messages": messages[-CHAT_QUEUE_MAX_MESSAGES:]}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    normalized = [normalize_queued_chat_message(item) for item in messages]
+    compact = [item for item in normalized if item][-CHAT_QUEUE_MAX_MESSAGES:]
+    path.write_text(json.dumps({"schema_version": 2, "messages": compact}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def queued_chat_summary() -> dict[str, Any]:
@@ -11236,29 +11704,38 @@ def queued_chat_summary() -> dict[str, Any]:
     latest = ""
     if messages:
         latest = str(messages[-1].get("created_at") or "")
+    ordered = sorted_queued_chat_messages(messages)
     return {
         "queued_chat_count": len(messages),
         "queued_chat_latest_at": latest,
         "queued_chat_after_current_run": bool(messages),
+        "queued_chat_items": [public_queued_chat_item(item) for item in ordered],
     }
 
 
 def enqueue_chat_message(display_message: str, prepared_message: str, attachments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     messages = read_queued_chat_messages()
+    now = now_iso()
     entry = {
         "id": str(payload.get("clientMessageId") or payload.get("client_message_id") or f"queued_{now_id()}").strip()[:120],
         "role": "user",
-        "kind": "text",
+        "kind": "chat",
         "text": display_message or prepared_message or "Attached resources.",
         "prepared_message": prepared_message,
         "attachments": attachments if isinstance(attachments, dict) else {},
-        "created_at": now_iso(),
-        "settings": normalize_research_settings(payload.get("settings")),
+        "client_attachments": payload.get("clientAttachments") if isinstance(payload.get("clientAttachments"), list) else [],
+        "conversation_history": payload.get("conversationHistory") if isinstance(payload.get("conversationHistory"), list) else [],
+        "created_at": now,
+        "updated_at": now,
+        "settings": queued_chat_settings_from_payload(payload),
+        "priority": normalize_queued_chat_priority(payload.get("priority") or payload.get("queuePriority")),
+        "status": "queued",
     }
+    entry = normalize_queued_chat_message(entry) or entry
     messages.append(entry)
     write_queued_chat_messages(messages)
     append_research_log(f"Queued chat message for reply after the current autoresearch run: {entry['text'][:180]}")
-    return {"queued": True, "count": len(messages), "run_after_current": True, "latest_at": entry["created_at"]}
+    return {"queued": True, "count": len(messages), "run_after_current": True, "latest_at": entry["created_at"], "item": public_queued_chat_item(entry)}
 
 
 def archive_queued_chat_messages(messages: list[dict[str, Any]], reason: str) -> str:
@@ -11278,6 +11755,137 @@ def clear_queued_chat_messages() -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+def queue_response_payload() -> dict[str, Any]:
+    return {"ok": True, **queued_chat_summary()}
+
+
+def start_queued_chat_item(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = normalize_queued_chat_message(item)
+    if not normalized:
+        raise ValueError("Queued chat item is invalid.")
+    raw_settings = normalized.get("settings") if isinstance(normalized.get("settings"), dict) else {}
+    session_settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
+    settings = normalize_research_settings(raw_settings or session_settings)
+    with RESEARCH_LOCK:
+        RESEARCH_SESSION["loop_active"] = False
+        RESEARCH_SESSION["loop_stop_reason"] = "queued_chat_after_current_run"
+    persist_research_session()
+    message = str(normalized.get("prepared_message") or normalized.get("text") or "").strip()
+    display = str(normalized.get("text") or message or "Queued chat message.").strip()
+    return start_research_run(
+        chat_research_prompt(
+            message or "Queued chat message.",
+            conversation_history=normalized.get("conversation_history"),
+        ),
+        "chat",
+        resume=should_resume_research_session(settings),
+        settings_payload=settings,
+        display_prompt=display,
+        loop_active=False,
+    )
+
+
+def dispatch_next_queued_chat() -> dict[str, Any]:
+    running, _mode = active_process_mode()
+    if running:
+        return {"started": False, "reason": "active_run", **queued_chat_summary()}
+    messages = read_queued_chat_messages()
+    if not messages:
+        return {"started": False, "reason": "empty", **queued_chat_summary()}
+    ordered = sorted_queued_chat_messages(messages)
+    item = ordered[0]
+    try:
+        session = start_queued_chat_item(item)
+    except Exception as exc:
+        append_research_log(f"Queued chat could not start: {exc}")
+        return {"started": False, "reason": "error", "error": str(exc), **queued_chat_summary()}
+    if str(session.get("status") or "").lower() != "running":
+        append_research_log("Queued chat did not enter running state; keeping queue item pending.")
+        return {"started": False, "reason": "not_running", "session": session, **queued_chat_summary()}
+    remaining = [entry for entry in messages if str(entry.get("id") or "") != str(item.get("id") or "")]
+    write_queued_chat_messages(remaining)
+    archive_path = archive_queued_chat_messages([item], "started_queued_chat")
+    append_research_log(
+        f"Started queued chat reply; archived queue item: {archive_path or 'none'}"
+    )
+    return {"started": True, "item": public_queued_chat_item(item), "session": session, **queued_chat_summary()}
+
+
+def enqueue_research_queue_item(payload: dict[str, Any]) -> dict[str, Any]:
+    message = str(payload.get("message", "")).strip()
+    if message.startswith("/"):
+        raise ValueError("Slash commands cannot be queued in v1.")
+    if isinstance(payload.get("resumeFromTrial"), dict):
+        raise ValueError("Continue-from-trial messages cannot be queued in v1.")
+    display_message = str(payload.get("displayMessage") or message).strip()
+    prepared_message, attachments = attach_message_resources(payload, message)
+    if not display_message and any(attachments.get(key) for key in ("saved_files", "resource_links", "resource_clues", "metadata_files")):
+        display_message = "Attached resources."
+    if not display_message and not prepared_message:
+        raise ValueError("Queued message is required.")
+    queued = enqueue_chat_message(display_message, prepared_message, attachments, payload)
+    return {"files": {**attachments, "queued_chat": queued}, "session": research_session_snapshot(), **queued_chat_summary()}
+
+
+def update_research_queue_item(payload: dict[str, Any]) -> dict[str, Any]:
+    item_id = str(payload.get("id") or "").strip()
+    if not item_id:
+        raise ValueError("Queued message id is required.")
+    messages = read_queued_chat_messages()
+    found = False
+    updated: dict[str, Any] | None = None
+    next_messages: list[dict[str, Any]] = []
+    for item in messages:
+        if str(item.get("id") or "") != item_id:
+            next_messages.append(item)
+            continue
+        found = True
+        text = str(payload.get("text") if "text" in payload else item.get("text") or "").strip()
+        if not text:
+            raise ValueError("Queued message text is required.")
+        updated = {
+            **item,
+            "text": text,
+            "prepared_message": message_with_attachment_summary(text, item.get("attachments") if isinstance(item.get("attachments"), dict) else {}),
+            "updated_at": now_iso(),
+        }
+        next_messages.append(updated)
+    if not found:
+        raise ValueError("Queued message was not found.")
+    write_queued_chat_messages(next_messages)
+    return {"item": public_queued_chat_item(updated or {}), **queued_chat_summary()}
+
+
+def reorder_research_queue(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_ids = payload.get("ids")
+    if not isinstance(raw_ids, list):
+        raise ValueError("Queued message ids are required.")
+    ids = [str(item or "").strip() for item in raw_ids if str(item or "").strip()]
+    messages = read_queued_chat_messages()
+    by_id = {str(item.get("id") or ""): item for item in messages}
+    ordered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item_id in ids:
+        if item_id in by_id and item_id not in seen:
+            ordered.append(by_id[item_id])
+            seen.add(item_id)
+    ordered.extend(item for item in messages if str(item.get("id") or "") not in seen)
+    write_queued_chat_messages(ordered)
+    return queued_chat_summary()
+
+
+def delete_research_queue_item(payload: dict[str, Any]) -> dict[str, Any]:
+    item_id = str(payload.get("id") or "").strip()
+    if not item_id:
+        raise ValueError("Queued message id is required.")
+    messages = read_queued_chat_messages()
+    remaining = [item for item in messages if str(item.get("id") or "") != item_id]
+    if len(remaining) == len(messages):
+        raise ValueError("Queued message was not found.")
+    write_queued_chat_messages(remaining)
+    return queued_chat_summary()
 
 
 def archive_resend_context(resend_context: Any) -> str:
@@ -11490,12 +12098,10 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
     message, attachments = attach_message_resources(payload, message)
     if not display_message and any(attachments.get(key) for key in ("saved_files", "resource_links", "resource_clues", "metadata_files")):
         display_message = "Attached resources."
-    running, mode = active_process_mode()
+    running, _mode = active_process_mode()
     if running:
-        if mode in {"goal", "research", "command"}:
-            queued = enqueue_chat_message(display_message, message, attachments, payload)
-            return {"files": {**attachments, "queued_chat": queued}, "session": research_session_snapshot()}
-        raise ValueError("Wait for the current framing/chat run to finish before sending another chat message.")
+        queued = enqueue_chat_message(display_message, message, attachments, payload)
+        return {"files": {**attachments, "queued_chat": queued}, "session": research_session_snapshot()}
     resend_context = payload.get("resendContext") if isinstance(payload.get("resendContext"), dict) else {}
     archive_resend_context(resend_context)
     force_fresh = bool(resend_context.get("forceFreshSession"))
@@ -12214,6 +12820,11 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     result = export_status(query.get("id", [""])[0])
                     self.send_json({"ok": True, "export": result, **result})
                     return
+                if parsed.path == "/api/manuscript/figure-image/status":
+                    query = parse_qs(parsed.query)
+                    result = manuscript_figure_image_status(query.get("id", [""])[0])
+                    self.send_json({"ok": True, "job": result, **result})
+                    return
                 if parsed.path == "/api/export/download":
                     query = parse_qs(parsed.query)
                     self.serve_export_download(query.get("id", [""])[0])
@@ -12227,6 +12838,9 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/research/session":
                     self.send_json({"session": research_session_snapshot()})
+                    return
+                if parsed.path == "/api/research/queue":
+                    self.send_json(queue_response_payload())
                     return
                 if parsed.path == "/api/framing/messages":
                     self.send_json({"ok": True, "messages": load_framing_messages()})
@@ -12332,6 +12946,10 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     result = start_export(payload)
                     self.send_json({"ok": True, "export": result, **result})
                     return
+                if parsed.path == "/api/manuscript/figure-image/start":
+                    result = start_manuscript_figure_image(payload)
+                    self.send_json({"ok": True, "job": result, **result})
+                    return
                 if parsed.path == "/api/export/cancel":
                     result = cancel_export(payload)
                     self.send_json({"ok": True, "export": result, **result})
@@ -12350,6 +12968,15 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/research/chat":
                     self.send_json({"ok": True, "result": start_research_chat(payload)})
+                    return
+                if parsed.path == "/api/research/queue":
+                    self.send_json({"ok": True, "result": enqueue_research_queue_item(payload)})
+                    return
+                if parsed.path == "/api/research/queue/reorder":
+                    self.send_json({"ok": True, "result": reorder_research_queue(payload), **queued_chat_summary()})
+                    return
+                if parsed.path == "/api/research/queue/dispatch-next":
+                    self.send_json({"ok": True, "result": dispatch_next_queued_chat()})
                     return
                 if parsed.path == "/api/research/plan":
                     self.send_json({"ok": True, "result": start_research_plan(payload)})
@@ -12386,6 +13013,37 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     if payload.get("record") is not False:
                         record_ui_file_edit(file_payload.get("path") or path)
                     self.send_json({"ok": True, "file": file_payload})
+                    return
+            self.send_json({"error": "Unknown API route"}, status=404)
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def do_PATCH(self) -> None:
+        parsed = urlparse(self.path)
+        if not self.authorize_remote_request(parsed):
+            return
+        try:
+            payload = self.read_json()
+            with using_project(self.request_project_id(parsed, payload)):
+                if parsed.path == "/api/research/queue":
+                    self.send_json({"ok": True, "result": update_research_queue_item(payload), **queued_chat_summary()})
+                    return
+            self.send_json({"error": "Unknown API route"}, status=404)
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if not self.authorize_remote_request(parsed):
+            return
+        try:
+            payload = self.read_json()
+            query = parse_qs(parsed.query)
+            if not payload and query.get("id"):
+                payload = {"id": query.get("id", [""])[0]}
+            with using_project(self.request_project_id(parsed, payload)):
+                if parsed.path == "/api/research/queue":
+                    self.send_json({"ok": True, "result": delete_research_queue_item(payload), **queued_chat_summary()})
                     return
             self.send_json({"error": "Unknown API route"}, status=404)
         except Exception as exc:

@@ -21,7 +21,6 @@
     "auto-research": "bin/auto-research.js"
   },
   "files": [
-    ".npmignore",
     "bin/",
     "templates/",
     "docs/",

@@ -1574,6 +1574,17 @@ Confidence: medium
     throw new Error("composer stop mode and per-agent shell setup must stay wired through UI and server launch");
   }
   if (
+    !serverPy.includes("/api/research/queue") ||
+    !serverPy.includes("def dispatch_next_queued_chat") ||
+    !serverPy.includes('"queued_chat_items"') ||
+    !appJs.includes("function renderQueuedChatPanel") ||
+    !appJs.includes("data-queue-action=\"stop-send\"") ||
+    !stylesCss.includes(".queue-panel") ||
+    !stylesCss.includes(".queue-item.is-next")
+  ) {
+    throw new Error("agent follow-up queue must expose API, composer UI, and dispatch state");
+  }
+  if (
     !appJs.includes("function uploadTooLargeMessage") ||
     !appJs.includes("function queueLargeResourceImport") ||
     !appJs.includes("function confirmLargeResourceImport") ||
@@ -1641,10 +1652,19 @@ Confidence: medium
     throw new Error("first user framing message must survive stale overview snapshots");
   }
   const sendSessionStart = appJs.indexOf("async function sendSessionComposerMessage");
-  const sendAppendIndex = appJs.indexOf('appendFramingMessage("user", displayText', sendSessionStart);
-  const sendClearIndex = appJs.indexOf("clearFramingComposerText(text || displayText)", sendSessionStart);
-  const sendCollectIndex = appJs.indexOf("const files = await collectUploadFiles(uploadItemsForRequest)", sendSessionStart);
-  if (!(sendSessionStart >= 0 && sendAppendIndex > sendSessionStart && sendClearIndex > sendAppendIndex && sendCollectIndex > sendClearIndex)) {
+  const sendImmediateStart = appJs.indexOf("let appendedMessage = null", sendSessionStart);
+  const sendAppendIndex = appJs.indexOf('appendFramingMessage("user", displayText', sendImmediateStart);
+  const sendClearIndex = appJs.indexOf("clearFramingComposerText(text || displayText)", sendAppendIndex);
+  const sendCollectIndex = appJs.indexOf("const files = await collectUploadFiles(uploadItemsForRequest)", sendImmediateStart);
+  if (
+    !(
+      sendSessionStart >= 0 &&
+      sendImmediateStart > sendSessionStart &&
+      sendAppendIndex > sendImmediateStart &&
+      sendClearIndex > sendAppendIndex &&
+      sendCollectIndex > sendClearIndex
+    )
+  ) {
     throw new Error("session composer must render the sent message and clear input before collecting uploads or posting");
   }
   const launchStart = appJs.indexOf("async function launchAutoresearch");
@@ -1705,11 +1725,19 @@ Confidence: medium
     !appJs.includes("function pendingExpectedTrialReport") ||
     !appJs.includes("function persistentAutoresearchPanelHtml") ||
     !appJs.includes("const activeTrial = liveIteration || (manuallySelected ? selected : (pendingExpected || selected))") ||
-    !appJs.includes("const countParts = [`${trials.length} active trial") ||
-    !appJs.includes("if (reportedCount) countParts.push(`${reportedCount} reported`)") ||
+    !(
+      (
+        appJs.includes("const countParts = [`${trials.length} active trial") &&
+        appJs.includes("if (reportedCount) countParts.push(`${reportedCount} reported`)")
+      ) ||
+      (
+        appJs.includes("data-autoresearch-panel-collapsed") &&
+        appJs.includes("trial-history-latest-update")
+      )
+    ) ||
     appJs.includes("const activeTrial = selectedTrial(reports)") ||
     !(appJs.includes('reportStatus === "reported" ? "Reported"') || appJs.includes('if (trial?.is_closed === true) return "Reported"')) ||
-    !appJs.includes("Report pending") ||
+    !(appJs.includes("Report pending") || appJs.includes("is-pending")) ||
     !appJs.includes("Report is not available yet. Agent activity for this trial is shown below.") ||
     !appJs.includes("function isGoalPassed()") ||
     !appJs.includes("function isTrialLive(iteration)") ||
@@ -1776,9 +1804,27 @@ Confidence: medium
     appJs.includes('"/goal resume": { label: "Autoresearch", value: "Resume autoresearch"') ||
     appJs.includes('"/goal restart": { label: "Autoresearch", value: "Restart autoresearch"') ||
     !appJs.includes('data-project-launch>Start autoresearch') ||
-    !appJs.includes('data-resume-autoresearch>Resume autoresearch') ||
-    !appJs.includes('data-trial-continue="${escapeHtml(iteration)}">Continue from this trial') ||
-    !appJs.includes('trial-danger-button" type="button" data-restart-autoresearch>Restart autoresearch') ||
+    !(
+      appJs.includes('data-resume-autoresearch>Resume autoresearch') ||
+      (
+        appJs.includes('data-resume-autoresearch aria-label="Resume"') &&
+        appJs.includes("<span>Resume</span>")
+      )
+    ) ||
+    !(
+      appJs.includes('data-trial-continue="${escapeHtml(iteration)}">Continue from this trial') ||
+      (
+        appJs.includes('data-trial-continue="${escapeHtml(iteration)}" aria-label="Continue from this trial"') &&
+        appJs.includes("<span>Continue from this trial</span>")
+      )
+    ) ||
+    !(
+      appJs.includes('trial-danger-button" type="button" data-restart-autoresearch>Restart autoresearch') ||
+      (
+        appJs.includes('data-restart-autoresearch aria-label="Restart"') &&
+        appJs.includes("<span>Restart</span>")
+      )
+    ) ||
     !stylesCss.includes(".trial-report-open-actions") ||
     !stylesCss.includes(".trial-report-control-actions") ||
     !indexHtml.includes(">Start autoresearch<") ||
@@ -1927,9 +1973,9 @@ Confidence: medium
     !appJs.includes('class="trial-chip-index"') ||
     !appJs.includes('class="trial-chip-status"') ||
     !stylesCss.includes("html[data-theme] .trial-chip-index") ||
-    !stylesCss.includes("height: 22px;") ||
+    !(stylesCss.includes("height: 22px;") || stylesCss.includes("height: 25px;")) ||
     !stylesCss.includes("html[data-theme] :is(.trial-chip.is-active, .trial-chip.is-running) .trial-chip-index") ||
-    !stylesCss.includes("background: color-mix(in srgb, var(--primary-text) 18%, transparent);") ||
+    !(stylesCss.includes("background: color-mix(in srgb, var(--primary-text) 18%, transparent);") || stylesCss.includes("color-mix(in srgb, var(--primary-text) 22%, transparent)")) ||
     !stylesCss.includes("color: var(--primary-text);")
   ) {
     throw new Error("trial strip numbers must render as high-contrast fixed-size badges");
@@ -2607,6 +2653,89 @@ Confidence: medium
     throw new Error(`Python Claude backend fixture returned unexpected output: ${agentBackendOutput}`);
   }
 
+  const figureImageOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    [
+      "import importlib.util, json, os, pathlib, stat, time",
+      "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+      "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "project_root = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT'])",
+      "context = module.ProjectContext(project_root)",
+      "module.PROJECT_REGISTRY = None",
+      "module._BOOTSTRAP_CONTEXT = context",
+      "module._CONTEXT.project = context",
+      "context.ui_settings_path.parent.mkdir(parents=True, exist_ok=True)",
+      "context.ui_settings_path.write_text(json.dumps({'agent': {'backend': 'claude'}, 'codex': {'provider': 'cli', 'model': 'gpt-5.5', 'reasoningEffort': 'medium'}, 'claude': {'provider': 'external'}, 'env': {}, 'codex_env': {}, 'claude_env': {}}), encoding='utf-8')",
+      "fig_dir = project_root / 'manuscript' / 'figures'",
+      "fig_dir.mkdir(parents=True, exist_ok=True)",
+      "blueprint = project_root / 'manuscript' / 'BLUEPRINT.md'",
+      "blueprint.write_text('# Manuscript Blueprint\\n\\n## Manuscript Architecture\\n\\n##### Figure F000001: Calibration Map\\n\\nPlacement: Section 2.\\n\\nCaption draft or current caption: Old caption.\\n\\nSource artifact or spec path: `manuscript/figures/old.pdf`\\n\\nResult shown or conceptual basis: Evidence.\\n\\n##### Table T000001: Evidence\\n\\nSource artifact or spec path: `manuscript/tables/evidence.csv`\\n', encoding='utf-8')",
+      "title = 'Figure F000001: Calibration Map'",
+      "assert module.figure_image_output_path(title, 'manuscript/figures/custom.png') == 'manuscript/figures/custom.png'",
+      "assert module.figure_image_output_path(title, 'manuscript/figures/custom.pdf') == 'manuscript/figures/generated/figure_f000001_calibration_map.png'",
+      "prompt = module.figure_image_prompt(title, 'Purpose: test description', 'manuscript/figures/generated/out.png')",
+      "assert 'Use your built-in image generation tool only' in prompt and 'Purpose: test description' in prompt and 'manuscript/figures/generated/out.png' in prompt",
+      "inserted = module.replace_or_insert_source_path('Caption draft or current caption: Caption.\\n\\nResult shown or conceptual basis: Evidence.', 'manuscript/figures/generated/inserted.png')",
+      "assert 'Source artifact or spec path: `manuscript/figures/generated/inserted.png`' in inserted and inserted.index('Source artifact') < inserted.index('Result shown'), inserted",
+      "try:",
+      "    module.start_manuscript_figure_image({'title': title, 'description': 'Purpose: generated figure'})",
+      "    raise AssertionError('Saved Claude backend should not start Codex image generation')",
+      "except ValueError as exc:",
+      "    assert 'Codex' in str(exc), exc",
+      "try:",
+      "    module.start_manuscript_figure_image({'title': title, 'description': 'Purpose: generated figure', 'settings': {'agent': {'backend': 'claude'}}})",
+      "    raise AssertionError('Claude backend should not start Codex image generation')",
+      "except ValueError as exc:",
+      "    assert 'Codex' in str(exc), exc",
+      "try:",
+      "    module.start_manuscript_figure_image({'title': title, 'description': 'Purpose: generated figure', 'settings': {'agent': {'backend': 'bad-agent'}}})",
+      "    raise AssertionError('Invalid backend should not default into Codex image generation')",
+      "except ValueError as exc:",
+      "    assert 'Codex' in str(exc), exc",
+      "codex_home = pathlib.Path(os.environ['COAUTO_FAKE_CODEX_HOME'])",
+      "fake_bin = pathlib.Path(os.environ['COAUTO_FAKE_CODEX_BIN'])",
+      "fake_bin.mkdir(parents=True, exist_ok=True)",
+      "fake_codex = fake_bin / ('codex.cmd' if os.name == 'nt' else 'codex')",
+      "fake_codex.write_text(\"\"\"#!/usr/bin/env python3\\nimport base64, json, os, pathlib, sys\\nsys.stdin.read()\\nthread_id = '019f0000-0000-7000-8000-000000000123'\\noutdir = pathlib.Path(os.environ['CODEX_HOME']) / 'generated_images' / thread_id\\noutdir.mkdir(parents=True, exist_ok=True)\\npng = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=')\\n(outdir / 'ig_fake.png').write_bytes(png)\\nprint(json.dumps({'type': 'thread.started', 'thread_id': thread_id}), flush=True)\\nprint(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'generated inline'}}), flush=True)\\n\"\"\", encoding='utf-8')",
+      "fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)",
+      "os.environ['COAUTO_CODEX'] = str(fake_codex)",
+      "os.environ['CODEX_HOME'] = str(codex_home)",
+      "module.ensure_agent_ready = lambda *args, **kwargs: {'ok': True}",
+      "job = module.start_manuscript_figure_image({'title': title, 'description': 'Purpose: generated figure', 'sourcePath': 'manuscript/figures/old.pdf', 'settings': {'agent': {'backend': 'codex'}, 'codex': {'model': 'gpt-5.5', 'reasoningEffort': 'medium'}}})",
+      "full_job = module.FIGURE_IMAGE_JOBS[job['id']]",
+      "assert '--ephemeral' in full_job['command'] and '--json' in full_job['command'] and 'approval_policy=\"never\"' in full_job['command'], full_job['command']",
+      "deadline = time.time() + 8",
+      "status = job",
+      "while status['status'] in {'pending', 'running'} and time.time() < deadline:",
+      "    time.sleep(0.05)",
+      "    status = module.manuscript_figure_image_status(job['id'])",
+      "assert status['status'] == 'succeeded', status",
+      "assert status['thread_id'] == '019f0000-0000-7000-8000-000000000123', status",
+      "assert status['output_path'] == 'manuscript/figures/generated/figure_f000001_calibration_map.png', status",
+      "assert (project_root / status['output_path']).read_bytes().startswith(b'\\x89PNG'), status",
+      "blueprint_text = blueprint.read_text(encoding='utf-8')",
+      "assert 'manuscript/figures/generated/figure_f000001_calibration_map.png' in blueprint_text and 'old.pdf' not in blueprint_text, blueprint_text",
+      "assert 'manuscript/tables/evidence.csv' in blueprint_text, blueprint_text",
+      "print(json.dumps({'status': status['status'], 'output': status['output_path'], 'thread': status['thread_id']}))"
+    ].join("\n")
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_PROJECT_ROOT: projectDir,
+      COAUTO_FAKE_CODEX_HOME: path.join(tempRoot, "fake-codex-home"),
+      COAUTO_FAKE_CODEX_BIN: path.join(tempRoot, "fake-codex-bin")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!figureImageOutput.includes('"status": "succeeded"') || !figureImageOutput.includes("figure_f000001_calibration_map.png")) {
+    throw new Error(`Figure image generation smoke test returned unexpected output: ${figureImageOutput}`);
+  }
+
   const chatBoundaryOutput = execFileSync(python.command, [
     ...python.args,
     "-c",
@@ -2656,15 +2785,41 @@ Confidence: medium
       "context.session.update({'process': RunningProc(), 'status': 'running', 'mode': 'goal', 'loop_active': True, 'loop_iteration': 2, 'settings': settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "queued = module.start_research_chat({'message': 'prioritize source-level evidence before drafting', 'settings': settings, 'clientMessageId': 'q1'})",
       "assert queued['files']['queued_chat']['queued'] is True and queued['files']['queued_chat']['count'] == 1, queued",
+      "priority = module.enqueue_research_queue_item({'message': 'answer this right after stop', 'settings': settings, 'clientMessageId': 'q0', 'priority': 'send_after_stop'})",
+      "assert priority['queued_chat_count'] == 2 and priority['queued_chat_items'][0]['id'] == 'q0', priority",
       "assert captured == [], captured",
       "assert context.session['loop_active'] is True",
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 2, 'settings': settings})",
       "captured.clear()",
       "started_queued_chat = module.maybe_start_queued_chat_after_run('goal', 0)",
       "assert started_queued_chat is True, started_queued_chat",
-      "assert captured and captured[-1]['mode'] == 'chat' and captured[-1]['resume'] is False and captured[-1]['loop_active'] is False, captured",
-      "assert 'Queued user messages sent while autoresearch was running' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert captured and captured[-1]['mode'] == 'chat' and captured[-1]['resume'] is True and captured[-1]['loop_active'] is False, captured",
+      "assert 'answer this right after stop' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert [item['id'] for item in module.read_queued_chat_messages()] == ['q1'], module.read_queued_chat_messages()",
+      "captured.clear()",
+      "context.session.update({'process': None, 'status': 'completed', 'mode': 'chat', 'loop_active': False, 'loop_iteration': 2, 'settings': settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
+      "started_second_queued_chat = module.maybe_start_queued_chat_after_run('chat', 0)",
+      "assert started_second_queued_chat is True and 'prioritize source-level evidence' in captured[-1]['prompt'], captured",
       "assert module.read_queued_chat_messages() == [], module.read_queued_chat_messages()",
+      "legacy_queue_path = module.queued_chat_messages_path()",
+      "legacy_queue_path.parent.mkdir(parents=True, exist_ok=True)",
+      "legacy_queue_path.write_text(json.dumps([{'text': 'legacy queued message', 'message': 'legacy queued message'}]), encoding='utf-8')",
+      "legacy_first_id = module.read_queued_chat_messages()[0]['id']",
+      "legacy_second_id = module.read_queued_chat_messages()[0]['id']",
+      "assert legacy_first_id == legacy_second_id and legacy_first_id.startswith('queued_'), (legacy_first_id, legacy_second_id)",
+      "legacy_queue_path.write_text(json.dumps([{'text': 'duplicate legacy', 'message': 'duplicate legacy'}, {'text': 'duplicate legacy', 'message': 'duplicate legacy'}]), encoding='utf-8')",
+      "legacy_ids = [item['id'] for item in module.read_queued_chat_messages()]",
+      "assert len(legacy_ids) == 2 and len(set(legacy_ids)) == 2, legacy_ids",
+      "module.delete_research_queue_item({'id': legacy_ids[0]})",
+      "remaining_legacy_ids = [item['id'] for item in module.read_queued_chat_messages()]",
+      "assert remaining_legacy_ids == [legacy_ids[1]], (legacy_ids, remaining_legacy_ids)",
+      "module.clear_queued_chat_messages()",
+      "module.write_queued_chat_messages([{'id': 'qa', 'text': 'old text', 'prepared_message': 'old text', 'attachments': {'saved_files': ['resources/user_input/file.pdf'], 'resource_links': [{'mode': 'linked', 'category': 'literature', 'path': 'resources/literature/paper.pdf', 'source': 'paper.pdf'}], 'retained_attachments': [{'kind': 'file', 'path': 'resources/old.csv', 'category': 'data'}], 'resource_clues': [], 'metadata_files': ['resources/user_input/RESOURCE_MANIFEST.md']}, 'settings': settings}])",
+      "module.update_research_queue_item({'id': 'qa', 'text': 'new text'})",
+      "edited_queue_item = module.read_queued_chat_messages()[0]",
+      "assert edited_queue_item['text'] == 'new text', edited_queue_item",
+      "assert 'resources/user_input/file.pdf' in edited_queue_item['prepared_message'] and 'resources/literature/paper.pdf' in edited_queue_item['prepared_message'] and 'resources/old.csv' in edited_queue_item['prepared_message'], edited_queue_item['prepared_message']",
+      "module.clear_queued_chat_messages()",
       "captured.clear()",
       "module.start_research_command({'command': '/goal Follow the new intervention', 'settings': {'backend': 'codex'}})",
       "assert captured == [] and context.session['loop_active'] is False, captured",
@@ -2673,6 +2828,14 @@ Confidence: medium
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 2, 'settings': claude_settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "module.start_research_chat({'message': 'intervention: change method to simulation', 'settings': claude_settings})",
       "assert captured and captured[-1]['mode'] == 'chat' and captured[-1]['settings']['backend'] == 'claude', captured",
+      "captured.clear()",
+      "context.session.update({'process': RunningProc(), 'status': 'running', 'mode': 'goal', 'loop_active': True, 'loop_iteration': 3, 'settings': claude_settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
+      "queued_without_settings = module.start_research_chat({'message': 'queue without explicit settings', 'clientMessageId': 'qc'})",
+      "assert queued_without_settings['files']['queued_chat']['queued'] is True, queued_without_settings",
+      "assert module.read_queued_chat_messages()[0]['settings']['backend'] == 'claude', module.read_queued_chat_messages()",
+      "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 3, 'settings': claude_settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
+      "started_claude_queue = module.maybe_start_queued_chat_after_run('goal', 0)",
+      "assert started_claude_queue is True and captured[-1]['settings']['backend'] == 'claude', captured",
       "print(json.dumps({'queued': queued['files']['queued_chat']['count'], 'pending': len(module.pending_human_interventions()), 'prompt': captured[-1]['mode']}))",
     ].join("; ")
   ], {

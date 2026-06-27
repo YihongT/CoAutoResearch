@@ -247,19 +247,19 @@ function baseHead(theme, title) {
         .visual-fixture .framing-message.user { width: 100%; max-width: 100%; justify-items: end; }
         .visual-fixture .framing-message.user .transcript-body { width: fit-content; max-width: min(100%, calc(100vw - 36px)); overflow-wrap: anywhere; }
         .visual-fixture .trial-history-head { display: grid; align-items: stretch; gap: 12px; }
-        .visual-fixture .trial-history-head > div { display: grid; grid-template-columns: 1fr; gap: 5px; min-width: 0; }
+        .visual-fixture .trial-history-title-row { display: grid; grid-template-columns: 1fr; gap: 5px; min-width: 0; }
         .visual-fixture .trial-history-head strong { white-space: nowrap; }
-        .visual-fixture .trial-history-head p,
         .visual-fixture .trial-history-head span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .visual-fixture .trial-report-actions { flex-wrap: wrap; }
         .visual-fixture .trial-report-actions button { flex: 1 1 150px; min-width: 0; }
         .visual-fixture .brief-editor-shell.is-framing-dock { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: calc(100vw - 24px); transform: none; }
+        .visual-fixture .brief-editor-shell.is-framing-dock .queue-item { grid-template-columns: 20px minmax(0, 1fr) auto; }
         .visual-fixture .brief-editor-shell.is-framing-dock .brief-composer-row { align-items: flex-start; flex-wrap: wrap; min-height: 0; }
         .visual-fixture .brief-editor-shell.is-framing-dock .composer-attach-button { order: 1; }
         .visual-fixture .brief-editor-shell.is-framing-dock textarea { order: 2; flex: 1 1 calc(100% - 112px); }
         .visual-fixture .brief-editor-shell.is-framing-dock .send-button { order: 3; flex: 0 0 44px; }
-        .visual-fixture .brief-editor-shell.is-framing-dock .brief-run-controls { order: 4; flex: 1 1 calc(100% - 58px); width: calc(100% - 58px); margin-left: 58px; justify-content: flex-start; }
-        .visual-fixture .brief-editor-shell.is-framing-dock .brief-run-controls label { flex: 1 1 112px; min-width: 112px; }
+        .visual-fixture .brief-editor-shell.is-framing-dock .brief-run-controls { order: 4; flex: 0 0 auto; width: auto; margin-left: auto; justify-content: flex-end; }
+        .visual-fixture .brief-editor-shell.is-framing-dock .brief-run-controls label { flex: 0 0 auto; min-width: 0; }
         .visual-fixture .composer-suggestion-row { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; }
         .visual-fixture .composer-suggestion-chip { flex: 0 0 auto; max-width: 220px; }
         .visual-fixture .file-viewer-body { grid-template-columns: 1fr; }
@@ -306,19 +306,38 @@ function railHtml() {
 
 function composerHtml() {
   return `<section class="brief-editor-shell is-framing-dock" aria-label="Composer">
+    <div class="queue-panel" aria-label="Queued messages">
+      <div class="queue-panel-inner">
+        <div class="queue-panel-head"><span>Queued</span><strong>3 messages</strong></div>
+        <div class="queue-list">
+          <div class="queue-item is-next">
+            <span class="queue-drag-handle" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01"/></svg></span>
+            <div class="queue-item-copy"><div class="queue-item-text">Update the reviewer gate summary and keep it aligned with Trial 18.</div><div class="queue-item-meta"><span>Queued</span><span>1 attachment</span><span>10:02 AM</span></div></div>
+            <div class="queue-item-actions"><button class="queue-icon-button" type="button">↑</button><button class="queue-icon-button" type="button">↓</button><button class="queue-icon-button" type="button">✎</button><button class="queue-icon-button" type="button">×</button></div>
+          </div>
+          <div class="queue-item">
+            <span class="queue-drag-handle" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01"/></svg></span>
+            <div class="queue-item-copy"><div class="queue-item-text">Check whether the manuscript outline should be collapsible by default.</div><div class="queue-item-meta"><span>Queued</span><span>10:03 AM</span></div></div>
+            <div class="queue-item-actions"><button class="queue-icon-button" type="button">↑</button><button class="queue-icon-button" type="button">↓</button><button class="queue-icon-button" type="button">✎</button><button class="queue-icon-button" type="button">×</button></div>
+          </div>
+        </div>
+        <div class="queue-more">1 more queued</div>
+      </div>
+    </div>
     <div class="brief-composer-row">
       <button class="composer-attach-button" type="button" aria-label="Attach resources" aria-haspopup="menu" aria-expanded="false">+</button>
-      <textarea aria-label="Message" placeholder="Message Codex about the current research, ask for status, attach resources, or steer the next step..."></textarea>
+      <textarea aria-label="Message" placeholder="Message the research agent..."></textarea>
       <div class="brief-run-controls">
         <label><select><option>GPT-5.5</option></select></label>
         <label><select><option>Medium</option></select></label>
       </div>
+      <button class="queue-action-menu-toggle" type="button" aria-label="Queue send options"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
       <button class="send-button" type="button" aria-label="Send">Up</button>
     </div>
     <div class="composer-suggestion-row">
       <span>Goal paused</span>
-      <button class="composer-suggestion-chip" type="button">Resume autoresearch</button>
-      <button class="composer-suggestion-chip" type="button">Restart autoresearch</button>
+      <button class="composer-suggestion-chip" type="button">Resume</button>
+      <button class="composer-suggestion-chip" type="button">Restart</button>
       <button class="composer-suggestion-chip" type="button">Show autoresearch</button>
       <button class="composer-suggestion-chip" type="button">Status</button>
       <button class="composer-suggestion-chip" type="button">Diff</button>
@@ -361,35 +380,72 @@ function dashboardHtml(theme, label) {
                 </div>
               </div>
             </article>
-            <section class="trial-history-card">
+            <section class="trial-history-card is-expanded is-running" data-autoresearch-panel-collapsed="false">
               <header class="trial-history-head">
-                <div>
-                  <strong>Trials</strong>
-                  <span>8 trials - 8 reported - <em class="autoresearch-complete-tag">Autoresearch complete</em></span>
-                  <p>Latest: 000008_active_fork_post_revision_final_gate_review</p>
+                <div class="trial-history-kicker" aria-label="Autoresearch">
+                  <span class="trial-history-micro-spinner" aria-hidden="true"></span>
+                  <span>Autoresearch</span>
+                  <span class="trial-history-kicker-status">Trial 8: Running</span>
                 </div>
-                <button class="secondary-button small-button" type="button">Open latest manuscript</button>
+                <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="true">
+                  <span class="trial-history-toggle-copy">
+                    <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
+                  </span>
+                </button>
               </header>
               <div class="trial-history-body">
                 <nav class="trial-strip" aria-label="Autoresearch trials">
                   <button class="trial-scroll-button" type="button">&lt;</button>
                   <div class="trial-strip-scroll">
-                    <button class="trial-chip" type="button"><span class="trial-chip-number">1</span><strong>blocked</strong></button>
-                    <button class="trial-chip" type="button"><span class="trial-chip-number">2</span><strong>Done</strong></button>
-                    <button class="trial-chip" type="button"><span class="trial-chip-number">3</span><strong>Done</strong></button>
-                    <button class="trial-chip is-active" type="button"><span class="trial-chip-number">8</span><strong>Done</strong></button>
+                    <button class="trial-chip is-incomplete" type="button"><strong class="trial-chip-index">1</strong><span class="trial-chip-status">Blocked</span></button>
+                    <button class="trial-chip is-continued" type="button"><strong class="trial-chip-index">2</strong><span class="trial-chip-status">Continued</span></button>
+                    <button class="trial-chip" type="button"><strong class="trial-chip-index">3</strong><span class="trial-chip-status">Reported</span></button>
+                    <button class="trial-chip is-active" type="button"><strong class="trial-chip-index">8</strong><span class="trial-chip-status">Done</span></button>
                   </div>
                   <button class="trial-scroll-button" type="button">&gt;</button>
                 </nav>
                 <article class="trial-report-card is-complete">
-                  <div class="trial-report-head"><h3>Trial 8 <em>completed</em></h3></div>
+                  <div class="trial-report-head">
+                    <div><strong>Trial 8</strong><em>completed</em><em class="is-autoresearch-complete">Autoresearch complete</em><span class="trial-report-head-progress">3/8 reviewer gates are pass. · updated 03:01 AM</span></div>
+                  </div>
+                  <div class="trial-progress-stepper" aria-label="Trial progress">
+                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Planning</span></span>
+                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Working</span></span>
+                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Synthesizing</span></span>
+                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reporting</span></span>
+                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reviewing</span></span>
+                    <span class="trial-progress-step is-current"><span class="trial-progress-marker" aria-hidden="true">6</span><span>Gate update</span></span>
+                  </div>
                   <p>Reviewed the revised working manuscript and final autoresearch gate after targeted revision.</p>
                   <div class="trial-report-actions">
-                    <button class="secondary-button small-button" type="button">Continue from this trial</button>
-                    <button class="secondary-button small-button" type="button">Open report</button>
-                    <button class="secondary-button small-button" type="button">Open review</button>
+                    <div class="trial-report-open-actions">
+                      <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open manuscript"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h6" /><path d="M8 9h2" /></svg></span><span>Manuscript</span></button>
+                      <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open report"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 18v-4" /><path d="M12 18v-7" /><path d="M16 18v-2" /></svg></span><span>Report</span></button>
+                      <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open review"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="m8 11 2 2 4-4" /></svg></span><span>Review</span></button>
+                    </div>
+                    <div class="trial-report-control-actions">
+                      <button class="secondary-button small-button trial-flow-button" type="button" aria-label="Continue from this trial"><span class="trial-action-icon trial-action-icon-continue" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h6a5 5 0 0 1 5 5v5" /><path d="M13 14l3 3 3-3" /></svg></span><span>Continue from this trial</span></button>
+                      <button class="secondary-button small-button trial-danger-button" type="button" aria-label="Restart"><span class="trial-action-icon trial-action-icon-restart" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.34-5.66" /><path d="M4 4v6h6" /></svg></span><span>Restart</span></button>
+                    </div>
                   </div>
                 </article>
+              </div>
+            </section>
+            <section class="trial-history-card is-collapsed is-running" data-autoresearch-panel-collapsed="true">
+              <header class="trial-history-head">
+                <div class="trial-history-kicker" aria-label="Autoresearch">
+                  <span class="trial-history-micro-spinner" aria-hidden="true"></span>
+                  <span>Autoresearch</span>
+                  <span class="trial-history-kicker-status">Trial 8: Running</span>
+                </div>
+                <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="false">
+                  <span class="trial-history-toggle-copy">
+                    <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
+                  </span>
+                </button>
+              </header>
+              <div class="trial-history-body">
+                <nav class="trial-strip" aria-label="Autoresearch trials"></nav>
               </div>
             </section>
             <section class="file-viewer-shell">
@@ -540,6 +596,78 @@ function panelsHtml(theme, label) {
           <h1>Working blueprint</h1>
           <p>Editorial document layout — mono eyebrows, Fraunces titles, hairline rules.</p>
         </header>
+
+        <section class="manuscript-layout">
+          <aside class="manuscript-outline-panel" aria-label="Manuscript outline">
+            <div class="manuscript-outline-brand">
+              <span class="manuscript-outline-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 18V6" /><path d="M5 8h10" /><path d="M5 13h7" /><path d="M5 18h12" /><circle cx="5" cy="8" r="1.4" /><circle cx="5" cy="13" r="1.4" /><circle cx="5" cy="18" r="1.4" /></svg></span>
+              <div><p>Manuscript map</p><strong>Outline</strong></div>
+            </div>
+            <nav class="manuscript-outline-nav">
+              <details class="manuscript-outline-group" open>
+                <summary><span>Outline</span><strong>3</strong></summary>
+                <div class="manuscript-outline-links">
+                  <a class="manuscript-outline-link" href="#abstract"><span>Abstract</span><strong>Abstract</strong></a>
+                  <a class="manuscript-outline-link" href="#section-one"><span>Section</span><strong>Section 1: Safety evidence must guide action</strong></a>
+                  <a class="manuscript-outline-link" href="#section-two"><span>Section</span><strong>Section 2: Perceived safety is not trust</strong></a>
+                </div>
+              </details>
+              <details class="manuscript-outline-group">
+                <summary><span>Figures</span><strong>2</strong></summary>
+                <div class="manuscript-outline-links">
+                  <a class="manuscript-outline-link" href="#figure-one"><span>Figure</span><strong>Figure F1: Calibration map</strong><em>active</em></a>
+                </div>
+              </details>
+            </nav>
+          </aside>
+          <div class="manuscript-reader">
+            <section class="context-card">
+              <div class="item-head">
+                <div><h3>Manuscript story map</h3><div class="meta">Finished-results paper map in manuscript reading order.</div></div>
+              </div>
+              <section class="manuscript-story-map" id="story-map-fixture">
+                <header class="story-map-hero">
+                  <div>
+                    <p class="story-map-kicker">Finished-results blueprint</p>
+                    <h3>Manuscript story map</h3>
+                    <div class="story-map-core"><p>A quiet reader column with a marginal outline keeps manuscript navigation visible without turning the page into a file inspector.</p></div>
+                  </div>
+                  <dl class="story-map-meta"><div><dt>Target venue</dt><dd>Nature Machine Intelligence</dd></div><div><dt>Article type</dt><dd>Perspective</dd></div></dl>
+                </header>
+              </section>
+            </section>
+          </div>
+        </section>
+
+        <nav class="trial-strip" aria-label="Autoresearch trials">
+          <span>Trials</span>
+          <button class="trial-scroll-button" type="button">&lt;</button>
+          <div class="trial-strip-scroll">
+            <button class="trial-chip is-incomplete" type="button"><strong class="trial-chip-index">12</strong><span class="trial-chip-status">Blocked</span></button>
+            <button class="trial-chip" type="button"><strong class="trial-chip-index">13</strong><span class="trial-chip-status">Reported</span></button>
+            <button class="trial-chip" type="button"><strong class="trial-chip-index">14</strong><span class="trial-chip-status">Reported</span></button>
+            <button class="trial-chip" type="button"><strong class="trial-chip-index">15</strong><span class="trial-chip-status">Reported</span></button>
+            <button class="trial-chip is-continued" type="button"><strong class="trial-chip-index">16</strong><span class="trial-chip-status">Continued</span></button>
+            <button class="trial-chip" type="button"><strong class="trial-chip-index">17</strong><span class="trial-chip-status">Reported</span></button>
+            <button class="trial-chip is-active" type="button"><strong class="trial-chip-index">18</strong><span class="trial-chip-status">Done</span></button>
+          </div>
+          <button class="trial-scroll-button" type="button">&gt;</button>
+        </nav>
+
+        <article class="trial-report-card is-running">
+          <div class="trial-report-head">
+            <div><strong>Trial 8</strong><em>running</em></div>
+          </div>
+          <div class="trial-progress-stepper" aria-label="Trial progress">
+            <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Planning</span></span>
+            <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Working</span></span>
+            <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Synthesizing</span></span>
+            <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reporting</span></span>
+            <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reviewing</span></span>
+            <span class="trial-progress-step is-current"><span class="trial-progress-marker" aria-hidden="true">6</span><span>Gate update</span></span>
+          </div>
+          <p class="trial-progress-summary">Gate update is preparing the final project state.</p>
+        </article>
 
         <article class="story-section-card paper-section-row">
           <header class="story-section-head">
