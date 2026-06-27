@@ -11799,6 +11799,30 @@ def queue_response_payload() -> dict[str, Any]:
     return {"ok": True, **queued_chat_summary()}
 
 
+def append_started_queued_chat_framing_message(item: dict[str, Any]) -> dict[str, Any] | None:
+    normalized = normalize_queued_chat_message(item)
+    if not normalized:
+        return None
+    message_id = str(normalized.get("id") or f"queued_{now_id()}").strip()[:120]
+    messages = load_framing_messages()
+    if any(str(message.get("id") or "") == message_id for message in messages):
+        return None
+    message = sanitize_framing_message(
+        {
+            "id": message_id,
+            "role": "user",
+            "kind": "text",
+            "text": str(normalized.get("text") or normalized.get("prepared_message") or "Queued chat message.").strip(),
+            "created_at": now_iso(),
+            "attachments": normalized.get("client_attachments") if isinstance(normalized.get("client_attachments"), list) else [],
+        }
+    )
+    if not message:
+        return None
+    save_framing_messages([*messages, message])
+    return message
+
+
 def start_queued_chat_item(item: dict[str, Any]) -> dict[str, Any]:
     normalized = normalize_queued_chat_message(item)
     if not normalized:
@@ -11842,6 +11866,10 @@ def dispatch_next_queued_chat() -> dict[str, Any]:
     if str(session.get("status") or "").lower() != "running":
         append_research_log("Queued chat did not enter running state; keeping queue item pending.")
         return {"started": False, "reason": "not_running", "session": session, **queued_chat_summary()}
+    try:
+        append_started_queued_chat_framing_message(item)
+    except Exception as exc:
+        append_research_log(f"Queued chat started but could not be persisted in the conversation: {exc}")
     remaining = [entry for entry in messages if str(entry.get("id") or "") != str(item.get("id") or "")]
     write_queued_chat_messages(remaining)
     archive_path = archive_queued_chat_messages([item], "started_queued_chat")

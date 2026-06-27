@@ -1776,6 +1776,19 @@ async function testStopAndSendQueuesPriorityThenStops() {
   assert.equal(app.context.__apiCalls[1].endpoint, "/api/research/stop");
 }
 
+function testDuplicateQueuedUserTurnsRestoreFromServerMessages() {
+  const app = loadAppContext();
+  app.run(`
+    __setServerMessages([
+      { id: "qd1", role: "user", kind: "text", text: "您好", created_at: "2026-06-17T10:01:00.000Z" },
+      { id: "qd2", role: "user", kind: "text", text: "您好", created_at: "2026-06-17T10:02:00.000Z" }
+    ]);
+    __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "chat", transcript: [] });
+    __restore();
+  `);
+  assertJsonEqual(app.context.__messages().filter((message) => message.role === "user").map((message) => message.id), ["qd1", "qd2"], "server-persisted queued user turns should survive even when the text is identical");
+}
+
 async function testAttachmentOnlyMessage() {
   const app = loadAppContext();
   app.run('__setSelectedResources([{ path: "/tmp/paper.pdf", category: "literature" }])');
@@ -6243,6 +6256,7 @@ await testRunningChatMessageIsQueued();
 await testRunningSteeringLookingMessageIsQueuedTheSameWay();
 await testQueuedChatCanReorderAndDelete();
 await testStopAndSendQueuesPriorityThenStops();
+testDuplicateQueuedUserTurnsRestoreFromServerMessages();
 await testAttachmentOnlyMessage();
 await testResourceLinksDoNotRepeatAcrossMessages();
 await testResumeFromTrialRequiresConfirmationAndSendsPayload();
