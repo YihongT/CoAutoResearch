@@ -9669,7 +9669,7 @@ body.has-brief-dock {
   position: fixed !important;
   left: var(--brief-dock-left, 50%) !important;
   right: auto !important;
-  bottom: 22px !important;
+  bottom: var(--brief-dock-bottom, 22px) !important;
   z-index: 1000 !important;
   display: block !important;
   width: var(--brief-dock-width, min(var(--framing-composer-width, 980px), calc(100vw - 48px))) !important;
@@ -9682,6 +9682,44 @@ body.has-brief-dock {
   background: var(--composer-bg) !important;
   box-shadow: 0 18px 54px color-mix(in srgb, var(--rail) 18%, transparent) !important;
   transform: translateX(-50%) !important;
+}
+
+.autoresearch-dock {
+  position: fixed;
+  left: var(--brief-dock-left, 50%);
+  right: auto;
+  top: 22px;
+  bottom: auto;
+  z-index: 990;
+  width: var(--brief-dock-width, min(var(--framing-composer-width, 980px), calc(100vw - 48px)));
+  max-width: calc(100vw - 48px);
+  max-height: min(48vh, calc(100vh - var(--brief-dock-height, 88px) - var(--brief-dock-bottom, 22px) - 84px));
+  margin: 0;
+  padding: 16px 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid rgba(32, 31, 27, 0.09);
+  border-radius: 16px;
+  background: var(--composer-bg);
+  box-shadow: 0 18px 54px color-mix(in srgb, var(--rail) 16%, transparent);
+  box-sizing: border-box;
+  transform: translateX(-50%);
+}
+
+.autoresearch-dock[hidden] {
+  display: none !important;
+}
+
+.autoresearch-dock .transcript-timeline.with-axis,
+.autoresearch-dock .trial-history-card,
+.autoresearch-dock .trial-report-card {
+  width: 100% !important;
+  max-width: 100% !important;
+  justify-self: stretch !important;
+}
+
+.autoresearch-dock .transcript-timeline.with-axis {
+  gap: 0;
 }
 
 .brief-editor-shell.is-framing-dock .file-tabs,
@@ -10090,6 +10128,10 @@ body.has-brief-dock {
 body.has-brief-dock .main-stage {
   padding-bottom: 0;
   scroll-padding-bottom: calc(var(--brief-dock-height, 132px) + 36px);
+}
+
+body.has-brief-dock.has-autoresearch-dock .main-stage {
+  scroll-padding-top: calc(var(--autoresearch-dock-height, 0px) + 44px);
 }
 
 body.has-brief-dock #cold-start-workspace.has-framing-thread .stage-panel[data-stage-panel="1"] .cold-card {
@@ -13396,6 +13438,43 @@ html[data-theme] .brief-editor-shell.is-framing-dock {
     0 12px 30px -18px color-mix(in srgb, var(--rail) 22%, transparent) !important;
 }
 
+html[data-theme] .autoresearch-dock {
+  border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  border-radius: 18px;
+  background: var(--panel-bg-strong);
+  color: var(--composer-ink);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--rail) 5%, transparent),
+    0 12px 30px -18px color-mix(in srgb, var(--rail) 20%, transparent);
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+html[data-theme] .autoresearch-dock:is(:hover, :focus-within) {
+  scrollbar-color: color-mix(in srgb, var(--panel-ink, var(--ink)) 24%, transparent) transparent;
+}
+
+html[data-theme] .autoresearch-dock::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html[data-theme] .autoresearch-dock::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+html[data-theme] .autoresearch-dock::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  background-clip: content-box;
+}
+
+html[data-theme] .autoresearch-dock:is(:hover, :focus-within)::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--panel-ink, var(--ink)) 24%, transparent);
+  background-clip: content-box;
+}
+
 html[data-theme] .brief-editor-shell.is-framing-dock textarea {
   background: var(--control-bg) !important;
   color: var(--control-ink) !important;
@@ -16169,8 +16248,8 @@ html[data-theme] .trial-history-head .trial-chip-status {
   line-height: 1;
 }
 html[data-theme] .trial-history-body {
-  padding: 14px 0 0 !important;
-  gap: 24px;
+  padding: 10px 0 0 !important;
+  gap: 16px;
 }
 html[data-theme] .trial-artifact-button {
   display: inline-flex;
@@ -16238,14 +16317,14 @@ html[data-theme] .trial-chip.is-continued:not(.is-active):not(.is-running) .tria
 
 /* Autoresearch trial axis: timeline labels, not a row of nested pills. */
 html[data-theme] .trial-strip:not(.review-trial-strip) .trial-strip-scroll {
-  gap: 18px;
-  padding: 3px 4px;
+  gap: 16px;
+  padding: 1px 4px;
 }
 html[data-theme] .trial-strip:not(.review-trial-strip) .trial-chip {
   position: relative;
   overflow: visible;
-  min-height: 32px;
-  padding: 3px 2px;
+  min-height: 28px;
+  padding: 1px 2px;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -16256,8 +16335,8 @@ html[data-theme] .trial-strip:not(.review-trial-strip) .trial-chip:not(:first-ch
   position: absolute;
   z-index: 0;
   top: 50%;
-  left: -18px;
-  width: 18px;
+  left: -16px;
+  width: 16px;
   height: 1px;
   background: color-mix(in srgb, var(--line-strong) 46%, transparent);
   transform: translateY(-50%);
@@ -16274,9 +16353,9 @@ html[data-theme] .trial-strip:not(.review-trial-strip) .trial-chip-status {
   z-index: 1;
 }
 html[data-theme] .trial-strip:not(.review-trial-strip) .trial-chip-index {
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
   border-color: color-mix(in srgb, var(--line-strong) 62%, transparent);
   background:
     linear-gradient(
@@ -16792,6 +16871,16 @@ html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
   html[data-theme] .brief-editor-shell.is-framing-dock .composer-suggestion-row {
     max-height: 132px;
     overflow-y: auto;
+  }
+
+  html[data-theme] .autoresearch-dock {
+    left: 50%;
+    top: 12px;
+    bottom: auto;
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    max-height: min(46vh, calc(100vh - var(--brief-dock-height, 88px) - var(--brief-dock-bottom, 18px) - 58px));
+    padding: 14px 16px;
   }
 }
 

@@ -77,6 +77,30 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function waitForChildExit(child, timeoutMs = 1000) {
+  if (child.exitCode !== null || child.signalCode) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, timeoutMs);
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    child.once("exit", onExit);
+  });
+}
+
+async function stopChromeChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode) return;
+  child.kill("SIGTERM");
+  const exited = await waitForChildExit(child, 800);
+  if (exited) return;
+  child.kill("SIGKILL");
+  await waitForChildExit(child, 1200);
+}
+
 function waitForDevToolsUrl(child, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     let stderr = "";
@@ -206,9 +230,7 @@ async function captureScreenshot(chrome, { width, height, url, screenshot, userD
     await fsp.writeFile(screenshot, Buffer.from(data, "base64"));
   } finally {
     client?.close();
-    if (!child.killed) child.kill("SIGTERM");
-    await wait(100);
-    if (!child.killed) child.kill("SIGKILL");
+    await stopChromeChild(child);
   }
 }
 
@@ -227,9 +249,11 @@ function baseHead(theme, title) {
       .visual-fixture .framing-thread { display: grid; gap: 28px; width: min(1180px, calc(100% - 56px)); margin: 0 auto; padding: 72px 0 40px; }
       .visual-fixture .framing-message { display: grid; gap: 8px; }
       .visual-fixture .framing-message.user { justify-items: end; }
-      .visual-fixture .framing-message.assistant, .visual-fixture .trial-history-card, .visual-fixture .file-viewer-shell { width: min(1040px, 100%); justify-self: center; }
+      .visual-fixture .framing-message.assistant, .visual-fixture .trial-history-card, .visual-fixture .autoresearch-dock, .visual-fixture .file-viewer-shell { width: min(1040px, 100%); justify-self: center; }
       .visual-fixture .framing-message.user .transcript-body { max-width: min(760px, 82%); }
       .visual-fixture .brief-editor-shell.is-framing-dock { position: fixed; left: max(260px, 50%); bottom: 34px; transform: translateX(-50%); width: min(1040px, calc(100vw - 320px)); min-height: 148px; z-index: 20; }
+      .visual-fixture .autoresearch-dock { position: relative; left: auto; top: auto; bottom: auto; transform: none; max-width: 100%; }
+      .visual-fixture .autoresearch-dock + .autoresearch-dock { margin-top: 18px; }
       .visual-fixture .file-viewer-shell { overflow: hidden; border-radius: 24px; }
       .visual-fixture .file-viewer-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr); min-height: 260px; }
       .visual-fixture .settings-dialog { position: relative; display: block; margin: 42px auto; }
@@ -243,6 +267,7 @@ function baseHead(theme, title) {
         .visual-fixture .framing-message,
         .visual-fixture .framing-message.assistant,
         .visual-fixture .trial-history-card,
+        .visual-fixture .autoresearch-dock,
         .visual-fixture .file-viewer-shell { justify-self: stretch; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
         .visual-fixture .framing-message.user { width: 100%; max-width: 100%; justify-items: end; }
         .visual-fixture .framing-message.user .transcript-body { width: fit-content; max-width: min(100%, calc(100vw - 36px)); overflow-wrap: anywhere; }
@@ -380,74 +405,78 @@ function dashboardHtml(theme, label) {
                 </div>
               </div>
             </article>
-            <section class="trial-history-card is-expanded is-running" data-autoresearch-panel-collapsed="false">
-              <header class="trial-history-head">
-                <div class="trial-history-kicker" aria-label="Autoresearch">
-                  <span class="trial-history-micro-spinner" aria-hidden="true"></span>
-                  <span>Autoresearch</span>
-                  <span class="trial-history-kicker-status">Trial 8: Running</span>
-                </div>
-                <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="true">
-                  <span class="trial-history-toggle-copy">
-                    <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
-                  </span>
-                </button>
-              </header>
-              <div class="trial-history-body">
-                <nav class="trial-strip" aria-label="Autoresearch trials">
-                  <button class="trial-scroll-button" type="button">&lt;</button>
-                  <div class="trial-strip-scroll">
-                    <button class="trial-chip is-incomplete" type="button"><strong class="trial-chip-index">1</strong><span class="trial-chip-status">Blocked</span></button>
-                    <button class="trial-chip is-continued" type="button"><strong class="trial-chip-index">2</strong><span class="trial-chip-status">Continued</span></button>
-                    <button class="trial-chip" type="button"><strong class="trial-chip-index">3</strong><span class="trial-chip-status">Reported</span></button>
-                    <button class="trial-chip is-active" type="button"><strong class="trial-chip-index">8</strong><span class="trial-chip-status">Done</span></button>
+            <div class="autoresearch-dock">
+              <section class="trial-history-card is-expanded is-running" data-autoresearch-panel-collapsed="false">
+                <header class="trial-history-head">
+                  <div class="trial-history-kicker" aria-label="Autoresearch">
+                    <span class="trial-history-micro-spinner" aria-hidden="true"></span>
+                    <span>Autoresearch</span>
+                    <span class="trial-history-kicker-status">Trial 8: Running</span>
                   </div>
-                  <button class="trial-scroll-button" type="button">&gt;</button>
-                </nav>
-                <article class="trial-report-card is-complete">
-                  <div class="trial-report-head">
-                    <div><strong>Trial 8</strong><em>completed</em><em class="is-autoresearch-complete">Autoresearch complete</em><span class="trial-report-head-progress">3/8 reviewer gates are pass. · updated 03:01 AM</span></div>
-                  </div>
-                  <div class="trial-progress-stepper" aria-label="Trial progress">
-                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Planning</span></span>
-                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Working</span></span>
-                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Synthesizing</span></span>
-                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reporting</span></span>
-                    <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reviewing</span></span>
-                    <span class="trial-progress-step is-current"><span class="trial-progress-marker" aria-hidden="true">6</span><span>Gate update</span></span>
-                  </div>
-                  <p>Reviewed the revised working manuscript and final autoresearch gate after targeted revision.</p>
-                  <div class="trial-report-actions">
-                    <div class="trial-report-open-actions">
-                      <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open manuscript"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h6" /><path d="M8 9h2" /></svg></span><span>Manuscript</span></button>
-                      <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open report"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 18v-4" /><path d="M12 18v-7" /><path d="M16 18v-2" /></svg></span><span>Report</span></button>
-                      <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open review"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="m8 11 2 2 4-4" /></svg></span><span>Review</span></button>
+                  <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="true">
+                    <span class="trial-history-toggle-copy">
+                      <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
+                    </span>
+                  </button>
+                </header>
+                <div class="trial-history-body">
+                  <nav class="trial-strip" aria-label="Autoresearch trials">
+                    <button class="trial-scroll-button" type="button">&lt;</button>
+                    <div class="trial-strip-scroll">
+                      <button class="trial-chip is-incomplete" type="button"><strong class="trial-chip-index">1</strong><span class="trial-chip-status">Blocked</span></button>
+                      <button class="trial-chip is-continued" type="button"><strong class="trial-chip-index">2</strong><span class="trial-chip-status">Continued</span></button>
+                      <button class="trial-chip" type="button"><strong class="trial-chip-index">3</strong><span class="trial-chip-status">Reported</span></button>
+                      <button class="trial-chip is-active" type="button"><strong class="trial-chip-index">8</strong><span class="trial-chip-status">Done</span></button>
                     </div>
-                    <div class="trial-report-control-actions">
-                      <button class="secondary-button small-button trial-flow-button" type="button" aria-label="Continue from this trial"><span class="trial-action-icon trial-action-icon-continue" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h6a5 5 0 0 1 5 5v5" /><path d="M13 14l3 3 3-3" /></svg></span><span>Continue from this trial</span></button>
-                      <button class="secondary-button small-button trial-danger-button" type="button" aria-label="Restart"><span class="trial-action-icon trial-action-icon-restart" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.34-5.66" /><path d="M4 4v6h6" /></svg></span><span>Restart</span></button>
+                    <button class="trial-scroll-button" type="button">&gt;</button>
+                  </nav>
+                  <article class="trial-report-card is-complete">
+                    <div class="trial-report-head">
+                      <div><strong>Trial 8</strong><em>completed</em><em class="is-autoresearch-complete">Autoresearch complete</em><span class="trial-report-head-progress">3/8 reviewer gates are pass. · updated 03:01 AM</span></div>
                     </div>
-                  </div>
-                </article>
-              </div>
-            </section>
-            <section class="trial-history-card is-collapsed is-running" data-autoresearch-panel-collapsed="true">
-              <header class="trial-history-head">
-                <div class="trial-history-kicker" aria-label="Autoresearch">
-                  <span class="trial-history-micro-spinner" aria-hidden="true"></span>
-                  <span>Autoresearch</span>
-                  <span class="trial-history-kicker-status">Trial 8: Running</span>
+                    <div class="trial-progress-stepper" aria-label="Trial progress">
+                      <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Planning</span></span>
+                      <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Working</span></span>
+                      <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Synthesizing</span></span>
+                      <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reporting</span></span>
+                      <span class="trial-progress-step is-complete"><span class="trial-progress-marker" aria-hidden="true">✓</span><span>Reviewing</span></span>
+                      <span class="trial-progress-step is-current"><span class="trial-progress-marker" aria-hidden="true">6</span><span>Gate update</span></span>
+                    </div>
+                    <p>Reviewed the revised working manuscript and final autoresearch gate after targeted revision.</p>
+                    <div class="trial-report-actions">
+                      <div class="trial-report-open-actions">
+                        <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open manuscript"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h6" /><path d="M8 9h2" /></svg></span><span>Manuscript</span></button>
+                        <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open report"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 18v-4" /><path d="M12 18v-7" /><path d="M16 18v-2" /></svg></span><span>Report</span></button>
+                        <button class="secondary-button small-button trial-artifact-button" type="button" aria-label="Open review"><span class="trial-artifact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="m8 11 2 2 4-4" /></svg></span><span>Review</span></button>
+                      </div>
+                      <div class="trial-report-control-actions">
+                        <button class="secondary-button small-button trial-flow-button" type="button" aria-label="Continue from this trial"><span class="trial-action-icon trial-action-icon-continue" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h6a5 5 0 0 1 5 5v5" /><path d="M13 14l3 3 3-3" /></svg></span><span>Continue from this trial</span></button>
+                        <button class="secondary-button small-button trial-danger-button" type="button" aria-label="Restart"><span class="trial-action-icon trial-action-icon-restart" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.34-5.66" /><path d="M4 4v6h6" /></svg></span><span>Restart</span></button>
+                      </div>
+                    </div>
+                  </article>
                 </div>
-                <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="false">
-                  <span class="trial-history-toggle-copy">
-                    <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
-                  </span>
-                </button>
-              </header>
-              <div class="trial-history-body">
-                <nav class="trial-strip" aria-label="Autoresearch trials"></nav>
-              </div>
-            </section>
+              </section>
+            </div>
+            <div class="autoresearch-dock">
+              <section class="trial-history-card is-collapsed is-running" data-autoresearch-panel-collapsed="true">
+                <header class="trial-history-head">
+                  <div class="trial-history-kicker" aria-label="Autoresearch">
+                    <span class="trial-history-micro-spinner" aria-hidden="true"></span>
+                    <span>Autoresearch</span>
+                    <span class="trial-history-kicker-status">Trial 8: Running</span>
+                  </div>
+                  <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="false">
+                    <span class="trial-history-toggle-copy">
+                      <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
+                    </span>
+                  </button>
+                </header>
+                <div class="trial-history-body">
+                  <nav class="trial-strip" aria-label="Autoresearch trials"></nav>
+                </div>
+              </section>
+            </div>
             <section class="file-viewer-shell">
               <header class="file-viewer-head"><div><p class="eyebrow">File preview</p><h2>BLUEPRINT.md</h2></div><button class="dialog-close-button" type="button">x</button></header>
               <div class="file-viewer-body">

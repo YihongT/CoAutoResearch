@@ -417,7 +417,15 @@ function loadAppContext() {
     },
     document: {
       body: element(),
-      documentElement: { scrollHeight: 0, clientHeight: 0, dataset: {} },
+      documentElement: {
+        scrollHeight: 0,
+        clientHeight: 0,
+        dataset: {},
+        style: {
+          setProperty(name, value) { this[name] = String(value); },
+          removeProperty(name) { delete this[name]; },
+        },
+      },
       getElementById(id) {
         return elements.get(`#${id}`) || null;
       },
@@ -500,6 +508,7 @@ function loadAppContext() {
     };
     projectDraftDirty = false;
     coldFiles["PROJECT.md"] = "# Project\\n\\nReady.";
+    globalThis.__renderFramingConversationImpl = renderFramingConversation;
     persistFramingMessages = async () => {
       globalThis.__persistCount += 1;
       globalThis.__persistedMessages = globalThis.__messages();
@@ -1038,6 +1047,16 @@ function loadAppContext() {
       const directMessages = collapseProjectDraftMessages(localMessages).map((message) => framingMessageHtml(message)).join("");
       const directPanel = persistentAutoresearchPanelHtml(sessionTranscriptEntries());
       return thread?.innerHTML || lastFramingHtml || directMessages + directPanel || "";
+    };
+    globalThis.__autoresearchDockProbe = () => {
+      globalThis.__renderFramingConversationImpl();
+      return {
+        dockHtml: lastAutoresearchDockHtml,
+        dockHidden: Boolean(autoresearchDockElement?.hidden),
+        threadHtml: $("#framing-thread")?.innerHTML || "",
+        bodyClass: document.body.classList.toString(),
+        shellDocked: Boolean($("#brief-editor-shell")?.classList.contains("is-framing-dock")),
+      };
     };
     globalThis.__thinkingProbe = () => framingThinkingHtml();
     globalThis.__progressDetailsProbe = () => framingProgressDetailsHtml();
@@ -2564,6 +2583,43 @@ function testAutoresearchPanelCollapsePersists() {
   assert.equal(reviewing.html.includes("Trial 18: Incomplete"), false, "trial header should not collapse active progress into a generic incomplete status");
 }
 
+function testAutoresearchPanelRendersInFloatingDock() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000018_best_effect_analysis_method_design",
+      iteration: 18,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/REPORT.md",
+      review_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Gate complete."
+    }];
+    __setSession({
+      id: "s18",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      transcript: [{
+        id: "assistant-progress-18",
+        role: "assistant",
+        raw_type: "item.message",
+        content: "Synthesizing the latest evidence table.",
+        created_at: "2026-01-01T00:00:00Z"
+      }]
+    });
+  `);
+  const dock = app.run("__autoresearchDockProbe()");
+  assert.equal(dock.dockHidden, false, "autoresearch panel should be visible in the floating dock");
+  assert.equal(dock.dockHtml.includes("trial-history-card"), true, "floating dock should own the trial history card");
+  assert.equal(dock.dockHtml.includes("Trial 18: Done"), true, "floating dock should preserve the panel header content");
+  assert.equal(dock.threadHtml.includes("trial-history-card"), false, "trial history card should not remain in the transcript thread");
+  assert.equal(dock.bodyClass.includes("has-autoresearch-dock"), true, "body should expose the autoresearch dock state");
+  assert.equal(dock.shellDocked, true, "composer dock should stay active while the autoresearch dock is visible");
+}
+
 function testPausedAutoresearchActionsRenderInTrialPanel() {
   const app = loadAppContext();
   app.run(`
@@ -2769,6 +2825,75 @@ function testLatestClosedTrialShowsResumeAutoresearch() {
   assert.equal(html.includes("Should the next trial run the CSEUA pilot now, or explicitly defer it?"), true, "latest closed boundary should show response_to_human");
   assert.equal(html.includes('data-trial-continue="18"'), false, "latest boundary should not use fork-style Continue from this trial");
   assert.equal(html.includes("data-restart-autoresearch"), true, "latest closed boundary should keep Restart beside Resume");
+}
+
+function testLowInformationTrialSummaryIsOmitted() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000018_best_effect_analysis_method_design",
+      iteration: 18,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/REPORT.md",
+      review_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/reviews/FINAL_GATE_REVIEW.md"
+    }];
+    __setSession({
+      id: "s18",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      transcript: [{
+        id: "assistant-created-trial",
+        role: "assistant",
+        raw_type: "item.message",
+        content: "Created Trial \`000018_best_effect_analysis_method_design\`.",
+        created_at: "2026-01-01T00:00:00Z"
+      }]
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  const reportVisibleBody = html.slice(html.indexOf("trial-report-head"), html.indexOf("trial-report-actions"));
+  assert.equal(reportVisibleBody.includes("Created Trial"), false, "low-information Created Trial summary should not render in the visible trial report body");
+  assert.equal(html.includes("trial-report-card"), true, "trial report should still render without the low-information summary");
+}
+
+function testNonActionableHumanResponseIsOmitted() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000018_best_effect_analysis_method_design",
+      iteration: 18,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/REPORT.md",
+      review_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Gate continues after Trial 18."
+    }];
+    __setSession({
+      id: "s18",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 18,
+      gate: {
+        status: "blocked",
+        raw_status: "needs_human",
+        response_to_human: "Trial 18 is already closed and applied intervention stop and return control to the UI at the closed Trial 18 boundary."
+      },
+      trajectory: {
+        latest_active_trial: "000018_best_effect_analysis_method_design",
+        next_trial_number: 19
+      }
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("data-resume-autoresearch"), true, "latest closed non-pass boundary should still expose Resume");
+  assert.equal(html.includes("Needs human input"), false, "non-actionable boundary status should not render as a human input prompt");
+  assert.equal(html.includes("already closed and applied intervention stop"), false, "non-actionable boundary status should stay out of the trial panel");
 }
 
 function testOldTrialDoesNotShowStaleHumanResponse() {
@@ -5774,10 +5899,13 @@ testFileTreePdfPreviewControls();
 testSessionTimelineDoesNotRenderCurrentActivityCard();
 testRunningTrialOpenButtonsStayGroupedLeft();
 testAutoresearchPanelCollapsePersists();
+testAutoresearchPanelRendersInFloatingDock();
 testPausedAutoresearchActionsRenderInTrialPanel();
 testAutoresearchPanelPersistsAfterFramingReply();
 testReportedTrialShowsContinueFromThisTrial();
 testLatestClosedTrialShowsResumeAutoresearch();
+testLowInformationTrialSummaryIsOmitted();
+testNonActionableHumanResponseIsOmitted();
 testOldTrialDoesNotShowStaleHumanResponse();
 testPassedAutoresearchPanelHidesResumeAllowsRestart();
 testStagedTrialContinueActionsRenderInTrialPanel();

@@ -118,6 +118,8 @@ let viewScrollPersistTimer = null;
 let suppressViewScrollPersistence = false;
 let viewScrollRestoreToken = 0;
 let composerDraft = "";
+let autoresearchDockElement = null;
+let lastAutoresearchDockHtml = "";
 let targetVenueProjectId = activeProjectId || "";
 const localMessages = [];
 const openRunActivityDetails = new Set();
@@ -2954,9 +2956,17 @@ function gateHumanResponse() {
   return cleanText(gate.response_to_human, "");
 }
 
+function gateHumanResponseLooksActionable(value) {
+  const text = cleanText(value, "");
+  if (!text) return false;
+  if (/[?？]/.test(text)) return true;
+  return /\b(please|should|choose|confirm|approve|review|decide|provide|select|upload|edit|clarify|respond|answer|input|instruction|instructions|required|requires)\b/i.test(text);
+}
+
 function gateRequiresHumanResponse() {
   const gate = sessionState().gate || {};
-  if (!gateHumanResponse()) return false;
+  const response = gateHumanResponse();
+  if (!gateHumanResponseLooksActionable(response)) return false;
   const status = String(gate.status || "").trim().toLowerCase();
   const raw = String(gate.raw_status || "").trim().toLowerCase();
   return status === "blocked" || /\b(needs[_\s-]*human|human|clarification)\b/.test(raw);
@@ -4463,13 +4473,16 @@ function renderFramingConversation() {
     ? sessionTimelineHtml(transcriptEntries, { omittedEntryIds: activity.omittedEntryIds, omitLocal: true })
     : "";
   const shouldShowPending = localPending || (isSessionRunning() && !transcriptTrialPanel);
-  const pending = shouldShowPending ? framingThinkingHtml() : "";
+  const pendingHtml = shouldShowPending ? framingThinkingHtml() : "";
   const pendingShowsAutoresearch = shouldShowPending && isAutoresearchActiveRun();
   const footerAutoresearchPanel = pendingShowsAutoresearch
     ? ""
     : (transcriptTrialPanel || persistentAutoresearchPanelHtml(transcriptEntries, { omittedEntryIds: activity.omittedEntryIds, omitLocal: true }));
-  const hasThreadContent = Boolean(messages || pending || footerAutoresearchPanel);
-  const nextHtml = [messages, pending, footerAutoresearchPanel].filter(Boolean).join("");
+  const autoresearchDockHtml = pendingShowsAutoresearch ? pendingHtml : footerAutoresearchPanel;
+  const pending = pendingShowsAutoresearch ? "" : pendingHtml;
+  const hasInlineThreadContent = Boolean(messages || pending);
+  const hasThreadContent = Boolean(hasInlineThreadContent || autoresearchDockHtml);
+  const nextHtml = [messages, pending].filter(Boolean).join("");
   if (nextHtml !== lastFramingHtml) {
     const renderedDraft = document.querySelector(".project-rendered");
     if (renderedDraft) projectRenderedScrollTop = renderedDraft.scrollTop;
@@ -4491,14 +4504,58 @@ function renderFramingConversation() {
       });
     }
   }
-  thread.hidden = !hasThreadContent;
+  thread.hidden = !hasInlineThreadContent;
   $("#cold-start-workspace")?.classList.toggle("has-framing-thread", hasThreadContent);
   $("#framing-project-panel")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog-inline")?.toggleAttribute("hidden", true);
   syncBriefComposerDock(activeView === "chat" && hasThreadContent);
+  renderAutoresearchDock(autoresearchDockHtml, activeView === "chat" && hasThreadContent);
   renderComposerSuggestions();
   updateFramingScrollButton();
+}
+
+function ensureAutoresearchDock() {
+  const existing = $("#autoresearch-dock");
+  if (existing) {
+    autoresearchDockElement = existing;
+    return existing;
+  }
+  if (autoresearchDockElement) return autoresearchDockElement;
+  const dock = document.createElement("div");
+  dock.id = "autoresearch-dock";
+  dock.className = "autoresearch-dock";
+  dock.hidden = true;
+  document.body.appendChild(dock);
+  autoresearchDockElement = dock;
+  return dock;
+}
+
+function syncAutoresearchDockGeometry() {
+  const dock = autoresearchDockElement || $("#autoresearch-dock");
+  const visible = Boolean(dock && !dock.hidden && String(dock.innerHTML || "").trim());
+  let height = 0;
+  if (visible && typeof dock.getBoundingClientRect === "function") {
+    height = Math.max(44, dock.getBoundingClientRect().height || 0);
+  }
+  document.documentElement?.style?.setProperty?.("--autoresearch-dock-height", `${height}px`);
+}
+
+function renderAutoresearchDock(html, active = true) {
+  const dock = ensureAutoresearchDock();
+  const nextHtml = active && html ? html : "";
+  if (nextHtml !== lastAutoresearchDockHtml) {
+    dock.innerHTML = nextHtml;
+    lastAutoresearchDockHtml = nextHtml;
+    requestAnimationFrame(restoreTrialStripScroll);
+  }
+  dock.hidden = !nextHtml;
+  document.body.classList.toggle("has-autoresearch-dock", Boolean(nextHtml));
+  syncAutoresearchDockGeometry();
+  requestAnimationFrame(() => {
+    syncAutoresearchDockGeometry();
+    updateFramingScrollButton();
+  });
 }
 
 function syncBriefComposerDock(active) {
@@ -4524,23 +4581,32 @@ function syncBriefComposerDock(active) {
       }
     }
   }
+  if (!active) renderAutoresearchDock("", false);
 }
 
 function updateBriefDockGeometry() {
   const shell = $("#brief-editor-shell");
   const main = $(".main-stage");
   if (!shell || !main || !shell.classList.contains("is-framing-dock")) return;
-  const rect = main.getBoundingClientRect();
+  const rect = typeof main.getBoundingClientRect === "function"
+    ? main.getBoundingClientRect()
+    : { left: 0, width: window.innerWidth || 980 };
   const available = Math.max(320, rect.width - 56);
   const width = Math.min(980, available);
   const left = rect.left + rect.width / 2;
-  const height = Math.max(88, shell.getBoundingClientRect().height || 0);
+  const shellRect = typeof shell.getBoundingClientRect === "function" ? shell.getBoundingClientRect() : { height: 0 };
+  const height = Math.max(88, shellRect.height || 0);
+  const bottom = window.innerWidth <= 760 ? 18 : 22;
   shell.style.setProperty("--brief-dock-left", `${left}px`);
   shell.style.setProperty("--brief-dock-width", `${width}px`);
   shell.style.setProperty("--brief-dock-height", `${height}px`);
-  document.documentElement.style.setProperty("--brief-dock-left", `${left}px`);
-  document.documentElement.style.setProperty("--brief-dock-width", `${width}px`);
-  document.documentElement.style.setProperty("--brief-dock-height", `${height}px`);
+  shell.style.setProperty("--brief-dock-bottom", `${bottom}px`);
+  const rootStyle = document.documentElement?.style;
+  rootStyle?.setProperty?.("--brief-dock-left", `${left}px`);
+  rootStyle?.setProperty?.("--brief-dock-width", `${width}px`);
+  rootStyle?.setProperty?.("--brief-dock-height", `${height}px`);
+  rootStyle?.setProperty?.("--brief-dock-bottom", `${bottom}px`);
+  syncAutoresearchDockGeometry();
   requestAnimationFrame(updateFramingScrollButton);
 }
 
@@ -6238,13 +6304,21 @@ function trialOpenActionButtonsHtml(report, options = {}) {
   ].filter(Boolean).join("");
 }
 
+function cleanTrialReportSummaryText(value) {
+  const text = cleanText(value, "");
+  if (!text) return "";
+  if (/^Created\s+Trial\s+[`'"]?0*\d{1,6}_[a-z0-9_ -]+[`'"]?\.?$/i.test(text)) return "";
+  return text;
+}
+
 function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
   const report = reportOverride || reportForIteration(iteration);
   const finalEntry = [...entries].reverse().find((entry) => ["final", "assistant"].includes(transcriptRole(entry)) && String(entry.content || "").trim());
   const fallback = finalEntry ? compactText(finalEntry.content, 260) : "";
   const reportSummary = cleanText(report?.report_summary, "");
   const objective = cleanText(report?.objective, "");
-  const summary = reportSummary || fallback || objective || (report ? "Summary is not available yet." : "Report is not available yet. Agent activity for this trial is shown below.");
+  const rawSummary = reportSummary || fallback || objective || (report ? "Summary is not available yet." : "Report is not available yet. Agent activity for this trial is shown below.");
+  const summary = cleanTrialReportSummaryText(rawSummary);
   const running = isTrialLive(iteration, report);
   const status = running ? "running" : trialStatusLabel(iteration, report).toLowerCase();
   const latestCompletedIteration = currentTrialIndex(visibleTrialReports());
@@ -6267,7 +6341,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
       ${trialProgressStepperHtml(progress)}
       ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
       ${trialHumanResponseHtml(iteration)}
-      <p>${escapeHtml(summary)}</p>
+      ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
       <div class="trial-report-actions">
         ${openActions ? `<div class="trial-report-open-actions">${openActions}</div>` : ""}
         ${controlActions ? `<div class="trial-report-control-actions">${controlActions}</div>` : ""}
