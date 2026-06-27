@@ -3309,6 +3309,11 @@ function testPassedGoalDoesNotShowStaleRunningTrial() {
   assert.equal(html.includes("Trial 6"), true, "passed goals should default to the latest reported trial");
   assert.equal(html.includes("Open manuscript"), true, "reported trials should expose the latest manuscript shortcut in artifact actions");
   assert.equal(html.includes("Autoresearch complete"), true, "passed goals should mark the whole autoresearch trajectory complete");
+  const expandedHeader = html.match(/<header class="trial-history-head">([\s\S]*?)<\/header>/)?.[1] || "";
+  assert.equal(expandedHeader.includes("Autoresearch complete"), false, "expanded completed goals should rely on the active trial card complete tag");
+  const collapsedHtml = app.run("__toggleAutoresearchPanelCollapse().html");
+  const collapsedHeader = collapsedHtml.match(/<header class="trial-history-head">([\s\S]*?)<\/header>/)?.[1] || "";
+  assert.equal(collapsedHeader.includes("Autoresearch complete"), true, "collapsed completed goals should keep the complete state visible in the header");
   app.run(`
     appState.research_session.gate = { status: "continue" };
   `);

@@ -15592,10 +15592,27 @@ html[data-theme] .trial-history-micro-spinner::before {
   80% { content: "⠇"; }
   90%, 100% { content: "⠏"; }
 }
+@keyframes autoresearch-running-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 34%, transparent);
+    transform: scale(0.9);
+  }
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    transform: scale(0.9);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   html[data-theme] .trial-history-micro-spinner::before {
     animation: none;
     content: "⠋";
+  }
+  html[data-theme] .trial-report-card.is-running .trial-report-head em::before {
+    animation: none;
   }
 }
 html[data-theme] .trial-history-kicker-status {
@@ -15850,6 +15867,22 @@ html[data-theme] .trial-report-head em {
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+html[data-theme] .trial-report-card.is-running .trial-report-head em {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  color: color-mix(in srgb, var(--accent) 58%, var(--ink));
+}
+html[data-theme] .trial-report-card.is-running .trial-report-head em::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 72%, var(--accent-3));
+  animation: autoresearch-running-pulse 1.45s ease-out infinite;
 }
 html[data-theme] .trial-report-head em.is-autoresearch-complete {
   border-color: var(--line);

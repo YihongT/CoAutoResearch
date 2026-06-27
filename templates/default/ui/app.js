@@ -6808,6 +6808,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
   const kickerStatus = miniTrialIteration
     ? `<span class="trial-history-kicker-status">Trial ${escapeHtml(miniTrialIteration)}: ${escapeHtml(miniTrialLabel)}</span>`
     : "";
+  const collapsedCompleteBadge = collapsed ? autoresearchCompleteBadgeHtml() : "";
   const latestUpdate = latestTrialUpdateText(activeTrialData, runningTrialData);
   const running = Boolean(runningTrialData);
   const activeTrialIsRunning = runningTrialData
@@ -6829,6 +6830,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
           }
           <span>Autoresearch</span>
           ${kickerStatus}
+          ${collapsedCompleteBadge}
         </div>
         <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="${collapsed ? "false" : "true"}">
           <span class="trial-history-toggle-copy">
