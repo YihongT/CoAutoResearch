@@ -166,6 +166,7 @@ CORE_REVIEWER_FILES = [
 ]
 CORE_PROTOCOL_FILES = [
     "EXECUTION_AGENT.md",
+    "PROJECT_FRAMING.md",
     "RESOURCE_INTAKE.md",
     "RESOURCE_SCOUT.md",
     "REVIEWER_SCOPE_ANALYST.md",
@@ -10630,6 +10631,7 @@ User brief:
 Target venue / audience:
 {target_venue or "Not provided"}
 
+{chat_history_prompt_section(payload.get("conversationHistory"))}
 {response_language_prompt_section()}
 
 Resource locations to inspect:
@@ -10685,6 +10687,7 @@ Use the repository instructions and inspect only the files needed to write a use
 Your task:
 - read AGENTS.md
 - read instructions/RESOURCE_INTAKE.md
+- read instructions/PROJECT_FRAMING.md
 - read instructions/COLD_START.md and instructions/CONVERSION.md only as needed
 - read resources/user_input/INITIAL_BRIEF.md
 - read resources/user_input/RESOURCE_MANIFEST.md if present
@@ -10916,9 +10919,9 @@ Hard boundary:
 Allowed behavior:
 - Answer questions from current project files and the supplied UI conversation history.
 - Always answer the user's latest message or discussion request first. Treat file updates as optional follow-through, not the answer itself.
-- Update `PROJECT.md` only when the user explicitly asks you to draft or revise the project, or when the message clearly changes the project definition: topic, objective, scope, target venue or audience, required resources, constraints, contribution type, or success criteria.
-- Do not update `PROJECT.md` for greetings, product/how-to questions, status questions, ordinary discussion, unclear early ideas, or resource/file/repo/paper/dataset references that need Resource Intake before they can be treated as project evidence.
-- If the message clearly changes the project framing, you may update framing-level files such as `PROJECT.md` or resource intake notes.
+- Read and follow `instructions/PROJECT_FRAMING.md` when deciding whether to draft, update, or leave `PROJECT.md` unchanged.
+- Before autoresearch starts, keep `PROJECT.md` current when the conversation produces a clearer or materially different launch frame; after autoresearch starts, revise it only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
+- If resources were attached or mentioned, follow `instructions/RESOURCE_INTAKE.md` before treating them as project evidence or active inputs for `PROJECT.md`.
 - Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you.
 - If it is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
 - If it clarifies an existing pending intervention, update that same pending intervention instead of creating a new ID. Create a new ID only for a distinct intervention topic.

@@ -22,6 +22,8 @@ Before substantive work, read:
 
 If starting from an empty or newly initialized project, read `instructions/COLD_START.md`.
 
+If creating, revising, or deciding whether to update `PROJECT.md`, read `instructions/PROJECT_FRAMING.md`.
+
 If acquiring, filing, resolving, or interpreting user-provided resources, read `instructions/RESOURCE_INTAKE.md`.
 
 If planning or running agent-initiated resource search for a trial, read `instructions/RESOURCE_SCOUT.md`.
@@ -46,7 +48,7 @@ Before framing, conversion, or normal research execution, route the latest user 
 6. If there are no prior materials or the user explicitly starts from scratch, use `instructions/COLD_START.md`.
 7. Otherwise continue the normal execution loop.
 
-Do not create or revise `PROJECT.md` from a user message that names prior work, a repo, dataset, papers, or files until resource intake is complete, blocked with a clear user question, or explicitly not needed.
+Do not create or revise `PROJECT.md` from a user message that names prior work, a repo, dataset, papers, or files until resource intake is complete, blocked with a clear user question, or explicitly not needed. After intake, use `instructions/PROJECT_FRAMING.md` to decide whether the material should update the canonical launch frame.
 
 ---
 
@@ -56,7 +58,7 @@ Use this contract whenever deciding where to read, write, move, or summarize inf
 
 | Path | Role | Read when | Write/update when | Must not contain |
 |---|---|---|---|---|
-| `PROJECT.md` | Canonical research proposal and target definition | before substantive work | cold start, conversion, or true project-definition change | trial logs, raw outputs, temporary thoughts |
+| `PROJECT.md` | Canonical research proposal and target definition | before substantive work | cold start, conversion, or a project-definition change under `instructions/PROJECT_FRAMING.md` | trial logs, raw outputs, temporary thoughts |
 | `resources/` | Raw inputs and external materials | when grounding, converting, acquiring resources, or checking provenance | when adding user brief, prior work, literature, seed papers, data-source notes | accepted current truth unless promoted elsewhere |
 | `workspace/` | Live workbench for concrete implementation, execution, analysis, and evaluation artifacts | when building, running, debugging, prototyping, analyzing, evaluating, or inspecting concrete work products | when adding or modifying models, methods, frameworks, system designs, prototypes, code, notebooks, scripts, pipelines, simulations, configs, prompts, schemas, evaluation harnesses, working/derived data, generated outputs, logs, checkpoints, weights, or caches | authoritative claims, accepted conclusions, or current method status without trial/report traceability |
 | `research_trajectory/STATE.md` | Current control state | before every trial and after human intervention | when objective, plan, method status, constraints, blockers, active resources, or next step changes | raw logs, full artifacts, literature dumps |

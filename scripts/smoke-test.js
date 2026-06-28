@@ -951,6 +951,7 @@ try {
   }
   if (
     !reviewerMetadata.coreReviewerFiles?.["REFERENCE_REVIEWER.md"] ||
+    !reviewerMetadata.coreProtocolFiles?.["PROJECT_FRAMING.md"] ||
     !reviewerMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
     !reviewerMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
   ) {
@@ -1027,7 +1028,7 @@ Confidence: medium
     throw new Error(`upgrade-project --dry-run should report planned reviewer sync:\n${dryRunUpgrade}`);
   }
   const reviewerUpgradeOutput = execFileSync("node", [cli, "upgrade-project", staleReviewerProject], { cwd: root, encoding: "utf8" });
-  if (!reviewerUpgradeOutput.includes("synced 10 core reviewers") || !reviewerUpgradeOutput.includes("synced 4 core protocol instructions")) {
+  if (!reviewerUpgradeOutput.includes("synced 10 core reviewers") || !reviewerUpgradeOutput.includes("synced 5 core protocol instructions")) {
     throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
   }
   const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
@@ -1036,6 +1037,7 @@ Confidence: medium
   }
   if (
     !upgradedMetadata.coreReviewerFiles?.["REFERENCE_REVIEWER.md"] ||
+    !upgradedMetadata.coreProtocolFiles?.["PROJECT_FRAMING.md"] ||
     !upgradedMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
     !upgradedMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
   ) {
@@ -1341,6 +1343,7 @@ Confidence: medium
   }
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
+  const projectFramingInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "PROJECT_FRAMING.md"), "utf8");
   if (
     !serverPy.includes("REMOTE_AUTH_TOKEN") ||
     !serverPy.includes("authorize_remote_request") ||
@@ -1410,14 +1413,24 @@ Confidence: medium
     throw new Error("server must preserve goal-launch messages and keep attachment-only chat turns visible");
   }
   if (
+    !projectFramingInstructions.includes("# Project Framing Protocol") ||
+    !projectFramingInstructions.includes("Before Autoresearch Starts") ||
+    !projectFramingInstructions.includes("After Autoresearch Starts") ||
+    !projectFramingInstructions.includes("Do not wait for the user to say") ||
+    !projectFramingInstructions.includes("After autoresearch starts, `PROJECT.md` is no longer a live chat draft")
+  ) {
+    throw new Error("PROJECT_FRAMING.md must define before/after autoresearch PROJECT.md update policy");
+  }
+  if (
     !serverPy.includes("def chat_research_prompt") ||
     !serverPy.includes("This is not an autoresearch launch") ||
     !serverPy.includes("the server has not classified it for you") ||
     !serverPy.includes("create or update a pending intervention file") ||
     !serverPy.includes("If it clarifies an existing pending intervention, update that same pending intervention") ||
     !serverPy.includes("The final response must first answer the user's current question or discussion request with substantive analysis") ||
-    !serverPy.includes("Update `PROJECT.md` only when the user explicitly asks you to draft or revise the project") ||
-    !serverPy.includes("Do not update `PROJECT.md` for greetings, product/how-to questions, status questions") ||
+    !serverPy.includes("Read and follow `instructions/PROJECT_FRAMING.md`") ||
+    !serverPy.includes("Before autoresearch starts, keep `PROJECT.md` current") ||
+    !serverPy.includes("read instructions/PROJECT_FRAMING.md") ||
     !serverPy.includes('Do not use a file-update summary such as "Updated PROJECT.md" as a substitute for answering the user') ||
     serverPy.includes("def intervention_chat_prompt") ||
     serverPy.includes("is_human_intervention_candidate") ||
@@ -1804,7 +1817,13 @@ Confidence: medium
     !appJs.includes('return { label: "Autoresearch", value: "Start autoresearch" }') ||
     appJs.includes('"/goal resume": { label: "Autoresearch", value: "Resume autoresearch"') ||
     appJs.includes('"/goal restart": { label: "Autoresearch", value: "Restart autoresearch"') ||
-    !appJs.includes('data-project-launch>Start autoresearch') ||
+    !appJs.includes("function prelaunchAffordanceState()") ||
+    !appJs.includes('primaryLabel: "Start autoresearch"') ||
+    !appJs.includes("data-prelaunch-action") ||
+    !appJs.includes("data-project-launch") ||
+    appJs.includes('primaryLabel: "Draft PROJECT.md"') ||
+    appJs.includes('primaryLabel: "Update PROJECT.md"') ||
+    appJs.includes('secondaryLabel: "Start anyway"') ||
     !(
       appJs.includes('data-resume-autoresearch>Resume autoresearch') ||
       (
@@ -1872,7 +1891,9 @@ Confidence: medium
   if (
     !stylesVersion ||
     !appJs.includes("function currentProgressStartTime(transcript)") ||
-    !appJs.includes("const latestRunStart = transcript.reduce") ||
+    !appJs.includes("function explicitCurrentRunStartTime(transcript = [])") ||
+    !appJs.includes("const latestRunStart = (Array.isArray(transcript) ? transcript : []).reduce") ||
+    !appJs.includes("if (isSessionRunning() && explicitRunStart) return explicitRunStart;") ||
     !appJs.includes("function currentRunLiveStatusHtml()") ||
     !appJs.includes("function currentRunActivityDetailsHtml") ||
     !appJs.includes("function currentRunReadableSummary") ||
@@ -1913,7 +1934,8 @@ Confidence: medium
     appJs.includes("canLaunchAutoresearchFromAssistant") ||
     appJs.includes("latestAssistantTextMessage") ||
     !appJs.includes("function projectDraftCardHtml") ||
-    !appJs.includes("data-project-launch>Start autoresearch</button>") ||
+    !appJs.includes("const launchState = prelaunchAffordanceState()") ||
+    !appJs.includes("canStartGoal = isLatest && launchState.showStart") ||
     !appJs.includes("fullscreenButtonHtml(\"PROJECT.md\")")
   ) {
     throw new Error("PROJECT.md draft card must own launch and fullscreen actions");

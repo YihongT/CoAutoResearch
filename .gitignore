@@ -11,6 +11,7 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+.claude/
 secrets/*
 !secrets/README.md
 
@@ -32,6 +33,7 @@ docs/_site/
 .sass-cache/
 .jekyll-cache/
 ui/.runtime/
+**/ui/.runtime/
 
 # Generated local projects and manual test sandboxes
 tmp/

@@ -3242,6 +3242,113 @@ function renderQueueActionMenu() {
   controls.button.setAttribute("aria-expanded", show && queueActionMenuOpen ? "true" : "false");
 }
 
+function normalUserFramingMessages(messages = localMessages) {
+  return (Array.isArray(messages) ? messages : [])
+    .filter((message) => message?.role === "user" && !isControlFramingMessage(message) && String(message.text || "").trim());
+}
+
+function latestNormalUserFramingMessage(messages = localMessages) {
+  const items = normalUserFramingMessages(messages);
+  return items.length ? items[items.length - 1] : null;
+}
+
+function latestProjectDraftTimestamp() {
+  const message = latestProjectMessage();
+  return message ? framingMessageTime(message, 0) : 0;
+}
+
+function isPrelaunchPhase() {
+  if (!hasActiveProject()) return false;
+  if (isSessionRunning()) return false;
+  if (isGoalPassed()) return false;
+  if (hasGoalStarted()) return false;
+  if (visibleTrials().length > 0) return false;
+  if (hasAutoresearchTrajectory()) return false;
+  return true;
+}
+
+function prelaunchBlockReason() {
+  if (hasBlockingResourceImports()) return blockingResourceImportMessage();
+  const blockedAgent = launchBlockingStatus();
+  if (blockedAgent) return blockedAgent.message || `${agentLabel(effectiveBackend(currentLaunchBackend()))} is not ready.`;
+  return "";
+}
+
+function prelaunchAffordanceState() {
+  if (!isPrelaunchPhase()) return { state: "hidden", hidden: true };
+  const draftReady = hasProjectDraftReady();
+  if (!draftReady) return { state: "hidden", hidden: true };
+  const blockedReason = prelaunchBlockReason();
+  if (blockedReason) {
+    return {
+      state: "blocked",
+      hidden: false,
+      title: "PROJECT.md ready",
+      detail: blockedReason,
+      primaryLabel: "Start autoresearch",
+      primaryAction: "start",
+      disabled: true,
+      showStart: draftReady,
+      reason: blockedReason,
+    };
+  }
+  return {
+    state: "ready",
+    hidden: false,
+    title: "PROJECT.md ready",
+    detail: "Review settings, then start autoresearch.",
+    primaryLabel: "Start autoresearch",
+    primaryAction: "start",
+    showStart: true,
+  };
+}
+
+function ensurePrelaunchAffordancePanel() {
+  const workbench = $("#cold-editor-workbench");
+  const row = workbench?.querySelector(".brief-composer-row");
+  if (!workbench || !row) return null;
+  let panel = $("#prelaunch-affordance");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "prelaunch-affordance";
+    panel.className = "prelaunch-strip";
+    panel.setAttribute("aria-label", "Autoresearch launch readiness");
+  }
+  const queuePanel = $("#queue-panel");
+  if (queuePanel && queuePanel.parentElement === workbench) {
+    queuePanel.insertAdjacentElement("afterend", panel);
+  } else if (panel.parentElement !== workbench) {
+    row.insertAdjacentElement("beforebegin", panel);
+  }
+  return panel;
+}
+
+function prelaunchAffordanceHtml(state = prelaunchAffordanceState()) {
+  if (!state || state.hidden) return "";
+  const disabled = state.disabled ? " disabled" : "";
+  const title = state.reason ? ` title="${escapeHtml(state.reason)}"` : "";
+  return `
+    <div class="prelaunch-strip-inner" data-prelaunch-state="${escapeHtml(state.state || "")}">
+      <div class="prelaunch-copy">
+        <span>${escapeHtml(state.title || "")}</span>
+        ${state.detail ? `<p>${escapeHtml(state.detail)}</p>` : ""}
+      </div>
+      <div class="prelaunch-actions">
+        <button class="prelaunch-action primary-button small-button" type="button" data-prelaunch-action="${escapeHtml(state.primaryAction || "")}"${disabled}${title}>${escapeHtml(state.primaryLabel || "")}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPrelaunchAffordance() {
+  const panel = ensurePrelaunchAffordancePanel();
+  if (!panel) return;
+  const state = prelaunchAffordanceState();
+  panel.hidden = Boolean(state.hidden);
+  panel.innerHTML = state.hidden ? "" : prelaunchAffordanceHtml(state);
+  requestAnimationFrame(updateBriefDockGeometry);
+}
+
 function updateQueuedChatSessionFromPayload(payload) {
   const session =
     payload?.result?.session ||
@@ -3425,6 +3532,7 @@ function renderComposerActionButtons() {
     else if (queueMode) send.title = "Queue follow-up";
   }
   renderQueuedChatPanel();
+  renderPrelaunchAffordance();
   renderQueueActionMenu();
 }
 
@@ -4309,19 +4417,24 @@ function isRunVisiblyPending() {
 }
 
 function currentProgressLeewayMs() {
-  return hasLocalPendingRunScope() ? 0 : 1000;
+  return hasLocalPendingRunScope() && !isSessionRunning() ? 0 : 1000;
+}
+
+function explicitCurrentRunStartTime(transcript = []) {
+  const activeRunStarted = entryTimeValue({ created_at: activeRun().started_at });
+  const latestRunStart = (Array.isArray(transcript) ? transcript : []).reduce((latest, entry) => {
+    if (!transcriptRunStart(entry)) return latest;
+    return Math.max(latest, entryTimeValue(entry));
+  }, 0);
+  return Math.max(activeRunStarted, latestRunStart);
 }
 
 function currentProgressStartTime(transcript) {
   const sessionStarted = entryTimeValue({ created_at: sessionState().started_at });
-  const activeRunStarted = entryTimeValue({ created_at: activeRun().started_at });
-  const latestRunStart = transcript.reduce((latest, entry) => {
-    if (!transcriptRunStart(entry)) return latest;
-    return Math.max(latest, entryTimeValue(entry));
-  }, 0);
+  const explicitRunStart = explicitCurrentRunStartTime(transcript);
   const pendingSince = Number(framingPendingSince || 0);
-  const explicitRunStart = Math.max(activeRunStarted, latestRunStart);
-  if (hasLocalPendingRunScope()) return Math.max(pendingSince, explicitRunStart || 0);
+  if (isSessionRunning() && explicitRunStart) return explicitRunStart;
+  if (hasLocalPendingRunScope()) return pendingSince;
   return explicitRunStart || pendingSince || sessionStarted;
 }
 
@@ -4491,10 +4604,46 @@ function framingProgressDetailsHtml() {
   return currentRunActivityDetailsHtml(currentProgressEntries());
 }
 
+function terminalRunNoResponseHtml(unansweredUser) {
+  if (!unansweredUser) return "";
+  const session = sessionState();
+  const status = String(session.status || "").toLowerCase();
+  if (isSessionRunning() || !["completed", "failed", "interrupted"].includes(status)) return "";
+  const mode = String(session.mode || activeRunMode() || "").toLowerCase();
+  if (!["chat", "framing"].includes(mode)) return "";
+  const statusText = status === "failed"
+    ? "The run failed before a response was saved."
+    : status === "interrupted"
+      ? "The run stopped before a response was saved."
+      : "The run completed without a saved response.";
+  const hasReturncode = session.returncode !== null && session.returncode !== undefined && String(session.returncode).trim() !== "";
+  const returncode = hasReturncode ? Number(session.returncode) : NaN;
+  const detailParts = [];
+  if (Number.isFinite(returncode)) detailParts.push(`Exit code ${returncode}.`);
+  const lastSummary = String(session.last_event_summary || "").trim();
+  if (lastSummary) detailParts.push(compactText(lastSummary, 220));
+  const entries = currentProgressEntries();
+  return `
+    <article class="framing-message assistant is-run-ended" aria-live="polite">
+      <div class="transcript-meta">CoAutoResearch</div>
+      <div class="transcript-body thinking-bubble">
+        <section class="run-ended-status" aria-label="Run ended without a saved response">
+          <p>${escapeHtml(statusText)}</p>
+          ${detailParts.length ? `<p class="run-ended-detail">${escapeHtml(detailParts.join(" "))}</p>` : ""}
+          ${entries.length ? currentRunActivityDetailsHtml(entries) : ""}
+        </section>
+      </div>
+    </article>
+  `;
+}
+
 function projectDraftCardHtml(message) {
   const latest = latestProjectMessage();
   const isLatest = latest && latest.id === message.id;
-  const canStartGoal = isLatest && !hasGoalStarted();
+  const launchState = prelaunchAffordanceState();
+  const canStartGoal = isLatest && launchState.showStart;
+  const launchDisabled = launchState.disabled ? " disabled" : "";
+  const launchTitle = launchState.reason ? ` title="${escapeHtml(launchState.reason)}"` : "";
   const draft = String(message?.artifact?.text || currentProjectDraft());
   cacheProjectDraftInlinePayload(draft);
   const body = projectDraftEditMode && isLatest
@@ -4510,7 +4659,7 @@ function projectDraftCardHtml(message) {
       <div class="project-card-actions" ${isLatest ? "" : "hidden"}>
         ${messageCopyButton(draft, "Copy PROJECT.md draft", "PROJECT.md draft copied.")}
         <button class="secondary-button small-button" type="button" data-project-edit> Edit Markdown</button>
-        ${canStartGoal ? '<button class="primary-button small-button" type="button" data-project-launch>Start autoresearch</button>' : ""}
+        ${canStartGoal ? `<button class="primary-button small-button" type="button" data-project-launch ${launchDisabled}${launchTitle}>Start autoresearch</button>` : ""}
       </div>
     `;
   return `
@@ -4553,12 +4702,13 @@ function renderFramingConversation() {
     : "";
   const shouldShowPending = localPending || (isSessionRunning() && !transcriptTrialPanel);
   const pendingHtml = shouldShowPending ? framingThinkingHtml() : "";
+  const terminalNoResponseHtml = !shouldShowPending ? terminalRunNoResponseHtml(unansweredUser) : "";
   const pendingShowsAutoresearch = shouldShowPending && isAutoresearchActiveRun();
   const footerAutoresearchPanel = pendingShowsAutoresearch
     ? ""
     : (transcriptTrialPanel || persistentAutoresearchPanelHtml(transcriptEntries, { omittedEntryIds: activity.omittedEntryIds, omitLocal: true }));
   const autoresearchDockHtml = pendingShowsAutoresearch ? pendingHtml : footerAutoresearchPanel;
-  const pending = pendingShowsAutoresearch ? "" : pendingHtml;
+  const pending = pendingShowsAutoresearch ? "" : `${pendingHtml}${terminalNoResponseHtml}`;
   const hasInlineThreadContent = Boolean(messages || pending);
   const hasThreadContent = Boolean(hasInlineThreadContent || autoresearchDockHtml);
   const nextHtml = [messages, pending].filter(Boolean).join("");
@@ -5758,8 +5908,8 @@ function coldComposerPlaceholder(hasFramingThread) {
     return "Ask the agent to revise PROJECT.md, narrow the scope, change the target venue, or add constraints...";
   }
   return hasFramingThread
-    ? "Ask a follow-up, describe the project, attach materials, or ask to draft PROJECT.md..."
-    : "Ask a question, describe the project, attach materials, or ask to draft PROJECT.md...";
+    ? "Ask a follow-up, describe the project, attach materials, or discuss next steps..."
+    : "Ask a question, describe the project, attach materials, or discuss next steps...";
 }
 
 function renderColdStartEditor() {
@@ -6897,7 +7047,7 @@ function workingDurationText(startedAt = "") {
 }
 
 function workingDurationHtml(startedAt = "") {
-  const fallback = hasLocalPendingRunScope() ? "" : activeRun().started_at || "";
+  const fallback = isSessionRunning() ? (activeRun().started_at || sessionState().started_at || "") : "";
   const started = currentRunStartedAtString(startedAt || fallback);
   return `<span class="working-duration" data-working-started-at="${escapeHtml(started)}">${escapeHtml(workingDurationText(started))}</span>`;
 }
@@ -9974,6 +10124,7 @@ function renderAttachmentTrays() {
     updateFramingScrollButton();
   });
   updateResourceImportActionState();
+  renderPrelaunchAffordance();
 }
 
 function uploadTooLargeMessage(name, size) {
@@ -12078,10 +12229,12 @@ function composerPromptNextValue(currentValue, prompt) {
 
 function renderComposerSuggestions() {
   const row = $("#composer-suggestions");
-  if (!row) return;
-  row.hidden = true;
-  row.classList.remove("is-running");
-  row.innerHTML = "";
+  if (row) {
+    row.hidden = true;
+    row.classList.remove("is-running");
+    row.innerHTML = "";
+  }
+  renderPrelaunchAffordance();
   requestAnimationFrame(() => {
     updateBriefDockGeometry();
     updateFramingScrollButton();
@@ -12349,13 +12502,16 @@ async function startFramingRun(brief, options = {}) {
   if (!hasActiveProject()) throw new Error("Create a project first.");
   const text = String(brief || "").trim();
   if (!text) throw new Error("Research brief is required.");
-  if (activeColdPath) coldFiles[activeColdPath] = text;
+  if (activeColdPath && options.updateActiveColdPath !== false) coldFiles[activeColdPath] = text;
   await saveColdFiles({ refresh: false });
   setColdSaveStatus("Autosaved", "saved");
   const fileEdits = Object.entries(coldFiles).map(([path, value]) => ({ path, text: value }));
   const targetVenue = String($("#target-venue")?.value || "").trim();
   const files = Array.isArray(options.files) ? options.files : await collectUploadFiles();
   const resourceLinks = Array.isArray(options.resourceLinks) ? options.resourceLinks : collectResourceLinks();
+  const conversationHistory = Array.isArray(options.conversationHistory)
+    ? options.conversationHistory
+    : conversationHistoryForRequest(localMessages);
   const response = await api("/api/research/framing", {
     method: "POST",
     body: JSON.stringify({
@@ -12364,6 +12520,7 @@ async function startFramingRun(brief, options = {}) {
       fileEdits,
       resourceLinks,
       files,
+      conversationHistory,
       settings: settingsFromForm(),
     }),
   });
@@ -12372,6 +12529,19 @@ async function startFramingRun(brief, options = {}) {
   mergeSessionFromApiResponse(response);
   await notifyResourceHandlingFromResponse(response);
   return response;
+}
+
+async function handlePrelaunchAffordanceAction(action) {
+  const state = prelaunchAffordanceState();
+  if (state.hidden || state.disabled) {
+    if (state.reason) showToast(state.reason, true);
+    return false;
+  }
+  if (action === "start") {
+    await openLaunchDialog();
+    return true;
+  }
+  return false;
 }
 
 async function coldStartFromPrepare() {
@@ -12385,7 +12555,7 @@ async function coldStartFromPrepare() {
   const attachments = currentComposerAttachments();
   const resumeFromTrial = selectedResumeTrialPayload();
   if (!input && !attachments.length && !resumeFromTrial) {
-    showToast(hasProjectDraftReady() ? "Write a message to refine the project." : "Write a message or ask to draft PROJECT.md before launch.", true);
+    showToast(hasProjectDraftReady() ? "Write a message to refine the project." : "Write a message describing the project before launch.", true);
     setColdViewMode("source");
     $("#cold-file-editor")?.focus();
     return;
@@ -12807,6 +12977,7 @@ function bindEvents() {
     }
     resizeColdEditor();
     renderColdPreview();
+    renderPrelaunchAffordance();
   });
   $("#target-venue").addEventListener("input", (event) => {
     scopedSet("autoResearchTargetVenue", event.target.value || "");
@@ -13030,6 +13201,13 @@ function bindEvents() {
     if (queueActionMenuOpen && !event.target.closest("#queue-action-menu") && !event.target.closest("#queue-action-menu-toggle")) {
       queueActionMenuOpen = false;
       renderQueueActionMenu();
+    }
+    const prelaunchAction = event.target.closest("[data-prelaunch-action]");
+    if (prelaunchAction) {
+      event.preventDefault();
+      handlePrelaunchAffordanceAction(prelaunchAction.dataset.prelaunchAction || "")
+        .catch((error) => showToast(error.message, true));
+      return;
     }
     const queueMove = event.target.closest("[data-queue-move]");
     if (queueMove) {

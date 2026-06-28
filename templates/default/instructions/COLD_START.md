@@ -31,7 +31,7 @@ Most inputs are optional. If input is missing, create placeholders and mark unce
 2. If the input mentions existing materials, follow `instructions/RESOURCE_INTAKE.md` before framing the project.
 3. Check `.env.example` and local environment availability when keys or external services are needed. Never write real secrets into tracked files.
 4. If filed resources or user corrections materially affect canonical project state, run `instructions/CONVERSION.md`.
-5. Create or update `PROJECT.md`.
+5. Read `instructions/PROJECT_FRAMING.md`, then create or update `PROJECT.md`.
 6. Create or update `research_trajectory/STATE.md`.
 7. Create or update `research_trajectory/CURRENT_FINDINGS.md`.
 8. Document initialization or conversion decisions in `research_trajectory/trials/000000_project_conversion/` only when conversion actually runs or a coherent initialization record is needed.

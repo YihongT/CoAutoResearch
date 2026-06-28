@@ -32,6 +32,10 @@ If the project is empty or newly initialized, also read:
 
 - `instructions/COLD_START.md`
 
+If creating, revising, or deciding whether to update `PROJECT.md`, also read:
+
+- `instructions/PROJECT_FRAMING.md`
+
 If the latest user message or UI submission mentions files, folders, repositories, papers, datasets, proposals, prior work, reviews, or target-venue materials, also read:
 
 - `instructions/RESOURCE_INTAKE.md`

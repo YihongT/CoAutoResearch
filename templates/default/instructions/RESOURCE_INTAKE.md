@@ -20,7 +20,7 @@ Use this protocol when the latest user message, UI payload, or project state men
 - proposals, grants, drafts, target venue materials, CFPs, or author guidelines;
 - old experiments, existing results, or prior research artifacts.
 
-Do not frame or revise `PROJECT.md` from a message that names prior work, a repo, dataset, papers, or files until resource intake is complete, blocked with a clear user question, or explicitly not needed.
+Do not frame or revise `PROJECT.md` from a message that names prior work, a repo, dataset, papers, or files until resource intake is complete, blocked with a clear user question, or explicitly not needed. After intake, follow `instructions/PROJECT_FRAMING.md` to decide whether the material should update the canonical launch frame.
 
 ---
 
@@ -153,7 +153,7 @@ Restart behavior depends on provenance: a full autoresearch restart keeps
 become archived prior-run context until the user explicitly reattaches or
 confirms them.
 
-The manifest is provenance and intake state. It is not current research truth until promoted into `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report.
+The manifest is provenance and intake state. It is not current research truth until promoted into `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report. Use `instructions/PROJECT_FRAMING.md` before promoting resource context into `PROJECT.md`.
 
 ---
 

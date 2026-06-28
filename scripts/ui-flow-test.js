@@ -548,8 +548,9 @@ function loadAppContext() {
     renderStage = () => {};
     loadOverview = async () => {};
     saveProjectDraft = async () => {};
-    startFramingRun = async (brief) => {
+    startFramingRun = async (brief, options = {}) => {
       globalThis.__startedFramingBrief = brief;
+      globalThis.__startedFramingOptions = options;
       appState.research_session = { ...appState.research_session, mode: "framing", status: "running" };
       return { ok: true };
     };
@@ -1046,7 +1047,7 @@ function loadAppContext() {
       renderFramingConversation();
       const directMessages = collapseProjectDraftMessages(localMessages).map((message) => framingMessageHtml(message)).join("");
       const directPanel = persistentAutoresearchPanelHtml(sessionTranscriptEntries());
-      return thread?.innerHTML || lastFramingHtml || directMessages + directPanel || "";
+      return lastFramingHtml || thread?.innerHTML || directMessages + directPanel || "";
     };
     globalThis.__autoresearchDockProbe = () => {
       globalThis.__renderFramingConversationImpl();
@@ -1065,6 +1066,9 @@ function loadAppContext() {
       const row = document.querySelector("#composer-suggestions");
       return { hidden: Boolean(row?.hidden), html: row?.innerHTML || "", className: row?.className || "" };
     };
+    globalThis.__prelaunchState = () => prelaunchAffordanceState();
+    globalThis.__prelaunchHtml = () => prelaunchAffordanceHtml();
+    globalThis.__prelaunchAction = async (action) => handlePrelaunchAffordanceAction(action);
     globalThis.__queuedItems = () => queuedChatItems().map((item) => ({ ...item }));
     globalThis.__moveQueuedItem = async (id, direction) => moveQueuedChatItem(id, direction);
     globalThis.__deleteQueuedItem = async (id) => deleteQueuedChatItem(id);
@@ -1495,6 +1499,58 @@ async function testEmptyProjectPrepareUsesChatEndpoint() {
   assert.equal(app.context.__apiCalls[0].body.message, "How should I use this tool?");
   assert.equal(app.context.__startedFramingBrief, undefined, "empty project first message must not start the framing helper");
   assert.equal(app.context.__confirmMessageLog().length, 0, "ordinary empty-project chat should not ask for a regenerate confirmation");
+}
+
+async function testPrelaunchAffordanceStatesAndActions() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    __setMessages([{ id: "u1", role: "user", kind: "text", text: "Let's study embodied AI safety evidence.", created_at: "2026-06-17T10:00:00.000Z" }]);
+  `);
+  let state = app.run("__prelaunchState()");
+  assert.equal(state.state, "hidden", "pre-start conversation without PROJECT.md should not expose a manual draft action");
+  assert.equal(app.run("__prelaunchHtml()"), "", "manual draft affordance should stay hidden");
+  assert.equal(await app.run('__prelaunchAction("draft")'), false, "draft is not a prelaunch UI action");
+  assert.equal(app.context.__startedFramingBrief, undefined, "draft action must not start a framing run from the UI");
+
+  const ready = loadAppContext();
+  state = ready.run("__prelaunchState()");
+  assert.equal(state.state, "ready", "valid PROJECT.md before autoresearch should offer Start");
+  assert.equal(ready.run("__prelaunchHtml()").includes("Start autoresearch"), true, "ready affordance should show Start autoresearch");
+  await ready.run('__prelaunchAction("start")');
+  assert.equal(ready.launchDialog.open, true, "Start affordance should open the existing launch dialog");
+
+  const stale = loadAppContext();
+  stale.run(`
+    __setMessages([
+      { id: "p1", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Project\\n\\nReady." }, created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "u2", role: "user", kind: "text", text: "Actually narrow the scope to exposed humans.", created_at: "2026-06-17T10:01:00.000Z" }
+    ]);
+  `);
+  state = stale.run("__prelaunchState()");
+  assert.equal(state.state, "ready", "new user framing after PROJECT.md should not expose a manual update action");
+  const staleHtml = stale.run("__prelaunchHtml()");
+  assert.equal(staleHtml.includes("Start autoresearch"), true);
+  assert.equal(staleHtml.includes("Update PROJECT.md"), false);
+  assert.equal(staleHtml.includes("Start anyway"), false);
+  assert.equal(await stale.run('__prelaunchAction("update")'), false, "update is not a prelaunch UI action");
+  assert.equal(stale.context.__startedFramingBrief, undefined, "update action must not start a framing run from the UI");
+
+  const started = loadAppContext();
+  started.run('__setSession({ id: "g1", session_id: "sid", status: "completed", mode: "goal", loop_iteration: 1, transcript: [] });');
+  assert.equal(started.run("__prelaunchState()").state, "hidden", "Start affordance must disappear after autoresearch has started");
+
+  const blocked = loadAppContext();
+  blocked.run('pendingResourceImports.push({ id: "r1", status: "copying", name: "large.zip" });');
+  state = blocked.run("__prelaunchState()");
+  assert.equal(state.state, "blocked", "resource import should block prelaunch actions");
+  assert.equal(state.showStart, true, "blocked valid PROJECT.md should still expose the disabled Start affordance");
+  assert.equal(state.reason, "Wait for resource copy to finish before continuing.");
 }
 
 async function testPlanComposerModeUsesPlanEndpoint() {
@@ -3604,6 +3660,8 @@ function testRunningProgressIgnoresLateLocalPendingTimestamp() {
   const app = loadAppContext();
   app.run(`
     framingPendingSince = Date.parse("2026-06-17T10:05:00.000Z");
+    framingReplyPending = true;
+    pendingFramingUserMessageId = "tu1";
     __setSession({
       id: "s1",
       session_id: "sid",
@@ -3631,6 +3689,42 @@ function testRunningProgressIgnoresLateLocalPendingTimestamp() {
     "server active_run start should win over a later local pending timestamp"
   );
   assert.equal(app.run("__progressSummaryProbe()"), "Update: Checking the title/story mismatch.", "late local pending time must not filter out real Codex updates");
+  const html = app.run("__thinkingProbe()");
+  assert.equal(html.includes('data-working-started-at="2026-06-17T10:00:00.000Z"'), true, "running timer should use the server run start, not the later local pending timestamp");
+  assert.equal(html.includes('data-working-started-at="2026-06-17T10:05:00.000Z"'), false, "running timer must not reset to local pending time once the server run is active");
+}
+
+function testTerminalChatRunWithoutAssistantShowsStatus() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "Discuss this linked work.", created_at: "2026-06-17T10:00:00.000Z" }
+    ]);
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "failed",
+      mode: "chat",
+      returncode: 1,
+      started_at: "2026-06-17T10:00:00.000Z",
+      ended_at: "2026-06-17T10:00:06.000Z",
+      last_event_summary: "Network connection closed before final response.",
+      active_run: {
+        running: false,
+        mode: "chat",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z"
+      },
+      transcript: [
+        { id: "tu1", role: "user", kind: "user", raw_type: "ui.chat", content: "Discuss this linked work.", created_at: "2026-06-17T10:00:00.000Z" },
+        { id: "te1", role: "assistant", kind: "error", raw_type: "error", content: "Network connection closed before final response.", created_at: "2026-06-17T10:00:04.000Z" }
+      ]
+    });
+  `);
+  const html = app.run("terminalRunNoResponseHtml(latestUnansweredUserMessage(collapseProjectDraftMessages(localMessages)))");
+  assert.equal(html.includes("The run failed before a response was saved."), true, "failed runs without an assistant answer should leave a visible status in the thread");
+  assert.equal(html.includes("Exit code 1."), true, "terminal status should expose the process exit code when available");
+  assert.equal(html.includes("Run activity"), true, "terminal status should keep available run activity inspectable");
 }
 
 function testRunningProgressFallsBackToReasoningSummary() {
@@ -6245,6 +6339,7 @@ testAgentPanelScrollRestoreAndEntryBehavior();
 await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
+await testPrelaunchAffordanceStatesAndActions();
 await testPlanComposerModeUsesPlanEndpoint();
 await testPlanChipCanReturnToChat();
 await testTypedPlanSlashIsConvertedLocally();
@@ -6312,6 +6407,7 @@ testChatRunThinkingUsesLiveStatus();
 testChatRunCommandOnlyKeepsRawCommandFolded();
 testLocalPendingDoesNotFlashPreviousRunUpdates();
 testRunningProgressIgnoresLateLocalPendingTimestamp();
+testTerminalChatRunWithoutAssistantShowsStatus();
 testRunningProgressFallsBackToReasoningSummary();
 testCurrentRunningTranscriptGroupDoesNotRenderWorkedActivity();
 testWorkingDurationFormatter();

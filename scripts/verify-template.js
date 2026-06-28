@@ -105,6 +105,7 @@ for (const name of [
 const coreProtocolFiles = Array.isArray(manifest.coreProtocolFiles) ? manifest.coreProtocolFiles : [];
 for (const name of [
   "EXECUTION_AGENT.md",
+  "PROJECT_FRAMING.md",
   "RESOURCE_INTAKE.md",
   "RESOURCE_SCOUT.md",
   "REVIEWER_SCOPE_ANALYST.md"
