@@ -5226,6 +5226,11 @@ async function testSettingsModalSaveSyncsScopedSessionSettings() {
     (async () => {
       const form = document.querySelector("#settings-form");
       form.querySelector = () => null;
+      localStorage.setItem(scopedStorageKey("autoResearchSessionSettings"), JSON.stringify({
+        agent: { backend: "claude" },
+        codex: { model: "gpt-5.3-codex", reasoningEffort: "xhigh", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 99 },
+        claude: { model: "opus", reasoningEffort: "max", permissionPreset: "bypassPermissions", provider: "zai_glm", preExecScript: "stale claude setup", webSearch: false, reviewCheckpointInterval: 88 }
+      }));
       form.elements.themeMode.value = "atelier-nocturne";
       form.elements.settingsModel.value = "gpt-5.2";
       form.elements.settingsReasoningEffort.value = "low";
@@ -5234,6 +5239,18 @@ async function testSettingsModalSaveSyncsScopedSessionSettings() {
       form.elements.settingsExtraConfig.value = "sandbox note";
       form.elements.settingsReviewCheckpointInterval.value = "17";
       const payload = settingsPayloadFromModal();
+      payload.claude = {
+        model: "sonnet",
+        reasoningEffort: "high",
+        permissionPreset: "auto",
+        permissionMode: "auto",
+        provider: "external",
+        webSearch: true,
+        fastMode: false,
+        extraConfig: "",
+        preExecScript: "project claude setup",
+        reviewCheckpointInterval: 23
+      };
       globalThis.__apiResponse = { settings: payload, secret_keys: [] };
       await saveUiSettings({ preventDefault() {}, currentTarget: form, submitter: null });
       return __sessionSettingsState();
@@ -5246,6 +5263,9 @@ async function testSettingsModalSaveSyncsScopedSessionSettings() {
   assert.equal(stored.codex.permissionPreset, "full-access");
   assert.equal(stored.codex.webSearch, false);
   assert.equal(Number(stored.codex.reviewCheckpointInterval), 17);
+  assert.equal(stored.claude.model, "sonnet", "Settings save should replace stale scoped Claude model with project settings");
+  assert.equal(stored.claude.preExecScript, "project claude setup", "Settings save should replace stale scoped Claude shell setup");
+  assert.equal(Number(stored.claude.reviewCheckpointInterval), 23);
   assert.equal(state.composerModel, "gpt-5.2", "Settings save should sync the composer model");
   assert.equal(state.composerReasoning, "low", "Settings save should sync the composer reasoning");
   assert.equal(state.formPermission, "full-access", "Settings save should sync launch/session form values");
@@ -5361,18 +5381,18 @@ async function testApiKeyProviderSettingsPayloads() {
   `);
   assert.equal(state.codexCall.body.codex.provider, "openai_api_key");
   assert.equal(state.codexCall.body.codex_env.OPENAI_API_KEY, "sk-openai-test");
-  assertJsonEqual(state.codexMissingStatus, { text: "Missing key", state: "missing" });
-  assertJsonEqual(state.codexPendingStatus, { text: "Unsaved key", state: "pending" });
-  assert.equal(state.codexStatus, "Saved");
+  assertJsonEqual(state.codexMissingStatus, { text: "No project key saved", state: "missing" });
+  assertJsonEqual(state.codexPendingStatus, { text: "Unsaved project key", state: "pending" });
+  assert.equal(state.codexStatus, "Project override saved");
   assert.equal(state.codexStatusState, "saved");
   assert.equal(state.codexInputAfterSave, "", "saved Codex API key must not be echoed into the input");
   assert.equal(state.codexClearHidden, false, "saved Codex API key should expose a clear action");
   assert.equal(state.claudeCall.body.claude.provider, "anthropic_api_key");
   assert.equal(state.claudeCall.body.claude_env.ANTHROPIC_API_KEY, "sk-ant-test");
   assert.equal(state.claudeCall.body.claude_env.ANTHROPIC_BASE_URL, undefined);
-  assertJsonEqual(state.claudeMissingStatus, { text: "Missing key", state: "missing" });
-  assertJsonEqual(state.claudePendingStatus, { text: "Unsaved key", state: "pending" });
-  assert.equal(state.claudeStatus, "Saved");
+  assertJsonEqual(state.claudeMissingStatus, { text: "No project key saved", state: "missing" });
+  assertJsonEqual(state.claudePendingStatus, { text: "Unsaved project key", state: "pending" });
+  assert.equal(state.claudeStatus, "Project override saved");
   assert.equal(state.claudeStatusState, "saved");
   assert.equal(state.claudeInputAfterSave, "", "saved Claude API key must not be echoed into the input");
   assert.equal(state.gatewayHidden, true, "official Anthropic API key provider should not show gateway fields");
@@ -5433,7 +5453,7 @@ async function testClaudeGatewaySettingsPayload() {
   assert.equal(state.call.body.claude_env.ANTHROPIC_DEFAULT_SONNET_MODEL, "glm-5.2[1m]");
   assert.equal(state.call.body.claude_env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "glm-4.5-air");
   assert.equal(state.credentialAfterHydrate, "", "saved credentials must not be echoed into the input");
-  assert.equal(state.credentialStatus, "ANTHROPIC_AUTH_TOKEN saved");
+  assert.equal(state.credentialStatus, "Project override saved");
   assert.equal(state.gatewayHidden, false);
   assert.equal(state.composerModel, "glm-5.2[1m]", "saved GLM model should sync into composer settings");
 }

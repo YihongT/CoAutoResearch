@@ -1447,6 +1447,7 @@ Confidence: medium
     throw new Error("index.html must reference styles.css and app.js with cache-busting ?v= version tokens");
   }
   const readme = await fsp.readFile(path.join(root, "README.md"), "utf8");
+  const gitignore = await fsp.readFile(path.join(root, ".gitignore"), "utf8");
   const docsConfig = await fsp.readFile(path.join(root, "docs", "conf.py"), "utf8");
   const docsRequirements = await fsp.readFile(path.join(root, "docs", "requirements.txt"), "utf8");
   const docsIndex = await fsp.readFile(path.join(root, "docs", "index.md"), "utf8");
@@ -1674,15 +1675,37 @@ Confidence: medium
     !appJs.includes("function scopedSessionSettings") ||
     !appJs.includes("function mergedProjectSessionSettings") ||
     !appJs.includes("function persistSessionSettings") ||
+    !appJs.includes("function projectSessionSettingsForStorage") ||
+    !appJs.includes("function persistProjectSessionSettings") ||
     !appJs.includes('scopedGet("autoResearchComposerDraft", "", { legacyFallback: false })') ||
     !appJs.includes('scopedGet("autoResearchTargetVenue", "", { legacyFallback: false })') ||
     !appJs.includes('scopedSet("autoResearchTargetVenue", event.target.value || "")') ||
     !appJs.includes('scopedSet("autoResearchSessionSettings", JSON.stringify(sessionSettingsForStorage(settings)))') ||
+    !appJs.includes('scopedSet("autoResearchSessionSettings", JSON.stringify(projectSessionSettingsForStorage(settings)))') ||
+    !appJs.includes("persistProjectSessionSettings(uiSettings);") ||
     !loadSettingsBody.includes("hydrateSettingsDialog(uiSettings);") ||
     !loadSettingsBody.includes("restoreSessionSettings();") ||
     loadSettingsBody.includes("applySessionSettings(")
   ) {
     throw new Error("project-scoped UI persistence must keep drafts/settings in scoped storage and keep loadUiSettings from overwriting browser overrides");
+  }
+  if (
+    !indexHtml.includes("Using external CLI auth keeps tokens outside the project") ||
+    !indexHtml.includes("Clear project override") ||
+    !appJs.includes("Project override saved") ||
+    !appJs.includes("No project key saved")
+  ) {
+    throw new Error("settings UI must label provider credentials as project-local overrides");
+  }
+  if (
+    !gitignore.includes(".claude/") ||
+    !gitignore.includes("ui/.runtime/") ||
+    !gitignore.includes("**/ui/.runtime/") ||
+    !gitignore.includes(".env") ||
+    !gitignore.includes(".env.*") ||
+    !gitignore.includes("secrets/*")
+  ) {
+    throw new Error("local agent settings, env files, project runtime settings, and local secrets must stay git-ignored");
   }
   assertThemeContrast(stylesCss);
   if (
@@ -2905,6 +2928,15 @@ Confidence: medium
       "assert saved_response['codex_env']['present']['OPENAI_API_KEY'], saved_response",
       "assert saved_response['claude_env']['present']['ANTHROPIC_API_KEY'], saved_response",
       "assert 'ui-openai-secret' not in saved_text and 'ui-anthropic-secret' not in saved_text, saved_response",
+      "other_root = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']).parent / 'settings-other-project'",
+      "other_context = module.ProjectContext(other_root)",
+      "module._CONTEXT.project = other_context",
+      "other_settings = module.load_ui_settings()",
+      "assert other_settings['agent']['backend'] in {'codex', 'claude'} and not other_settings['codex_env'] and not other_settings['claude_env'], other_settings",
+      "module.save_ui_settings({'agent': {'backend': 'claude'}, 'codex': {'provider': 'cli'}, 'claude': {'provider': 'external'}, 'env': {}, 'codex_env': {}, 'claude_env': {}})",
+      "assert module.load_ui_settings()['agent']['backend'] == 'claude'",
+      "module._CONTEXT.project = context",
+      "assert module.load_ui_settings()['agent']['backend'] == 'codex' and module.load_ui_settings()['codex_env'].get('OPENAI_API_KEY') == 'ui-openai-secret'",
       "api_codex_env = module.agent_process_env('codex')",
       "api_claude_env = module.agent_process_env('claude')",
       "assert api_codex_env.get('OPENAI_API_KEY') == 'ui-openai-secret' and 'ANTHROPIC_API_KEY' not in api_codex_env, api_codex_env",

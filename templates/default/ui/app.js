@@ -1899,8 +1899,31 @@ function sessionSettingsForStorage(settings) {
   return next;
 }
 
+function projectSessionSettingsForStorage(settings = uiSettings || {}) {
+  const backend = normalizeAgentBackend(settings?.agent?.backend || settings?.backend);
+  const codex = normalizeSessionSettings({
+    ...providerSettingsFromUi("codex"),
+    ...(settings?.codex || {}),
+    backend: "codex",
+  });
+  const claude = normalizeSessionSettings({
+    ...providerSettingsFromUi("claude"),
+    ...(settings?.claude || {}),
+    backend: "claude",
+  });
+  return {
+    agent: { backend },
+    codex: stripBackendSetting(codex),
+    claude: stripBackendSetting(claude),
+  };
+}
+
 function persistSessionSettings(settings) {
   scopedSet("autoResearchSessionSettings", JSON.stringify(sessionSettingsForStorage(settings)));
+}
+
+function persistProjectSessionSettings(settings = uiSettings || {}) {
+  scopedSet("autoResearchSessionSettings", JSON.stringify(projectSessionSettingsForStorage(settings)));
 }
 
 function storedComposerDraft() {
@@ -5841,11 +5864,11 @@ function hydrateSettingsDialog(settings) {
             </span>
             ${
               saved
-                ? `<button class="settings-clear-button" type="button" data-clear-secret="${escapeHtml(key)}">Clear</button>`
-                : `<span class="secret-status">Empty</span>`
+                ? `<button class="settings-clear-button" type="button" data-clear-secret="${escapeHtml(key)}">Clear project override</button>`
+                : `<span class="secret-status">No project override</span>`
             }
           </span>
-          <input name="env_${escapeHtml(key)}" type="${inputType}" placeholder="${saved ? "Saved - leave blank to keep" : "Paste value"}" autocomplete="off" />
+          <input name="env_${escapeHtml(key)}" type="${inputType}" placeholder="${saved ? "Project override saved - leave blank to keep" : "Paste value"}" autocomplete="off" />
           <span class="settings-secret-help">${escapeHtml(secretKeyHelp[key] || "Passed to selected agent subprocesses.")}</span>
         </label>
       `;
@@ -5870,10 +5893,10 @@ function hydrateCodexProviderSettings(settings = uiSettings || {}, backend = act
   const saved = Boolean(envPresent.OPENAI_API_KEY);
   if (form.elements.settingsCodexApiKey) {
     form.elements.settingsCodexApiKey.value = "";
-    form.elements.settingsCodexApiKey.placeholder = saved ? "Saved - leave blank to keep" : "Paste OpenAI API key";
+    form.elements.settingsCodexApiKey.placeholder = saved ? "Project override saved - leave blank to keep" : "Paste OpenAI API key";
   }
   const status = $("#settings-codex-api-key-status");
-  setProviderSecretStatus(status, saved ? "Saved" : "Missing key", saved ? "saved" : "missing");
+  setProviderSecretStatus(status, saved ? "Project override saved" : "No project key saved", saved ? "saved" : "missing");
   const clearButton = $("#settings-codex-api-key-clear");
   if (clearButton) {
     clearButton.hidden = !saved;
@@ -5907,14 +5930,14 @@ function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = ac
   if (form.elements.settingsClaudeHaikuModel) form.elements.settingsClaudeHaikuModel.value = claudeGatewayFieldValue(settings, "ANTHROPIC_DEFAULT_HAIKU_MODEL", provider);
   if (form.elements.settingsClaudeCredential) {
     form.elements.settingsClaudeCredential.value = "";
-    form.elements.settingsClaudeCredential.placeholder = authTokenSaved || apiKeySaved ? "Saved - leave blank to keep" : "Paste gateway credential";
+    form.elements.settingsClaudeCredential.placeholder = authTokenSaved || apiKeySaved ? "Project override saved - leave blank to keep" : "Paste gateway credential";
   }
   if (form.elements.settingsClaudeApiKey) {
     form.elements.settingsClaudeApiKey.value = "";
-    form.elements.settingsClaudeApiKey.placeholder = apiKeySaved ? "Saved - leave blank to keep" : "Paste Anthropic API key";
+    form.elements.settingsClaudeApiKey.placeholder = apiKeySaved ? "Project override saved - leave blank to keep" : "Paste Anthropic API key";
   }
   const apiKeyStatus = $("#settings-claude-api-key-status");
-  setProviderSecretStatus(apiKeyStatus, apiKeySaved ? "Saved" : "Missing key", apiKeySaved ? "saved" : "missing");
+  setProviderSecretStatus(apiKeyStatus, apiKeySaved ? "Project override saved" : "No project key saved", apiKeySaved ? "saved" : "missing");
   const apiKeyClearButton = $("#settings-claude-api-key-clear");
   if (apiKeyClearButton) {
     apiKeyClearButton.hidden = !apiKeySaved;
@@ -5923,7 +5946,7 @@ function hydrateClaudeProviderSettings(settings = uiSettings || {}, backend = ac
   const status = $("#settings-claude-credential-status");
   const clearButton = $("#settings-claude-credential-clear");
   const savedCredentialKey = authTokenSaved ? "ANTHROPIC_AUTH_TOKEN" : apiKeySaved ? "ANTHROPIC_API_KEY" : "";
-  setProviderSecretStatus(status, savedCredentialKey ? `${savedCredentialKey} saved` : "Missing credential", savedCredentialKey ? "saved" : "missing");
+  setProviderSecretStatus(status, savedCredentialKey ? "Project override saved" : "No project key saved", savedCredentialKey ? "saved" : "missing");
   if (clearButton) {
     clearButton.hidden = !savedCredentialKey;
     clearButton.dataset.clearClaudeSecret = savedCredentialKey;
@@ -5951,8 +5974,9 @@ function refreshCodexApiKeyDraftStatus() {
     form?.elements?.settingsCodexApiKey,
     $("#settings-codex-api-key-status"),
     Boolean(publicCodexEnvPresent(uiSettings || {}).OPENAI_API_KEY),
-    "Saved",
-    "Missing key"
+    "Project override saved",
+    "No project key saved",
+    "Unsaved project key"
   );
 }
 
@@ -5962,8 +5986,9 @@ function refreshClaudeApiKeyDraftStatus() {
     form?.elements?.settingsClaudeApiKey,
     $("#settings-claude-api-key-status"),
     Boolean(publicClaudeEnvPresent(uiSettings || {}).ANTHROPIC_API_KEY),
-    "Saved",
-    "Missing key"
+    "Project override saved",
+    "No project key saved",
+    "Unsaved project key"
   );
 }
 
@@ -5975,9 +6000,9 @@ function refreshClaudeCredentialDraftStatus() {
     form?.elements?.settingsClaudeCredential,
     $("#settings-claude-credential-status"),
     Boolean(savedKey),
-    savedKey ? `${savedKey} saved` : "Saved",
-    "Missing credential",
-    "Unsaved credential"
+    "Project override saved",
+    "No project key saved",
+    "Unsaved project credential"
   );
 }
 
@@ -6044,23 +6069,16 @@ async function saveUiSettings(event) {
       uiSettings = payload.settings || {};
       settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
       hydrateSettingsDialog(uiSettings);
-      // Force the per-session scoped backend to follow the Settings choice; otherwise
-      // a previously stickied scoped backend in localStorage would silently override.
+      // Force the per-project scoped session envelope to follow Settings completely;
+      // stale browser-only overrides must not shadow saved project runtime settings.
       const savedBackend = normalizeAgentBackend(uiSettings?.agent?.backend || "");
-      const scoped = scopedSessionSettings();
-      const scopedBackend = normalizeAgentBackend(scoped?.agent?.backend || scoped?.backend || "");
-      if (scopedBackend && scopedBackend !== savedBackend) {
-        const next = scoped && typeof scoped === "object" ? { ...scoped } : {};
-        next.agent = { ...(next.agent || {}), backend: savedBackend };
-        if (next.backend !== undefined) next.backend = savedBackend;
-        scopedSet("autoResearchSessionSettings", JSON.stringify(next));
-      }
+      persistProjectSessionSettings(uiSettings);
       const merged = normalizeSessionSettings({
         ...providerSettingsFromUi(savedBackend),
         ...(uiSettings?.[savedBackend] || {}),
         backend: savedBackend,
       });
-      applySessionSettings(merged, true);
+      applySessionSettings(merged, false);
       renderAgentStatusBanner();
       showToast("Settings saved locally.");
     });
@@ -6079,8 +6097,9 @@ async function clearSavedSecret(key) {
   uiSettings = payload.settings || {};
   settingsSecretKeys = payload.secret_keys || settingsSecretKeys;
   hydrateSettingsDialog(uiSettings);
-  applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
-  showToast(`${secretKeyLabels[key] || key} cleared.`);
+  persistProjectSessionSettings(uiSettings);
+  applySessionSettings(mergedProjectSessionSettings(uiSettings), false);
+  showToast(`${secretKeyLabels[key] || key} project override cleared.`);
 }
 
 async function clearSavedCodexSecret(key) {
@@ -6092,8 +6111,9 @@ async function clearSavedCodexSecret(key) {
   });
   uiSettings = payload.settings || {};
   hydrateSettingsDialog(uiSettings);
-  applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
-  showToast(`${key} cleared.`);
+  persistProjectSessionSettings(uiSettings);
+  applySessionSettings(mergedProjectSessionSettings(uiSettings), false);
+  showToast(`${key} project override cleared.`);
 }
 
 async function clearSavedClaudeSecret(key) {
@@ -6105,8 +6125,9 @@ async function clearSavedClaudeSecret(key) {
   });
   uiSettings = payload.settings || {};
   hydrateSettingsDialog(uiSettings);
-  applySessionSettings(mergedProjectSessionSettings(uiSettings), true);
-  showToast(`${key} cleared.`);
+  persistProjectSessionSettings(uiSettings);
+  applySessionSettings(mergedProjectSessionSettings(uiSettings), false);
+  showToast(`${key} project override cleared.`);
 }
 
 function setPanel(panel, options = {}) {

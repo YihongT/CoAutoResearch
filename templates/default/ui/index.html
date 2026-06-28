@@ -831,7 +831,7 @@
                   <option value="cli">Use existing Codex CLI login</option>
                   <option value="openai_api_key">OpenAI API key</option>
                 </select>
-                <small>API keys are used only for Codex runs started from this UI.</small>
+                <small>Using external CLI auth keeps tokens outside the project. API keys are project overrides used only for Codex runs started from this UI.</small>
               </label>
               <label class="field" data-claude-provider-field>
                 <span>Claude provider</span>
@@ -841,7 +841,7 @@
                   <option value="zai_glm">Z.AI GLM Coding Plan</option>
                   <option value="custom_anthropic">Custom Anthropic-compatible gateway</option>
                 </select>
-                <small>Aliases and shell functions are not used here; CoAutoResearch starts the real Claude Code executable.</small>
+                <small>Using external CLI auth keeps tokens outside the project. Project overrides are injected only into Claude Code runs started from this UI.</small>
               </label>
               <section class="provider-secret-card wide" id="codex-api-key-settings" hidden>
                 <div class="provider-secret-head">
@@ -849,13 +849,13 @@
                     <h4>OpenAI API key</h4>
                     <p>Injected only into Codex runs from this UI.</p>
                   </div>
-                  <small class="provider-secret-status" id="settings-codex-api-key-status">Missing key</small>
+                  <small class="provider-secret-status" id="settings-codex-api-key-status">No project key saved</small>
                 </div>
                 <label class="field provider-secret-input">
                   <span>Key</span>
-                  <input name="settingsCodexApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                  <input name="settingsCodexApiKey" type="password" autocomplete="off" placeholder="Project override saved - leave blank to keep" />
                 </label>
-                <button class="settings-clear-button" id="settings-codex-api-key-clear" type="button" data-clear-codex-secret hidden>Clear saved key</button>
+                <button class="settings-clear-button" id="settings-codex-api-key-clear" type="button" data-clear-codex-secret hidden>Clear project override</button>
               </section>
               <section class="provider-secret-card wide" id="claude-api-key-settings" hidden>
                 <div class="provider-secret-head">
@@ -863,13 +863,13 @@
                     <h4>Anthropic API key</h4>
                     <p>Injected only into Claude Code runs from this UI, without gateway routing variables.</p>
                   </div>
-                  <small class="provider-secret-status" id="settings-claude-api-key-status">Missing key</small>
+                  <small class="provider-secret-status" id="settings-claude-api-key-status">No project key saved</small>
                 </div>
                 <label class="field provider-secret-input">
                   <span>Key</span>
-                  <input name="settingsClaudeApiKey" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                  <input name="settingsClaudeApiKey" type="password" autocomplete="off" placeholder="Project override saved - leave blank to keep" />
                 </label>
-                <button class="settings-clear-button" id="settings-claude-api-key-clear" type="button" data-clear-claude-secret hidden>Clear saved key</button>
+                <button class="settings-clear-button" id="settings-claude-api-key-clear" type="button" data-clear-claude-secret hidden>Clear project override</button>
               </section>
               <section class="provider-secret-card provider-secret-card-grid wide" id="claude-gateway-settings" hidden>
                 <div class="provider-secret-head">
@@ -877,7 +877,7 @@
                     <h4>Claude gateway</h4>
                     <p>Injected only into Claude Code runs from this UI.</p>
                   </div>
-                  <small class="provider-secret-status" id="settings-claude-credential-status">Missing credential</small>
+                  <small class="provider-secret-status" id="settings-claude-credential-status">No project key saved</small>
                 </div>
                 <label class="field">
                   <span>Gateway base URL</span>
@@ -892,9 +892,9 @@
                 </label>
                 <label class="field">
                   <span>Credential</span>
-                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Saved - leave blank to keep" />
+                  <input name="settingsClaudeCredential" type="password" autocomplete="off" placeholder="Project override saved - leave blank to keep" />
                 </label>
-                <button class="settings-clear-button" id="settings-claude-credential-clear" type="button" data-clear-claude-secret hidden>Clear saved credential</button>
+                <button class="settings-clear-button" id="settings-claude-credential-clear" type="button" data-clear-claude-secret hidden>Clear project override</button>
                 <label class="field">
                   <span>Sonnet model mapping</span>
                   <input name="settingsClaudeSonnetModel" type="text" autocomplete="off" placeholder="glm-5.2[1m]" />
