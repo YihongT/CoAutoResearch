@@ -4690,23 +4690,25 @@ function framingMessageHtml(message) {
       </article>
     `;
   }
+  const projectAttachmentMessage = role === "assistant" && message.attachedProjectDraft ? message.attachedProjectDraft : null;
+  const launchAction = projectAttachmentMessage ? projectDraftLaunchButtonHtml(projectAttachmentMessage) : "";
   const actionItems = [
     messageCopyButton(message.text, `Copy ${role === "user" ? "your" : "CoAutoResearch"} message`),
     role === "user" && !message.resumeFromTrial
       ? `<button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button>`
       : "",
+    launchAction,
   ].filter(Boolean);
-  const actions = actionItems.length ? `<div class="framing-actions message-action-row">${actionItems.join("")}</div>` : "";
-  const projectAttachment = role === "assistant" && message.attachedProjectDraft
-    ? projectDraftAttachmentHtml(message.attachedProjectDraft)
-    : "";
+  const actionClass = `framing-actions message-action-row${launchAction ? " has-project-launch" : ""}`;
+  const actions = actionItems.length ? `<div class="${actionClass}">${actionItems.join("")}</div>` : "";
+  const projectAttachment = projectAttachmentMessage ? projectDraftAttachmentHtml(projectAttachmentMessage) : "";
   return `
     <article class="framing-message ${role}" data-framing-id="${escapeHtml(message.id)}">
       <div class="transcript-meta">${title}</div>
       ${messageAttachmentsHtml(message)}
       <div class="transcript-body">${transcriptContentHtml(message.text, { markdown: role === "assistant" })}</div>
-      ${actions}
       ${projectAttachment}
+      ${actions}
     </article>
   `;
 }
@@ -5013,12 +5015,8 @@ function terminalRunNoResponseHtml(unansweredUser) {
   `;
 }
 
-function projectDraftActionsHtml(message, options = {}) {
+function projectDraftReferenceHtml(message, options = {}) {
   const label = options.label === undefined ? "Updated" : String(options.label || "");
-  const launchState = prelaunchAffordanceState();
-  const canStartGoal = launchState.showStart;
-  const launchDisabled = launchState.disabled ? " disabled" : "";
-  const launchTitle = launchState.reason ? ` title="${escapeHtml(launchState.reason)}"` : "";
   const draft = String(message?.artifact?.text || currentProjectDraft());
   cacheProjectDraftInlinePayload(draft);
   return `
@@ -5026,9 +5024,27 @@ function projectDraftActionsHtml(message, options = {}) {
       ${label ? `<span>${escapeHtml(label)}</span>` : ""}
       ${markdownFileButtonHtml("PROJECT.md", "PROJECT.md")}
     </div>
+  `;
+}
+
+function projectDraftLaunchButtonHtml(message) {
+  const launchState = prelaunchAffordanceState();
+  if (!launchState.showStart) return "";
+  const launchDisabled = launchState.disabled ? " disabled" : "";
+  const launchTitle = launchState.reason ? ` title="${escapeHtml(launchState.reason)}"` : "";
+  const draft = String(message?.artifact?.text || currentProjectDraft());
+  cacheProjectDraftInlinePayload(draft);
+  return `<button class="primary-button small-button project-launch-action" type="button" data-project-launch ${launchDisabled}${launchTitle}>Start autoresearch</button>`;
+}
+
+function projectDraftActionsHtml(message, options = {}) {
+  const draft = String(message?.artifact?.text || currentProjectDraft());
+  cacheProjectDraftInlinePayload(draft);
+  return `
+    ${projectDraftReferenceHtml(message, options)}
     <div class="project-card-actions">
       ${messageCopyButton(draft, "Copy PROJECT.md draft", "PROJECT.md draft copied.")}
-      ${canStartGoal ? `<button class="primary-button small-button" type="button" data-project-launch ${launchDisabled}${launchTitle}>Start autoresearch</button>` : ""}
+      ${projectDraftLaunchButtonHtml(message)}
     </div>
   `;
 }
@@ -5036,7 +5052,7 @@ function projectDraftActionsHtml(message, options = {}) {
 function projectDraftAttachmentHtml(message) {
   return `
     <div class="project-draft-inline" data-project-attachment="${escapeHtml(message.id || "")}">
-      ${projectDraftActionsHtml(message)}
+      ${projectDraftReferenceHtml(message)}
     </div>
   `;
 }
@@ -5048,7 +5064,7 @@ function projectDraftCardHtml(message) {
       <div class="transcript-meta">CoAutoResearch</div>
       <div class="transcript-body">
         ${transcriptContentHtml(summary, { markdown: true })}
-        ${projectDraftAttachmentHtml(message)}
+        ${projectDraftActionsHtml(message)}
       </div>
     </article>
   `;
@@ -5106,7 +5122,7 @@ function renderFramingConversation() {
   restoreInitialChatScrollPosition();
   thread.hidden = !hasInlineThreadContent;
   $("#cold-start-workspace")?.classList.toggle("has-framing-thread", hasThreadContent);
-  renderProjectLaunchFallbackPanel(!hasAttachedProjectFooter);
+  renderProjectLaunchFallbackPanel(false);
   $("#framing-project-panel")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog-inline")?.toggleAttribute("hidden", true);

@@ -2274,8 +2274,11 @@ Confidence: medium
     !appJs.includes("function renderProjectLaunchFallbackPanel") ||
     !appJs.includes("visibleFramingMessagesForRender(localMessages)") ||
     !appJs.includes('markdownFileButtonHtml("PROJECT.md", "PROJECT.md")') ||
+    !appJs.includes("function projectDraftLaunchButtonHtml") ||
     !appJs.includes("const launchState = prelaunchAffordanceState()") ||
-    !appJs.includes("canStartGoal = launchState.showStart") ||
+    !appJs.includes("if (!launchState.showStart) return") ||
+    !appJs.includes("has-project-launch") ||
+    !appJs.includes("project-launch-action") ||
     !appJs.includes('id: latest?.id || "current-project-draft"') ||
     !appJs.includes('editable: true') ||
     !appJs.includes("PROJECT.md ready") ||

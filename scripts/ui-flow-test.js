@@ -1674,12 +1674,14 @@ async function testPrelaunchAffordanceStatesAndActions() {
   const ready = loadAppContext();
   ready.run(`
     __setMessages([
+      { id: "a1", role: "assistant", kind: "text", text: "I updated the launch frame.", created_at: "2026-06-17T09:59:59.000Z" },
       { id: "p1", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Project\\n\\nReady." }, created_at: "2026-06-17T10:00:00.000Z" }
     ]);
   `);
   state = ready.run("__prelaunchState()");
   assert.equal(state.state, "ready", "valid PROJECT.md before autoresearch should offer Start");
-  assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("data-project-launch"), true, "latest PROJECT.md attachment should expose Start autoresearch");
+  ready.run("__renderFramingConversationImpl()");
+  assert.equal(ready.run("__framingThreadHtmlProbe()").includes("data-project-launch"), true, "latest assistant reply should expose Start autoresearch");
   assert.equal(ready.run("__latestProjectAttachmentHtml()").includes('data-inline-fullscreen="PROJECT.md"'), true, "latest PROJECT.md attachment should keep the clickable file link");
   assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("project-rendered"), false, "PROJECT.md must stay collapsed by default");
   assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("data-project-edit"), false, "PROJECT.md footer should not expose the old inline edit path");
@@ -1691,13 +1693,15 @@ async function testPrelaunchAffordanceStatesAndActions() {
   const stale = loadAppContext();
   stale.run(`
     __setMessages([
+      { id: "a1", role: "assistant", kind: "text", text: "I updated PROJECT.md.", created_at: "2026-06-17T09:59:59.000Z" },
       { id: "p1", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Project\\n\\nReady." }, created_at: "2026-06-17T10:00:00.000Z" },
       { id: "u2", role: "user", kind: "text", text: "Actually narrow the scope to exposed humans.", created_at: "2026-06-17T10:01:00.000Z" }
     ]);
   `);
   state = stale.run("__prelaunchState()");
   assert.equal(state.state, "ready", "new user framing after PROJECT.md should not expose a manual update action");
-  const staleHtml = stale.run("__latestProjectAttachmentHtml()");
+  stale.run("__renderFramingConversationImpl()");
+  const staleHtml = stale.run("__framingThreadHtmlProbe()");
   assert.equal(staleHtml.includes("Start autoresearch"), true);
   assert.equal(staleHtml.includes("Update PROJECT.md"), false);
   assert.equal(staleHtml.includes("Start anyway"), false);
@@ -2790,9 +2794,14 @@ function testStartAutoresearchAppearsAtAssistantReplyEnd() {
   const assistantIndex = html.indexOf("Updated PROJECT.md and it is ready.");
   const linkIndex = html.indexOf('data-inline-fullscreen="PROJECT.md"');
   const launchIndex = html.indexOf("data-project-launch");
+  const copyIndex = html.indexOf("message-copy-button");
+  const projectInlineIndex = html.indexOf("project-draft-inline");
+  const actionRowIndex = html.indexOf("has-project-launch");
   assert.ok(assistantIndex >= 0, "assistant reply should render");
   assert.ok(linkIndex > assistantIndex, "PROJECT.md link should sit after the assistant reply");
-  assert.ok(launchIndex > linkIndex, "Start autoresearch should sit after the collapsed PROJECT.md link");
+  assert.ok(projectInlineIndex > assistantIndex && actionRowIndex > projectInlineIndex, "PROJECT.md reference should sit above the copy/start action row");
+  assert.ok(copyIndex > linkIndex && launchIndex > copyIndex, "Start autoresearch should sit on the copy action row after the copy button");
+  assert.equal(html.includes("has-project-launch"), true, "Start action should share the assistant action row");
   assert.equal(html.includes("project-rendered"), false, "PROJECT.md must not render expanded markdown by default");
   assert.equal(html.includes("inline-fullscreen-button"), false, "collapsed PROJECT.md should use the text link, not a fullscreen icon button");
   assert.equal(html.includes("data-project-edit"), false, "assistant-attached PROJECT.md footer should not contain inline edit controls");
@@ -2856,11 +2865,8 @@ function testProjectLaunchFallbackWithoutAssistantReply() {
     __renderFramingConversationImpl();
   `);
   const fallback = app.run("__projectLaunchFallbackProbe()");
-  assert.equal(fallback.exists, true, "composer fallback panel should be created when there is no assistant host");
-  assert.equal(fallback.hidden, false, "composer fallback should show for pre-start ready PROJECT.md without an assistant reply");
-  assert.equal(fallback.html.includes("PROJECT.md ready"), true);
-  assert.equal(fallback.html.includes("data-project-launch"), true);
-  assert.equal(fallback.html.includes('data-inline-fullscreen="PROJECT.md"'), true);
+  assert.equal(fallback.hidden, true, "composer fallback must stay hidden; Start belongs to assistant replies, not the input box");
+  assert.equal(fallback.html.includes("data-project-launch"), false);
 }
 
 function testMarkdownSoftBreakRendersAsSeparator() {

@@ -5120,6 +5120,15 @@ body.is-dragging-file .composer {
   gap: 6px;
 }
 
+.message-action-row.has-project-launch {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.message-action-row.has-project-launch .project-launch-action {
+  margin-left: auto;
+}
+
 .framing-message.user .message-action-row,
 .transcript-message.user .message-action-row {
   justify-content: flex-end;
@@ -5130,6 +5139,12 @@ body.is-dragging-file .composer {
 .transcript-message.final .message-action-row,
 .project-card-actions .message-copy-button {
   justify-content: flex-start;
+}
+
+.framing-message.assistant .message-action-row.has-project-launch,
+.transcript-message.assistant .message-action-row.has-project-launch,
+.transcript-message.final .message-action-row.has-project-launch {
+  justify-content: space-between;
 }
 
 .message-copy-button {
@@ -5584,11 +5599,8 @@ body.is-project-loading .cold-card > :not(.project-loading-state) {
 }
 
 .project-draft-inline {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-top: 10px;
+  display: block;
+  margin-top: 12px;
   color: var(--muted);
   font: 600 0.8rem/1.35 var(--font);
 }
