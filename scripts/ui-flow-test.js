@@ -81,6 +81,12 @@ function loadAppContext() {
       return selector === ".brief-composer-row" && this.__compactComposer ? {} : null;
     },
   });
+  const briefComposerRow = element();
+  const coldEditorWorkbench = element({
+    querySelector(selector) {
+      return selector === ".brief-composer-row" ? briefComposerRow : null;
+    },
+  });
   const projectEditor = element({ value: "# Project\n\nReady." });
   const composerFileInput = element({
     clickCount: 0,
@@ -268,7 +274,13 @@ function loadAppContext() {
     ["#cold-editor-path", element()],
     ["#cold-save-status", element()],
     ["#cold-file-preview", element()],
-    ["#cold-editor-workbench", element()],
+    ["#cold-editor-workbench", coldEditorWorkbench],
+    [".brief-composer-row", briefComposerRow],
+    ["#project-loading-state", element()],
+    ["#project-loading-eyebrow", element()],
+    ["#project-loading-title", element()],
+    ["#project-loading-detail", element()],
+    ["#project-loading-retry", element({ hidden: true })],
     ["#project-list", element()],
     [".main-stage", mainStage],
     [".chat-header", element()],
@@ -351,6 +363,7 @@ function loadAppContext() {
     ["#resume-command-label", resumeCommandLabel],
     ["#resume-command-text", resumeCommandText],
     ["#copy-resume-command", copyResumeCommand],
+    ["#sync-state", element()],
     ["#browser-roots", element()],
     ["#browser-current-path", element()],
     ["#browser-up", element()],
@@ -466,7 +479,16 @@ function loadAppContext() {
         return [];
       },
       createElement() {
-        return element();
+        const created = element();
+        Object.defineProperty(created, "id", {
+          get() { return this.__id || ""; },
+          set(value) {
+            this.__id = String(value || "");
+            if (this.__id) elements.set(`#${this.__id}`, this);
+          },
+          configurable: true,
+        });
+        return created;
       },
       execCommand() {
         return true;
@@ -518,6 +540,8 @@ function loadAppContext() {
     globalThis.__toastMessages = [];
     activeProjectId = "p1";
     activeView = "chat";
+    projectLoadPhase = "ready";
+    projectLoadError = "";
     appState = {
       project: { id: "p1", display_name: "project" },
       projects: [{ id: "p1", display_name: "project" }],
@@ -537,6 +561,7 @@ function loadAppContext() {
     };
     projectDraftDirty = false;
     coldFiles["PROJECT.md"] = "# Project\\n\\nReady.";
+    renderProjectLoadingState();
     globalThis.__renderFramingConversationImpl = renderFramingConversation;
     persistFramingMessages = async () => {
       globalThis.__persistCount += 1;
@@ -1096,8 +1121,33 @@ function loadAppContext() {
       return { hidden: Boolean(row?.hidden), html: row?.innerHTML || "", className: row?.className || "" };
     };
     globalThis.__prelaunchState = () => prelaunchAffordanceState();
+    globalThis.__setProjectLoadPhase = (phase, options = {}) => {
+      setProjectLoadPhase(phase, options);
+      return globalThis.__projectLoadingProbe();
+    };
+    globalThis.__projectLoadingProbe = () => ({
+      phase: projectLoadPhase,
+      error: projectLoadError,
+      bodyClass: document.body.classList.toString(),
+      panelHidden: Boolean(document.querySelector("#project-loading-state")?.hidden),
+      title: document.querySelector("#project-loading-title")?.textContent || "",
+      detail: document.querySelector("#project-loading-detail")?.textContent || "",
+      retryHidden: Boolean(document.querySelector("#project-loading-retry")?.hidden),
+      sync: document.querySelector("#sync-state")?.textContent || "",
+      coldDisabled: Boolean(document.querySelector("#cold-file-editor")?.disabled),
+      coldPlaceholder: document.querySelector("#cold-file-editor")?.placeholder || "",
+    });
+    globalThis.__projectLaunchFallbackProbe = () => {
+      const panel = document.querySelector("#project-launch-fallback");
+      return {
+        exists: Boolean(panel),
+        hidden: Boolean(panel?.hidden),
+        html: panel?.innerHTML || "",
+      };
+    };
+    globalThis.__projectInlinePayloadProbe = () => inlineFilePayloads["PROJECT.md"] || null;
     globalThis.__latestProjectAttachmentHtml = () => {
-      const latest = latestProjectMessage();
+      const latest = currentProjectDraftFooterMessage();
       return latest ? projectDraftAttachmentHtml(latest) : "";
     };
     globalThis.__queuedItems = () => queuedChatItems().map((item) => ({ ...item }));
@@ -1532,6 +1582,40 @@ async function testEmptyProjectPrepareUsesChatEndpoint() {
   assert.equal(app.context.__confirmMessageLog().length, 0, "ordinary empty-project chat should not ask for a regenerate confirmation");
 }
 
+function testProjectLoadingStates() {
+  const app = loadAppContext();
+  let state = app.run(`
+    __setProjectLoadPhase("projects");
+    renderProjectAvailability();
+    __projectLoadingProbe();
+  `);
+  assert.equal(state.title, "Loading projects...", "initial load should show a project loading state");
+  assert.equal(state.detail, "Finding available research workspaces");
+  assert.equal(state.bodyClass.includes("is-project-loading"), true, "body should expose loading state immediately");
+  assert.equal(state.coldDisabled, true, "composer should be disabled while projects are loading");
+  assert.equal(state.coldPlaceholder, "Opening project...");
+  assert.equal(state.retryHidden, true);
+
+  state = app.run(`
+    __setProjectLoadPhase("overview");
+    renderProjectAvailability();
+    __projectLoadingProbe();
+  `);
+  assert.equal(state.title, "Opening project...", "overview load should name the active project");
+  assert.equal(state.detail, "Reading project files and session state");
+  assert.equal(state.sync, "Reading files");
+
+  state = app.run(`
+    __setProjectLoadPhase("error", { error: "Permission denied" });
+    renderProjectAvailability();
+    __projectLoadingProbe();
+  `);
+  assert.equal(state.title, "Could not open project");
+  assert.equal(state.detail, "Permission denied");
+  assert.equal(state.sync, "Could not read files");
+  assert.equal(state.retryHidden, false, "overview errors should expose Retry");
+}
+
 async function testPrelaunchAffordanceStatesAndActions() {
   const app = loadAppContext();
   app.run(`
@@ -1559,6 +1643,9 @@ async function testPrelaunchAffordanceStatesAndActions() {
   assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("data-project-launch"), true, "latest PROJECT.md attachment should expose Start autoresearch");
   assert.equal(ready.run("__latestProjectAttachmentHtml()").includes('data-inline-fullscreen="PROJECT.md"'), true, "latest PROJECT.md attachment should keep the clickable file link");
   assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("project-rendered"), false, "PROJECT.md must stay collapsed by default");
+  assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("data-project-edit"), false, "PROJECT.md footer should not expose the old inline edit path");
+  assert.equal(ready.run("__latestProjectAttachmentHtml()").includes(">Edit<"), false, "PROJECT.md footer editing should live in the file viewer Source mode");
+  assert.equal(ready.run("__projectInlinePayloadProbe()").editable, true, "cached PROJECT.md payload must stay editable in Source mode");
   await ready.run("openLaunchDialog()");
   assert.equal(ready.launchDialog.open, true, "project attachment Start should use the existing launch dialog");
 
@@ -1749,6 +1836,43 @@ async function testFreshRemoteProjectStaleRunningSnapshotStillSends() {
     false,
     "stale remote running snapshot must not trigger the current-run toast"
   );
+}
+
+function testPrestartPendingExpectedTrialDoesNotShowAutoresearchPanel() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    appState.files.project.text = "# Project\\n\\nReady.";
+    appState.framing.project_ready = true;
+    appState.trials = [];
+    __setSession({
+      id: "s-chat",
+      session_id: "sid",
+      status: "completed",
+      mode: "chat",
+      loop_active: false,
+      loop_iteration: 0,
+      gate: { status: "continue" },
+      trajectory: { next_trial_number: 1 },
+      expected_trial: {
+        status: "pending",
+        expected_iteration: 1,
+        pending_intervention_ids: ["I0001"],
+        pending_intervention_paths: ["research_trajectory/human_interventions/I0001_prestart.md"],
+        updated_at: "2026-06-25T00:11:20-04:00"
+      },
+      transcript: []
+    });
+    __setMessages([
+      { id: "a1", role: "assistant", kind: "text", text: "I updated the launch frame.", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+  `);
+  assert.equal(app.run("hasAutoresearchTrajectory()"), false, "pending expected trial alone must not count as started autoresearch");
+  assert.equal(app.run("__prelaunchState()").state, "ready", "pre-start PROJECT.md should still expose Start");
+  const html = app.run("__framingThreadHtmlProbe()");
+  assert.equal(html.includes("Trial 1"), false, "pre-start pending expected marker must not render an autoresearch panel");
+  assert.equal(html.includes("data-resume-autoresearch"), false, "pre-start pending expected marker must not expose Resume");
+  assert.equal(html.includes("data-project-launch"), true, "pre-start ready PROJECT.md should expose Start instead");
 }
 
 async function testRunningChatMessageIsQueued() {
@@ -2632,6 +2756,7 @@ function testStartAutoresearchAppearsAtAssistantReplyEnd() {
   assert.ok(launchIndex > linkIndex, "Start autoresearch should sit after the collapsed PROJECT.md link");
   assert.equal(html.includes("project-rendered"), false, "PROJECT.md must not render expanded markdown by default");
   assert.equal(html.includes("inline-fullscreen-button"), false, "collapsed PROJECT.md should use the text link, not a fullscreen icon button");
+  assert.equal(html.includes("data-project-edit"), false, "assistant-attached PROJECT.md footer should not contain inline edit controls");
 }
 
 function testChatGeneratedProjectDraftIsSurfaced() {
@@ -2641,11 +2766,11 @@ function testChatGeneratedProjectDraftIsSurfaced() {
     coldFiles["PROJECT.md"] = "";
     appState.files.project.text = "# Project\\n\\nReady from chat.";
     appState.framing.project_ready = true;
-    __setSession({ id: "s-chat", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
-    __setMessages([
+    appState.framing.messages = [
       { id: "u1", role: "user", kind: "text", text: "Please draft PROJECT.md for this study.", created_at: "2026-06-17T10:00:00.000Z" },
       { id: "a1", role: "assistant", kind: "text", text: "I drafted a project frame after answering the request.", created_at: "2026-06-17T10:00:01.000Z" }
-    ]);
+    ];
+    __setSession({ id: "s-chat", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
     __restore();
   `);
   const messages = app.context.__messages();
@@ -2657,6 +2782,46 @@ function testChatGeneratedProjectDraftIsSurfaced() {
   assert.equal(html.includes("data-project-launch"), true, "chat-generated PROJECT.md attachment should keep the canonical launch button");
   assert.equal(html.includes('data-inline-fullscreen="PROJECT.md"'), true, "chat-generated PROJECT.md attachment should expose the collapsed file link");
   assert.equal(html.includes("project-rendered"), false, "chat-generated PROJECT.md should stay collapsed by default");
+}
+
+function testStartAutoresearchUsesCurrentProjectDraftWithoutArtifactMessage() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "Which venue?", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "I recommend Nature Human Behaviour and updated the launch frame.", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    appState.files.project.text = "# Project\\n\\nReady from file state.";
+    appState.framing.project_ready = true;
+    __setSession({ id: "s-chat", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+  `);
+  const html = app.run("__framingThreadHtmlProbe()");
+  assert.equal(html.includes("I recommend Nature Human Behaviour"), true, "assistant host should render");
+  assert.equal(html.includes("data-project-launch"), true, "ready PROJECT.md should expose Start even without a project artifact message");
+  assert.equal(html.includes('data-inline-fullscreen="PROJECT.md"'), true, "ready PROJECT.md should expose the file link");
+  assert.equal(html.includes("Ready from file state"), false, "PROJECT.md should stay collapsed instead of rendering inline");
+  assert.equal(html.includes("data-project-edit"), false, "collapsed footer should not contain inline edit controls");
+}
+
+function testProjectLaunchFallbackWithoutAssistantReply() {
+  const app = loadAppContext();
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "Launch this.", created_at: "2026-06-17T10:00:00.000Z" }
+    ]);
+    appState.files.project.text = "# Project\\n\\nReady fallback.";
+    appState.framing.project_ready = true;
+    __setSession({ id: "s-chat", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+    __renderFramingConversationImpl();
+  `);
+  const fallback = app.run("__projectLaunchFallbackProbe()");
+  assert.equal(fallback.exists, true, "composer fallback panel should be created when there is no assistant host");
+  assert.equal(fallback.hidden, false, "composer fallback should show for pre-start ready PROJECT.md without an assistant reply");
+  assert.equal(fallback.html.includes("PROJECT.md ready"), true);
+  assert.equal(fallback.html.includes("data-project-launch"), true);
+  assert.equal(fallback.html.includes('data-inline-fullscreen="PROJECT.md"'), true);
 }
 
 function testMarkdownSoftBreakRendersAsSeparator() {
@@ -6580,6 +6745,7 @@ testAgentPanelScrollRestoreAndEntryBehavior();
 await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
+testProjectLoadingStates();
 await testPrelaunchAffordanceStatesAndActions();
 await testPlanComposerModeUsesPlanEndpoint();
 await testPlanChipCanReturnToChat();
@@ -6588,6 +6754,7 @@ await testPlanRequestBlockedDuringActiveRun();
 await testPlanCardApproveReviseAndResend();
 await testFreshRemoteProjectFirstMessageSends();
 await testFreshRemoteProjectStaleRunningSnapshotStillSends();
+testPrestartPendingExpectedTrialDoesNotShowAutoresearchPanel();
 await testRunningChatMessageIsQueued();
 await testRunningSteeringLookingMessageIsQueuedTheSameWay();
 await testQueuedChatCanReorderAndDelete();
@@ -6623,6 +6790,8 @@ await testEditAttachmentsCanRemoveRetainAndAdd();
 await testLaunchGoalMessageBeforeBackendWork();
 testStartAutoresearchAppearsAtAssistantReplyEnd();
 testChatGeneratedProjectDraftIsSurfaced();
+testStartAutoresearchUsesCurrentProjectDraftWithoutArtifactMessage();
+testProjectLaunchFallbackWithoutAssistantReply();
 testMarkdownSoftBreakRendersAsSeparator();
 testMarkdownOrderedListsPreserveExplicitNumbers();
 testMessagesExposeCopyButtons();

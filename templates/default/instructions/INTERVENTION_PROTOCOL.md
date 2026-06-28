@@ -8,6 +8,8 @@ A formal human intervention is a user message that changes or constrains what th
 
 The server does not classify messages semantically. The agent must decide from the user message, the current project context, and this protocol.
 
+Before autoresearch has started, do not create human intervention files. Pre-start changes to venue, scope, paper outline, research objective, contribution framing, constraints, exclusions, success gates, or expected output are launch framing updates; handle them by following `instructions/PROJECT_FRAMING.md` and updating `PROJECT.md` when warranted. A human intervention file is only for steering an existing autoresearch trajectory after a Start/Resume run has created autoresearch state, trials, gate state, or other canonical trajectory context.
+
 ## What Is Not A Human Intervention
 
 Do not create or update an intervention for ordinary interaction, including:
@@ -22,7 +24,7 @@ Answer ordinary interaction directly. Do not mention intervention handling when 
 
 ## What Counts As A Human Intervention
 
-Create or update a pending intervention when the user message changes or constrains the research process, for example:
+After autoresearch has started, create or update a pending intervention when the user message changes or constrains the research process, for example:
 
 - correcting the research direction;
 - changing the current plan, method, resource priority, target venue, contribution framing, or scope;
@@ -39,7 +41,8 @@ Chat is not an autoresearch run. In chat mode:
 - answer the user first;
 - do not start, continue, resume, or plan a trial;
 - do not update `research_trajectory/STATE.md`, `research_trajectory/CURRENT_FINDINGS.md`, `research_trajectory/TRAJECTORY.json`, `research_trajectory/NEXT_TRIAL.json`, checkpoints, trials, reviewer files, or manuscript gate files;
-- if the message is a formal intervention, create or update a pending intervention file under `research_trajectory/human_interventions/`;
+- if autoresearch has not started, do not create or update intervention files; use `PROJECT.md` launch framing instead;
+- if autoresearch has started and the message is a formal intervention, create or update a pending intervention file under `research_trajectory/human_interventions/`;
 - update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json` only for intervention bookkeeping;
 - if you recorded or updated an intervention, add one final sentence to your response naming the path.
 

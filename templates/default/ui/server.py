@@ -6580,9 +6580,6 @@ def has_autoresearch_context() -> bool:
         return True
     if session_id and mode not in {"", "framing", "chat"}:
         return True
-    marker = read_expected_trial_marker()
-    if active_expected_trial_iteration(marker) > 0:
-        return True
     trials_dir = REPO_ROOT / "research_trajectory" / "trials"
     if trials_dir.is_dir() and any(child.is_dir() for child in trials_dir.iterdir()):
         return True
@@ -11416,8 +11413,9 @@ Allowed behavior:
 - After autoresearch starts, revise `PROJECT.md` only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
 - If resources were attached or mentioned, follow `instructions/RESOURCE_INTAKE.md` before treating them as project evidence or active inputs for `PROJECT.md`.
 - Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you.
-- If it is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
-- If it clarifies an existing pending intervention, update that same pending intervention instead of creating a new ID. Create a new ID only for a distinct intervention topic.
+- Before autoresearch starts, do not create or update human intervention files. Treat venue, scope, outline, objective, contribution, success-gate, constraint, exclusion, and output changes as `PROJECT.md` launch-framing updates instead.
+- After autoresearch starts, if the message is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
+- If a post-start message clarifies an existing pending intervention, update that same pending intervention instead of creating a new ID. Create a new ID only for a distinct intervention topic.
 - The final response must first answer the user's current question or discussion request with substantive analysis. If you updated `PROJECT.md` or other files, report those updates after the answer and briefly explain why they were warranted.
 - If you created or updated a pending intervention, end with one concise sentence naming the path, e.g. `Recorded pending intervention: research_trajectory/human_interventions/I0001_topic.md`.
 - If you did not create or update a pending intervention, do not mention interventions.

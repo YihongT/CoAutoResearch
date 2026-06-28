@@ -75,7 +75,6 @@ let framingReplyPending = false;
 let stopRequestPending = false;
 let pendingFramingUserMessageId = "";
 let framingPendingSince = 0;
-let projectDraftEditMode = false;
 let editingFramingId = "";
 let editingQueuedChatId = "";
 let draggingQueuedChatId = "";
@@ -83,7 +82,6 @@ let queueActionMenuOpen = false;
 const editAttachmentDrafts = new Map();
 let activeEditResourceTargetId = "";
 let pendingPreProjectResendConfirm = null;
-let projectRenderedScrollTop = 0;
 let overviewPollTimer = null;
 let researchEventSource = null;
 let researchEventProjectId = "";
@@ -96,6 +94,8 @@ let lastFramingHtml = "";
 let framingMessagesPersisting = false;
 let framingMessagesSaveVersion = 0;
 let serverClockOffsetMs = 0;
+let projectLoadPhase = "projects";
+let projectLoadError = "";
 let initialProjectDialogOpened = false;
 let openProjectMenuId = "";
 let pendingRenameProject = null;
@@ -703,6 +703,20 @@ function collapseProjectDraftMessages(messages) {
   return messages.filter((message) => !isProjectDraftMessage(message) || message.id === latest.id);
 }
 
+function currentProjectDraftFooterMessage(messages = localMessages) {
+  const latest = latestProjectMessage(messages);
+  const draft = String(latest?.artifact?.text || currentProjectDraft() || "").trim();
+  if (!draft || isPlaceholderProject(draft)) return null;
+  return {
+    id: latest?.id || "current-project-draft",
+    role: "assistant",
+    kind: "project",
+    text: latest?.text || "PROJECT.md ready.",
+    created_at: latest?.created_at || new Date().toISOString(),
+    artifact: { path: "PROJECT.md", text: draft },
+  };
+}
+
 function canHostProjectDraftAttachment(message) {
   return (
     message?.role === "assistant" &&
@@ -714,20 +728,20 @@ function canHostProjectDraftAttachment(message) {
 
 function attachProjectDraftToLatestAssistant(messages) {
   const items = Array.isArray(messages) ? messages : [];
-  const latest = latestProjectMessage(items);
+  const latest = currentProjectDraftFooterMessage(items);
   if (!latest) return items;
   const projectIndex = items.findIndex((message) => message?.id === latest.id);
-  if (projectIndex <= 0) return items;
+  const searchStart = projectIndex >= 0 ? projectIndex - 1 : items.length - 1;
   let hostId = "";
-  for (let index = projectIndex - 1; index >= 0; index -= 1) {
+  for (let index = searchStart; index >= 0; index -= 1) {
     if (canHostProjectDraftAttachment(items[index])) {
       hostId = items[index].id;
       break;
     }
   }
-  if (!hostId) return items;
+  if (!hostId) return projectIndex >= 0 ? items.filter((message) => message?.id !== latest.id) : items;
   return items
-    .filter((message) => message?.id !== latest.id)
+    .filter((message) => projectIndex < 0 || message?.id !== latest.id)
     .map((message) => (message?.id === hostId ? { ...message, attachedProjectDraft: latest } : message));
 }
 
@@ -2267,6 +2281,78 @@ function currentProjectName() {
   return String(project.display_name || project.title || "Project").trim();
 }
 
+function projectNameForId(projectId = activeProjectId) {
+  const project = projectById(projectId) || currentProject();
+  return String(project?.display_name || project?.title || "Project").trim();
+}
+
+function projectLoadingCopy() {
+  if (projectLoadPhase === "projects") {
+    return {
+      eyebrow: "Projects",
+      title: "Loading projects...",
+      detail: "Finding available research workspaces",
+      sync: "Loading projects",
+      retry: false,
+    };
+  }
+  if (projectLoadPhase === "overview") {
+    const name = projectNameForId();
+    return {
+      eyebrow: "Opening project",
+      title: `Opening ${name}...`,
+      detail: "Reading project files and session state",
+      sync: "Reading files",
+      retry: false,
+    };
+  }
+  if (projectLoadPhase === "error") {
+    const name = projectNameForId();
+    return {
+      eyebrow: "Project unavailable",
+      title: `Could not open ${name}`,
+      detail: projectLoadError || "The project files could not be read.",
+      sync: "Could not read files",
+      retry: true,
+    };
+  }
+  return {
+    eyebrow: "",
+    title: "",
+    detail: "",
+    sync: "",
+    retry: false,
+  };
+}
+
+function isProjectLoading() {
+  return projectLoadPhase === "projects" || projectLoadPhase === "overview" || projectLoadPhase === "error";
+}
+
+function renderProjectLoadingState() {
+  const loading = isProjectLoading() && !hasNoProject();
+  const copy = projectLoadingCopy();
+  document.body.classList.toggle("is-project-loading", loading);
+  document.body.classList.toggle("is-project-loading-error", projectLoadPhase === "error");
+  const panel = $("#project-loading-state");
+  if (panel) {
+    panel.hidden = !loading;
+    $("#project-loading-eyebrow").textContent = copy.eyebrow;
+    $("#project-loading-title").textContent = copy.title;
+    $("#project-loading-detail").textContent = copy.detail;
+    const retry = $("#project-loading-retry");
+    if (retry) retry.hidden = !copy.retry;
+  }
+  if (copy.sync) $("#sync-state").textContent = copy.sync;
+}
+
+function setProjectLoadPhase(phase, options = {}) {
+  projectLoadPhase = phase || "ready";
+  projectLoadError = String(options.error || "");
+  renderProjectLoadingState();
+  renderComposerActionButtons();
+}
+
 function projectById(projectId) {
   const id = String(projectId || "");
   const projects = Array.isArray(appState?.projects) ? appState.projects : [];
@@ -2316,6 +2402,7 @@ function hasNoProject() {
 
 function renderProjectAvailability() {
   const noProject = hasNoProject();
+  const loading = isProjectLoading() && !noProject;
   document.body.classList.toggle("has-no-project", noProject);
   const controls = [
     "#cold-file-editor",
@@ -2326,15 +2413,26 @@ function renderProjectAvailability() {
   ];
   controls.forEach((selector) => {
     const element = $(selector);
-    if (element) element.disabled = noProject;
+    if (element) element.disabled = noProject || loading;
   });
   $$(".composer-attach-button, [data-attachment-action], .composer-suggestion-chip").forEach((button) => {
-    button.disabled = noProject;
-    button.setAttribute("aria-disabled", noProject ? "true" : "false");
+    button.disabled = noProject || loading;
+    button.setAttribute("aria-disabled", noProject || loading ? "true" : "false");
   });
   updateResourceImportActionState();
   renderComposerActionButtons();
+  renderProjectLoadingState();
+  if (loading) {
+    renderProjectLaunchFallbackPanel(false);
+    const editor = $("#cold-file-editor");
+    if (editor) editor.placeholder = "Opening project...";
+    $("#session-pill")?.toggleAttribute("hidden", true);
+    $("#resume-command-bar")?.toggleAttribute("hidden", true);
+    $("#composer-suggestions")?.toggleAttribute("hidden", true);
+    return;
+  }
   if (!noProject) return;
+  renderProjectLaunchFallbackPanel(false);
   const editor = $("#cold-file-editor");
   if (editor) {
     editor.value = "";
@@ -2369,6 +2467,31 @@ function renderProjectList() {
   if (!target) return;
   const projects = Array.isArray(appState?.projects) ? appState.projects : [];
   renderProjectCreateButton();
+  if (projectLoadPhase === "projects" && !projects.length) {
+    target.innerHTML = `
+      <div class="project-switch-row is-loading">
+        <div class="project-switch project-switch-skeleton">
+          <span class="project-status-dot idle" aria-hidden="true"></span>
+          <span>
+            <strong>Loading projects...</strong>
+            <small>Reading workspaces</small>
+          </span>
+        </div>
+      </div>
+      <div class="project-switch-row is-loading">
+        <div class="project-switch project-switch-skeleton">
+          <span class="project-status-dot idle" aria-hidden="true"></span>
+          <span>
+            <strong>&nbsp;</strong>
+            <small>&nbsp;</small>
+          </span>
+        </div>
+      </div>
+    `;
+    renderRailVisibility();
+    renderProjectAvailability();
+    return;
+  }
   if (!projects.length) {
     target.innerHTML = `
       <button class="project-empty project-empty-action" type="button" data-create-first-project>
@@ -2435,7 +2558,6 @@ function resetProjectClientState() {
   prepareSaved = false;
   projectDraftDirty = false;
   framingDraftPending = false;
-  projectDraftEditMode = false;
   editingFramingId = "";
   lastFramingHtml = "";
   chatScrollRestoredProjectId = "";
@@ -2477,6 +2599,7 @@ async function switchProject(projectId) {
   persistNavigationState();
   activeProjectId = next;
   localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+  setProjectLoadPhase("overview");
   composerMode = initialComposerMode(activeProjectId);
   pendingPlanRevisionId = "";
   resetProjectClientState();
@@ -2489,7 +2612,8 @@ async function switchProject(projectId) {
   await loadOverview(true);
 }
 
-async function loadProjects() {
+async function loadProjects(options = {}) {
+  if (options.showLoading) setProjectLoadPhase("projects");
   const payload = await api("/api/projects");
   const projects = Array.isArray(payload.projects) ? payload.projects : [];
   const known = new Set(projects.map((project) => String(project.id || "")));
@@ -2511,6 +2635,8 @@ async function loadProjects() {
   renderProjectList();
   renderProjectAvailability();
   renderComposerModeControls();
+  if (options.showLoading && activeProjectId) setProjectLoadPhase("overview");
+  else setProjectLoadPhase("ready");
   maybeOpenInitialProjectDialog();
 }
 
@@ -2529,7 +2655,10 @@ async function upgradeProjectReviewers(projectId) {
     multi_project: Boolean(payload.multi_project ?? appState?.multi_project),
   };
   renderProjectList();
-  if (id === activeProjectId) await loadOverview(true);
+  if (id === activeProjectId) {
+    setProjectLoadPhase("overview");
+    await loadOverview(true);
+  }
   showToast(`Updated reviewers for ${project.display_name || project.title || "project"}.`);
 }
 
@@ -2703,8 +2832,10 @@ async function deleteProjectFromDialog(event) {
     closeProjectDeleteDialog();
     renderProjectList();
     if (activeProjectId) {
+      setProjectLoadPhase("overview");
       await loadOverview(true);
     } else {
+      setProjectLoadPhase("ready");
       renderProjectAvailability();
       maybeOpenInitialProjectDialog();
     }
@@ -2752,6 +2883,7 @@ async function createProjectFromDialog(event) {
     };
     closeProjectCreateDialog();
     renderProjectList();
+    setProjectLoadPhase("overview");
     hydrateTargetVenueField({ force: true });
     restoreResourceSelections();
     await loadUiSettings();
@@ -2774,12 +2906,14 @@ async function createProjectFromDialog(event) {
 async function loadOverview(silent = false) {
   if (!activeProjectId && appState?.multi_project) {
     $("#sync-state").textContent = "Create a project";
+    setProjectLoadPhase("ready");
     renderProjectList();
     renderProjectAvailability();
     maybeOpenInitialProjectDialog();
     return;
   }
   try {
+    if (projectLoadPhase !== "overview" && projectLoadPhase !== "projects") setProjectLoadPhase("overview");
     const materialContent = $("#context-content");
     const holdMaterialTree = activeView === "materials" && Boolean(materialContent?.childElementCount);
     appState = await api("/api/overview");
@@ -2801,6 +2935,7 @@ async function loadOverview(silent = false) {
     if (!["running", "stopping"].includes(String(session.status || "").toLowerCase())) {
       reconcileFramingPending(localMessages);
     }
+    setProjectLoadPhase("ready");
     $("#sync-state").textContent = `Synced ${new Date(appState.generated_at).toLocaleTimeString()}`;
     renderProjectList();
     renderRailVisibility();
@@ -2819,7 +2954,7 @@ async function loadOverview(silent = false) {
     scheduleWorkingTicker();
     if (!silent) showToast("Refreshed from repository files.");
   } catch (error) {
-    $("#sync-state").textContent = "Could not read files";
+    setProjectLoadPhase("error", { error: error.message });
     showToast(error.message, true);
   }
 }
@@ -2828,7 +2963,10 @@ function scheduleOverviewPoll(delay) {
   clearTimeout(overviewPollTimer);
   overviewPollTimer = setTimeout(async () => {
     if (activeProjectId) await loadOverview(true);
-    else await loadProjects().catch((error) => showToast(error.message, true));
+    else await loadProjects().catch((error) => {
+      setProjectLoadPhase("error", { error: error.message });
+      showToast(error.message, true);
+    });
     scheduleOverviewPoll(isSessionRunning() || framingDraftPending || framingReplyPending ? 1000 : 3500);
   }, delay);
 }
@@ -3123,7 +3261,6 @@ function hasAutoresearchTrajectory() {
   const trajectory = session.trajectory && typeof session.trajectory === "object" ? session.trajectory : {};
   return hasGoalStarted()
     || visibleTrials().length > 0
-    || pendingExpectedTrialIteration() > 0
     || Boolean(trajectory.base_trial || trajectory.latest_active_trial);
 }
 
@@ -3401,6 +3538,44 @@ function renderQueuedChatPanel() {
   requestAnimationFrame(updateBriefDockGeometry);
 }
 
+function ensureProjectLaunchFallbackPanel() {
+  const workbench = $("#cold-editor-workbench");
+  const row = workbench?.querySelector(".brief-composer-row");
+  if (!workbench || !row) return null;
+  let panel = $("#project-launch-fallback");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "project-launch-fallback";
+    panel.className = "project-launch-fallback";
+    panel.setAttribute("aria-label", "PROJECT.md launch action");
+    const queuePanel = ensureQueuedChatPanel();
+    if (queuePanel) queuePanel.insertAdjacentElement("afterend", panel);
+    else row.insertAdjacentElement("beforebegin", panel);
+  }
+  return panel;
+}
+
+function projectFooterIsAttached(messages = []) {
+  return (Array.isArray(messages) ? messages : []).some((message) => message?.attachedProjectDraft);
+}
+
+function renderProjectLaunchFallbackPanel(show) {
+  const panel = ensureProjectLaunchFallbackPanel();
+  if (!panel) return;
+  const message = currentProjectDraftFooterMessage();
+  const shouldShow = Boolean(show && message && !isProjectLoading() && prelaunchAffordanceState().showStart);
+  panel.hidden = !shouldShow;
+  panel.innerHTML = shouldShow
+    ? `
+      <div class="project-launch-fallback-inner">
+        <span>PROJECT.md ready</span>
+        ${projectDraftActionsHtml(message, { label: "" })}
+      </div>
+    `
+    : "";
+  requestAnimationFrame(updateBriefDockGeometry);
+}
+
 function renderQueueActionMenu() {
   const controls = ensureQueueActionMenu();
   if (!controls) return;
@@ -3426,6 +3601,7 @@ function latestProjectDraftTimestamp() {
 }
 
 function isPrelaunchPhase() {
+  if (isProjectLoading()) return false;
   if (!hasActiveProject()) return false;
   if (isSessionRunning()) return false;
   if (isGoalPassed()) return false;
@@ -3628,9 +3804,10 @@ function renderComposerActionButtons() {
   const queueMode = canQueueComposerWhileRunning();
   const resourceBlocked = hasBlockingResourceImports();
   const blockedMessage = blockingResourceImportMessage();
+  const loading = isProjectLoading();
   syncComposerActionButton($("#prepare-cold-start"), {
     stopMode,
-    disabled: hasNoProject() || resourceBlocked,
+    disabled: hasNoProject() || resourceBlocked || loading,
     sendHtml: composerSendIconHtml(),
     sendLabel: queueMode ? "Queue follow-up" : "Send",
   });
@@ -3644,7 +3821,7 @@ function renderComposerActionButtons() {
   const send = $("#chat-form .send-button");
   syncComposerActionButton(send, {
     stopMode,
-    disabled: !(canMessage() || queueMode) || resourceBlocked || hasNoProject(),
+    disabled: !(canMessage() || queueMode) || resourceBlocked || hasNoProject() || loading,
     sendHtml: queueMode ? "Queue" : "Send",
     sendLabel: queueMode ? "Queue follow-up" : "Send",
   });
@@ -3658,10 +3835,12 @@ function renderComposerActionButtons() {
 }
 
 function canMessage() {
+  if (isProjectLoading()) return false;
   return hasLaunched() && hasSession() && !isSessionRunning();
 }
 
 function canChatWithProjectDraft() {
+  if (isProjectLoading()) return false;
   return hasProjectDraftReady() && !isSessionRunning();
 }
 
@@ -3759,9 +3938,11 @@ function markPrepareSaved(value) {
 function currentProjectDraft() {
   const projectMessage = latestProjectMessage();
   if (projectMessage?.artifact?.text) return String(projectMessage.artifact.text || "");
+  const stateDraft = String(appState?.files?.project?.text || "");
   const editor = $("#project-draft-editor");
-  if (editor) return String(editor.value || "");
-  return String(appState?.files?.project?.text || "");
+  const editorDraft = String(editor?.value || "");
+  if (editorDraft.trim()) return editorDraft;
+  return stateDraft;
 }
 
 function hasProjectDraftReady() {
@@ -4361,13 +4542,14 @@ function cacheProjectDraftInlinePayload(draft) {
   const text = String(draft || "");
   inlineFiles["PROJECT.md"] = text;
   inlineFilePayloads["PROJECT.md"] = {
+    ...(inlineFilePayloads["PROJECT.md"] || {}),
     exists: true,
     is_dir: false,
     path: "PROJECT.md",
     text,
     kind: "markdown",
     mime: "text/markdown",
-    editable: false,
+    editable: true,
   };
 }
 
@@ -4802,34 +4984,21 @@ function terminalRunNoResponseHtml(unansweredUser) {
   `;
 }
 
-function projectDraftActionsHtml(message) {
-  const latest = latestProjectMessage();
-  const isLatest = latest && latest.id === message.id;
+function projectDraftActionsHtml(message, options = {}) {
+  const label = options.label === undefined ? "Updated" : String(options.label || "");
   const launchState = prelaunchAffordanceState();
-  const canStartGoal = isLatest && launchState.showStart;
+  const canStartGoal = launchState.showStart;
   const launchDisabled = launchState.disabled ? " disabled" : "";
   const launchTitle = launchState.reason ? ` title="${escapeHtml(launchState.reason)}"` : "";
   const draft = String(message?.artifact?.text || currentProjectDraft());
   cacheProjectDraftInlinePayload(draft);
-  if (projectDraftEditMode && isLatest) {
-    return `
-      <div class="project-inline-edit">
-        <textarea class="project-inline-editor" data-project-inline-editor spellcheck="false">${escapeHtml(draft)}</textarea>
-        <div class="project-card-actions">
-          <button class="secondary-button small-button" type="button" data-project-edit-cancel>Cancel</button>
-          <button class="primary-button small-button" type="button" data-project-edit-save>Save</button>
-        </div>
-      </div>
-    `;
-  }
   return `
     <div class="project-inline-reference">
-      <span>Updated</span>
+      ${label ? `<span>${escapeHtml(label)}</span>` : ""}
       ${markdownFileButtonHtml("PROJECT.md", "PROJECT.md")}
     </div>
-    <div class="project-card-actions" ${isLatest ? "" : "hidden"}>
+    <div class="project-card-actions">
       ${messageCopyButton(draft, "Copy PROJECT.md draft", "PROJECT.md draft copied.")}
-      <button class="secondary-button small-button" type="button" data-project-edit>Edit</button>
       ${canStartGoal ? `<button class="primary-button small-button" type="button" data-project-launch ${launchDisabled}${launchTitle}>Start autoresearch</button>` : ""}
     </div>
   `;
@@ -4862,6 +5031,7 @@ function renderFramingConversation() {
   reconcileFramingPending(localMessages);
   const wasNearBottom = isPageNearBottom();
   const visibleMessages = visibleFramingMessagesForRender(localMessages);
+  const hasAttachedProjectFooter = projectFooterIsAttached(visibleMessages);
   const transcriptEntries = sessionTranscriptEntries();
   const activity = buildFramingActivityByMessage(visibleMessages, transcriptEntries);
   const messages = visibleMessages
@@ -4890,15 +5060,9 @@ function renderFramingConversation() {
   const hasThreadContent = Boolean(hasInlineThreadContent || autoresearchDockHtml);
   const nextHtml = [messages, pending].filter(Boolean).join("");
   if (nextHtml !== lastFramingHtml) {
-    const renderedDraft = document.querySelector(".project-rendered");
-    if (renderedDraft) projectRenderedScrollTop = renderedDraft.scrollTop;
     thread.innerHTML = nextHtml;
     lastFramingHtml = nextHtml;
     requestAnimationFrame(() => {
-      const nextRenderedDraft = document.querySelector(".project-rendered");
-      if (nextRenderedDraft) {
-        nextRenderedDraft.scrollTop = Math.min(projectRenderedScrollTop, nextRenderedDraft.scrollHeight);
-      }
       restoreTrialStripScroll();
     });
     if (activeView === "chat" && pending && wasNearBottom) {
@@ -4913,6 +5077,7 @@ function renderFramingConversation() {
   restoreInitialChatScrollPosition();
   thread.hidden = !hasInlineThreadContent;
   $("#cold-start-workspace")?.classList.toggle("has-framing-thread", hasThreadContent);
+  renderProjectLaunchFallbackPanel(!hasAttachedProjectFooter);
   $("#framing-project-panel")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog-inline")?.toggleAttribute("hidden", true);
@@ -6026,6 +6191,31 @@ function renderStage() {
 }
 
 function renderChatState() {
+  if (isProjectLoading()) {
+    renderProjectLoadingState();
+    renderProjectLaunchFallbackPanel(false);
+    $("#chat-thread").hidden = true;
+    $("#framing-thread").hidden = true;
+    $("#cold-start-workspace")?.classList.remove("has-framing-thread");
+    $("#open-launch-dialog")?.toggleAttribute("hidden", true);
+    $("#open-launch-dialog-inline")?.toggleAttribute("hidden", true);
+    $("#session-pill")?.toggleAttribute("hidden", true);
+    $("#resume-command-bar")?.toggleAttribute("hidden", true);
+    const textarea = $("#chat-form textarea");
+    const send = $("#chat-form .send-button");
+    const cont = $("#continue-research");
+    if (textarea) {
+      textarea.disabled = true;
+      textarea.placeholder = "Opening project...";
+    }
+    if (send) send.disabled = true;
+    if (cont) cont.disabled = true;
+    renderComposerActionButtons();
+    renderComposerSuggestions();
+    syncBriefComposerDock(false);
+    renderAutoresearchDock("", false);
+    return;
+  }
   const session = sessionState();
   const launched = hasLaunched();
   const running = isSessionRunning();
@@ -6075,6 +6265,7 @@ function renderChatState() {
 }
 
 function coldComposerPlaceholder(hasFramingThread) {
+  if (isProjectLoading()) return "Opening project...";
   if (canQueueComposerWhileRunning()) {
     return "Queue a follow-up for when the agent finishes...";
   }
@@ -6101,6 +6292,11 @@ function renderColdStartEditor() {
     ? "Drafted from existing PROJECT.md. Edit before launch."
     : "Saved to resources/user_input/INITIAL_BRIEF.md";
   const editor = $("#cold-file-editor");
+  if (isProjectLoading()) {
+    editor.placeholder = "Opening project...";
+    editor.disabled = true;
+    return;
+  }
   const hasFramingThread = localMessages.length > 0 || framingDraftPending || framingReplyPending;
   const currentEditorValue = String(editor.value || "");
   const sessionComposerMode = hasProjectDraftReady() || hasLaunched() || hasFramingThread;
@@ -6530,7 +6726,7 @@ function reportForIteration(iteration) {
   const target = Number(iteration || 0);
   const visible = visibleTrialReports().find((trial) => trialIterationValue(trial) === target) || null;
   if (visible) return visible;
-  return pendingExpectedTrialIteration() === target ? pendingExpectedTrialReport(target) : null;
+  return hasAutoresearchTrajectory() && pendingExpectedTrialIteration() === target ? pendingExpectedTrialReport(target) : null;
 }
 
 function currentTrialIndex(trials = visibleTrials()) {
@@ -7351,11 +7547,12 @@ function buildFramingActivityByMessage(messages, entries) {
 
 function trialTimelineContentHtml(entries, options = {}) {
   const pendingExpected = pendingExpectedTrialIteration();
-  if (!entries.length && !visibleTrials().length && !activeRunTrialIteration() && !pendingExpected) return "";
   const omittedEntryIds = options.omittedEntryIds || new Set();
   const trialGroups = new Map();
   let currentIteration = 0;
   const hasTrialContext = hasLaunched() || hasGoalStarted() || visibleTrials().length > 0;
+  const showPendingExpected = Boolean(pendingExpected && hasTrialContext);
+  if (!entries.length && !visibleTrials().length && !activeRunTrialIteration() && !showPendingExpected) return "";
   entries.forEach((entry) => {
     if (entry?.id && omittedEntryIds.has(String(entry.id))) return;
     const nextIteration = effectiveIteration(entry, currentIteration);
@@ -7371,7 +7568,7 @@ function trialTimelineContentHtml(entries, options = {}) {
   });
 
   const reports = [...visibleTrials()];
-  if (pendingExpected && !reports.some((report) => trialIterationValue(report) === pendingExpected) && !isGoalPassed()) {
+  if (showPendingExpected && !reports.some((report) => trialIterationValue(report) === pendingExpected) && !isGoalPassed()) {
     const pendingReport = pendingExpectedTrialReport(pendingExpected);
     if (pendingReport) reports.push(pendingReport);
   }
@@ -7390,7 +7587,7 @@ function trialTimelineContentHtml(entries, options = {}) {
     }));
   const selected = selectedTrial(trials);
   const manuallySelected = Number(selectedTrialIndex || 0) > 0 && trialStripManualActive();
-  const activeTrial = manuallySelected ? selected : (liveIteration || pendingExpected || selected);
+  const activeTrial = manuallySelected ? selected : (liveIteration || (showPendingExpected ? pendingExpected : 0) || selected);
   const activeTrialData = trials.find((trial) => Number(trial.iteration) === Number(activeTrial));
   const runningTrialData = liveIteration && Number(activeTrial) === Number(liveIteration)
     ? trials.find((trial) => isTrialLive(trial.iteration))
@@ -13425,6 +13622,17 @@ function bindEvents() {
     if (uploadSourceMenu && !uploadSourceMenu.hidden && !event.target.closest("#upload-source-menu") && !event.target.closest("#composer-attach-button") && !event.target.closest("[data-edit-upload]")) {
       closeUploadSourcePicker();
     }
+    const projectLoadingRetry = event.target.closest("[data-project-loading-retry]");
+    if (projectLoadingRetry) {
+      const retry = activeProjectId
+        ? loadOverview(true)
+        : loadProjects({ showLoading: true });
+      retry.catch((error) => {
+        setProjectLoadPhase("error", { error: error.message });
+        showToast(error.message, true);
+      });
+      return;
+    }
     const projectSwitch = event.target.closest("[data-project-switch]");
     if (projectSwitch) {
       switchProject(projectSwitch.dataset.projectSwitch).catch((error) => showToast(error.message, true));
@@ -13824,37 +14032,6 @@ function bindEvents() {
       revisePlan(planRevise.dataset.planRevise);
       return;
     }
-    const projectEdit = event.target.closest("[data-project-edit]");
-    if (projectEdit) {
-      projectDraftEditMode = true;
-      renderFramingConversation();
-      requestAnimationFrame(() => document.querySelector("[data-project-inline-editor]")?.focus());
-      return;
-    }
-    const projectEditCancel = event.target.closest("[data-project-edit-cancel]");
-    if (projectEditCancel) {
-      projectDraftEditMode = false;
-      renderFramingConversation();
-      return;
-    }
-    const projectEditSave = event.target.closest("[data-project-edit-save]");
-    if (projectEditSave) {
-      const inlineEditor = document.querySelector("[data-project-inline-editor]");
-      const hiddenEditor = $("#project-draft-editor");
-      if (inlineEditor && hiddenEditor) {
-        hiddenEditor.value = inlineEditor.value;
-        updateLatestProjectDraftMessage(inlineEditor.value);
-        projectDraftDirty = true;
-        updateProjectDraftPreview();
-        withButtonFeedback(projectEditSave, () => saveProjectDraft())
-          .then(() => {
-            projectDraftEditMode = false;
-            renderFramingConversation();
-          })
-          .catch((error) => showToast(error.message, true));
-      }
-      return;
-    }
     const projectLaunch = event.target.closest("[data-project-launch]");
     if (projectLaunch) {
       openLaunchDialog();
@@ -13934,8 +14111,12 @@ function bindEvents() {
 async function init() {
   bindEvents();
   setResourceCategory(activeResourceCategory);
+  setProjectLoadPhase("projects");
   await loadUiSettings();
-  await loadProjects().catch((error) => showToast(error.message, true));
+  await loadProjects({ showLoading: true }).catch((error) => {
+    setProjectLoadPhase("error", { error: error.message });
+    showToast(error.message, true);
+  });
   restoreNavigationState();
   if (!activeProjectId && appState?.multi_project) {
     $("#sync-state").textContent = "Create a project";

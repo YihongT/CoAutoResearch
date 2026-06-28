@@ -1622,6 +1622,8 @@ Confidence: medium
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
   const projectFramingInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "PROJECT_FRAMING.md"), "utf8");
+  const interventionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "INTERVENTION_PROTOCOL.md"), "utf8");
+  const agentsInstructions = await fsp.readFile(path.join(root, "templates", "default", "AGENTS.md"), "utf8");
   if (
     !serverPy.includes("REMOTE_AUTH_TOKEN") ||
     !serverPy.includes("authorize_remote_request") ||
@@ -1703,11 +1705,23 @@ Confidence: medium
     throw new Error("PROJECT_FRAMING.md must define before/after autoresearch PROJECT.md update policy");
   }
   if (
+    !interventionInstructions.includes("Before autoresearch has started, do not create human intervention files") ||
+    !interventionInstructions.includes("Pre-start changes to venue, scope, paper outline") ||
+    !interventionInstructions.includes("if autoresearch has not started, do not create or update intervention files; use `PROJECT.md` launch framing instead") ||
+    !agentsInstructions.includes("ordinary interaction, pre-start launch framing, or formal human intervention") ||
+    !agentsInstructions.includes("Before autoresearch starts, messages that change venue, scope, outline") ||
+    !agentsInstructions.includes("do not create human intervention files before there is an autoresearch trajectory")
+  ) {
+    throw new Error("intervention instructions must route pre-start launch framing to PROJECT.md instead of pending intervention files");
+  }
+  if (
     !serverPy.includes("def chat_research_prompt") ||
     !serverPy.includes("This is not an autoresearch launch") ||
     !serverPy.includes("the server has not classified it for you") ||
-    !serverPy.includes("create or update a pending intervention file") ||
-    !serverPy.includes("If it clarifies an existing pending intervention, update that same pending intervention") ||
+    !serverPy.includes("Before autoresearch starts, do not create or update human intervention files") ||
+    !serverPy.includes("Treat venue, scope, outline, objective, contribution, success-gate, constraint, exclusion, and output changes as `PROJECT.md` launch-framing updates instead") ||
+    !serverPy.includes("After autoresearch starts, if the message is a formal human intervention, create or update a pending intervention file") ||
+    !serverPy.includes("If a post-start message clarifies an existing pending intervention, update that same pending intervention") ||
     !serverPy.includes("The final response must first answer the user's current question or discussion request with substantive analysis") ||
     !serverPy.includes("Read and follow `instructions/PROJECT_FRAMING.md`") ||
     !serverPy.includes("before sending the final response check whether that planned answer establishes or materially changes the launch frame") ||
@@ -2021,7 +2035,8 @@ Confidence: medium
     !appJs.includes("function pendingExpectedTrialIteration()") ||
     !appJs.includes("function pendingExpectedTrialReport") ||
     !appJs.includes("function persistentAutoresearchPanelHtml") ||
-    !appJs.includes("const activeTrial = manuallySelected ? selected : (liveIteration || pendingExpected || selected)") ||
+    !appJs.includes("const showPendingExpected = Boolean(pendingExpected && hasTrialContext)") ||
+    !appJs.includes("const activeTrial = manuallySelected ? selected : (liveIteration || (showPendingExpected ? pendingExpected : 0) || selected)") ||
     !appJs.includes("Number(activeTrial) === Number(liveIteration)") ||
     !(
       (
@@ -2061,6 +2076,10 @@ Confidence: medium
     appJs.includes("const running = isSessionRunning() && Number(sessionState().loop_iteration || 0) === Number(iteration)")
   ) {
     throw new Error("trial history must show live status only for truly active, unreported trials");
+  }
+  const hasAutoresearchTrajectoryBlock = appJs.match(/function hasAutoresearchTrajectory\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  if (!hasAutoresearchTrajectoryBlock || hasAutoresearchTrajectoryBlock.includes("pendingExpectedTrialIteration")) {
+    throw new Error("pending NEXT_TRIAL markers alone must not count as started autoresearch");
   }
   if (
     !appJs.includes("function isSessionInterrupted()") ||
@@ -2228,12 +2247,38 @@ Confidence: medium
     appJs.includes("latestAssistantTextMessage") ||
     !appJs.includes("function projectDraftAttachmentHtml") ||
     !appJs.includes("function attachProjectDraftToLatestAssistant") ||
+    !appJs.includes("function currentProjectDraftFooterMessage") ||
+    !appJs.includes("function renderProjectLaunchFallbackPanel") ||
     !appJs.includes("visibleFramingMessagesForRender(localMessages)") ||
     !appJs.includes('markdownFileButtonHtml("PROJECT.md", "PROJECT.md")') ||
     !appJs.includes("const launchState = prelaunchAffordanceState()") ||
-    !appJs.includes("canStartGoal = isLatest && launchState.showStart")
+    !appJs.includes("canStartGoal = launchState.showStart") ||
+    !appJs.includes('id: latest?.id || "current-project-draft"') ||
+    !appJs.includes('editable: true') ||
+    !appJs.includes("PROJECT.md ready") ||
+    appJs.includes("projectDraftEditMode") ||
+    appJs.includes("data-project-edit") ||
+    appJs.includes("data-project-edit-save") ||
+    appJs.includes("data-project-edit-cancel") ||
+    stylesCss.includes("project-inline-editor") ||
+    stylesCss.includes("project-inline-edit")
   ) {
     throw new Error("assistant replies must own collapsed PROJECT.md launch attachments");
+  }
+  if (
+    !indexHtml.includes("project-loading-state") ||
+    !indexHtml.includes("Loading projects...") ||
+    !indexHtml.includes("Finding available research workspaces") ||
+    !appJs.includes("let projectLoadPhase = \"projects\"") ||
+    !appJs.includes("function setProjectLoadPhase") ||
+    !appJs.includes("function renderProjectLoadingState") ||
+    !appJs.includes("Opening project...") ||
+    !appJs.includes("Could not read files") ||
+    !appJs.includes("data-project-loading-retry") ||
+    !stylesCss.includes(".project-loading-state") ||
+    !stylesCss.includes("body.is-project-loading")
+  ) {
+    throw new Error("remote project loading must show an immediate professional loading/error state");
   }
   if (
     !appJs.includes("Open latest manuscript") ||
@@ -3129,6 +3174,22 @@ Confidence: medium
       "assert 'human-intervention intake mode' not in captured[-1]['prompt'], captured[-1]['prompt']",
       "assert 'server has not classified it for you' in captured[-1]['prompt'], captured[-1]['prompt']",
       "assert ordinary['files'].get('intervention') is None, ordinary",
+      "captured.clear()",
+      "codex_chat_settings = module.normalize_research_settings({'backend': 'codex', 'reviewCheckpointInterval': 5})",
+      "context.session.update({'process': None, 'status': 'completed', 'mode': 'chat', 'loop_active': False, 'loop_iteration': 0, 'settings': codex_chat_settings, 'session_id': '', 'logs': [], 'raw_logs': [], 'transcript': []})",
+      "module.start_research_chat({'message': 'Recommend a venue and outline before launch.', 'settings': codex_chat_settings})",
+      "assert captured[-1]['mode'] == 'chat' and captured[-1]['settings']['backend'] == 'codex', captured[-1]",
+      "assert 'Before autoresearch starts, do not create or update human intervention files' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'PROJECT.md` launch-framing updates instead' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'After autoresearch starts, if the message is a formal human intervention' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "captured.clear()",
+      "claude_chat_settings = module.normalize_research_settings({'backend': 'claude', 'reviewCheckpointInterval': 5})",
+      "context.session.update({'process': None, 'status': 'completed', 'mode': 'chat', 'loop_active': False, 'loop_iteration': 0, 'settings': claude_chat_settings, 'session_id': '', 'logs': [], 'raw_logs': [], 'transcript': []})",
+      "module.start_research_chat({'message': 'Recommend a venue and outline before launch.', 'settings': claude_chat_settings})",
+      "assert captured[-1]['mode'] == 'chat' and captured[-1]['settings']['backend'] == 'claude', captured[-1]",
+      "assert 'Before autoresearch starts, do not create or update human intervention files' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'PROJECT.md` launch-framing updates instead' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'After autoresearch starts, if the message is a formal human intervention' in captured[-1]['prompt'], captured[-1]['prompt']",
       "marker_path = root / 'research_trajectory' / 'NEXT_TRIAL.json'",
       "module.sync_expected_trial_pending_interventions('no_pending_interventions')",
       "assert not marker_path.exists(), 'empty pending sync must not create NEXT_TRIAL.json'",
@@ -3159,6 +3220,7 @@ Confidence: medium
       "assert started_queued_chat is True, started_queued_chat",
       "assert captured and captured[-1]['mode'] == 'chat' and captured[-1]['resume'] is True and captured[-1]['loop_active'] is False, captured",
       "assert 'answer this right after stop' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'Before autoresearch starts, do not create or update human intervention files' in captured[-1]['prompt'], captured[-1]['prompt']",
       "framing_after_first_queue = module.load_framing_messages()",
       "assert framing_after_first_queue[-1]['id'] == 'q0' and framing_after_first_queue[-1]['text'] == 'answer this right after stop', framing_after_first_queue",
       "assert [item['id'] for item in module.read_queued_chat_messages()] == ['q1'], module.read_queued_chat_messages()",
@@ -3166,6 +3228,7 @@ Confidence: medium
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'chat', 'loop_active': False, 'loop_iteration': 2, 'settings': settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "started_second_queued_chat = module.maybe_start_queued_chat_after_run('chat', 0)",
       "assert started_second_queued_chat is True and 'prioritize source-level evidence' in captured[-1]['prompt'], captured",
+      "assert 'PROJECT.md` launch-framing updates instead' in captured[-1]['prompt'], captured[-1]['prompt']",
       "framing_after_second_queue = module.load_framing_messages()",
       "assert [message['id'] for message in framing_after_second_queue[-2:]] == ['q0', 'q1'], framing_after_second_queue",
       "assert module.read_queued_chat_messages() == [], module.read_queued_chat_messages()",
@@ -3211,6 +3274,8 @@ Confidence: medium
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 3, 'settings': claude_settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "started_claude_queue = module.maybe_start_queued_chat_after_run('goal', 0)",
       "assert started_claude_queue is True and captured[-1]['settings']['backend'] == 'claude', captured",
+      "assert 'Before autoresearch starts, do not create or update human intervention files' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'PROJECT.md` launch-framing updates instead' in captured[-1]['prompt'], captured[-1]['prompt']",
       "print(json.dumps({'queued': queued['files']['queued_chat']['count'], 'pending': len(module.pending_human_interventions()), 'prompt': captured[-1]['mode']}))",
     ].join("; ")
   ], {

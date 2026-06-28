@@ -125,11 +125,13 @@ When sources conflict, use this priority order:
 
 ## Human Messages During a Run
 
-Human messages are either ordinary interaction or formal human intervention. The UI/server does not make the semantic classification; the agent must decide from the message, project context, and `instructions/INTERVENTION_PROTOCOL.md`.
+Human messages are either ordinary interaction, pre-start launch framing, or formal human intervention. The UI/server does not make the semantic classification; the agent must decide from the message, project context, and `instructions/INTERVENTION_PROTOCOL.md`.
 
 Ordinary interaction includes progress questions, clarifications, temporary pauses, requests to inspect logs, and requests for explanations. Do not create intervention files for ordinary interaction.
 
-Formal human intervention changes or constrains research direction, plan, method, resource, claim, target venue, or priority. In chat mode, record pending interventions under `research_trajectory/human_interventions/` and update the intervention index only; do not update canonical research state, trials, reviewer files, or manuscript gates from chat.
+Before autoresearch starts, messages that change venue, scope, outline, objective, contribution framing, constraints, exclusions, success gates, or expected output are launch-framing updates. Follow `instructions/PROJECT_FRAMING.md` and update `PROJECT.md` when warranted; do not create human intervention files before there is an autoresearch trajectory.
+
+After autoresearch has started, a formal human intervention changes or constrains research direction, plan, method, resource, claim, target venue, or priority. In chat mode, record pending interventions under `research_trajectory/human_interventions/` and update the intervention index only; do not update canonical research state, trials, reviewer files, or manuscript gates from chat.
 
 Pending interventions are priority inputs for the next Start/Resume autoresearch run. The execution agent must read them before selecting or executing the next objective.
 

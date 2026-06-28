@@ -5472,47 +5472,115 @@ body.is-dragging-file .composer {
   font-size: 13px;
 }
 
-.project-rendered {
-  max-height: min(58vh, 560px);
-  max-width: 100%;
-  overflow: auto;
-  padding: 4px 2px 8px;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-}
-
-.project-rendered :where(p, li, h1, h2, h3, h4, code, pre) {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
-.project-rendered pre {
-  overflow-x: auto;
-  white-space: pre-wrap;
-}
-
-.project-inline-editor {
-  width: 100%;
-  min-height: min(56vh, 520px);
-  max-height: 62vh;
-  padding: 16px;
-  overflow: auto;
-  border: 1px solid rgba(34, 39, 32, 0.12);
-  border-radius: 16px;
-  background: rgba(255, 253, 247, 0.82);
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.55;
-  resize: vertical;
-}
-
 .project-card-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.project-loading-state {
+  min-height: min(58vh, 620px);
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 80px 24px;
+  text-align: center;
+}
+
+.project-loading-state[hidden] {
+  display: none;
+}
+
+.project-loading-state h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--reader);
+  font-size: clamp(30px, 4vw, 54px);
+  font-weight: 400;
+  line-height: 1.04;
+}
+
+.project-loading-state .setup-copy {
+  max-width: 520px;
+  margin: 0;
+}
+
+.project-loading-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 14px;
+  color: var(--muted);
+}
+
+.project-loading-mark span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: loadingDotPulse 1.2s ease-in-out infinite;
+}
+
+.project-loading-mark span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.project-loading-mark span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes loadingDotPulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+body.is-project-loading .cold-card > :not(.project-loading-state) {
+  display: none !important;
+}
+
+.project-switch-skeleton {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.project-switch-row.is-loading + .project-switch-row.is-loading {
+  margin-top: 6px;
+}
+
+.project-launch-fallback {
+  padding: 10px 12px 0;
+}
+
+.project-launch-fallback[hidden] {
+  display: none;
+}
+
+.project-launch-fallback-inner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.project-launch-fallback-inner > span {
+  color: var(--muted);
+  font: 700 0.7rem/1 var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .project-draft-inline {
@@ -5543,12 +5611,6 @@ body.is-dragging-file .composer {
   justify-content: flex-start;
   gap: 6px;
   margin: 0;
-}
-
-.project-inline-edit {
-  width: min(760px, 100%);
-  display: grid;
-  gap: 10px;
 }
 
 .plan-card-message {
@@ -12420,7 +12482,6 @@ body,
 .markdown-preview,
 .project-rendered,
 .inline-preview,
-.project-inline-editor,
 .brief-editor-shell #cold-file-editor,
 .brief-editor-shell #cold-file-preview,
 .framing-edit-form textarea,
@@ -13144,7 +13205,6 @@ body {
 input,
 select,
 textarea,
-.project-inline-editor,
 .framing-edit-form textarea,
 .transcript-edit-form textarea,
 .settings-secret-card input[type="password"],
@@ -13446,7 +13506,7 @@ html[data-theme] :is(.composer, .brief-editor-shell.is-framing-dock) {
   box-shadow: 0 22px 64px color-mix(in srgb, var(--rail) 18%, transparent);
 }
 
-html[data-theme] :is(.composer textarea, .brief-editor-shell.is-framing-dock textarea, input, select, textarea, .project-inline-editor, .framing-edit-form textarea, .transcript-edit-form textarea) {
+html[data-theme] :is(.composer textarea, .brief-editor-shell.is-framing-dock textarea, input, select, textarea, .framing-edit-form textarea, .transcript-edit-form textarea) {
   border-color: var(--control-border);
   background: var(--control-bg);
   color: var(--control-ink);

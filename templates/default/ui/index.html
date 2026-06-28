@@ -30,7 +30,7 @@
     <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css?v=20260626-stop-preexec" />
   </head>
-  <body>
+  <body class="is-project-loading">
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
       <symbol id="brand-mark-glyph" viewBox="0 0 32 32">
         <circle cx="5.5" cy="24" r="2.7" fill="none" stroke="currentColor" stroke-width="1.9" />
@@ -94,7 +94,7 @@
           </button>
           <div class="rail-sync-row">
             <span class="sync-dot" aria-hidden="true"></span>
-            <span id="sync-state">Reading files</span>
+            <span id="sync-state">Loading projects</span>
           </div>
         </div>
       </aside>
@@ -136,6 +136,17 @@
             <section class="cold-start-workspace" id="cold-start-workspace">
               <section class="stage-panel is-active" data-stage-panel="1">
                 <section class="assistant-card cold-card">
+                  <section class="project-loading-state" id="project-loading-state" aria-live="polite" aria-label="Project loading state">
+                    <div class="project-loading-mark" aria-hidden="true">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                    <p class="eyebrow" id="project-loading-eyebrow">Projects</p>
+                    <h2 id="project-loading-title">Loading projects...</h2>
+                    <p class="setup-copy" id="project-loading-detail">Finding available research workspaces</p>
+                    <button class="secondary-button small-button" id="project-loading-retry" type="button" data-project-loading-retry hidden>Retry</button>
+                  </section>
                   <div class="card-head">
                     <div>
                       <p class="eyebrow">Framing</p>
