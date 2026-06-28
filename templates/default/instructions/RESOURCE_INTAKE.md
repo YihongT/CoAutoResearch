@@ -36,6 +36,47 @@ Do not debate whether explicit UI resources are relevant before filing them. Fil
 
 ---
 
+## Content Inspection Gate
+
+Path-only intake is not content inspection. Reading `RESOURCE_MANIFEST.md`,
+listing a symlink, or seeing a resource name is enough to confirm that a
+resource exists, but it is not enough to make content-grounded claims about the
+resource. Explicit user-provided files are not optional context; they must be
+carefully inspected before they are used for reasoning.
+
+Before making claims about an attached or linked resource's venue fit,
+contribution, evidence, methods, results, manuscript status, or project framing:
+
+1. Confirm the filed path, type, and whether it is a file, directory, symlink, or
+   unavailable.
+2. If the resource is one or more explicit files, open and read every readable
+   user-provided file before summarizing it, framing from it, or using it as
+   evidence.
+3. If the resource is a directory or repository, first create a recursive
+   inventory of the provided files, with enough type, size, and path information
+   to distinguish source, notes, manuscripts, results, data, figures, binaries,
+   caches, generated artifacts, and dependency folders.
+4. After that inventory, inspect all human-authored or research-bearing files
+   needed to understand the provided work, prioritizing README, manifests,
+   manuscripts or drafts, results summaries, experiment registries, docs, notes,
+   configs, source files, scripts, recent outputs, and table/figure provenance.
+5. Do not skip an explicit user-provided file because it is merely inconvenient.
+   Skip only when it is binary-only, generated/cache/dependency material, too
+   large to inspect directly, inaccessible, irrelevant to the requested decision
+   after inventory, or unsafe to open. Record the skip reason.
+6. In the final response or artifact, name the specific resource files inspected
+   and summarize any material skipped. If you have only confirmed paths or read
+   the manifest, explicitly say the answer is path-level only.
+
+Do not try to read every byte of a large repository, dataset, binary artifact,
+cache, dependency folder, or generated-output tree. But do perform a deliberate
+full-resource pass: inventory the whole user-provided resource, inspect the
+content-bearing files, and make the limits of inspection explicit. If the bundle
+cannot be inspected enough for the requested claim, block with a clear user
+question or describe only the path-level intake state.
+
+---
+
 ## Inferred Natural-Language Resources
 
 Paths, repo names, paper titles, dataset names, or folder names mentioned only in text are resource clues, not permission to silently copy arbitrary material.

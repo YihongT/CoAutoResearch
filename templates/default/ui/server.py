@@ -11195,7 +11195,7 @@ Use the repository instructions:
 - read instructions/CONVERSION.md
 - read resources/user_input/INITIAL_BRIEF.md
 - read resources/user_input/RESOURCE_MANIFEST.md if present
-- inspect relevant resources
+- inspect relevant resource contents under the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md` before making any venue-fit, contribution, evidence, methods, results, manuscript-status, or project-framing claim from them
 - if RESOURCE_MANIFEST.md contains inferred resource references, unresolved resources, or ambiguous resources, complete or block Resource Intake before treating those materials as available
 - initialize or update PROJECT.md, research_trajectory/STATE.md, the conversion trial, and manuscript/BLUEPRINT.md only as appropriate under the adaptive intake router
 
@@ -11233,7 +11233,7 @@ Your task:
 - read resources/user_input/INITIAL_BRIEF.md
 - read resources/user_input/RESOURCE_MANIFEST.md if present
 - if RESOURCE_MANIFEST.md contains inferred, unresolved, or ambiguous resource clues, run Resource Intake first and do not treat those clues as attached resources until they are filed or explicitly blocked
-- inspect attached resources enough to understand the research direction
+- inspect attached resource contents under the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md` before making any venue-fit, contribution, evidence, methods, results, manuscript-status, or project-framing claim from them
 - write or update PROJECT.md as a concrete, user-reviewable research framing document
 
 Do not launch the full autoresearch loop. Do not create trials yet unless absolutely necessary.
@@ -11464,6 +11464,7 @@ Allowed behavior:
 - Before autoresearch starts, if your planned answer chooses or changes the target venue, scope, paper outline, research objective, contribution type, success gate, expected output, constraints, assumptions, exclusions, or other launch framing, update `PROJECT.md` before the final response. Do not leave launch-ready framing only in chat.
 - After autoresearch starts, revise `PROJECT.md` only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
 - If resources were attached or mentioned, follow `instructions/RESOURCE_INTAKE.md` before treating them as project evidence or active inputs for `PROJECT.md`.
+- If the answer depends on attached resource content, perform the full-resource pass required by the Content Inspection Gate before making venue-fit, contribution, evidence, methods, results, manuscript-status, or project-framing claims. Reading only `RESOURCE_MANIFEST.md`, listing a symlink, or using a resource name counts as path-level intake only.
 - Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you.
 - Before autoresearch starts, do not create or update human intervention files. Treat venue, scope, outline, objective, contribution, success-gate, constraint, exclusion, and output changes as `PROJECT.md` launch-framing updates instead.
 - After autoresearch starts, if the message is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
@@ -11472,7 +11473,7 @@ Allowed behavior:
 - If you created or updated a pending intervention, end with one concise sentence naming the path, e.g. `Recorded pending intervention: research_trajectory/human_interventions/I0001_topic.md`.
 - If you did not create or update a pending intervention, do not mention interventions.
 - Do not use a file-update summary such as "Updated PROJECT.md" as a substitute for answering the user's question.
-- If resources were attached, acknowledge what the UI saved and say that Resource Intake or autoresearch should be launched explicitly before treating them as trial evidence.
+- If resources were attached but you did not inspect their contents, acknowledge only what the UI saved and say that Resource Intake or autoresearch should be launched explicitly before treating them as trial evidence.
 
 Use AGENTS.md for repository conventions, but the boundary above overrides any instruction that would start or continue a trial. Be concise in the final response."""
 
