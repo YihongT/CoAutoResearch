@@ -703,6 +703,38 @@ function collapseProjectDraftMessages(messages) {
   return messages.filter((message) => !isProjectDraftMessage(message) || message.id === latest.id);
 }
 
+function canHostProjectDraftAttachment(message) {
+  return (
+    message?.role === "assistant" &&
+    !isProjectDraftMessage(message) &&
+    message.kind !== "plan" &&
+    !isControlFramingMessage(message)
+  );
+}
+
+function attachProjectDraftToLatestAssistant(messages) {
+  const items = Array.isArray(messages) ? messages : [];
+  const latest = latestProjectMessage(items);
+  if (!latest) return items;
+  const projectIndex = items.findIndex((message) => message?.id === latest.id);
+  if (projectIndex <= 0) return items;
+  let hostId = "";
+  for (let index = projectIndex - 1; index >= 0; index -= 1) {
+    if (canHostProjectDraftAttachment(items[index])) {
+      hostId = items[index].id;
+      break;
+    }
+  }
+  if (!hostId) return items;
+  return items
+    .filter((message) => message?.id !== latest.id)
+    .map((message) => (message?.id === hostId ? { ...message, attachedProjectDraft: latest } : message));
+}
+
+function visibleFramingMessagesForRender(messages = localMessages) {
+  return attachProjectDraftToLatestAssistant(collapseProjectDraftMessages(messages));
+}
+
 function setHiddenProjectDraft(text) {
   const editor = $("#project-draft-editor");
   if (editor) editor.value = String(text || "");
@@ -4454,12 +4486,16 @@ function framingMessageHtml(message) {
       : "",
   ].filter(Boolean);
   const actions = actionItems.length ? `<div class="framing-actions message-action-row">${actionItems.join("")}</div>` : "";
+  const projectAttachment = role === "assistant" && message.attachedProjectDraft
+    ? projectDraftAttachmentHtml(message.attachedProjectDraft)
+    : "";
   return `
     <article class="framing-message ${role}" data-framing-id="${escapeHtml(message.id)}">
       <div class="transcript-meta">${title}</div>
       ${messageAttachmentsHtml(message)}
       <div class="transcript-body">${transcriptContentHtml(message.text, { markdown: role === "assistant" })}</div>
       ${actions}
+      ${projectAttachment}
     </article>
   `;
 }
@@ -4766,7 +4802,7 @@ function terminalRunNoResponseHtml(unansweredUser) {
   `;
 }
 
-function projectDraftCardHtml(message) {
+function projectDraftActionsHtml(message) {
   const latest = latestProjectMessage();
   const isLatest = latest && latest.id === message.id;
   const launchState = prelaunchAffordanceState();
@@ -4775,34 +4811,46 @@ function projectDraftCardHtml(message) {
   const launchTitle = launchState.reason ? ` title="${escapeHtml(launchState.reason)}"` : "";
   const draft = String(message?.artifact?.text || currentProjectDraft());
   cacheProjectDraftInlinePayload(draft);
-  const body = projectDraftEditMode && isLatest
-    ? `
-      <textarea class="project-inline-editor" data-project-inline-editor spellcheck="false">${escapeHtml(draft)}</textarea>
-      <div class="project-card-actions">
-        <button class="secondary-button small-button" type="button" data-project-edit-cancel>Cancel</button>
-        <button class="primary-button small-button" type="button" data-project-edit-save>Save</button>
-      </div>
-    `
-    : `
-      <div class="project-rendered markdown-preview">${markdownToHtml(draft)}</div>
-      <div class="project-card-actions" ${isLatest ? "" : "hidden"}>
-        ${messageCopyButton(draft, "Copy PROJECT.md draft", "PROJECT.md draft copied.")}
-        <button class="secondary-button small-button" type="button" data-project-edit> Edit Markdown</button>
-        ${canStartGoal ? `<button class="primary-button small-button" type="button" data-project-launch ${launchDisabled}${launchTitle}>Start autoresearch</button>` : ""}
+  if (projectDraftEditMode && isLatest) {
+    return `
+      <div class="project-inline-edit">
+        <textarea class="project-inline-editor" data-project-inline-editor spellcheck="false">${escapeHtml(draft)}</textarea>
+        <div class="project-card-actions">
+          <button class="secondary-button small-button" type="button" data-project-edit-cancel>Cancel</button>
+          <button class="primary-button small-button" type="button" data-project-edit-save>Save</button>
+        </div>
       </div>
     `;
+  }
   return `
-    <article class="framing-message assistant project-draft-message" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="project">
-      <div class="transcript-meta">CoAutoResearch / PROJECT.md</div>
-      <div class="transcript-body project-draft-bubble">
-        <div class="project-card-head">
-          <div>
-            <strong>Project framing draft</strong>
-            <span>${isLatest ? "Review the scope before launching autoresearch." : "Earlier draft kept in the conversation history."}</span>
-          </div>
-          ${fullscreenButtonHtml("PROJECT.md")}
-        </div>
-        ${body}
+    <div class="project-inline-reference">
+      <span>Updated</span>
+      ${markdownFileButtonHtml("PROJECT.md", "PROJECT.md")}
+    </div>
+    <div class="project-card-actions" ${isLatest ? "" : "hidden"}>
+      ${messageCopyButton(draft, "Copy PROJECT.md draft", "PROJECT.md draft copied.")}
+      <button class="secondary-button small-button" type="button" data-project-edit>Edit</button>
+      ${canStartGoal ? `<button class="primary-button small-button" type="button" data-project-launch ${launchDisabled}${launchTitle}>Start autoresearch</button>` : ""}
+    </div>
+  `;
+}
+
+function projectDraftAttachmentHtml(message) {
+  return `
+    <div class="project-draft-inline" data-project-attachment="${escapeHtml(message.id || "")}">
+      ${projectDraftActionsHtml(message)}
+    </div>
+  `;
+}
+
+function projectDraftCardHtml(message) {
+  const summary = String(message?.text || "").trim() || "PROJECT.md was updated.";
+  return `
+    <article class="framing-message assistant project-draft-message is-compact-project" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="project">
+      <div class="transcript-meta">CoAutoResearch</div>
+      <div class="transcript-body">
+        ${transcriptContentHtml(summary, { markdown: true })}
+        ${projectDraftAttachmentHtml(message)}
       </div>
     </article>
   `;
@@ -4813,7 +4861,7 @@ function renderFramingConversation() {
   if (!thread) return;
   reconcileFramingPending(localMessages);
   const wasNearBottom = isPageNearBottom();
-  const visibleMessages = collapseProjectDraftMessages(localMessages);
+  const visibleMessages = visibleFramingMessagesForRender(localMessages);
   const transcriptEntries = sessionTranscriptEntries();
   const activity = buildFramingActivityByMessage(visibleMessages, transcriptEntries);
   const messages = visibleMessages

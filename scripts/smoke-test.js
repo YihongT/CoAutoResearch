@@ -2226,12 +2226,14 @@ Confidence: medium
   if (
     appJs.includes("canLaunchAutoresearchFromAssistant") ||
     appJs.includes("latestAssistantTextMessage") ||
-    !appJs.includes("function projectDraftCardHtml") ||
+    !appJs.includes("function projectDraftAttachmentHtml") ||
+    !appJs.includes("function attachProjectDraftToLatestAssistant") ||
+    !appJs.includes("visibleFramingMessagesForRender(localMessages)") ||
+    !appJs.includes('markdownFileButtonHtml("PROJECT.md", "PROJECT.md")') ||
     !appJs.includes("const launchState = prelaunchAffordanceState()") ||
-    !appJs.includes("canStartGoal = isLatest && launchState.showStart") ||
-    !appJs.includes("fullscreenButtonHtml(\"PROJECT.md\")")
+    !appJs.includes("canStartGoal = isLatest && launchState.showStart")
   ) {
-    throw new Error("PROJECT.md draft card must own launch and fullscreen actions");
+    throw new Error("assistant replies must own collapsed PROJECT.md launch attachments");
   }
   if (
     !appJs.includes("Open latest manuscript") ||
@@ -2489,7 +2491,7 @@ Confidence: medium
     appJs.includes("[messages, sessionTranscript, pending, projectCards]") ||
     appJs.includes("projectBelongsAfterLatestUser") ||
     !appJs.includes("collapseProjectDraftMessages") ||
-    !appJs.includes("const visibleMessages = collapseProjectDraftMessages(localMessages)") ||
+    !appJs.includes("const visibleMessages = visibleFramingMessagesForRender(localMessages)") ||
     !appJs.includes('details class="framing-progress-row is-collapsible')
   ) {
     throw new Error("framing timeline must keep message order, collapse old PROJECT.md drafts, and keep tool details collapsed");

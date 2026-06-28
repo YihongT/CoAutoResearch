@@ -5515,6 +5515,42 @@ body.is-dragging-file .composer {
   flex-wrap: wrap;
 }
 
+.project-draft-inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+  color: var(--muted);
+  font: 600 0.8rem/1.35 var(--font);
+}
+
+.project-inline-reference {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-inline-reference span {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+}
+
+.project-draft-inline .project-card-actions {
+  justify-content: flex-start;
+  gap: 6px;
+  margin: 0;
+}
+
+.project-inline-edit {
+  width: min(760px, 100%);
+  display: grid;
+  gap: 10px;
+}
+
 .plan-card-message {
   width: min(860px, 100%);
   max-width: min(860px, 100%);

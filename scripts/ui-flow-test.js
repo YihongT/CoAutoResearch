@@ -1074,7 +1074,7 @@ function loadAppContext() {
     globalThis.__framingThreadHtmlProbe = () => {
       const thread = $("#framing-thread");
       renderFramingConversation();
-      const directMessages = collapseProjectDraftMessages(localMessages).map((message) => framingMessageHtml(message)).join("");
+      const directMessages = visibleFramingMessagesForRender(localMessages).map((message) => framingMessageHtml(message)).join("");
       const directPanel = persistentAutoresearchPanelHtml(sessionTranscriptEntries());
       return lastFramingHtml || thread?.innerHTML || directMessages + directPanel || "";
     };
@@ -1096,9 +1096,9 @@ function loadAppContext() {
       return { hidden: Boolean(row?.hidden), html: row?.innerHTML || "", className: row?.className || "" };
     };
     globalThis.__prelaunchState = () => prelaunchAffordanceState();
-    globalThis.__latestProjectCardHtml = () => {
+    globalThis.__latestProjectAttachmentHtml = () => {
       const latest = latestProjectMessage();
-      return latest ? projectDraftCardHtml(latest) : "";
+      return latest ? projectDraftAttachmentHtml(latest) : "";
     };
     globalThis.__queuedItems = () => queuedChatItems().map((item) => ({ ...item }));
     globalThis.__moveQueuedItem = async (id, direction) => moveQueuedChatItem(id, direction);
@@ -1556,9 +1556,11 @@ async function testPrelaunchAffordanceStatesAndActions() {
   `);
   state = ready.run("__prelaunchState()");
   assert.equal(state.state, "ready", "valid PROJECT.md before autoresearch should offer Start");
-  assert.equal(ready.run("__latestProjectCardHtml()").includes("data-project-launch"), true, "latest PROJECT.md card should own Start autoresearch");
+  assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("data-project-launch"), true, "latest PROJECT.md attachment should expose Start autoresearch");
+  assert.equal(ready.run("__latestProjectAttachmentHtml()").includes('data-inline-fullscreen="PROJECT.md"'), true, "latest PROJECT.md attachment should keep the clickable file link");
+  assert.equal(ready.run("__latestProjectAttachmentHtml()").includes("project-rendered"), false, "PROJECT.md must stay collapsed by default");
   await ready.run("openLaunchDialog()");
-  assert.equal(ready.launchDialog.open, true, "project-card Start should use the existing launch dialog");
+  assert.equal(ready.launchDialog.open, true, "project attachment Start should use the existing launch dialog");
 
   const stale = loadAppContext();
   stale.run(`
@@ -1569,7 +1571,7 @@ async function testPrelaunchAffordanceStatesAndActions() {
   `);
   state = stale.run("__prelaunchState()");
   assert.equal(state.state, "ready", "new user framing after PROJECT.md should not expose a manual update action");
-  const staleHtml = stale.run("__latestProjectCardHtml()");
+  const staleHtml = stale.run("__latestProjectAttachmentHtml()");
   assert.equal(staleHtml.includes("Start autoresearch"), true);
   assert.equal(staleHtml.includes("Update PROJECT.md"), false);
   assert.equal(staleHtml.includes("Start anyway"), false);
@@ -2612,7 +2614,7 @@ async function testLaunchGoalMessageBeforeBackendWork() {
   assert.equal(app.context.__composerDraftState().stored, null, "successful launch should clear the project-scoped composer draft");
 }
 
-function testStartAutoresearchOnlyAppearsOnProjectDraftCard() {
+function testStartAutoresearchAppearsAtAssistantReplyEnd() {
   const app = loadAppContext();
   app.run(`
     __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "framing", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
@@ -2621,13 +2623,15 @@ function testStartAutoresearchOnlyAppearsOnProjectDraftCard() {
       { id: "p1", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Project\\n\\nReady to launch." }, created_at: "2026-06-17T10:00:02.000Z" }
     ]);
   `);
-  const assistantHtml = app.run("__messageHtml(0)");
-  const projectHtml = app.run("__messageHtml(1)");
-  assert.equal(assistantHtml.includes("data-project-launch"), false, "assistant text messages must not duplicate the project launch button");
-  assert.equal(projectHtml.includes("data-project-launch"), true, "project draft card should keep the canonical launch button");
-  assert.equal(projectHtml.includes('data-inline-fullscreen="PROJECT.md"'), true, "project draft card should expose the canonical fullscreen preview");
-  assert.equal(projectHtml.includes("inline-fullscreen-button"), true);
-  assert.equal(projectHtml.includes("Open full view"), false);
+  const html = app.run("__framingThreadHtmlProbe()");
+  const assistantIndex = html.indexOf("Updated PROJECT.md and it is ready.");
+  const linkIndex = html.indexOf('data-inline-fullscreen="PROJECT.md"');
+  const launchIndex = html.indexOf("data-project-launch");
+  assert.ok(assistantIndex >= 0, "assistant reply should render");
+  assert.ok(linkIndex > assistantIndex, "PROJECT.md link should sit after the assistant reply");
+  assert.ok(launchIndex > linkIndex, "Start autoresearch should sit after the collapsed PROJECT.md link");
+  assert.equal(html.includes("project-rendered"), false, "PROJECT.md must not render expanded markdown by default");
+  assert.equal(html.includes("inline-fullscreen-button"), false, "collapsed PROJECT.md should use the text link, not a fullscreen icon button");
 }
 
 function testChatGeneratedProjectDraftIsSurfaced() {
@@ -2649,9 +2653,10 @@ function testChatGeneratedProjectDraftIsSurfaced() {
   assert.ok(project, "ready PROJECT.md from chat should be surfaced as a draft card");
   assert.equal(project.artifact.path, "PROJECT.md");
   assert.equal(project.artifact.text, "# Project\n\nReady from chat.");
-  const html = app.run(`__messageHtml(${messages.findIndex((message) => message.kind === "project")})`);
-  assert.equal(html.includes("data-project-launch"), true, "chat-generated PROJECT.md card should keep the canonical launch button");
-  assert.equal(html.includes('data-inline-fullscreen="PROJECT.md"'), true, "chat-generated PROJECT.md card should expose fullscreen preview");
+  const html = app.run("__framingThreadHtmlProbe()");
+  assert.equal(html.includes("data-project-launch"), true, "chat-generated PROJECT.md attachment should keep the canonical launch button");
+  assert.equal(html.includes('data-inline-fullscreen="PROJECT.md"'), true, "chat-generated PROJECT.md attachment should expose the collapsed file link");
+  assert.equal(html.includes("project-rendered"), false, "chat-generated PROJECT.md should stay collapsed by default");
 }
 
 function testMarkdownSoftBreakRendersAsSeparator() {
@@ -2711,7 +2716,7 @@ function testMessagesExposeCopyButtons() {
   assert.equal(userHtml.includes(encodeURIComponent("Copy this user message")), true);
   assert.equal(assistantHtml.includes("message-copy-button"), true, "assistant messages should expose a copy icon");
   assert.equal(assistantHtml.includes(encodeURIComponent("Copy this assistant message")), true);
-  assert.equal(projectHtml.includes("message-copy-button"), true, "project draft cards should expose a copy icon");
+  assert.equal(projectHtml.includes("message-copy-button"), true, "compact PROJECT.md messages should expose a copy icon");
   assert.equal(projectHtml.includes(encodeURIComponent("# Copyable Project\n\nDraft body.")), true);
   assert.equal(transcriptHtml.includes("message-copy-button"), true, "transcript messages should expose a copy icon");
   assert.equal(transcriptHtml.includes(encodeURIComponent("Copy this transcript response.")), true);
@@ -6616,7 +6621,7 @@ await testEditPreProjectMessageUsesChat();
 await testEditPreProjectMessageDoesNotUseRegenerateConfirmation();
 await testEditAttachmentsCanRemoveRetainAndAdd();
 await testLaunchGoalMessageBeforeBackendWork();
-testStartAutoresearchOnlyAppearsOnProjectDraftCard();
+testStartAutoresearchAppearsAtAssistantReplyEnd();
 testChatGeneratedProjectDraftIsSurfaced();
 testMarkdownSoftBreakRendersAsSeparator();
 testMarkdownOrderedListsPreserveExplicitNumbers();
