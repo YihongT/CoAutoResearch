@@ -727,6 +727,17 @@ async function smokeRemoteAuth() {
     if (overview.status !== 200 || overviewPayload.runtime?.remote !== true) {
       throw new Error(`remote overview should report remote runtime, got ${overview.status} ${JSON.stringify(overviewPayload.runtime)}`);
     }
+    const unauthorizedEvents = await fetch(`${baseUrl}/api/research/events`);
+    if (unauthorizedEvents.status !== 401) {
+      throw new Error(`remote auth should protect research events, got ${unauthorizedEvents.status}`);
+    }
+    const eventsController = new AbortController();
+    const authorizedEvents = await fetch(`${baseUrl}/api/research/events`, { headers: { Cookie: cookie }, signal: eventsController.signal });
+    if (authorizedEvents.status !== 200 || !(authorizedEvents.headers.get("content-type") || "").includes("text/event-stream")) {
+      throw new Error(`remote auth should allow authorized research events, got ${authorizedEvents.status} ${authorizedEvents.headers.get("content-type")}`);
+    }
+    await authorizedEvents.body?.cancel();
+    eventsController.abort();
     const badToken = await fetch(`${baseUrl}/api/health`, { headers: { Authorization: "Bearer wrong-token" } });
     if (badToken.status !== 401) {
       throw new Error(`remote auth should reject wrong bearer token, got ${badToken.status}`);
@@ -742,6 +753,273 @@ async function smokeRemoteAuth() {
   } finally {
     await terminateProcess(proc);
   }
+}
+
+function parseSseFrame(frame) {
+  const event = { event: "message", data: "" };
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith("event:")) event.event = line.slice("event:".length).trim();
+    if (line.startsWith("data:")) event.data += line.slice("data:".length).trimStart();
+  }
+  if (!event.data) return null;
+  return { ...event, payload: JSON.parse(event.data) };
+}
+
+async function readSseUntil(url, predicate, timeoutMs = 8000, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok || !response.body) {
+      throw new Error(`SSE request failed: ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separator = buffer.indexOf("\n\n");
+      while (separator >= 0) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        const parsed = parseSseFrame(frame);
+        if (parsed?.event === "research" && predicate(parsed.payload)) {
+          controller.abort();
+          clearTimeout(timeout);
+          return parsed.payload;
+        }
+        separator = buffer.indexOf("\n\n");
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+    try {
+      await response?.body?.cancel();
+    } catch {
+      // The stream may already be aborted.
+    }
+  }
+  throw new Error(`Timed out waiting for SSE event from ${url}`);
+}
+
+async function waitForFinalOverview(baseUrl, expectedText, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastPayload = null;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/api/overview`);
+    lastPayload = await response.json();
+    const session = lastPayload.research_session || {};
+    const status = String(session.status || "");
+    const transcript = Array.isArray(session.transcript) ? session.transcript : [];
+    if (!["running", "stopping"].includes(status) && session.returncode === 0 && transcript.some((entry) => String(entry.content || "").includes(expectedText))) {
+      return lastPayload;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error(`Timed out waiting for final overview with ${expectedText}: ${JSON.stringify(lastPayload?.research_session || {})}`);
+}
+
+async function waitForCompletedOverview(baseUrl, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastPayload = null;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/api/overview`);
+    lastPayload = await response.json();
+    const session = lastPayload.research_session || {};
+    const status = String(session.status || "");
+    if (!["running", "stopping"].includes(status) && session.returncode === 0) {
+      return lastPayload;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(`Timed out waiting for completed overview: ${JSON.stringify(lastPayload?.research_session || {})}`);
+}
+
+async function writeStreamingFakeAgents(directory) {
+  await fsp.mkdir(directory, { recursive: true });
+  const codex = path.join(directory, "codex");
+  const claude = path.join(directory, "claude");
+  await fsp.writeFile(
+    codex,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"login\" ] && [ \"$2\" = \"status\" ]; then echo Logged in; exit 0; fi",
+      "if [ \"$1\" = \"--version\" ]; then echo codex fake stream 0.0.0; exit 0; fi",
+      "printf '%s\\n' '{\"type\":\"thread.started\",\"session_id\":\"codex-stream-session\"}'",
+      "sleep 0.15",
+      "printf '%s\\n' '{\"type\":\"item.agentMessage.delta\",\"delta\":\"Hello \"}'",
+      "sleep 0.15",
+      "printf '%s\\n' '{\"type\":\"item.agentMessage.delta\",\"delta\":\"Codex\"}'",
+      "sleep 0.15",
+      "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Hello Codex\"}}'",
+      "printf '%s\\n' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}'",
+      "exit 0"
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.writeFile(
+    claude,
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then printf '%s\\n' '{\"authenticated\":true}'; exit 0; fi",
+      "if [ \"$1\" = \"--version\" ]; then echo claude fake stream 0.0.0; exit 0; fi",
+      "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-stream-session\"}'",
+      "sleep 0.15",
+      "printf '%s\\n' '{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}'",
+      "sleep 0.15",
+      "printf '%s\\n' '{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude\"}}'",
+      "sleep 0.15",
+      "printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Hello Claude\"}],\"stop_reason\":\"end_turn\"}}'",
+      "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"Hello Claude\",\"session_id\":\"claude-stream-session\"}'",
+      "exit 0"
+    ].join("\n"),
+    "utf8"
+  );
+  await fsp.chmod(codex, 0o755);
+  await fsp.chmod(claude, 0o755);
+  return { codex, claude };
+}
+
+async function smokeStreamingHttpIntegrationForBackend(backend) {
+  if (process.platform === "win32") {
+    console.log(`Skipping ${backend} streaming HTTP smoke: POSIX fake agent scripts are not available on Windows.`);
+    return;
+  }
+  const python = findPython();
+  const port = await freePort();
+  const fakeBin = path.join(tempRoot, `streaming-fake-bin-${backend}`);
+  const fakeAgents = await writeStreamingFakeAgents(fakeBin);
+  const streamProjectDir = path.join(tempRoot, `streaming-project-${backend}`);
+  execFileSync("node", [cli, "init", streamProjectDir], { cwd: root, stdio: "pipe" });
+  const serverPath = path.join(root, "templates", "default", "ui", "server.py");
+  const proc = spawn(python.command, [...python.args, serverPath, "--host", "127.0.0.1", "--port", String(port), "--project-root", streamProjectDir], {
+    cwd: streamProjectDir,
+    env: {
+      ...process.env,
+      COAUTO_TEMPLATE_ROOT: path.join(root, "templates", "default"),
+      COAUTO_CODEX: fakeAgents.codex,
+      COAUTO_CLAUDE: fakeAgents.claude,
+      PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  try {
+    await waitForProcessOutput(proc, (output) => output.includes(`Open http://127.0.0.1:${port}`), 15000);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const expected = backend === "claude" ? "Hello Claude" : "Hello Codex";
+    const streamed = readSseUntil(
+      `${baseUrl}/api/research/events`,
+      (payload) => payload.kind === "transcript" && payload.transcript_entry?.streaming === true && String(payload.transcript_entry?.content || "").includes("Hello"),
+      8000
+    );
+    const start = await fetch(`${baseUrl}/api/research/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "stream this harmless smoke response", settings: { backend } })
+    });
+    const startPayload = await start.json();
+    if (start.status !== 200 || startPayload.ok === false) {
+      throw new Error(`${backend} streaming chat should start, got ${start.status} ${JSON.stringify(startPayload)}`);
+    }
+    const streamedPayload = await streamed;
+    if (!String(streamedPayload.transcript_entry?.content || "").includes("Hello")) {
+      throw new Error(`${backend} SSE should deliver a visible partial transcript before completion: ${JSON.stringify(streamedPayload)}`);
+    }
+    const finalPayload = await waitForFinalOverview(baseUrl, expected);
+    const finalSession = finalPayload.research_session || {};
+    if (finalSession.status !== "completed" || finalSession.returncode !== 0) {
+      throw new Error(`${backend} final overview should stay consistent after streaming: ${JSON.stringify(finalSession)}`);
+    }
+  } finally {
+    await terminateProcess(proc);
+    await fsp.rm(streamProjectDir, { recursive: true, force: true });
+  }
+}
+
+async function smokeStreamingHttpIntegration() {
+  await smokeStreamingHttpIntegrationForBackend("codex");
+  await smokeStreamingHttpIntegrationForBackend("claude");
+}
+
+function realAgentAuthStatus(backend) {
+  const command = backend === "claude" ? (process.env.COAUTO_CLAUDE || "claude") : (process.env.COAUTO_CODEX || "codex");
+  const args = backend === "claude" ? ["auth", "status"] : ["login", "status"];
+  const result = spawnSync(command, args, { encoding: "utf8", timeout: 10000 });
+  if (result.error) return { ok: false, command, reason: result.error.message };
+  if (result.status !== 0) {
+    const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
+    return { ok: false, command, reason: output || `exit ${result.status}` };
+  }
+  return { ok: true, command, reason: "" };
+}
+
+async function smokeRealCliStreamingForBackend(backend, command) {
+  const python = findPython();
+  const port = await freePort();
+  const realProjectDir = path.join(tempRoot, `real-streaming-project-${backend}`);
+  execFileSync("node", [cli, "init", realProjectDir], { cwd: root, stdio: "pipe" });
+  const serverPath = path.join(root, "templates", "default", "ui", "server.py");
+  const env = {
+    ...process.env,
+    COAUTO_TEMPLATE_ROOT: path.join(root, "templates", "default"),
+    ...(backend === "claude" ? { COAUTO_CLAUDE: command } : { COAUTO_CODEX: command })
+  };
+  const proc = spawn(python.command, [...python.args, serverPath, "--host", "127.0.0.1", "--port", String(port), "--project-root", realProjectDir], {
+    cwd: realProjectDir,
+    env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  try {
+    await waitForProcessOutput(proc, (output) => output.includes(`Open http://127.0.0.1:${port}`), 15000);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const streamed = readSseUntil(
+      `${baseUrl}/api/research/events`,
+      (payload) => payload.kind === "transcript" && String(payload.transcript_entry?.content || "").trim().length > 0,
+      120000
+    );
+    const start = await fetch(`${baseUrl}/api/research/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "Do not edit files. Reply exactly: stream-smoke-ok.",
+        settings: { backend }
+      })
+    });
+    const startPayload = await start.json();
+    if (start.status !== 200 || startPayload.ok === false) {
+      throw new Error(`${backend} real streaming chat should start, got ${start.status} ${JSON.stringify(startPayload)}`);
+    }
+    await streamed;
+    const finalPayload = await waitForCompletedOverview(baseUrl, 120000);
+    const transcript = finalPayload.research_session?.transcript || [];
+    if (!Array.isArray(transcript) || transcript.length < 2) {
+      throw new Error(`${backend} real streaming overview should include a persisted transcript: ${JSON.stringify(finalPayload.research_session || {})}`);
+    }
+  } finally {
+    await terminateProcess(proc);
+    await fsp.rm(realProjectDir, { recursive: true, force: true });
+  }
+}
+
+async function smokeRealCliStreamingIfAvailable() {
+  if (process.env.COAUTO_REAL_CLI_STREAM_SMOKE !== "1") {
+    console.log("Skipping real CLI streaming smoke: COAUTO_REAL_CLI_STREAM_SMOKE=1 is not set.");
+    return;
+  }
+  const codex = realAgentAuthStatus("codex");
+  const claude = realAgentAuthStatus("claude");
+  if (!codex.ok || !claude.ok) {
+    const reasons = [];
+    if (!codex.ok) reasons.push(`Codex unavailable: ${codex.reason}`);
+    if (!claude.ok) reasons.push(`Claude unavailable: ${claude.reason}`);
+    console.log(`Skipping real CLI streaming smoke: ${reasons.join("; ")}`);
+    return;
+  }
+  await smokeRealCliStreamingForBackend("codex", codex.command);
+  await smokeRealCliStreamingForBackend("claude", claude.command);
 }
 
 async function smokeEmptyDashboardSettings() {
@@ -1825,8 +2103,11 @@ Confidence: medium
     appJs.includes('"/goal restart": { label: "Autoresearch", value: "Restart autoresearch"') ||
     !appJs.includes("function prelaunchAffordanceState()") ||
     !appJs.includes('primaryLabel: "Start autoresearch"') ||
-    !appJs.includes("data-prelaunch-action") ||
     !appJs.includes("data-project-launch") ||
+    appJs.includes("data-prelaunch-action") ||
+    appJs.includes("prelaunchAffordanceHtml") ||
+    appJs.includes("renderPrelaunchAffordance") ||
+    stylesCss.includes("prelaunch-strip") ||
     appJs.includes('primaryLabel: "Draft PROJECT.md"') ||
     appJs.includes('primaryLabel: "Update PROJECT.md"') ||
     appJs.includes('secondaryLabel: "Start anyway"') ||
@@ -2241,6 +2522,8 @@ Confidence: medium
   await smokeRemoteSshMode();
   await smokeRemoteCloudflareFallback();
   await smokeRemoteAuth();
+  await smokeStreamingHttpIntegration();
+  await smokeRealCliStreamingIfAvailable();
   await smokeEmptyDashboardSettings();
 
   const fakeBin = path.join(tempRoot, "fake-bin");
@@ -2677,7 +2960,41 @@ Confidence: medium
       "module.append_research_log(assistant_line)",
       "module.append_research_log(tool_line)",
       "module.append_research_log(result_line)",
-      "usage = module.latest_agent_usage()",
+      "observed_session_id = context.session['session_id']",
+      "observed_usage = module.latest_agent_usage()",
+      "context.session.clear(); context.session.update(module.new_research_session()); context.session.update({'id': 'S_claude_stream', 'backend': 'claude', 'settings': settings, 'status': 'running', 'mode': 'chat', 'transcript': []})",
+      "claude_delta_a = json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': 'Hello '}})",
+      "claude_delta_b = json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': 'Claude'}})",
+      "module.append_research_log(claude_delta_a); module.append_research_log(claude_delta_b)",
+      "claude_stream = [item for item in context.session['transcript'] if item.get('streaming')]",
+      "assert len(claude_stream) == 1 and claude_stream[0]['content'] == 'Hello Claude', context.session['transcript']",
+      "claude_final = json.dumps({'type': 'result', 'subtype': 'success', 'result': 'Hello Claude', 'session_id': '00000000-0000-0000-0000-000000000abc'})",
+      "module.append_research_log(claude_final)",
+      "assert len(context.session['transcript']) == 1 and context.session['transcript'][0]['content'] == 'Hello Claude' and not context.session['transcript'][0].get('streaming'), context.session['transcript']",
+      "context.session.clear(); context.session.update(module.new_research_session()); context.session.update({'id': 'S_codex_stream', 'backend': 'codex', 'settings': codex_settings, 'status': 'running', 'mode': 'chat', 'transcript': []})",
+      "codex_delta_a = json.dumps({'type': 'item/agentMessage/delta', 'delta': 'Hello '})",
+      "codex_delta_b = json.dumps({'type': 'item/agentMessage/delta', 'delta': 'Codex'})",
+      "module.append_research_log(codex_delta_a); module.append_research_log(codex_delta_b)",
+      "codex_stream = [item for item in context.session['transcript'] if item.get('kind') == 'assistant']",
+      "assert len(codex_stream) == 1 and codex_stream[0]['content'] == 'Hello Codex' and codex_stream[0].get('streaming'), context.session['transcript']",
+      "codex_tool_delta = json.dumps({'type': 'item/commandExecution/outputDelta', 'delta': 'stdout line'})",
+      "module.append_research_log(codex_tool_delta)",
+      "assert any(item.get('kind') == 'tool' and item.get('content') == 'stdout line' for item in context.session['transcript']), context.session['transcript']",
+      "codex_final = json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'Hello Codex'}})",
+      "module.append_research_log(codex_final)",
+      "assert len([item for item in context.session['transcript'] if item.get('kind') == 'assistant']) == 1 and not [item for item in context.session['transcript'] if item.get('kind') == 'assistant'][0].get('streaming'), context.session['transcript']",
+      "context.session.clear(); context.session.update(module.new_research_session()); context.session.update({'id': 'S_plan_stream', 'backend': 'codex', 'settings': codex_settings, 'status': 'running', 'mode': 'plan', 'transcript': []})",
+      "plan_delta = json.dumps({'method': 'item/plan/delta', 'params': {'itemId': 'plan', 'delta': 'Plan text'}})",
+      "module.append_research_log(plan_delta)",
+      "assert context.session['transcript'] == [], context.session['transcript']",
+      "context.research_events.clear(); context.research_event_id = 0; context.session.update({'id': 'S_events', 'backend': 'codex', 'status': 'running', 'mode': 'chat'})",
+      "[module.emit_research_event('agent_event', {'log': str(i)}) for i in range(505)]",
+      "assert len(context.research_events) == module.RESEARCH_EVENT_BUFFER_MAX and context.research_events[0]['event_id'] == 6 and context.research_events[-1]['event_id'] == 505, (len(context.research_events), context.research_events[0]['event_id'], context.research_events[-1]['event_id'])",
+      "replayed = module.research_events_since(context, 503)",
+      "assert [event['event_id'] for event in replayed] == [504, 505], replayed",
+      "frame = module.format_research_sse_event(replayed[0])",
+      "assert frame.startswith('id: 504\\nevent: research\\ndata: ') and frame.endswith('\\n\\n'), frame",
+      "usage = observed_usage; context.session['session_id'] = observed_session_id",
       "assert context.session['session_id'] == '00000000-0000-0000-0000-000000000999', context.session['session_id']",
       "assert usage['usage']['input_tokens'] == 3 and usage['cost_usd'] == 0.012, usage",
       "print(json.dumps({'backend': settings['backend'], 'command': new_cmd[1:4], 'transcript': len(context.session['transcript']), 'cost': usage['cost_usd']}))",

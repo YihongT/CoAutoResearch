@@ -85,10 +85,17 @@ let activeEditResourceTargetId = "";
 let pendingPreProjectResendConfirm = null;
 let projectRenderedScrollTop = 0;
 let overviewPollTimer = null;
+let researchEventSource = null;
+let researchEventProjectId = "";
+let researchEventLastId = "";
+let researchEventReconnectTimer = null;
+let researchEventFailureCount = 0;
+let researchEventOverviewRefreshPending = false;
 let workingTickerTimer = null;
 let lastFramingHtml = "";
 let framingMessagesPersisting = false;
 let framingMessagesSaveVersion = 0;
+let serverClockOffsetMs = 0;
 let initialProjectDialogOpened = false;
 let openProjectMenuId = "";
 let pendingRenameProject = null;
@@ -1940,6 +1947,128 @@ async function apiBinary(path, body, options = {}) {
   return payload;
 }
 
+function researchEventsPath() {
+  const query = researchEventLastId ? `?since=${encodeURIComponent(researchEventLastId)}` : "";
+  return apiPath(`/api/research/events${query}`);
+}
+
+function stopResearchEventStream(options = {}) {
+  clearTimeout(researchEventReconnectTimer);
+  researchEventReconnectTimer = null;
+  if (researchEventSource) {
+    researchEventSource.close();
+    researchEventSource = null;
+  }
+  researchEventProjectId = "";
+  if (options.resetLastId) researchEventLastId = "";
+}
+
+function queueStreamingOverviewRefresh() {
+  if (researchEventOverviewRefreshPending) return;
+  researchEventOverviewRefreshPending = true;
+  setTimeout(async () => {
+    researchEventOverviewRefreshPending = false;
+    if (!activeProjectId) return;
+    try {
+      await loadOverview(true);
+    } catch (_error) {
+      // Overview polling remains the correctness fallback.
+    }
+  }, 0);
+}
+
+function upsertSessionTranscriptEntry(session, entry) {
+  if (!entry || typeof entry !== "object") return false;
+  const transcript = Array.isArray(session.transcript) ? [...session.transcript] : [];
+  const entryId = String(entry.id || "").trim();
+  let updated = false;
+  if (entryId) {
+    const index = transcript.findIndex((item) => String(item?.id || "") === entryId);
+    if (index >= 0) {
+      transcript[index] = { ...transcript[index], ...entry };
+      updated = true;
+    }
+  }
+  if (!updated) transcript.push(entry);
+  session.transcript = transcript.slice(-600);
+  return true;
+}
+
+function applyResearchEventPayload(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  const eventProjectId = String(payload.project_id || "").trim();
+  if (eventProjectId && activeProjectId && eventProjectId !== activeProjectId) return false;
+  if (payload.event_id !== undefined) {
+    const nextEventId = Number(payload.event_id || 0);
+    const currentEventId = Number(researchEventLastId || 0);
+    if (Number.isFinite(nextEventId) && nextEventId > currentEventId) researchEventLastId = String(nextEventId);
+  }
+  if (!appState) appState = {};
+  const currentSession = appState.research_session && typeof appState.research_session === "object" ? appState.research_session : {};
+  const sessionPatch = payload.session_patch && typeof payload.session_patch === "object" ? payload.session_patch : {};
+  const nextSession = {
+    ...currentSession,
+    ...(payload.run_id ? { id: payload.run_id } : {}),
+    ...(payload.backend ? { backend: payload.backend } : {}),
+    ...(payload.mode ? { mode: payload.mode } : {}),
+    ...(payload.status ? { status: payload.status } : {}),
+    ...sessionPatch,
+  };
+  upsertSessionTranscriptEntry(nextSession, payload.transcript_entry);
+  if (payload.log) {
+    const logs = Array.isArray(nextSession.logs) ? [...nextSession.logs] : [];
+    const line = String(payload.log || "");
+    if (line && logs[logs.length - 1] !== line) logs.push(line);
+    nextSession.logs = logs.slice(-500);
+  }
+  appState.research_session = nextSession;
+  renderChatState();
+  renderSession();
+  renderResumeCommandBar();
+  renderComposerSuggestions();
+  scheduleWorkingTicker();
+  if (payload.kind === "completed" || payload.kind === "error") queueStreamingOverviewRefresh();
+  return true;
+}
+
+function handleResearchEventMessage(event) {
+  try {
+    applyResearchEventPayload(JSON.parse(event.data));
+  } catch (_error) {
+    // Ignore malformed stream frames; overview polling will reconcile state.
+  }
+}
+
+function scheduleResearchEventReconnect() {
+  clearTimeout(researchEventReconnectTimer);
+  if (!activeProjectId || researchEventFailureCount >= 3) return;
+  const delay = Math.min(10000, 1000 * Math.max(1, researchEventFailureCount));
+  researchEventReconnectTimer = setTimeout(() => startResearchEventStream({ force: true }), delay);
+}
+
+function startResearchEventStream(options = {}) {
+  if (!activeProjectId || typeof EventSource === "undefined") return;
+  if (researchEventFailureCount >= 3 && !options.force) return;
+  if (researchEventSource && researchEventProjectId === activeProjectId && !options.force) return;
+  const previousProjectId = researchEventProjectId;
+  stopResearchEventStream({ resetLastId: previousProjectId && previousProjectId !== activeProjectId });
+  researchEventProjectId = activeProjectId;
+  const source = new EventSource(researchEventsPath());
+  researchEventSource = source;
+  source.addEventListener("research", handleResearchEventMessage);
+  source.onmessage = handleResearchEventMessage;
+  source.onopen = () => {
+    researchEventFailureCount = 0;
+  };
+  source.onerror = () => {
+    if (researchEventSource === source) {
+      researchEventFailureCount += 1;
+      stopResearchEventStream();
+      scheduleResearchEventReconnect();
+    }
+  };
+}
+
 function mergeSessionFromApiResponse(payload) {
   const session =
     payload?.result?.session ||
@@ -1955,6 +2084,7 @@ function mergeSessionFromApiResponse(payload) {
     appState.latest_plan = plan;
     if (upsertLatestPlanMessage(localMessages)) lastFramingHtml = "";
   }
+  startResearchEventStream();
   renderChatState();
   renderSession();
   renderResumeCommandBar();
@@ -2266,6 +2396,8 @@ function clearObject(object) {
 }
 
 function resetProjectClientState() {
+  stopResearchEventStream({ resetLastId: true });
+  researchEventFailureCount = 0;
   activeColdPath = "";
   coldDirty = false;
   prepareSaved = false;
@@ -2619,6 +2751,7 @@ async function loadOverview(silent = false) {
     const materialContent = $("#context-content");
     const holdMaterialTree = activeView === "materials" && Boolean(materialContent?.childElementCount);
     appState = await api("/api/overview");
+    syncServerClockOffset(appState.generated_at);
     if (appState.active_project_id && appState.active_project_id !== activeProjectId) {
       activeProjectId = appState.active_project_id;
       localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
@@ -2627,6 +2760,7 @@ async function loadOverview(silent = false) {
       restoreResourceSelections();
       restorePendingResourceImports();
     }
+    startResearchEventStream();
     const session = appState.research_session || {};
     if (framingDraftPending && session.mode === "framing" && !["running", "stopping"].includes(session.status)) {
       framingDraftPending = false;
@@ -2669,7 +2803,9 @@ function scheduleOverviewPoll(delay) {
 
 function updateWorkingDurations() {
   $$("[data-working-started-at]").forEach((node) => {
-    node.textContent = workingDurationText(node.dataset.workingStartedAt || "");
+    node.textContent = workingDurationText(node.dataset.workingStartedAt || "", {
+      serverClock: node.dataset.workingServerClock === "true",
+    });
   });
 }
 
@@ -3303,52 +3439,6 @@ function prelaunchAffordanceState() {
   };
 }
 
-function ensurePrelaunchAffordancePanel() {
-  const workbench = $("#cold-editor-workbench");
-  const row = workbench?.querySelector(".brief-composer-row");
-  if (!workbench || !row) return null;
-  let panel = $("#prelaunch-affordance");
-  if (!panel) {
-    panel = document.createElement("div");
-    panel.id = "prelaunch-affordance";
-    panel.className = "prelaunch-strip";
-    panel.setAttribute("aria-label", "Autoresearch launch readiness");
-  }
-  const queuePanel = $("#queue-panel");
-  if (queuePanel && queuePanel.parentElement === workbench) {
-    queuePanel.insertAdjacentElement("afterend", panel);
-  } else if (panel.parentElement !== workbench) {
-    row.insertAdjacentElement("beforebegin", panel);
-  }
-  return panel;
-}
-
-function prelaunchAffordanceHtml(state = prelaunchAffordanceState()) {
-  if (!state || state.hidden) return "";
-  const disabled = state.disabled ? " disabled" : "";
-  const title = state.reason ? ` title="${escapeHtml(state.reason)}"` : "";
-  return `
-    <div class="prelaunch-strip-inner" data-prelaunch-state="${escapeHtml(state.state || "")}">
-      <div class="prelaunch-copy">
-        <span>${escapeHtml(state.title || "")}</span>
-        ${state.detail ? `<p>${escapeHtml(state.detail)}</p>` : ""}
-      </div>
-      <div class="prelaunch-actions">
-        <button class="prelaunch-action primary-button small-button" type="button" data-prelaunch-action="${escapeHtml(state.primaryAction || "")}"${disabled}${title}>${escapeHtml(state.primaryLabel || "")}</button>
-      </div>
-    </div>
-  `;
-}
-
-function renderPrelaunchAffordance() {
-  const panel = ensurePrelaunchAffordancePanel();
-  if (!panel) return;
-  const state = prelaunchAffordanceState();
-  panel.hidden = Boolean(state.hidden);
-  panel.innerHTML = state.hidden ? "" : prelaunchAffordanceHtml(state);
-  requestAnimationFrame(updateBriefDockGeometry);
-}
-
 function updateQueuedChatSessionFromPayload(payload) {
   const session =
     payload?.result?.session ||
@@ -3532,7 +3622,6 @@ function renderComposerActionButtons() {
     else if (queueMode) send.title = "Queue follow-up";
   }
   renderQueuedChatPanel();
-  renderPrelaunchAffordance();
   renderQueueActionMenu();
 }
 
@@ -7067,6 +7156,16 @@ function formatWorkedDuration(seconds) {
   return parts.join(" ");
 }
 
+function syncServerClockOffset(generatedAt) {
+  const serverNow = Date.parse(String(generatedAt || ""));
+  if (!Number.isFinite(serverNow)) return;
+  serverClockOffsetMs = serverNow - Date.now();
+}
+
+function currentClockMs(options = {}) {
+  return Date.now() + (options.serverClock ? Number(serverClockOffsetMs || 0) : 0);
+}
+
 function currentRunStartedAtMs() {
   const transcript = Array.isArray(sessionState().transcript) ? sessionState().transcript : [];
   return currentProgressStartTime(transcript);
@@ -7079,17 +7178,18 @@ function currentRunStartedAtString(fallback = "") {
   return start ? new Date(start).toISOString() : "";
 }
 
-function workingDurationText(startedAt = "") {
+function workingDurationText(startedAt = "", options = {}) {
   const explicit = String(startedAt || "").trim();
   const start = explicit ? Date.parse(explicit) : currentRunStartedAtMs();
   if (!Number.isFinite(start) || start <= 0) return "Working";
-  return `Working for ${formatWorkedDuration((Date.now() - start) / 1000)}`;
+  return `Working for ${formatWorkedDuration((currentClockMs(options) - start) / 1000)}`;
 }
 
 function workingDurationHtml(startedAt = "") {
   const fallback = isSessionRunning() ? (activeRun().started_at || sessionState().started_at || "") : "";
   const started = currentRunStartedAtString(startedAt || fallback);
-  return `<span class="working-duration" data-working-started-at="${escapeHtml(started)}">${escapeHtml(workingDurationText(started))}</span>`;
+  const serverClock = Boolean(startedAt || fallback);
+  return `<span class="working-duration" data-working-started-at="${escapeHtml(started)}" data-working-server-clock="${serverClock ? "true" : "false"}">${escapeHtml(workingDurationText(started, { serverClock }))}</span>`;
 }
 
 function workedDurationLabel(userEntry, entries) {
@@ -10164,7 +10264,6 @@ function renderAttachmentTrays() {
     updateFramingScrollButton();
   });
   updateResourceImportActionState();
-  renderPrelaunchAffordance();
 }
 
 function uploadTooLargeMessage(name, size) {
@@ -12274,7 +12373,6 @@ function renderComposerSuggestions() {
     row.classList.remove("is-running");
     row.innerHTML = "";
   }
-  renderPrelaunchAffordance();
   requestAnimationFrame(() => {
     updateBriefDockGeometry();
     updateFramingScrollButton();
@@ -12571,19 +12669,6 @@ async function startFramingRun(brief, options = {}) {
   return response;
 }
 
-async function handlePrelaunchAffordanceAction(action) {
-  const state = prelaunchAffordanceState();
-  if (state.hidden || state.disabled) {
-    if (state.reason) showToast(state.reason, true);
-    return false;
-  }
-  if (action === "start") {
-    await openLaunchDialog();
-    return true;
-  }
-  return false;
-}
-
 async function coldStartFromPrepare() {
   if (!ensureResourceImportsReady()) return;
   if (!hasActiveProject()) {
@@ -12676,7 +12761,6 @@ async function resendConversationMessage(id, text) {
   }
   const resourceLinks = collectEditResourceLinks(id);
   const retainedAttachments = collectEditRetainedAttachments(id);
-  const files = await collectUploadFiles(editAttachmentDraftForMessage(id).uploads);
   message.edited_at = new Date().toISOString();
   message.text = displayText;
   if (editAttachments.length) message.attachments = editAttachments;
@@ -12687,14 +12771,14 @@ async function resendConversationMessage(id, text) {
   }
   setHiddenProjectDraft("");
   projectDraftDirty = false;
-  await persistFramingMessages();
+  if (useFramingRun) framingDraftPending = true;
+  else framingReplyPending = true;
+  beginFramingPending(id);
   renderFramingConversation();
+  scrollFramingToBottomSoon();
   try {
-    if (useFramingRun) framingDraftPending = true;
-    else framingReplyPending = true;
-    beginFramingPending(id);
-    renderFramingConversation();
-    scrollFramingToBottomSoon();
+    await persistFramingMessages();
+    const files = await collectUploadFiles(editAttachmentDraftForMessage(id).uploads);
     if (useFramingRun) {
       await startFramingRun(displayText, { files, resourceLinks });
     } else {
@@ -13017,7 +13101,6 @@ function bindEvents() {
     }
     resizeColdEditor();
     renderColdPreview();
-    renderPrelaunchAffordance();
   });
   $("#target-venue").addEventListener("input", (event) => {
     scopedSet("autoResearchTargetVenue", event.target.value || "");
@@ -13241,13 +13324,6 @@ function bindEvents() {
     if (queueActionMenuOpen && !event.target.closest("#queue-action-menu") && !event.target.closest("#queue-action-menu-toggle")) {
       queueActionMenuOpen = false;
       renderQueueActionMenu();
-    }
-    const prelaunchAction = event.target.closest("[data-prelaunch-action]");
-    if (prelaunchAction) {
-      event.preventDefault();
-      handlePrelaunchAffordanceAction(prelaunchAction.dataset.prelaunchAction || "")
-        .catch((error) => showToast(error.message, true));
-      return;
     }
     const queueMove = event.target.closest("[data-queue-move]");
     if (queueMove) {

@@ -372,10 +372,36 @@ function loadAppContext() {
     ["#settings-claude-credential-clear", claudeCredentialClear],
   ].forEach(([selector, value]) => elements.set(selector, value));
 
+  const eventSources = [];
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.closed = false;
+      this.listeners = new Map();
+      eventSources.push(this);
+    }
+    addEventListener(type, callback) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(callback);
+    }
+    emit(type, payload = {}) {
+      const event = type === "research" || type === "message"
+        ? { data: JSON.stringify(payload) }
+        : payload;
+      (this.listeners.get(type) || []).forEach((callback) => callback(event));
+      const handler = this[`on${type}`];
+      if (typeof handler === "function") handler(event);
+    }
+    close() {
+      this.closed = true;
+    }
+  }
+
   const context = {
     console,
     URL,
     URLSearchParams,
+    EventSource: FakeEventSource,
     FormData: class FormData {
       constructor(form) {
         this.form = form;
@@ -466,6 +492,8 @@ function loadAppContext() {
     fetch: async () => ({ ok: true, json: async () => ({}) }),
     globalThis: null,
   };
+  context.window.EventSource = FakeEventSource;
+  context.__eventSources = eventSources;
   context.globalThis = context;
   vm.createContext(context);
   const appPath = path.join(root, "templates", "default", "ui", "app.js");
@@ -481,6 +509,7 @@ function loadAppContext() {
     globalThis.__renderCount = 0;
     globalThis.__persistCount = 0;
     globalThis.__scrollCount = 0;
+    globalThis.__loadOverviewCalls = [];
     globalThis.__browserOpenCount = 0;
     globalThis.__browserOpenCategory = "";
     globalThis.__browserOpenMode = "";
@@ -546,7 +575,7 @@ function loadAppContext() {
     setColdViewMode = () => {};
     markPrepareSaved = () => {};
     renderStage = () => {};
-    loadOverview = async () => {};
+    loadOverview = async (silent = false) => { globalThis.__loadOverviewCalls.push(silent); };
     saveProjectDraft = async () => {};
     startFramingRun = async (brief, options = {}) => {
       globalThis.__startedFramingBrief = brief;
@@ -1067,8 +1096,10 @@ function loadAppContext() {
       return { hidden: Boolean(row?.hidden), html: row?.innerHTML || "", className: row?.className || "" };
     };
     globalThis.__prelaunchState = () => prelaunchAffordanceState();
-    globalThis.__prelaunchHtml = () => prelaunchAffordanceHtml();
-    globalThis.__prelaunchAction = async (action) => handlePrelaunchAffordanceAction(action);
+    globalThis.__latestProjectCardHtml = () => {
+      const latest = latestProjectMessage();
+      return latest ? projectDraftCardHtml(latest) : "";
+    };
     globalThis.__queuedItems = () => queuedChatItems().map((item) => ({ ...item }));
     globalThis.__moveQueuedItem = async (id, direction) => moveQueuedChatItem(id, direction);
     globalThis.__deleteQueuedItem = async (id) => deleteQueuedChatItem(id);
@@ -1514,16 +1545,20 @@ async function testPrelaunchAffordanceStatesAndActions() {
   `);
   let state = app.run("__prelaunchState()");
   assert.equal(state.state, "hidden", "pre-start conversation without PROJECT.md should not expose a manual draft action");
-  assert.equal(app.run("__prelaunchHtml()"), "", "manual draft affordance should stay hidden");
-  assert.equal(await app.run('__prelaunchAction("draft")'), false, "draft is not a prelaunch UI action");
+  assert.equal(app.run('document.querySelector("#prelaunch-affordance") === null'), true, "composer prelaunch strip should not be created");
   assert.equal(app.context.__startedFramingBrief, undefined, "draft action must not start a framing run from the UI");
 
   const ready = loadAppContext();
+  ready.run(`
+    __setMessages([
+      { id: "p1", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Project\\n\\nReady." }, created_at: "2026-06-17T10:00:00.000Z" }
+    ]);
+  `);
   state = ready.run("__prelaunchState()");
   assert.equal(state.state, "ready", "valid PROJECT.md before autoresearch should offer Start");
-  assert.equal(ready.run("__prelaunchHtml()").includes("Start autoresearch"), true, "ready affordance should show Start autoresearch");
-  await ready.run('__prelaunchAction("start")');
-  assert.equal(ready.launchDialog.open, true, "Start affordance should open the existing launch dialog");
+  assert.equal(ready.run("__latestProjectCardHtml()").includes("data-project-launch"), true, "latest PROJECT.md card should own Start autoresearch");
+  await ready.run("openLaunchDialog()");
+  assert.equal(ready.launchDialog.open, true, "project-card Start should use the existing launch dialog");
 
   const stale = loadAppContext();
   stale.run(`
@@ -1534,11 +1569,10 @@ async function testPrelaunchAffordanceStatesAndActions() {
   `);
   state = stale.run("__prelaunchState()");
   assert.equal(state.state, "ready", "new user framing after PROJECT.md should not expose a manual update action");
-  const staleHtml = stale.run("__prelaunchHtml()");
+  const staleHtml = stale.run("__latestProjectCardHtml()");
   assert.equal(staleHtml.includes("Start autoresearch"), true);
   assert.equal(staleHtml.includes("Update PROJECT.md"), false);
   assert.equal(staleHtml.includes("Start anyway"), false);
-  assert.equal(await stale.run('__prelaunchAction("update")'), false, "update is not a prelaunch UI action");
   assert.equal(stale.context.__startedFramingBrief, undefined, "update action must not start a framing run from the UI");
 
   const started = loadAppContext();
@@ -2176,6 +2210,124 @@ function testClaudeResultSuccessRecoversAssistantReply() {
   assert.equal(html.includes("The run completed without a saved response."), false, "Claude result.success must not render the no-response error state");
 }
 
+async function testResearchEventStreamUpsertsTranscriptAndCompletes() {
+  const app = loadAppContext();
+  const state = await app.run(`
+    (async () => {
+      startResearchEventStream();
+      const first = globalThis.__eventSources.at(-1);
+      first.emit("open", {});
+      first.emit("research", {
+        schema_version: 1,
+        event_id: 1,
+        kind: "transcript",
+        project_id: "p1",
+        run_id: "s-stream",
+        backend: "codex",
+        mode: "chat",
+        status: "running",
+        session_patch: { status: "running", last_event_summary: "Assistant is writing." },
+        transcript_entry: {
+          id: "ta-stream",
+          role: "assistant",
+          kind: "assistant",
+          title: "Assistant",
+          content: "Hel",
+          raw_type: "item.agentMessage.delta",
+          created_at: "2026-06-17T10:00:01.000Z",
+          run_id: "s-stream",
+          streaming: true
+        }
+      });
+      first.emit("research", {
+        schema_version: 1,
+        event_id: 2,
+        kind: "transcript",
+        project_id: "p1",
+        run_id: "s-stream",
+        backend: "codex",
+        mode: "chat",
+        status: "running",
+        session_patch: { status: "running", last_event_summary: "Assistant is writing more." },
+        transcript_entry: {
+          id: "ta-stream",
+          role: "assistant",
+          kind: "assistant",
+          title: "Assistant",
+          content: "Hello",
+          raw_type: "item.agentMessage.delta",
+          created_at: "2026-06-17T10:00:01.000Z",
+          run_id: "s-stream",
+          streaming: true
+        }
+      });
+      first.emit("research", {
+        schema_version: 1,
+        event_id: 3,
+        kind: "completed",
+        project_id: "p1",
+        run_id: "s-stream",
+        backend: "codex",
+        mode: "chat",
+        status: "completed",
+        session_patch: { status: "completed", returncode: 0 }
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
+        url: first.url,
+        lastId: researchEventLastId,
+        transcript: appState.research_session.transcript,
+        status: appState.research_session.status,
+        overviewCalls: globalThis.__loadOverviewCalls
+      };
+    })()
+  `);
+  assert.equal(state.url, "/api/research/events?project=p1", "EventSource should open a project-scoped stream");
+  assert.equal(state.lastId, "3", "streaming events should advance Last-Event-ID");
+  assert.equal(state.transcript.length, 1, "streaming transcript updates must upsert by id");
+  assert.equal(state.transcript[0].content, "Hello");
+  assert.equal(state.status, "completed");
+  assertJsonEqual(state.overviewCalls, [true], "completion should request one silent overview reconciliation");
+}
+
+function testResearchEventStreamProjectSwitchAndErrorFallback() {
+  const app = loadAppContext();
+  const state = app.run(`
+    startResearchEventStream();
+    const first = globalThis.__eventSources.at(-1);
+    activeProjectId = "p2";
+    resetProjectClientState();
+    startResearchEventStream();
+    const second = globalThis.__eventSources.at(-1);
+    second.emit("error", {});
+    const afterOneError = { failureCount: researchEventFailureCount, reconnectScheduled: Boolean(researchEventReconnectTimer) };
+    clearTimeout(researchEventReconnectTimer);
+    researchEventReconnectTimer = null;
+    startResearchEventStream({ force: true });
+    globalThis.__eventSources.at(-1).emit("error", {});
+    clearTimeout(researchEventReconnectTimer);
+    researchEventReconnectTimer = null;
+    startResearchEventStream({ force: true });
+    globalThis.__eventSources.at(-1).emit("error", {});
+    const beforeFallbackCount = globalThis.__eventSources.length;
+    startResearchEventStream();
+    ({
+      firstClosed: first.closed,
+      secondUrl: second.url,
+      afterOneError,
+      failureCount: researchEventFailureCount,
+      sourceCount: globalThis.__eventSources.length,
+      beforeFallbackCount
+    });
+  `);
+  assert.equal(state.firstClosed, true, "project reset should close the previous EventSource");
+  assert.equal(state.secondUrl, "/api/research/events?project=p2", "project switch should reopen for the new project");
+  assert.equal(state.afterOneError.failureCount, 1, "stream errors should be counted");
+  assert.equal(state.afterOneError.reconnectScheduled, true, "first stream error should schedule a retry");
+  assert.equal(state.failureCount, 3, "repeated stream errors should reach fallback threshold");
+  assert.equal(state.sourceCount, state.beforeFallbackCount, "after repeated failures, normal starts should fall back to polling");
+}
+
 function testTranscriptEntriesDoNotExposeEdit() {
   const app = loadAppContext();
   app.run(`
@@ -2302,6 +2454,28 @@ async function testSteeringResendStartsVisibleNormalChatRun() {
   assert.equal(chatCalls[0].body.resendContext.forceFreshSession, true, "resend should force a fresh non-resumed chat session");
   assert.equal(chatCalls[0].body.resendContext.archivedCount, 1, "resend should archive the truncated assistant tail");
   assert.equal(app.context.__startedFramingBrief, undefined, "resend must not start framing");
+}
+
+async function testResendRendersEditedUserBeforeSlowUploadCollection() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "old question", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "old answer", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    __installBlockingCollect();
+  `);
+  const pending = app.run('resendConversationMessage("u1", "edited question while upload waits")');
+  await Promise.resolve();
+  await Promise.resolve();
+  const messages = app.context.__messages();
+  assert.equal(messages.length, 1, "resend should truncate stale tail immediately");
+  assert.equal(messages[0].text, "edited question while upload waits", "edited user turn should be visible before slow file collection finishes");
+  assert.equal(app.context.__pendingState().reply, true, "resend should mark reply pending before slow file collection finishes");
+  assert.ok(app.context.__collectSeen.renderCount > 0, "edited message should render before collectUploadFiles waits");
+  app.context.__resolveCollect();
+  await pending;
+  assert.equal(app.context.__apiCalls.some((call) => call.endpoint === "/api/research/chat"), true, "resend should still call chat after collection resolves");
 }
 
 async function testLegacyRecordedInterventionMessageStillRenders() {
@@ -3845,6 +4019,22 @@ function testWorkingDurationFormatter() {
   assert.equal(app.run("__formatWorkedDuration(7440)"), "2h 4m");
   assert.equal(app.run("__formatWorkedDuration(108120)"), "1d 6h 2m");
   assert.equal(app.run("__formatWorkedDuration(93784)"), "1d 2h 3m 4s");
+}
+
+function testWorkingDurationUsesServerClockOffset() {
+  const app = loadAppContext();
+  const clientNow = Date.now();
+  const serverOffsetMs = 5 * 60 * 1000;
+  const serverStartedAt = new Date(clientNow + serverOffsetMs - 125000).toISOString();
+  const state = app.run(`
+    serverClockOffsetMs = ${serverOffsetMs};
+    ({
+      text: workingDurationText("${serverStartedAt}", { serverClock: true }),
+      html: workingDurationHtml("${serverStartedAt}")
+    });
+  `);
+  assert.equal(state.text, "Working for 2m 5s", "running timer should use server-clock offset for remote projects");
+  assert.equal(state.html.includes('data-working-server-clock="true"'), true, "running timer markup should remember that the timestamp came from the server");
 }
 
 function testTrialStripScrollRestoresAcrossRender() {
@@ -6414,10 +6604,13 @@ await testTypedLegacyGoalControlsStayOnCommandEndpoint();
 testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 testClaudeResultSuccessRecoversAssistantReply();
+await testResearchEventStreamUpsertsTranscriptAndCompletes();
+testResearchEventStreamProjectSwitchAndErrorFallback();
 testTranscriptEntriesDoNotExposeEdit();
 await testEditTruncatesLaterConversationBeforeResend();
 await testEditAfterAutoresearchFirstMessageUsesChat();
 await testSteeringResendStartsVisibleNormalChatRun();
+await testResendRendersEditedUserBeforeSlowUploadCollection();
 await testLegacyRecordedInterventionMessageStillRenders();
 await testEditPreProjectMessageUsesChat();
 await testEditPreProjectMessageDoesNotUseRegenerateConfirmation();
@@ -6459,6 +6652,7 @@ testTerminalChatRunWithoutAssistantShowsStatus();
 testRunningProgressFallsBackToReasoningSummary();
 testCurrentRunningTranscriptGroupDoesNotRenderWorkedActivity();
 testWorkingDurationFormatter();
+testWorkingDurationUsesServerClockOffset();
 testTrialStripScrollRestoresAcrossRender();
 testRunningTrialUsesProgressFallback();
 testStatusCardShowsReviewCheckpoint();

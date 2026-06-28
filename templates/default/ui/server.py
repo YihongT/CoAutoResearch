@@ -47,6 +47,9 @@ EXPORT_CONFIRMATION_BYTES = 1 * 1024 * 1024 * 1024
 EXPORT_CHUNK_BYTES = 1024 * 1024
 EXPORT_JOB_TTL_SECONDS = 24 * 60 * 60
 EXPORT_STORE_WITHOUT_COMPRESSION_BYTES = 16 * 1024 * 1024
+RESEARCH_EVENT_BUFFER_MAX = 500
+RESEARCH_EVENT_HEARTBEAT_SECONDS = 15
+STREAMING_TRANSCRIPT_MAX_CHARS = 8000
 FIGURE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 REMOTE_AUTH_TOKEN = os.environ.get("COAUTO_REMOTE_AUTH_TOKEN", "").strip()
 REMOTE_AUTH_QUERY = "coauto_token"
@@ -1233,6 +1236,9 @@ class ProjectContext:
         self.trajectory_path = self.root / "research_trajectory" / "TRAJECTORY.json"
         self.session = new_research_session()
         self.lock = threading.RLock()
+        self.research_events: list[dict[str, Any]] = []
+        self.research_event_id = 0
+        self.research_event_condition = threading.Condition(threading.RLock())
         self.refresh_metadata()
         self.load_runtime()
 
@@ -2240,7 +2246,7 @@ def agent_wait_state_from_values(running: bool, last_event_at: Any, last_event_s
 def persist_research_session() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     with RESEARCH_LOCK:
-        payload = {key: value for key, value in RESEARCH_SESSION.items() if key not in {"process", "process_thread"}}
+        payload = {key: value for key, value in RESEARCH_SESSION.items() if key not in {"process", "process_thread", "streaming_transcript"}}
     SESSION_STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -3499,9 +3505,11 @@ def transcript_from_codex_line(line: str) -> dict[str, Any] | None:
             return {"role": "tool", "kind": "error", "title": "Runtime message", "content": stripped, "raw_type": "process.message", "editable": False}
         return None
 
-    raw_type = str(event.get("type") or event.get("event") or event.get("kind") or "event")
+    raw_type = str(event.get("method") or event.get("type") or event.get("event") or event.get("kind") or "event")
     raw_type_lower = raw_type.lower()
     if raw_type_lower in {"thread.started", "turn.started"}:
+        return None
+    if "delta" in raw_type_lower or raw_type_lower.endswith("/delta"):
         return None
     if raw_type_lower == "turn.completed" and set(event.keys()).issubset({"type", "usage"}):
         return None
@@ -3689,6 +3697,409 @@ def transcript_dedupe_key(entry: dict[str, Any] | None) -> tuple[str, str, str, 
         str(entry.get("raw_type") or "").strip().lower(),
         compact_single_line(str(entry.get("content") or ""), 800),
     )
+
+
+def research_event_session_patch(extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    with RESEARCH_LOCK:
+        settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
+        patch = {
+            "session_id": str(RESEARCH_SESSION.get("session_id") or ""),
+            "last_event_at": str(RESEARCH_SESSION.get("last_event_at") or ""),
+            "last_event_summary": str(RESEARCH_SESSION.get("last_event_summary") or ""),
+            "agent_notice": dict(RESEARCH_SESSION.get("agent_notice") if isinstance(RESEARCH_SESSION.get("agent_notice"), dict) else {}),
+            "returncode": RESEARCH_SESSION.get("returncode"),
+            "backend": normalize_agent_backend(RESEARCH_SESSION.get("backend") or settings.get("backend") or ""),
+            "mode": str(RESEARCH_SESSION.get("mode") or ""),
+            "status": str(RESEARCH_SESSION.get("status") or ""),
+            "loop_iteration": int(RESEARCH_SESSION.get("loop_iteration") or 0),
+        }
+    if extra:
+        patch.update(extra)
+    return patch
+
+
+def emit_research_event(kind: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    context = current_project_context()
+    payload = dict(payload or {})
+    created_at = now_iso()
+    with context.lock:
+        session = context.session
+        settings = session.get("settings") if isinstance(session.get("settings"), dict) else {}
+        backend = normalize_agent_backend(session.get("backend") or settings.get("backend") or "")
+        event = {
+            "schema_version": 1,
+            "event_id": 0,
+            "kind": str(kind or "agent_event"),
+            "project_id": context.id,
+            "run_id": str(session.get("id") or ""),
+            "backend": backend,
+            "mode": str(session.get("mode") or ""),
+            "status": str(session.get("status") or ""),
+            "created_at": created_at,
+            "session_patch": research_event_session_patch(),
+        }
+    event.update(payload)
+    if not isinstance(event.get("session_patch"), dict):
+        event["session_patch"] = research_event_session_patch()
+    with context.research_event_condition:
+        context.research_event_id += 1
+        event["event_id"] = context.research_event_id
+        context.research_events.append(event)
+        if len(context.research_events) > RESEARCH_EVENT_BUFFER_MAX:
+            context.research_events = context.research_events[-RESEARCH_EVENT_BUFFER_MAX:]
+        context.research_event_condition.notify_all()
+    return event
+
+
+def research_events_since(context: ProjectContext, since_id: int) -> list[dict[str, Any]]:
+    with context.research_event_condition:
+        return [dict(event) for event in context.research_events if int(event.get("event_id") or 0) > since_id]
+
+
+def parse_research_event_since(value: Any) -> int:
+    try:
+        return max(0, int(str(value or "").strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def format_research_sse_event(event: dict[str, Any]) -> str:
+    event_id = int(event.get("event_id") or 0)
+    data = json.dumps(event, ensure_ascii=False)
+    return f"id: {event_id}\nevent: research\ndata: {data}\n\n"
+
+
+def stream_payload_value(payload: dict[str, Any], key: str) -> Any:
+    if key in payload:
+        return payload.get(key)
+    key_lower = key.lower()
+    for candidate, value in payload.items():
+        if str(candidate).lower() == key_lower:
+            return value
+    return None
+
+
+def stream_text_value(value: Any, keys: tuple[str, ...] = ()) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        return "".join(stream_text_value(item, keys) for item in value)
+    if isinstance(value, dict):
+        for key in keys:
+            text = stream_text_value(stream_payload_value(value, key), keys)
+            if text:
+                return text
+        for key in ("delta", "text_delta", "textDelta", "output_delta", "outputDelta", "summaryTextDelta", "content", "message", "item"):
+            nested = stream_payload_value(value, key)
+            if nested is value:
+                continue
+            text = stream_text_value(nested, keys)
+            if text:
+                return text
+    return ""
+
+
+def normalized_stream_method(value: Any) -> str:
+    return re.sub(r"[\s._]+", "/", str(value or "").strip().lower())
+
+
+def stream_item_identifier(*payloads: Any) -> str:
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for key in ("itemId", "item_id", "blockId", "block_id", "id", "callId", "call_id", "index"):
+            value = stream_payload_value(payload, key)
+            if value is not None and str(value).strip() != "":
+                return slugify(str(value), "active")
+    return "active"
+
+
+def streaming_update_from_codex_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    method = str(event.get("method") or event.get("type") or event.get("event") or event.get("kind") or "").strip()
+    method_key = normalized_stream_method(method)
+    if "plan/delta" in method_key:
+        return None
+    params = event.get("params") if isinstance(event.get("params"), dict) else event
+    item = params.get("item") if isinstance(params.get("item"), dict) else event.get("item") if isinstance(event.get("item"), dict) else {}
+    item_type = normalized_stream_method(item.get("type") or item.get("kind") or item.get("role") or "")
+    type_blob = f"{method_key} {item_type}"
+    item_id = stream_item_identifier(params, item, event)
+
+    if (
+        "agentmessage/delta" in method_key
+        or "agent/message/delta" in method_key
+        or ("delta" in method_key and ("agent/message" in type_blob or "agent_message" in type_blob or "message" in item_type))
+    ):
+        text = stream_text_value(params, ("delta", "text", "textDelta", "text_delta", "content"))
+        if not text:
+            return None
+        return {
+            "key": f"assistant:{item_id}",
+            "family": "assistant",
+            "role": "assistant",
+            "kind": "assistant",
+            "title": "Assistant",
+            "text": text,
+            "raw_type": method or "item.agentMessage.delta",
+            "mode": "append",
+        }
+
+    if "reasoning" in type_blob and ("delta" in method_key or "summarytextdelta" in method_key):
+        text = stream_text_value(params, ("delta", "summaryTextDelta", "text", "content"))
+        if not text:
+            return None
+        return {
+            "key": f"reasoning:{item_id}",
+            "family": "reasoning",
+            "role": "assistant",
+            "kind": "reasoning",
+            "title": "Reasoning",
+            "text": text,
+            "raw_type": method or "item.reasoning.summaryTextDelta",
+            "mode": "append",
+        }
+
+    if (
+        "commandexecution/outputdelta" in method_key
+        or "command/execution/outputdelta" in method_key
+        or "outputdelta" in method_key
+        or ("delta" in method_key and any(token in type_blob for token in ("command", "exec", "stdout", "stderr", "tool")))
+    ):
+        text = stream_text_value(params, ("delta", "outputDelta", "output_delta", "output", "stdout", "stderr", "text", "content"))
+        if not text:
+            return None
+        return {
+            "key": f"tool:{item_id}",
+            "family": "tool",
+            "role": "tool",
+            "kind": "tool",
+            "title": "Tool",
+            "text": text,
+            "raw_type": method or "item.commandExecution.outputDelta",
+            "mode": "append",
+        }
+
+    return None
+
+
+def streaming_update_from_claude_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    nested = event.get("event") if isinstance(event.get("event"), dict) else event.get("raw_event") if isinstance(event.get("raw_event"), dict) else event
+    if not isinstance(nested, dict):
+        return None
+    event_type = str(nested.get("type") or event.get("type") or "event").strip() or "event"
+    subtype = str(nested.get("subtype") or event.get("subtype") or "").strip()
+    raw_type = event_type if "." in event_type or not subtype else f"{event_type}.{subtype}"
+    raw_type_lower = raw_type.lower()
+    event_family = event_type.split(".", 1)[0].lower()
+
+    if event_family == "content_block_delta":
+        delta = nested.get("delta") if isinstance(nested.get("delta"), dict) else {}
+        delta_type = str(delta.get("type") or "").strip().lower()
+        index = stream_item_identifier({"index": nested.get("index", 0)})
+        if delta_type == "text_delta":
+            text = stream_text_value(delta, ("text",))
+            family = "assistant"
+            role = "assistant"
+            kind = "assistant"
+            title = "Assistant"
+        elif "thinking" in delta_type:
+            text = stream_text_value(delta, ("thinking", "text"))
+            family = "reasoning"
+            role = "assistant"
+            kind = "reasoning"
+            title = "Reasoning"
+        elif delta_type == "input_json_delta":
+            text = stream_text_value(delta, ("partial_json", "text"))
+            family = "tool"
+            role = "tool"
+            kind = "tool"
+            title = "Tool"
+        else:
+            return None
+        if not text:
+            return None
+        return {
+            "key": f"{family}:{index}",
+            "family": family,
+            "role": role,
+            "kind": kind,
+            "title": title,
+            "text": text,
+            "raw_type": raw_type,
+            "mode": "append",
+        }
+
+    if "partial" in raw_type_lower or event_family == "assistant":
+        message = nested.get("message") if isinstance(nested.get("message"), dict) else nested
+        if not isinstance(message, dict):
+            return None
+        stop_reason = message.get("stop_reason")
+        if stop_reason not in {None, ""} or claude_message_has_tool_use(message):
+            return None
+        text = claude_message_content_text(message, include_tools=False)
+        if not text:
+            return None
+        return {
+            "key": f"assistant:{stream_item_identifier(message, nested)}",
+            "family": "assistant",
+            "role": "assistant",
+            "kind": "assistant",
+            "title": "Assistant",
+            "text": text,
+            "raw_type": raw_type,
+            "mode": "snapshot",
+        }
+
+    return None
+
+
+def streaming_update_from_agent_line(line: str, backend: str) -> dict[str, Any] | None:
+    stripped = line.strip()
+    if not stripped:
+        return None
+    try:
+        event = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event, dict):
+        return None
+    return streaming_update_from_claude_event(event) if normalize_agent_backend(backend) == "claude" else streaming_update_from_codex_event(event)
+
+
+def parsed_transcript_entry(parsed: dict[str, Any], entry_id: str = "", streaming: bool = False, created_at: str = "") -> dict[str, Any]:
+    entry = transcript_entry(
+        str(parsed.get("role") or "assistant"),
+        str(parsed.get("kind") or "assistant"),
+        str(parsed.get("title") or "Assistant"),
+        str(parsed.get("content") or "")[:STREAMING_TRANSCRIPT_MAX_CHARS],
+        str(parsed.get("raw_type") or ""),
+        bool(parsed.get("editable")),
+    )
+    if entry_id:
+        entry["id"] = entry_id
+    if created_at:
+        entry["created_at"] = created_at
+    if streaming:
+        entry["streaming"] = True
+    elif "streaming" in entry:
+        entry.pop("streaming", None)
+    return entry
+
+
+def upsert_transcript_entry_locked(entry: dict[str, Any]) -> dict[str, Any]:
+    entry_id = str(entry.get("id") or "").strip()
+    if not entry_id:
+        RESEARCH_SESSION["transcript"].append(entry)
+        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        return entry
+    for index, existing in enumerate(RESEARCH_SESSION.get("transcript", [])):
+        if str(existing.get("id") or "") == entry_id:
+            merged = {**existing, **entry}
+            if existing.get("created_at"):
+                merged["created_at"] = existing["created_at"]
+            if entry.get("streaming") is False:
+                merged.pop("streaming", None)
+            RESEARCH_SESSION["transcript"][index] = merged
+            RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+            return merged
+    RESEARCH_SESSION["transcript"].append(entry)
+    RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+    return entry
+
+
+def streaming_transcript_state_locked() -> dict[str, dict[str, Any]]:
+    state = RESEARCH_SESSION.get("streaming_transcript")
+    if not isinstance(state, dict):
+        state = {}
+        RESEARCH_SESSION["streaming_transcript"] = state
+    return state
+
+
+def upsert_streaming_transcript_locked(update: dict[str, Any]) -> dict[str, Any] | None:
+    key = str(update.get("key") or "assistant:active")
+    text = str(update.get("text") or "")
+    state = streaming_transcript_state_locked()
+    existing = state.get(key) if isinstance(state.get(key), dict) else None
+    if not text and not existing:
+        return None
+    if not text.strip() and not existing:
+        return None
+    mode = str(update.get("mode") or "append")
+    content = text if mode == "snapshot" else f"{existing.get('content', '') if existing else ''}{text}"
+    content = content[:STREAMING_TRANSCRIPT_MAX_CHARS]
+    if not content.strip():
+        return None
+    entry_id = str(existing.get("id") or "") if existing else f"T{now_id()}_stream_{len(RESEARCH_SESSION.get('transcript', [])) + 1:04d}"
+    created_at = str(existing.get("created_at") or "") if existing else now_iso()
+    parsed = {
+        "role": update.get("role") or "assistant",
+        "kind": update.get("kind") or "assistant",
+        "title": update.get("title") or "Assistant",
+        "content": content,
+        "raw_type": update.get("raw_type") or "stream.delta",
+        "editable": False,
+    }
+    entry = parsed_transcript_entry(parsed, entry_id=entry_id, streaming=True, created_at=created_at)
+    entry = upsert_transcript_entry_locked(entry)
+    state[key] = {
+        "id": entry_id,
+        "created_at": created_at,
+        "content": content,
+        "family": str(update.get("family") or update.get("kind") or "assistant"),
+        "role": str(update.get("role") or "assistant"),
+        "kind": str(update.get("kind") or "assistant"),
+    }
+    return entry
+
+
+def finalize_streaming_transcript_locked(parsed: dict[str, Any]) -> dict[str, Any] | None:
+    content = str(parsed.get("content") or "").strip()
+    if not content:
+        return None
+    role = str(parsed.get("role") or "").strip().lower()
+    kind = str(parsed.get("kind") or "").strip().lower()
+    families: list[str] = []
+    if role in {"assistant", "final"} or kind in {"assistant", "final"}:
+        families.append("assistant")
+    if role == "tool" or kind in {"tool", "error"}:
+        families.append("tool")
+    if kind == "reasoning":
+        families.append("reasoning")
+    state = streaming_transcript_state_locked()
+    candidate_key = ""
+    for key, item in state.items():
+        if str(item.get("family") or "") in families:
+            candidate_key = key
+    if candidate_key:
+        item = state.pop(candidate_key)
+        entry = parsed_transcript_entry(parsed, entry_id=str(item.get("id") or ""), streaming=False, created_at=str(item.get("created_at") or ""))
+        entry["streaming"] = False
+        return upsert_transcript_entry_locked(entry)
+    entry = parsed_transcript_entry(parsed)
+    RESEARCH_SESSION["transcript"].append(entry)
+    RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+    return entry
+
+
+def finalize_active_streaming_transcripts_locked() -> list[dict[str, Any]]:
+    state = RESEARCH_SESSION.get("streaming_transcript")
+    if not isinstance(state, dict) or not state:
+        RESEARCH_SESSION["streaming_transcript"] = {}
+        return []
+    finalized: list[dict[str, Any]] = []
+    ids = {str(item.get("id") or "") for item in state.values() if isinstance(item, dict)}
+    for index, entry in enumerate(RESEARCH_SESSION.get("transcript", [])):
+        if str(entry.get("id") or "") in ids and entry.get("streaming"):
+            next_entry = dict(entry)
+            next_entry.pop("streaming", None)
+            RESEARCH_SESSION["transcript"][index] = next_entry
+            finalized.append(next_entry)
+    RESEARCH_SESSION["streaming_transcript"] = {}
+    return finalized
 
 
 def backfill_claude_result_transcript_from_raw_logs() -> bool:
@@ -9590,8 +10001,11 @@ def append_research_log(line: str) -> None:
         )
     display = format_agent_event(line, backend)
     transcript = transcript_from_agent_line(line, backend)
+    streaming_update = None if transcript else streaming_update_from_agent_line(line, backend)
     event_at = now_iso()
     notice = agent_notice_from_event(line, display)
+    transcript_update: dict[str, Any] | None = None
+    event_kind = "agent_event" if display or line.strip() else "session"
     with RESEARCH_LOCK:
         if line.strip():
             RESEARCH_SESSION["raw_logs"].append(line.rstrip("\n"))
@@ -9613,7 +10027,12 @@ def append_research_log(line: str) -> None:
                 if age is None or age >= AGENT_RATE_LIMIT_CLEAR_SECONDS:
                     RESEARCH_SESSION["agent_notice"] = {}
         if transcript and transcript.get("content"):
-            RESEARCH_SESSION["transcript"].append(transcript_entry(**transcript))
+            transcript_update = finalize_streaming_transcript_locked(transcript)
+            event_kind = "transcript"
+        elif streaming_update:
+            transcript_update = upsert_streaming_transcript_locked(streaming_update)
+            if transcript_update:
+                event_kind = "transcript"
         session_id = ""
         try:
             session_id = find_session_identifier(json.loads(line))
@@ -9624,7 +10043,15 @@ def append_research_log(line: str) -> None:
         RESEARCH_SESSION["raw_logs"] = RESEARCH_SESSION["raw_logs"][-2000:]
         RESEARCH_SESSION["logs"] = RESEARCH_SESSION["logs"][-2000:]
         RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        session_patch = research_event_session_patch()
     persist_research_session()
+    if line.strip() or display or transcript_update:
+        payload: dict[str, Any] = {"session_patch": session_patch}
+        if display:
+            payload["log"] = display
+        if transcript_update:
+            payload["transcript_entry"] = transcript_update
+        emit_research_event(event_kind, payload)
 
 
 def finish_research_run(returncode: int | None) -> None:
@@ -9635,7 +10062,10 @@ def finish_research_run(returncode: int | None) -> None:
         RESEARCH_SESSION["ended_at"] = now_iso()
         RESEARCH_SESSION["process"] = None
         RESEARCH_SESSION["process_thread"] = None
+        finalize_active_streaming_transcripts_locked()
+        session_patch = research_event_session_patch({"returncode": returncode})
     persist_research_session()
+    emit_research_event("completed" if returncode == 0 else "error", {"session_patch": session_patch, "returncode": returncode})
 
 
 def stop_autoresearch_loop(reason: str, gate: dict[str, Any] | None = None) -> None:
@@ -10071,6 +10501,7 @@ def start_research_run(
             RESEARCH_SESSION["logs"] = []
             RESEARCH_SESSION["raw_logs"] = []
             RESEARCH_SESSION["transcript"] = []
+            RESEARCH_SESSION["streaming_transcript"] = {}
         RESEARCH_SESSION.update(
             {
                 "id": f"S{now_id()}_{slugify(mode, 'research')}",
@@ -10083,6 +10514,7 @@ def start_research_run(
                 "started_at": now_iso(),
                 "ended_at": "",
                 "returncode": None,
+                "streaming_transcript": {},
                 "loop_active": next_loop_active,
                 "loop_iteration": next_loop_iteration,
                 "loop_max_iterations": review_checkpoint_interval,
@@ -10102,7 +10534,9 @@ def start_research_run(
             title = "Cold start request" if mode == "cold_start" else "User"
             RESEARCH_SESSION["transcript"].append(transcript_entry("user", "user", title, display_text, f"ui.{mode}", mode in {"chat", "research"}))
         RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        session_patch = research_event_session_patch()
     persist_research_session()
+    emit_research_event("session", {"session_patch": session_patch})
 
     wrapper_path: Path | None = None
     try:
@@ -10240,6 +10674,7 @@ def initialize_plan_research_session(
                 "logs": [],
                 "raw_logs": [],
                 "transcript": [],
+                "streaming_transcript": {},
                 "loop_active": False,
                 "loop_stop_reason": RESEARCH_SESSION.get("loop_stop_reason", ""),
                 "process": None,
@@ -10254,7 +10689,9 @@ def initialize_plan_research_session(
         )
         RESEARCH_SESSION["transcript"].append(transcript_entry("user", "user", "User", display_message, "ui.plan", True))
         RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        session_patch = research_event_session_patch()
     persist_research_session()
+    emit_research_event("session", {"session_patch": session_patch})
 
 
 def start_plan_process(
@@ -12184,6 +12621,7 @@ def append_plan_transcript(artifact: dict[str, Any]) -> None:
     public = public_plan_artifact(artifact)
     if not public.get("id"):
         return
+    event_entry: dict[str, Any] | None = None
     with RESEARCH_LOCK:
         existing_index = -1
         for index, item in enumerate(RESEARCH_SESSION.get("transcript", [])):
@@ -12200,11 +12638,17 @@ def append_plan_transcript(artifact: dict[str, Any]) -> None:
         )
         entry["artifact"] = public
         if existing_index >= 0:
+            entry["id"] = RESEARCH_SESSION["transcript"][existing_index].get("id") or entry["id"]
             RESEARCH_SESSION["transcript"][existing_index] = {**RESEARCH_SESSION["transcript"][existing_index], **entry}
+            event_entry = dict(RESEARCH_SESSION["transcript"][existing_index])
         else:
             RESEARCH_SESSION["transcript"].append(entry)
+            event_entry = dict(entry)
         RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        session_patch = research_event_session_patch()
     persist_research_session()
+    if event_entry:
+        emit_research_event("transcript", {"session_patch": session_patch, "transcript_entry": event_entry})
 
 
 def mark_plan_artifact_failed(plan_id: str, error: str) -> dict[str, Any]:
@@ -12825,6 +13269,39 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
             return {}
         return json.loads(raw.decode("utf-8"))
 
+    def serve_research_events(self, parsed: Any) -> None:
+        context = current_project_context()
+        query = parse_qs(parsed.query)
+        since = parse_research_event_since(query.get("since", [""])[0])
+        if since <= 0:
+            since = parse_research_event_since(self.headers.get("Last-Event-ID", ""))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            while True:
+                with context.research_event_condition:
+                    events = [dict(event) for event in context.research_events if int(event.get("event_id") or 0) > since]
+                    if not events:
+                        context.research_event_condition.wait(timeout=RESEARCH_EVENT_HEARTBEAT_SECONDS)
+                        events = [dict(event) for event in context.research_events if int(event.get("event_id") or 0) > since]
+                    heartbeat = not events
+                if heartbeat:
+                    self.wfile.write(f": heartbeat {now_iso()}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    continue
+                for event in events:
+                    self.wfile.write(format_research_sse_event(event).encode("utf-8"))
+                    self.wfile.flush()
+                    since = max(since, int(event.get("event_id") or 0))
+        except (BrokenPipeError, ConnectionError, OSError):
+            return
+
     def request_project_id(self, parsed: Any, payload: dict[str, Any] | None = None) -> str:
         query = parse_qs(parsed.query)
         project_id = query.get("project", [""])[0]
@@ -12960,6 +13437,9 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     search_query = query.get("q", [""])[0]
                     result = browse_local_path(unquote(local_path), unquote(search_query))
                     self.send_json(result, status=200 if result.get("ok") else 400)
+                    return
+                if parsed.path == "/api/research/events":
+                    self.serve_research_events(parsed)
                     return
                 if parsed.path == "/api/research/session":
                     self.send_json({"session": research_session_snapshot()})
