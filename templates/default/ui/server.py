@@ -10973,14 +10973,15 @@ Hard boundary:
 
 Allowed behavior:
 - Answer questions from current project files and the supplied UI conversation history.
-- Always answer the user's latest message or discussion request first. Treat file updates as optional follow-through, not the answer itself.
 - Read and follow `instructions/PROJECT_FRAMING.md` when deciding whether to draft, update, or leave `PROJECT.md` unchanged.
-- Before autoresearch starts, keep `PROJECT.md` current when the conversation produces a clearer or materially different launch frame; after autoresearch starts, revise it only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
+- Always form a substantive answer to the user's latest message first, then before sending the final response check whether that planned answer establishes or materially changes the launch frame.
+- Before autoresearch starts, if your planned answer chooses or changes the target venue, scope, paper outline, research objective, contribution type, success gate, expected output, constraints, assumptions, exclusions, or other launch framing, update `PROJECT.md` before the final response. Do not leave launch-ready framing only in chat.
+- After autoresearch starts, revise `PROJECT.md` only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
 - If resources were attached or mentioned, follow `instructions/RESOURCE_INTAKE.md` before treating them as project evidence or active inputs for `PROJECT.md`.
 - Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you.
 - If it is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
 - If it clarifies an existing pending intervention, update that same pending intervention instead of creating a new ID. Create a new ID only for a distinct intervention topic.
-- The final response must first answer the user's current question or discussion request with substantive analysis. If you updated files, report those updates after the answer and briefly explain why they were warranted.
+- The final response must first answer the user's current question or discussion request with substantive analysis. If you updated `PROJECT.md` or other files, report those updates after the answer and briefly explain why they were warranted.
 - If you created or updated a pending intervention, end with one concise sentence naming the path, e.g. `Recorded pending intervention: research_trajectory/human_interventions/I0001_topic.md`.
 - If you did not create or update a pending intervention, do not mention interventions.
 - Do not use a file-update summary such as "Updated PROJECT.md" as a substitute for answering the user's question.

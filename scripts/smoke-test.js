@@ -1416,6 +1416,9 @@ Confidence: medium
     !projectFramingInstructions.includes("# Project Framing Protocol") ||
     !projectFramingInstructions.includes("Before Autoresearch Starts") ||
     !projectFramingInstructions.includes("After Autoresearch Starts") ||
+    !projectFramingInstructions.includes("Evaluate the full latest turn, not only the user's raw message") ||
+    !projectFramingInstructions.includes("planned\nanswer itself establishes or materially changes the launch frame") ||
+    !projectFramingInstructions.includes("Do not leave launch-ready\nframing only in the chat transcript") ||
     !projectFramingInstructions.includes("Do not wait for the user to say") ||
     !projectFramingInstructions.includes("After autoresearch starts, `PROJECT.md` is no longer a live chat draft")
   ) {
@@ -1429,7 +1432,10 @@ Confidence: medium
     !serverPy.includes("If it clarifies an existing pending intervention, update that same pending intervention") ||
     !serverPy.includes("The final response must first answer the user's current question or discussion request with substantive analysis") ||
     !serverPy.includes("Read and follow `instructions/PROJECT_FRAMING.md`") ||
-    !serverPy.includes("Before autoresearch starts, keep `PROJECT.md` current") ||
+    !serverPy.includes("before sending the final response check whether that planned answer establishes or materially changes the launch frame") ||
+    !serverPy.includes("Before autoresearch starts, if your planned answer chooses or changes the target venue") ||
+    !serverPy.includes("Do not leave launch-ready framing only in chat") ||
+    serverPy.includes("Treat file updates as optional follow-through") ||
     !serverPy.includes("read instructions/PROJECT_FRAMING.md") ||
     !serverPy.includes('Do not use a file-update summary such as "Updated PROJECT.md" as a substitute for answering the user') ||
     serverPy.includes("def intervention_chat_prompt") ||

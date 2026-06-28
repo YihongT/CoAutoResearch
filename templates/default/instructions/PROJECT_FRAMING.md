@@ -15,10 +15,15 @@ change in `PROJECT.md`.
 ## Before Autoresearch Starts
 
 Before the first autoresearch run, treat `PROJECT.md` as a live framing
-document. Keep it current whenever the conversation produces a clearer or
+document. Keep it current whenever the latest turn produces a clearer or
 materially different launch frame.
 
-Update or draft `PROJECT.md` when the latest user message:
+Evaluate the full latest turn, not only the user's raw message. If your planned
+answer itself establishes or materially changes the launch frame, update
+`PROJECT.md` before sending the final response. Do not leave launch-ready
+framing only in the chat transcript.
+
+Update or draft `PROJECT.md` when the latest turn:
 
 - explicitly asks to draft, revise, frame, reframe, narrow, broaden, redirect,
   or prepare the project;
@@ -29,7 +34,10 @@ Update or draft `PROJECT.md` when the latest user message:
   frame;
 - corrects the agent's understanding of the project;
 - provides resource context that has completed Resource Intake or is explicitly
-  not required to be filed before framing.
+  not required to be filed before framing;
+- produces a substantive recommendation that chooses or changes the target venue
+  or audience, paper outline, research objective, contribution type, success
+  gate, expected output, constraints, assumptions, exclusions, or launch scope.
 
 Do not wait for the user to say "revise `PROJECT.md`" when the new framing is
 clear enough to preserve and would affect how autoresearch should begin.
