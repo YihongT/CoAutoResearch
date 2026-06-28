@@ -2904,6 +2904,7 @@ async function createProjectFromDialog(event) {
 }
 
 async function loadOverview(silent = false) {
+  const showOverviewLoading = !silent || projectLoadPhase === "overview" || projectLoadPhase === "projects";
   if (!activeProjectId && appState?.multi_project) {
     $("#sync-state").textContent = "Create a project";
     setProjectLoadPhase("ready");
@@ -2913,7 +2914,7 @@ async function loadOverview(silent = false) {
     return;
   }
   try {
-    if (projectLoadPhase !== "overview" && projectLoadPhase !== "projects") setProjectLoadPhase("overview");
+    if (showOverviewLoading && projectLoadPhase !== "overview" && projectLoadPhase !== "projects") setProjectLoadPhase("overview");
     const materialContent = $("#context-content");
     const holdMaterialTree = activeView === "materials" && Boolean(materialContent?.childElementCount);
     appState = await api("/api/overview");
@@ -2954,8 +2955,13 @@ async function loadOverview(silent = false) {
     scheduleWorkingTicker();
     if (!silent) showToast("Refreshed from repository files.");
   } catch (error) {
-    setProjectLoadPhase("error", { error: error.message });
-    showToast(error.message, true);
+    if (showOverviewLoading) {
+      setProjectLoadPhase("error", { error: error.message });
+      showToast(error.message, true);
+    } else {
+      const sync = $("#sync-state");
+      if (sync) sync.textContent = "Could not sync";
+    }
   }
 }
 

@@ -563,6 +563,7 @@ function loadAppContext() {
     coldFiles["PROJECT.md"] = "# Project\\n\\nReady.";
     renderProjectLoadingState();
     globalThis.__renderFramingConversationImpl = renderFramingConversation;
+    globalThis.__loadOverviewImpl = loadOverview;
     persistFramingMessages = async () => {
       globalThis.__persistCount += 1;
       globalThis.__persistedMessages = globalThis.__messages();
@@ -1614,6 +1615,44 @@ function testProjectLoadingStates() {
   assert.equal(state.detail, "Permission denied");
   assert.equal(state.sync, "Could not read files");
   assert.equal(state.retryHidden, false, "overview errors should expose Retry");
+}
+
+async function testSilentOverviewPollDoesNotShowLoading() {
+  const app = loadAppContext();
+  const state = await app.run(`
+    (async () => {
+      __setProjectLoadPhase("ready");
+      globalThis.__apiHandler = async (endpoint) => {
+        if (endpoint === "/api/overview") {
+          return {
+            ...appState,
+            generated_at: "2026-06-17T10:00:00.000Z",
+            research_session: { ...appState.research_session, status: "completed", mode: "chat", active_run: { running: false } }
+          };
+        }
+        return { ok: true };
+      };
+      await __loadOverviewImpl(true);
+      const afterSuccess = __projectLoadingProbe();
+      globalThis.__apiHandler = async (endpoint) => {
+        if (endpoint === "/api/overview") throw new Error("temporary network blip");
+        return { ok: true };
+      };
+      await __loadOverviewImpl(true);
+      const afterFailure = __projectLoadingProbe();
+      globalThis.__apiHandler = null;
+      return { afterSuccess, afterFailure, toasts: globalThis.__toastMessages };
+    })()
+  `);
+  assert.equal(state.afterSuccess.phase, "ready", "silent overview poll success should not enter overview loading");
+  assert.equal(state.afterSuccess.bodyClass.includes("is-project-loading"), false, "silent overview poll success must not show the loading canvas");
+  assert.equal(state.afterSuccess.panelHidden, true);
+  assert.equal(state.afterSuccess.sync.startsWith("Synced "), true, "silent overview poll success should only update sync state");
+  assert.equal(state.afterFailure.phase, "ready", "silent overview poll failure should keep the current project visible");
+  assert.equal(state.afterFailure.bodyClass.includes("is-project-loading"), false, "silent overview poll failure must not show the loading canvas");
+  assert.equal(state.afterFailure.panelHidden, true);
+  assert.equal(state.afterFailure.sync, "Could not sync");
+  assert.equal(state.toasts.some((item) => item.message.includes("temporary network blip")), false, "silent poll failures should not spam error toasts");
 }
 
 async function testPrelaunchAffordanceStatesAndActions() {
@@ -6746,6 +6785,7 @@ await testImmediateUserMessage();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
 testProjectLoadingStates();
+await testSilentOverviewPollDoesNotShowLoading();
 await testPrelaunchAffordanceStatesAndActions();
 await testPlanComposerModeUsesPlanEndpoint();
 await testPlanChipCanReturnToChat();

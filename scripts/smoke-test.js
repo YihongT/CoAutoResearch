@@ -2272,6 +2272,9 @@ Confidence: medium
     !appJs.includes("let projectLoadPhase = \"projects\"") ||
     !appJs.includes("function setProjectLoadPhase") ||
     !appJs.includes("function renderProjectLoadingState") ||
+    !appJs.includes("const showOverviewLoading = !silent || projectLoadPhase === \"overview\" || projectLoadPhase === \"projects\"") ||
+    !appJs.includes("if (showOverviewLoading && projectLoadPhase !== \"overview\" && projectLoadPhase !== \"projects\") setProjectLoadPhase(\"overview\")") ||
+    !appJs.includes('sync.textContent = "Could not sync"') ||
     !appJs.includes("Opening project...") ||
     !appJs.includes("Could not read files") ||
     !appJs.includes("data-project-loading-retry") ||
