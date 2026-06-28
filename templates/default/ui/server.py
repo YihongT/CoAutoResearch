@@ -10229,6 +10229,7 @@ Read:
 - research_trajectory/STATE.md
 - research_trajectory/CURRENT_FINDINGS.md
 - the `Autoresearch Goal Gate` section in research_trajectory/STATE.md
+- instructions/RESOURCE_INTAKE.md, and complete its Content Inspection Gate before using user-provided resource content for content-grounded planning, evidence, venue, methods, results, manuscript, or state claims
 - instructions/RESOURCE_SCOUT.md
 - instructions/REVIEWER_SCOPE_ANALYST.md
 - instructions/reviewers/REVIEW_TAXONOMY.md
@@ -10277,9 +10278,11 @@ Before creating or continuing any trial:
 3. read instructions/EXECUTION_AGENT.md;
 4. read instructions/RESOURCE_SCOUT.md;
 5. read instructions/REVIEWER_SCOPE_ANALYST.md;
-6. read the latest formal human intervention file above;
-7. apply the intervention to canonical project state;
-8. update research_trajectory/STATE.md, research_trajectory/CURRENT_FINDINGS.md, and manuscript-facing artifacts only where the intervention requires it.
+6. read instructions/RESOURCE_INTAKE.md;
+7. read the latest formal human intervention file above;
+8. if the intervention or attached resources depend on user-provided resource content, complete the Content Inspection Gate before making content-grounded claims or canonical updates;
+9. apply the intervention to canonical project state;
+10. update research_trajectory/STATE.md, research_trajectory/CURRENT_FINDINGS.md, and manuscript-facing artifacts only where the intervention requires it.
 
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
@@ -11268,7 +11271,7 @@ Use the repository instructions:
 - read PROJECT.md
 - read research_trajectory/STATE.md
 - read research_trajectory/CURRENT_FINDINGS.md
-- inspect resources only as needed for the next coherent research objective
+- if the next objective depends on user-provided resources, complete the Content Inspection Gate in instructions/RESOURCE_INTAKE.md before using those resources for content-grounded planning, evidence, venue, methods, results, manuscript, or state claims
 - read instructions/RESOURCE_SCOUT.md
 - read instructions/REVIEWER_SCOPE_ANALYST.md
 - read instructions/reviewers/REVIEW_TAXONOMY.md
@@ -11461,7 +11464,7 @@ Allowed behavior:
 - Answer questions from current project files and the supplied UI conversation history.
 - Read and follow `instructions/PROJECT_FRAMING.md` when deciding whether to draft, update, or leave `PROJECT.md` unchanged.
 - Always form a substantive answer to the user's latest message first, then before sending the final response check whether that planned answer establishes or materially changes the launch frame.
-- Before autoresearch starts, if your planned answer chooses or changes the target venue, scope, paper outline, research objective, contribution type, success gate, expected output, constraints, assumptions, exclusions, or other launch framing, update `PROJECT.md` before the final response. Do not leave launch-ready framing only in chat.
+- Before autoresearch starts, if your planned answer chooses or changes the target venue, scope, paper outline, research objective, contribution type, success gate, expected output, constraints, assumptions, exclusions, or other launch framing, update `PROJECT.md` before the final response. If the target venue or audience changes, also update `resources/target_venue/TARGET_VENUE.md`. Do not leave launch-ready framing only in chat.
 - After autoresearch starts, revise `PROJECT.md` only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
 - If resources were attached or mentioned, follow `instructions/RESOURCE_INTAKE.md` before treating them as project evidence or active inputs for `PROJECT.md`.
 - If the answer depends on attached resource content, perform the full-resource pass required by the Content Inspection Gate before making venue-fit, contribution, evidence, methods, results, manuscript-status, or project-framing claims. Reading only `RESOURCE_MANIFEST.md`, listing a symlink, or using a resource name counts as path-level intake only.
@@ -11500,6 +11503,7 @@ User request:
 
 Rules:
 - Read the project files and supplied conversation context only as needed to produce a concrete plan.
+- If the plan depends on attached or linked resource content, inspect the resource contents under the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md` before making content-grounded recommendations. If you only inspect paths, manifest entries, symlinks, filenames, or the user's short description, label the plan as path-level and provisional.
 - Do not create, edit, delete, rename, or move any project/repository files.
 - Do not update `PROJECT.md`, framing files, manuscript files, resources, trajectory files, trials, reviewer outputs, or runtime state.
 - Do not start autoresearch, create trials, run tests, execute setup commands, install dependencies, or make implementation changes.
@@ -11545,7 +11549,7 @@ User instruction:
 
 {response_language_prompt_section()}
 
-Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached.
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the response or next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough.
 
 For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
 
@@ -11554,7 +11558,7 @@ If the user is asking a question, asking for an explanation, or asking what the 
 
 {response_language_prompt_section()}
 
-Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 
 
 def resume_from_trial_prompt(
@@ -11608,6 +11612,7 @@ Read:
 - research_trajectory/STATE.md
 - research_trajectory/CURRENT_FINDINGS.md
 - the base trial PLAN/REVIEW/REPORT files
+- instructions/RESOURCE_INTAKE.md, and complete its Content Inspection Gate before using user-provided resource content for content-grounded planning, evidence, venue, methods, results, manuscript, or state claims
 - instructions/RESOURCE_SCOUT.md
 - instructions/REVIEWER_SCOPE_ANALYST.md
 - instructions/reviewers/REVIEW_TAXONOMY.md
@@ -11872,6 +11877,7 @@ Read:
 - resources/user_input/RESOURCE_MANIFEST.md
 - instructions/EXECUTION_AGENT.md
 - instructions/RESOURCE_INTAKE.md
+- complete the Content Inspection Gate before using retained user-provided resources for content-grounded planning, evidence, venue, methods, results, manuscript, or state claims
 - instructions/RESOURCE_SCOUT.md
 - instructions/REVIEWER_SCOPE_ANALYST.md
 - instructions/MANUSCRIPT.md
@@ -12094,14 +12100,17 @@ def retained_attachments_from_payload(payload: dict[str, Any]) -> list[dict[str,
 
 def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str, dict[str, Any]]:
     payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload, message))
+    target_venue = str(payload.get("targetVenue", "")).strip()
     saved_files = save_uploads(payload)
     linked_resources = save_resource_links(payload)
     retained_attachments = retained_attachments_from_payload(payload)
     metadata_files = write_ui_metadata(payload, saved_files, linked_resources)
     resolutions = payload.get("_resourceResolution", [])
-    if not saved_files and not linked_resources and not retained_attachments and not resolutions:
+    if not saved_files and not linked_resources and not retained_attachments and not resolutions and not metadata_files:
         return message, {"saved_files": [], "resource_links": [], "retained_attachments": [], "metadata_files": []}
     lines = ["", "", "Resource handling for this message:"]
+    if target_venue:
+        lines.append(f"- target venue / audience: {target_venue}")
     for path in saved_files:
         lines.append(f"- uploaded file: {path}")
     for item in linked_resources:

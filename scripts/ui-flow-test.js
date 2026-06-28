@@ -1559,9 +1559,11 @@ async function testImmediateUserMessage() {
 async function testExistingProjectComposerUsesChatEndpoint() {
   const app = loadAppContext();
   app.coldEditor.value = "Let's discuss the analysis method.";
+  app.run('document.querySelector("#target-venue").value = "Nature Communications";');
   await app.run("coldStartFromPrepare()");
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/chat", "existing PROJECT.md composer messages should use chat, not framing");
   assert.equal(app.context.__apiCalls[0].body.message, "Let's discuss the analysis method.");
+  assert.equal(app.context.__apiCalls[0].body.targetVenue, "Nature Communications", "chat payload should preserve the target venue input for metadata and prompt context");
   assert.equal(app.context.__startedFramingBrief, undefined, "existing project chat must not start a framing run");
 }
 

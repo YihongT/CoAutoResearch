@@ -42,11 +42,12 @@ Before framing, conversion, or normal research execution, route the latest user 
 
 1. If explicit UI resources are present, file them under `resources/` and update `resources/user_input/RESOURCE_MANIFEST.md` first.
 2. If unattached resource clues are present, follow `instructions/RESOURCE_INTAKE.md`.
-3. If newly filed resources materially affect `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or manuscript direction, run `instructions/CONVERSION.md`.
-4. If a formal human intervention changes direction, follow `instructions/INTERVENTION_PROTOCOL.md`, then run conversion only if canonical state needs reinterpretation.
-5. If a plan-level correction makes the active plan or project framing invalid, update the active plan and `STATE.md`; run conversion only if canonical project state is no longer valid.
-6. If there are no prior materials or the user explicitly starts from scratch, use `instructions/COLD_START.md`.
-7. Otherwise continue the normal execution loop.
+3. If the next framing, conversion, plan, trial, review, or answer depends on resource content, complete the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md` first. Path-level intake from `RESOURCE_MANIFEST.md`, a symlink listing, a filename, or a short user description is not enough for content-grounded claims.
+4. If newly filed resources materially affect `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or manuscript direction, run `instructions/CONVERSION.md`.
+5. If a formal human intervention changes direction, follow `instructions/INTERVENTION_PROTOCOL.md`, then run conversion only if canonical state needs reinterpretation.
+6. If a plan-level correction makes the active plan or project framing invalid, update the active plan and `STATE.md`; run conversion only if canonical project state is no longer valid.
+7. If there are no prior materials or the user explicitly starts from scratch, use `instructions/COLD_START.md`.
+8. Otherwise continue the normal execution loop.
 
 Do not create or revise `PROJECT.md` from a user message that names prior work, a repo, dataset, papers, or files until resource intake is complete, blocked with a clear user question, or explicitly not needed. After intake, use `instructions/PROJECT_FRAMING.md` to decide whether the material should update the canonical launch frame.
 
@@ -475,6 +476,12 @@ status: active | superseded
 ## Resource Folder Routing
 
 Use `resources/` for raw or external inputs. Do not treat resources as current truth until promoted into `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report.
+
+Before grounding any plan, conversion, evidence review, venue review, manuscript
+synthesis, or current-state update in a user-provided resource, complete the
+Content Inspection Gate in `instructions/RESOURCE_INTAKE.md`. Record the files
+inspected and any skipped files in the relevant PLAN, REPORT, review, or
+manifest entry.
 
 - `resources/user_input/INITIAL_BRIEF.md`: raw user one-line or short initial brief. Preserve it; do not overwrite unless asked.
 - `resources/user_input/NOTES.md`: additional raw user notes.

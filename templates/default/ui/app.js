@@ -12829,6 +12829,7 @@ async function sendSessionComposerMessage(message, options = {}) {
   const attachments = currentComposerAttachments();
   const resourceLinksForRequest = isCommand ? [] : collectResourceLinks();
   const uploadItemsForRequest = isCommand ? [] : copyComposerItems(selectedUploadItems);
+  const targetVenue = isCommand ? "" : String($("#target-venue")?.value || "").trim();
   let resumeFromTrial = selectedResumeTrialPayload();
   if (!text && !attachments.length && !resumeFromTrial) return false;
   const localControl = canSendLocalSlashControl(text);
@@ -12878,6 +12879,7 @@ async function sendSessionComposerMessage(message, options = {}) {
           conversationHistory: conversationHistoryForRequest(localMessages),
           files,
           resourceLinks: resourceLinksForRequest,
+          targetVenue,
           settings: settingsFromForm(),
           priority: options.queuePriority === "send_after_stop" ? "send_after_stop" : "normal",
         }),
@@ -12938,6 +12940,7 @@ async function sendSessionComposerMessage(message, options = {}) {
           conversationHistory: conversationHistoryForRequest(localMessages),
           files,
           resourceLinks: resourceLinksForRequest,
+          targetVenue,
           resumeFromTrial: isPlanRequest ? null : resumeFromTrial,
           ...(isPlanRequest && pendingPlanRevisionId ? { revisePlanId: pendingPlanRevisionId } : {}),
           settings: settingsFromForm(),
@@ -13117,6 +13120,7 @@ async function resendConversationMessage(id, text) {
         message: displayText,
         clientMessageId: message.id,
         conversationHistory: conversationHistoryForRequest(localMessages),
+        targetVenue: String($("#target-venue")?.value || "").trim(),
         resendContext: {
           editedMessageId: message.id,
           archivedCount: archivedMessages.length,

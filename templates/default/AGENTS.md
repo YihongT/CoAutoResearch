@@ -85,6 +85,8 @@ Detailed folder rules are in `instructions/EXECUTION_AGENT.md` under **Folder Op
 
 Before choosing the next research action, perform adaptive intake triage. Explicit UI uploads, drag-and-drop files, and local-browser file or folder selections are authoritative raw resources: file them under `resources/` and record them before framing, conversion, or research reasoning. Natural-language paths, repository names, papers, datasets, or prior-work references are resource clues: follow `instructions/RESOURCE_INTAKE.md` before treating them as available context.
 
+When an answer, plan, conversion, review, or project update depends on a user-provided resource, path-level intake is not enough. Follow the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md`: inventory the provided resource, inspect its content-bearing files, name what was inspected, and state any skipped material. Do not make content-grounded claims from only `RESOURCE_MANIFEST.md`, a symlink listing, a filename, or the user's short description.
+
 Research proceeds as a loop:
 
 1. read the required files;

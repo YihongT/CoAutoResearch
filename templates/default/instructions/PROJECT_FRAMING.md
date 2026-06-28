@@ -5,7 +5,9 @@
 `PROJECT.md` is the canonical launch frame for autoresearch. It defines the
 research objective, scope, audience or venue, likely contribution, important
 resources, constraints, assumptions, exclusions, success criteria, and open
-uncertainties.
+uncertainties. `resources/target_venue/TARGET_VENUE.md` is the compact
+target-venue/audience note and must stay consistent with the target venue or
+audience stated in `PROJECT.md`.
 
 Use this protocol whenever creating, revising, or deciding whether to preserve a
 change in `PROJECT.md`.
@@ -40,7 +42,10 @@ Update or draft `PROJECT.md` when the latest turn:
   gate, expected output, constraints, assumptions, exclusions, or launch scope.
 
 Do not wait for the user to say "revise `PROJECT.md`" when the new framing is
-clear enough to preserve and would affect how autoresearch should begin.
+clear enough to preserve and would affect how autoresearch should begin. When
+the preserved framing chooses or changes the target venue or audience, update
+both `PROJECT.md` and `resources/target_venue/TARGET_VENUE.md` before the final
+response.
 
 Do not update `PROJECT.md` for greetings, UI/how-to questions, status questions,
 ordinary discussion, purely casual chat, or early brainstorming that does not
@@ -57,6 +62,12 @@ Resource references are not automatically current research truth.
 If a message names prior work, a repository, paper, dataset, folder, proposal, or
 other external material, follow `instructions/RESOURCE_INTAKE.md` before treating
 that material as evidence or as an active project input.
+
+For resource-grounded framing, Resource Intake must include the Content
+Inspection Gate. Do not choose a venue, contribution type, scope, evidence
+standard, or project claim from only a manifest entry, symlink listing, filename,
+or short user description. If the resource content has not been inspected, say
+the framing is provisional or path-level only.
 
 You may mention unresolved resource clues in `PROJECT.md` as uncertainties or
 pending intake items only when that helps frame the project. Do not describe
@@ -91,6 +102,9 @@ instead of silently changing the launch frame.
 Always answer the user's latest message first. If you update `PROJECT.md`, report
 the change after the answer and briefly state why the update belonged in the
 launch frame.
+
+If you update the target venue or audience, also report the synchronized
+`resources/target_venue/TARGET_VENUE.md` update.
 
 Do not use a file-update summary such as "Updated `PROJECT.md`" as a substitute
 for answering the user's question.

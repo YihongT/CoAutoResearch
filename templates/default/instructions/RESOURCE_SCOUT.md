@@ -80,6 +80,11 @@ trial:
 - existing `resources/user_input/RESOURCE_MANIFEST.md`, when present
 - relevant existing files under `resources/`
 
+When the scout uses existing user-provided resources as search clues or
+summarizes their content, it must obey the Content Inspection Gate in
+`instructions/RESOURCE_INTAKE.md`. A manifest entry, symlink listing, filename,
+or short user description is only path-level context.
+
 ## Required PLAN Brief
 
 Each trial plan must include:

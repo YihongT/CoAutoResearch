@@ -32,7 +32,7 @@ Resources selected through the UI are authoritative raw inputs:
 - local-browser selected files;
 - local-browser selected folders.
 
-Do not debate whether explicit UI resources are relevant before filing them. File them under `resources/`, record them in `resources/user_input/RESOURCE_MANIFEST.md`, then inspect only what is needed for the next step.
+Do not debate whether explicit UI resources are relevant before filing them. File them under `resources/`, record them in `resources/user_input/RESOURCE_MANIFEST.md`, then apply the Content Inspection Gate before using their content for reasoning.
 
 ---
 

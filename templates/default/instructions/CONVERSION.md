@@ -8,7 +8,7 @@ Raw materials may include old repositories, ongoing work, proposals, notes, lite
 
 Conversion does not acquire resources. It reinterprets filed raw materials into canonical project state. Conversion does not mean trusting old work; it means inspecting it, extracting what is useful, and recording what is current, tentative, deprecated, or unknown.
 
-Before conversion, run `instructions/RESOURCE_INTAKE.md` unless the relevant materials are already filed in `resources/` and listed in `resources/user_input/RESOURCE_MANIFEST.md`.
+Before conversion, run `instructions/RESOURCE_INTAKE.md` unless the relevant materials are already filed in `resources/` and listed in `resources/user_input/RESOURCE_MANIFEST.md`. Filed and listed is not enough for conversion claims: before deriving canonical state from a user-provided resource, complete the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md`.
 
 ---
 
@@ -39,9 +39,9 @@ Possible inputs:
 
 These are raw materials. They are not current truth until reflected in `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, or a trial report.
 
-Also inspect `resources/user_input/RESOURCE_MANIFEST.md` before conversion. Resolve, defer, or explicitly record any unresolved or ambiguous resource entries that affect project state.
+Also inspect `resources/user_input/RESOURCE_MANIFEST.md` before conversion. Resolve, defer, or explicitly record any unresolved or ambiguous resource entries that affect project state. Reading the manifest is path-level intake only; it does not substitute for reading the content-bearing files of the provided resources.
 
-When converting an ongoing-work bundle, verify that `instructions/RESOURCE_INTAKE.md` has surfaced embedded bibliographies, literature, venue materials, and data-source artifacts into the appropriate `resources/` subfolders. If the embedded scan has not happened, do it before deriving canonical state. Conversion may inspect nested files directly, but later evidence, venue, and manuscript steps should not depend on rediscovering hidden files inside `ongoing_work/`.
+When converting an ongoing-work bundle, verify that `instructions/RESOURCE_INTAKE.md` has surfaced embedded bibliographies, literature, venue materials, and data-source artifacts into the appropriate `resources/` subfolders. If the embedded scan has not happened, do it before deriving canonical state. Conversion must inspect the bundle's human-authored and research-bearing content files before using the bundle for project framing, evidence, methods, results, or manuscript direction. Later evidence, venue, and manuscript steps should not depend on rediscovering hidden files inside `ongoing_work/`.
 
 Do not interpret an empty `resources/target_venue/papers/` folder as proof that no literature exists. It only means no local selected target-venue seed-paper copies are stored there. General manuscript references from ongoing work belong in `resources/literature/` unless deliberately selected as seed papers.
 
@@ -88,7 +88,7 @@ Do not treat an old repo as automatically current.
 Recommended pattern:
 
 1. keep the original snapshot under `resources/ongoing_work/`;
-2. inspect it as raw input;
+2. inspect it as raw input under the Content Inspection Gate;
 3. migrate only useful working artifacts to `workspace/`: executable pieces, prototypes, configs, evaluation harnesses, design/system implementation materials, or derived data needed for future work;
 4. record migration decisions in the conversion trial;
 5. record current method status in `STATE.md`;
