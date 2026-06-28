@@ -1632,6 +1632,8 @@ Confidence: medium
     !serverPy.includes("coauto_remote_auth") ||
     !serverPy.includes("def reconcile_research_process_state") ||
     !serverPy.includes("SESSION_STARTUP_GRACE_SECONDS") ||
+    !serverPy.includes("def is_client_disconnect_error") ||
+    !serverPy.includes("if is_client_disconnect_error(exc):") ||
     !serverPy.includes('"--remote"') ||
     !serverPy.includes("UI_REMOTE_MODE = bool(args.remote)")
   ) {
@@ -1670,6 +1672,11 @@ Confidence: medium
   const loadSettingsBody = loadSettingsStart >= 0 && loadSettingsEnd > loadSettingsStart
     ? appJs.slice(loadSettingsStart, loadSettingsEnd)
     : "";
+  const initStart = appJs.indexOf("async function init()");
+  const initEnd = appJs.indexOf("init().catch", initStart);
+  const initBody = initStart >= 0 && initEnd > initStart ? appJs.slice(initStart, initEnd) : "";
+  const initLoadProjectsIndex = initBody.indexOf("await loadProjects({ showLoading: true })");
+  const initLoadSettingsIndex = initBody.indexOf("await loadUiSettings()");
   if (
     !appJs.includes("function scopedJsonGet") ||
     !appJs.includes("function scopedSessionSettings") ||
@@ -1688,6 +1695,17 @@ Confidence: medium
     loadSettingsBody.includes("applySessionSettings(")
   ) {
     throw new Error("project-scoped UI persistence must keep drafts/settings in scoped storage and keep loadUiSettings from overwriting browser overrides");
+  }
+  if (
+    initLoadProjectsIndex < 0 ||
+    initLoadSettingsIndex < 0 ||
+    initLoadProjectsIndex > initLoadSettingsIndex ||
+    !appJs.includes("function clearOverviewPoll") ||
+    !appJs.includes("Project is no longer available") ||
+    !serverPy.includes("def ensure_current_project_writeable") ||
+    !serverPy.includes("context.deleted = True")
+  ) {
+    throw new Error("remote project deletion must clear stale polling and validate the project before loading project-scoped settings");
   }
   if (
     !indexHtml.includes("Using external CLI auth keeps tokens outside the project") ||
@@ -4201,6 +4219,13 @@ Confidence: medium
       "assert stub_created['display_name'] == 'stub project', stub_created",
       "assert (stub_dir / 'PROJECT.md').exists() and (stub_dir / 'ui' / 'server.py').exists()",
       "dashboard.delete_project({'project': stub_created['id'], 'confirm': 'stub project'})",
+      "runtime_stub_dir = temp_root / 'runtime_stub_project'",
+      "(runtime_stub_dir / 'ui' / '.runtime').mkdir(parents=True)",
+      "(runtime_stub_dir / 'ui' / '.runtime' / 'framing_messages.json').write_text('[]\\n', encoding='utf-8')",
+      "runtime_stub_created = dashboard.create_project({'name': 'runtime stub project'})",
+      "assert runtime_stub_created['display_name'] == 'runtime stub project', runtime_stub_created",
+      "assert (runtime_stub_dir / 'PROJECT.md').exists() and (runtime_stub_dir / 'ui' / 'server.py').exists()",
+      "dashboard.delete_project({'project': runtime_stub_created['id'], 'confirm': 'runtime stub project'})",
       "created = dashboard.create_project({'name': 'ui project'})",
       "assert created['display_name'] == 'ui project', created",
       "assert (temp_root / 'ui_project' / '.co-auto-research' / 'project.json').exists()",
@@ -4343,12 +4368,22 @@ Confidence: medium
       "        module.EXPORT_CONFIRMATION_BYTES = original_threshold",
       "dashboard.delete_project({'project': export_probe['id'], 'confirm': 'export probe'})",
       "ctx = dashboard.context_for(created['id'])",
+      "stale_ctx = ctx",
       "proc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])",
       "ctx.session['process'] = proc",
       "ctx.session['status'] = 'running'",
       "deleted = dashboard.delete_project({'project': created['id'], 'confirm': 'renamed ui project'})",
       "assert deleted['stopped_active_run'] is True, deleted",
       "assert proc.poll() is not None, proc.poll()",
+      "module._CONTEXT.project = stale_ctx",
+      "try:",
+      "    try:",
+      "        module.save_framing_messages([{'id': 'stale', 'role': 'user', 'text': 'stale write'}])",
+      "        raise AssertionError('stale deleted project context was allowed to recreate runtime files')",
+      "    except ValueError as exc:",
+      "        assert 'deleted' in str(exc) or 'available' in str(exc), exc",
+      "finally:",
+      "    delattr(module._CONTEXT, 'project')",
       "assert all(item['id'] != created['id'] for item in deleted['projects'])",
       "assert not (temp_root / 'ui_project').exists()",
       "print(json.dumps({'single': single_names, 'default': from_ui['display_name'], 'renamed': renamed['display_name'], 'deleted': deleted['deleted_project_id']}))"

@@ -2032,6 +2032,11 @@ function stopResearchEventStream(options = {}) {
   if (options.resetLastId) researchEventLastId = "";
 }
 
+function clearOverviewPoll() {
+  clearTimeout(overviewPollTimer);
+  overviewPollTimer = null;
+}
+
 function queueStreamingOverviewRefresh() {
   if (researchEventOverviewRefreshPending) return;
   researchEventOverviewRefreshPending = true;
@@ -2637,6 +2642,7 @@ async function switchProject(projectId) {
 
 async function loadProjects(options = {}) {
   if (options.showLoading) setProjectLoadPhase("projects");
+  const previousActiveProjectId = activeProjectId;
   const payload = await api("/api/projects");
   const projects = Array.isArray(payload.projects) ? payload.projects : [];
   const known = new Set(projects.map((project) => String(project.id || "")));
@@ -2653,6 +2659,9 @@ async function loadProjects(options = {}) {
     else localStorage.removeItem("coAutoResearchActiveProject");
     composerMode = initialComposerMode(activeProjectId);
     pendingPlanRevisionId = "";
+  }
+  if (String(activeProjectId || "") !== String(previousActiveProjectId || "")) {
+    resetProjectClientState();
   }
   appState = { ...(appState || {}), projects, active_project_id: activeProjectId, multi_project: Boolean(payload.multi_project) };
   renderProjectList();
@@ -2836,8 +2845,15 @@ async function deleteProjectFromDialog(event) {
     return;
   }
   submit.disabled = true;
+  const deletingActive = String(pendingDeleteProject.id || "") === String(activeProjectId || "");
+  if (deletingActive) {
+    clearOverviewPoll();
+    stopResearchEventStream({ resetLastId: true });
+    researchEventOverviewRefreshPending = false;
+    framingMessagesSaveVersion += 1;
+    framingMessagesPersisting = false;
+  }
   try {
-    const deletingActive = String(pendingDeleteProject.id || "") === String(activeProjectId || "");
     const payload = await api("/api/projects/delete", {
       method: "POST",
       body: JSON.stringify({ project: pendingDeleteProject.id, confirm }),
@@ -2856,11 +2872,14 @@ async function deleteProjectFromDialog(event) {
     renderProjectList();
     if (activeProjectId) {
       setProjectLoadPhase("overview");
+      await loadUiSettings();
       await loadOverview(true);
+      scheduleOverviewPoll(1000);
     } else {
       setProjectLoadPhase("ready");
       renderProjectAvailability();
       maybeOpenInitialProjectDialog();
+      scheduleOverviewPoll(3500);
     }
     showToast(payload.stopped_active_run ? "Stopped active run and deleted project." : "Project deleted.");
   } catch (error) {
@@ -2870,6 +2889,7 @@ async function deleteProjectFromDialog(event) {
       note.dataset.tone = "error";
     }
     showToast(error.message, true);
+    if (deletingActive) scheduleOverviewPoll(1000);
   } finally {
     submit.disabled = false;
     updateDeleteSubmitState();
@@ -2978,6 +2998,29 @@ async function loadOverview(silent = false) {
     scheduleWorkingTicker();
     if (!silent) showToast("Refreshed from repository files.");
   } catch (error) {
+    if (/Unknown project|Project is no longer available|Project was deleted/i.test(String(error.message || ""))) {
+      const staleProjectId = activeProjectId;
+      stopResearchEventStream({ resetLastId: true });
+      clearOverviewPoll();
+      try {
+        await loadProjects({ showLoading: true });
+        if (activeProjectId && activeProjectId !== staleProjectId) {
+          await loadUiSettings();
+          await loadOverview(true);
+          scheduleOverviewPoll(1000);
+          return;
+        }
+        if (!activeProjectId && appState?.multi_project) {
+          setProjectLoadPhase("ready");
+          renderProjectAvailability();
+          maybeOpenInitialProjectDialog();
+          scheduleOverviewPoll(3500);
+          return;
+        }
+      } catch (_recoverError) {
+        // Fall through to the normal unavailable-project state.
+      }
+    }
     if (showOverviewLoading) {
       setProjectLoadPhase("error", { error: error.message });
       showToast(error.message, true);
@@ -14155,11 +14198,11 @@ async function init() {
   bindEvents();
   setResourceCategory(activeResourceCategory);
   setProjectLoadPhase("projects");
-  await loadUiSettings();
   await loadProjects({ showLoading: true }).catch((error) => {
     setProjectLoadPhase("error", { error: error.message });
     showToast(error.message, true);
   });
+  await loadUiSettings();
   restoreNavigationState();
   if (!activeProjectId && appState?.multi_project) {
     $("#sync-state").textContent = "Create a project";

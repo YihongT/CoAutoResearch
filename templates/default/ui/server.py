@@ -77,6 +77,15 @@ RESTART_SNAPSHOT_PATHS = [
     "workspace",
     "resources/user_input/RESOURCE_MANIFEST.md",
 ]
+
+CLIENT_DISCONNECT_ERRNOS = {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED}
+
+
+def is_client_disconnect_error(exc: BaseException) -> bool:
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    return isinstance(exc, OSError) and getattr(exc, "errno", None) in CLIENT_DISCONNECT_ERRNOS
+
 CHAT_PROTECTED_PATHS = [
     "research_trajectory/STATE.md",
     "research_trajectory/CURRENT_FINDINGS.md",
@@ -1162,10 +1171,13 @@ def create_generated_project(projects_dir: Path, payload: dict[str, Any], templa
         except OSError as exc:
             raise ValueError(f"Cannot inspect project target: {exc}") from exc
         if has_entries:
-            if is_recreatable_project_stub(target):
+            blockers = project_stub_blockers(target)
+            if not blockers:
                 shutil.rmtree(target)
             else:
-                raise ValueError(f"Project directory already exists: {directory_name}")
+                sample = ", ".join(blockers[:8])
+                suffix = "" if len(blockers) <= 8 else f", and {len(blockers) - 8} more"
+                raise ValueError(f"Project directory already exists: {directory_name}. Blocking entries: {sample}{suffix}")
 
     target.mkdir(parents=True, exist_ok=True)
     shutil.copytree(template_root, target, ignore=template_copy_ignore(template_root), dirs_exist_ok=True)
@@ -1175,30 +1187,38 @@ def create_generated_project(projects_dir: Path, payload: dict[str, Any], templa
 
 def is_recreatable_project_stub(root: Path) -> bool:
     """Return true for safe leftovers from a just-deleted project poll."""
+    return not project_stub_blockers(root)
+
+
+def project_stub_blockers(root: Path) -> list[str]:
     if is_project_root(root):
-        return False
+        return ["valid project files"]
     allowed_files = {
         ".DS_Store",
         "research_trajectory/TRAJECTORY.json",
     }
     allowed_dirs = {
         "research_trajectory",
+        "ui",
+        "ui/.runtime",
     }
     try:
         entries = list(root.rglob("*"))
     except OSError:
-        return False
+        return ["unreadable directory"]
+    blockers: list[str] = []
     for entry in entries:
         try:
             relative = entry.relative_to(root).as_posix()
         except ValueError:
-            return False
+            blockers.append(str(entry))
+            continue
         if entry.is_dir():
-            if relative not in allowed_dirs:
-                return False
-        elif relative not in allowed_files:
-            return False
-    return True
+            if relative not in allowed_dirs and not relative.startswith("ui/.runtime/"):
+                blockers.append(relative)
+        elif relative not in allowed_files and not relative.startswith("ui/.runtime/"):
+            blockers.append(relative)
+    return blockers
 
 
 def is_project_root(root: Path) -> bool:
@@ -1239,6 +1259,7 @@ class ProjectContext:
         self.research_events: list[dict[str, Any]] = []
         self.research_event_id = 0
         self.research_event_condition = threading.Condition(threading.RLock())
+        self.deleted = False
         self.refresh_metadata()
         self.load_runtime()
 
@@ -1388,6 +1409,8 @@ class ProjectRegistry:
             context = self.contexts.get(project_id)
             if not context:
                 continue
+            if getattr(context, "deleted", False):
+                continue
             candidates = {
                 context.id,
                 context.display_name,
@@ -1412,11 +1435,11 @@ class ProjectRegistry:
         if not project_id:
             return self.default_context()
         context = self.contexts.get(project_id)
-        if context and is_project_root(context.root):
+        if context and not getattr(context, "deleted", False) and is_project_root(context.root):
             return context
         self.refresh()
         context = self.contexts.get(project_id)
-        if context and is_project_root(context.root):
+        if context and not getattr(context, "deleted", False) and is_project_root(context.root):
             return context
         context = self.context_for_alias(project_id)
         if not context:
@@ -1487,10 +1510,16 @@ class ProjectRegistry:
         expected = context.display_name
         if confirm != expected:
             raise ValueError(f"Type the project name to confirm deletion: {expected}")
-        stopped_run = self.stop_project_run_for_delete(context)
-        root = context.root.resolve()
-        shutil.rmtree(root)
-        self.refresh()
+        context.deleted = True
+        try:
+            stopped_run = self.stop_project_run_for_delete(context)
+            root = context.root.resolve()
+            shutil.rmtree(root)
+            self.refresh()
+        except Exception:
+            context.deleted = False
+            self.refresh()
+            raise
         projects = self.summaries()
         return {
             "deleted_project_id": project_id,
@@ -1563,6 +1592,23 @@ def current_project_context() -> ProjectContext:
     if _BOOTSTRAP_CONTEXT is None:
         _BOOTSTRAP_CONTEXT = ProjectContext(DEFAULT_PROJECT_ROOT)
     return _BOOTSTRAP_CONTEXT
+
+
+def current_project_writeable() -> bool:
+    context = current_project_context()
+    if getattr(context, "deleted", False):
+        return False
+    if PROJECT_REGISTRY and PROJECT_REGISTRY.multi_project and not is_project_root(context.root):
+        return False
+    return True
+
+
+def ensure_current_project_writeable() -> None:
+    context = current_project_context()
+    if getattr(context, "deleted", False):
+        raise ValueError("Project was deleted.")
+    if not current_project_writeable():
+        raise ValueError("Project is no longer available.")
 
 
 @contextmanager
@@ -2244,6 +2290,8 @@ def agent_wait_state_from_values(running: bool, last_event_at: Any, last_event_s
 
 
 def persist_research_session() -> None:
+    if not current_project_writeable():
+        return
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     with RESEARCH_LOCK:
         payload = {key: value for key, value in RESEARCH_SESSION.items() if key not in {"process", "process_thread", "streaming_transcript"}}
@@ -2600,6 +2648,7 @@ def load_framing_messages() -> list[dict[str, Any]]:
 
 
 def save_framing_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ensure_current_project_writeable()
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     clean_messages = []
     for item in messages[-80:]:
@@ -4461,6 +4510,7 @@ def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str,
 
 
 def write_text_file(relative_path: str, text: str) -> dict[str, Any]:
+    ensure_current_project_writeable()
     path = repo_path(relative_path)
     relative = rel_path(path)
     if is_checkpoint_manuscript_path(relative):
@@ -5546,6 +5596,7 @@ def read_trajectory_state() -> dict[str, Any]:
 
 
 def write_trajectory_state(state: dict[str, Any]) -> dict[str, Any]:
+    ensure_current_project_writeable()
     payload = default_trajectory_state()
     payload.update({key: value for key, value in state.items() if value is not None})
     payload["schema_version"] = TRAJECTORY_SCHEMA_VERSION
@@ -7857,6 +7908,7 @@ def start_resource_import(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def write_resource_import_chunk(import_id: str, offset: int, data: bytes) -> dict[str, Any]:
+    ensure_current_project_writeable()
     manifest = read_resource_import_manifest(import_id)
     if manifest.get("status") not in {"copying", "failed"}:
         raise ValueError("Resource import is not accepting chunks.")
@@ -13253,12 +13305,17 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
 
     def send_json(self, payload: Any, status: int = 200) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as exc:
+            if is_client_disconnect_error(exc):
+                return
+            raise
 
     def read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -13454,6 +13511,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True, **agent_available_models(backend)})
                     return
         except Exception as exc:
+            if is_client_disconnect_error(exc):
+                return
             self.send_json({"ok": False, "error": str(exc)}, status=400)
             return
         if parsed.path.startswith("/api/"):
@@ -13619,6 +13678,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
             self.send_json({"error": "Unknown API route"}, status=404)
         except Exception as exc:
+            if is_client_disconnect_error(exc):
+                return
             self.send_json({"ok": False, "error": str(exc)}, status=400)
 
     def do_PATCH(self) -> None:
@@ -13633,6 +13694,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
             self.send_json({"error": "Unknown API route"}, status=404)
         except Exception as exc:
+            if is_client_disconnect_error(exc):
+                return
             self.send_json({"ok": False, "error": str(exc)}, status=400)
 
     def do_DELETE(self) -> None:
@@ -13650,6 +13713,8 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
             self.send_json({"error": "Unknown API route"}, status=404)
         except Exception as exc:
+            if is_client_disconnect_error(exc):
+                return
             self.send_json({"ok": False, "error": str(exc)}, status=400)
 
     def serve_repo_file(self, relative_path: str, download: bool = False) -> None:
