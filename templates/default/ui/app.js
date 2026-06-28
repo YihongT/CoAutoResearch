@@ -2420,8 +2420,11 @@ function resolveProjectIdAlias(projects, value) {
 }
 
 function hasActiveProject() {
+  const id = String(activeProjectId || appState?.active_project_id || "");
+  if (!id) return false;
   const projects = Array.isArray(appState?.projects) ? appState.projects : [];
-  return Boolean(activeProjectId && projects.some((project) => String(project.id || "") === String(activeProjectId)));
+  if (projects.some((project) => String(project.id || "") === id)) return true;
+  return String(appState?.project?.id || "") === id;
 }
 
 function hasNoProject() {
@@ -2623,10 +2626,12 @@ function resetProjectClientState() {
 async function switchProject(projectId) {
   const next = String(projectId || "").trim();
   if (!next || next === activeProjectId) return;
+  clearOverviewPoll();
   persistActiveViewScrollPosition();
   persistNavigationState();
   activeProjectId = next;
   localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+  updateNavigationUrl();
   setProjectLoadPhase("overview");
   composerMode = initialComposerMode(activeProjectId);
   pendingPlanRevisionId = "";
@@ -2917,6 +2922,8 @@ async function createProjectFromDialog(event) {
     const project = payload.project || {};
     activeProjectId = String(project.id || payload.active_project_id || "");
     if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+    clearOverviewPoll();
+    updateNavigationUrl();
     resetProjectClientState();
     appState = {
       ...(appState || {}),
@@ -2947,6 +2954,7 @@ async function createProjectFromDialog(event) {
 }
 
 async function loadOverview(silent = false) {
+  const requestedProjectId = String(activeProjectId || "");
   const showOverviewLoading = !silent || projectLoadPhase === "overview" || projectLoadPhase === "projects";
   if (!activeProjectId && appState?.multi_project) {
     $("#sync-state").textContent = "Create a project";
@@ -2960,11 +2968,22 @@ async function loadOverview(silent = false) {
     if (showOverviewLoading && projectLoadPhase !== "overview" && projectLoadPhase !== "projects") setProjectLoadPhase("overview");
     const materialContent = $("#context-content");
     const holdMaterialTree = activeView === "materials" && Boolean(materialContent?.childElementCount);
-    appState = await api("/api/overview");
+    const overviewPayload = await api("/api/overview");
+    const responseProjectId = String(overviewPayload.active_project_id || overviewPayload.project?.id || "");
+    if (
+      requestedProjectId &&
+      activeProjectId &&
+      requestedProjectId !== String(activeProjectId || "") &&
+      responseProjectId === requestedProjectId
+    ) {
+      return;
+    }
+    appState = overviewPayload;
     syncServerClockOffset(appState.generated_at);
     if (appState.active_project_id && appState.active_project_id !== activeProjectId) {
       activeProjectId = appState.active_project_id;
       localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+      updateNavigationUrl();
       resetProjectClientState();
       restoreNavigationState();
       restoreResourceSelections();
@@ -4510,7 +4529,7 @@ function restoreFramingMessages() {
   }
   const projectText = String(appState?.files?.project?.text || "").trim();
   const framingInProgress = framingDraftPending || isFramingRunning();
-  if (!framingInProgress && projectText && !isPlaceholderProject(projectText) && appState?.framing?.project_ready) {
+  if (!framingInProgress && projectText && !isPlaceholderProject(projectText)) {
     const projectIndex = latestProjectIndex(nextMessages);
     if (projectIndex >= 0) {
       const existing = nextMessages[projectIndex];

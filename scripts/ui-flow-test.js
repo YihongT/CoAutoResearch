@@ -2815,7 +2815,7 @@ function testChatGeneratedProjectDraftIsSurfaced() {
     document.querySelector("#project-draft-editor").value = "";
     coldFiles["PROJECT.md"] = "";
     appState.files.project.text = "# Project\\n\\nReady from chat.";
-    appState.framing.project_ready = true;
+    appState.framing.project_ready = false;
     appState.framing.messages = [
       { id: "u1", role: "user", kind: "text", text: "Please draft PROJECT.md for this study.", created_at: "2026-06-17T10:00:00.000Z" },
       { id: "a1", role: "assistant", kind: "text", text: "I drafted a project frame after answering the request.", created_at: "2026-06-17T10:00:01.000Z" }
@@ -2842,6 +2842,8 @@ function testStartAutoresearchUsesCurrentProjectDraftWithoutArtifactMessage() {
       { id: "u1", role: "user", kind: "text", text: "Which venue?", created_at: "2026-06-17T10:00:00.000Z" },
       { id: "a1", role: "assistant", kind: "text", text: "I recommend Nature Human Behaviour and updated the launch frame.", created_at: "2026-06-17T10:00:01.000Z" }
     ]);
+    appState.project = { id: activeProjectId, display_name: "Loaded project" };
+    appState.projects = [];
     appState.files.project.text = "# Project\\n\\nReady from file state.";
     appState.framing.project_ready = true;
     __setSession({ id: "s-chat", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
@@ -4810,6 +4812,18 @@ async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
   const app = loadAppContext();
   const result = await app.run(`
     (async () => {
+      window.location.href = "http://localhost/?project=p1";
+      window.location.pathname = "/";
+      window.location.hash = "";
+      window.history = {
+        replaceState(_state, _title, next) {
+          const url = new URL(next, window.location.href);
+          window.location.href = url.href;
+          window.location.pathname = url.pathname;
+          window.location.search = url.search;
+          window.location.hash = url.hash;
+        }
+      };
       const settingsPayload = {
         agent: { backend: "claude" },
         codex: { model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true, reviewCheckpointInterval: 100 },
@@ -4844,6 +4858,7 @@ async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
       return {
         calls: globalThis.__apiCalls,
         activeProjectId,
+        search: window.location.search,
         state: __sessionSettingsState(),
         toasts: globalThis.__toastMessages,
         name: form.elements.projectName.value,
@@ -4855,9 +4870,74 @@ async function testProjectCreateSendsBackendAndLoadsProjectDefault() {
   assert.ok(createCall, `project create API call missing: ${JSON.stringify(result)}`);
   assert.equal(createCall.body.agentBackend, "claude", "project create should send the selected backend");
   assert.equal(result.activeProjectId, "p2");
+  assert.equal(result.search.includes("project=p2"), true, "project create should update the URL to the opened project");
   assert.equal(result.state.formBackend, "claude", "new project should load with its seeded backend default");
   assert.equal(result.state.composerModel, "sonnet");
   assert.equal(result.state.formModel, "sonnet");
+}
+
+async function testStaleOverviewResponseDoesNotReopenPreviousProject() {
+  const app = loadAppContext();
+  const result = await app.run(`
+    (async () => {
+      activeProjectId = "p1";
+      appState = {
+        active_project_id: "p1",
+        project: { id: "p1", display_name: "Old Project" },
+        projects: [
+          { id: "p1", display_name: "Old Project" },
+          { id: "p2", display_name: "New Project" }
+        ],
+        multi_project: true,
+        files: { project: { text: "# Old Project" } },
+        framing: { messages: [], project_ready: true },
+        summaries: { project: {}, manuscript: {} }
+      };
+      api = async (endpoint) => {
+        if (endpoint === "/api/overview") {
+          return {
+            ok: true,
+            active_project_id: "p1",
+            project: { id: "p1", display_name: "Old Project" },
+            projects: [
+              { id: "p1", display_name: "Old Project" },
+              { id: "p2", display_name: "New Project" }
+            ],
+            multi_project: true,
+            generated_at: "2026-06-28T00:00:00Z",
+            files: { project: { text: "# Stale Old Project" } },
+            framing: { messages: [], project_ready: true },
+            summaries: { project: {}, manuscript: {} },
+            research_session: {}
+          };
+        }
+        return { ok: true };
+      };
+      const pending = loadOverview(true);
+      activeProjectId = "p2";
+      appState = {
+        active_project_id: "p2",
+        project: { id: "p2", display_name: "New Project" },
+        projects: [
+          { id: "p1", display_name: "Old Project" },
+          { id: "p2", display_name: "New Project" }
+        ],
+        multi_project: true,
+        files: { project: { text: "# New Project" } },
+        framing: { messages: [], project_ready: true },
+        summaries: { project: {}, manuscript: {} }
+      };
+      await pending;
+      return {
+        activeProjectId,
+        appActive: appState.active_project_id,
+        projectText: appState.files.project.text
+      };
+    })()
+  `);
+  assert.equal(result.activeProjectId, "p2", "stale overview responses must not switch back to the previous project");
+  assert.equal(result.appActive, "p2", "stale overview payloads must not replace current project state");
+  assert.equal(result.projectText, "# New Project", "stale overview files must not render over the newly opened project");
 }
 
 async function testProjectAliasCanonicalizesBeforeAvailability() {
@@ -6910,6 +6990,7 @@ testAgentBackendSelectorPersistsProviderSettings();
 testSettingsBackendSwitchNormalizesModelFamily();
 testReasoningOptionsFollowBackendModel();
 await testProjectCreateSendsBackendAndLoadsProjectDefault();
+await testStaleOverviewResponseDoesNotReopenPreviousProject();
 await testProjectAliasCanonicalizesBeforeAvailability();
 testEmptyDashboardStateSurvivesStaleActiveProject();
 testAgentReadinessStatusBlocksLaunchUi();
