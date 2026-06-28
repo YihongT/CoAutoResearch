@@ -3472,7 +3472,7 @@ def event_payload_text(value: Any) -> str:
         parts = [event_payload_text(item) for item in value]
         return "\n".join(part for part in parts if part).strip()
     if isinstance(value, dict):
-        for key in ("text", "message", "summary", "content", "output", "result", "error", "stdout", "stderr"):
+        for key in ("text", "message", "summary", "content", "output", "result", "success", "error", "stdout", "stderr"):
             text = event_payload_text(value.get(key))
             if text:
                 return text
@@ -3593,6 +3593,14 @@ def claude_message_has_tool_use(message: Any) -> bool:
     return any(str(block.get("type") or "") in {"tool_use", "tool_result"} for block in claude_content_blocks(message))
 
 
+def claude_result_text(event: dict[str, Any]) -> str:
+    for key in ("success", "result", "message", "content", "output", "text", "error"):
+        text = event_payload_text(event.get(key))
+        if text:
+            return text
+    return ""
+
+
 def transcript_from_claude_line(line: str) -> dict[str, Any] | None:
     stripped = line.strip()
     if not stripped:
@@ -3606,16 +3614,17 @@ def transcript_from_claude_line(line: str) -> dict[str, Any] | None:
     if not isinstance(event, dict):
         return None
 
-    event_type = str(event.get("type") or "event")
+    event_type = str(event.get("type") or "event").strip() or "event"
     subtype = str(event.get("subtype") or "").strip()
-    raw_type = f"{event_type}.{subtype}" if subtype else event_type
+    raw_type = event_type if "." in event_type or not subtype else f"{event_type}.{subtype}"
     raw_type_lower = raw_type.lower()
+    event_family = event_type.split(".", 1)[0].lower()
     if raw_type_lower in {"system.init"}:
         return None
     if "delta" in raw_type_lower or "partial" in raw_type_lower:
         return None
 
-    if event_type == "assistant":
+    if event_family == "assistant":
         message = event.get("message") if isinstance(event.get("message"), dict) else event
         stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
         if stop_reason in {None, ""} and not claude_message_has_tool_use(message):
@@ -3630,7 +3639,7 @@ def transcript_from_claude_line(line: str) -> dict[str, Any] | None:
             return None
         return {"role": "assistant", "kind": "assistant", "title": "Assistant", "content": content[:8000], "raw_type": raw_type, "editable": False}
 
-    if event_type == "user":
+    if event_family == "user":
         message = event.get("message") if isinstance(event.get("message"), dict) else event
         if claude_message_has_tool_use(message):
             content = claude_message_content_text(message)
@@ -3646,9 +3655,9 @@ def transcript_from_claude_line(line: str) -> dict[str, Any] | None:
                 }
         return None
 
-    if event_type == "result":
-        is_error = bool(event.get("is_error")) or subtype == "error"
-        content = event_payload_text(event.get("result") or event.get("error") or event.get("message") or event)
+    if event_family == "result":
+        is_error = bool(event.get("is_error")) or "error" in raw_type_lower or subtype == "error"
+        content = claude_result_text(event)
         if not content:
             return None
         return {
@@ -3669,6 +3678,49 @@ def transcript_from_claude_line(line: str) -> dict[str, Any] | None:
 
 def transcript_from_agent_line(line: str, backend: str) -> dict[str, Any] | None:
     return transcript_from_claude_line(line) if normalize_agent_backend(backend) == "claude" else transcript_from_codex_line(line)
+
+
+def transcript_dedupe_key(entry: dict[str, Any] | None) -> tuple[str, str, str, str]:
+    if not isinstance(entry, dict):
+        return ("", "", "", "")
+    return (
+        str(entry.get("role") or "").strip().lower(),
+        str(entry.get("kind") or "").strip().lower(),
+        str(entry.get("raw_type") or "").strip().lower(),
+        compact_single_line(str(entry.get("content") or ""), 800),
+    )
+
+
+def backfill_claude_result_transcript_from_raw_logs() -> bool:
+    with RESEARCH_LOCK:
+        settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
+        backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or settings.get("backend") or "")
+        if backend != "claude":
+            return False
+        status = str(RESEARCH_SESSION.get("status") or "").strip().lower()
+        if status in {"running", "stopping"}:
+            return False
+        raw_logs = list(RESEARCH_SESSION.get("raw_logs") or [])
+        if not raw_logs:
+            return False
+        existing = {transcript_dedupe_key(item) for item in RESEARCH_SESSION.get("transcript", []) if isinstance(item, dict)}
+        added = False
+        for line in raw_logs:
+            parsed = transcript_from_claude_line(str(line or ""))
+            if not parsed:
+                continue
+            raw_type = str(parsed.get("raw_type") or "").strip().lower()
+            role = str(parsed.get("role") or "").strip().lower()
+            if role != "final" or (raw_type != "result" and not raw_type.startswith("result.")):
+                continue
+            key = transcript_dedupe_key(parsed)
+            if key in existing:
+                continue
+            RESEARCH_SESSION["transcript"].append(transcript_entry(**parsed))
+            RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+            existing.add(key)
+            added = True
+        return added
 
 
 def slugify(value: str, fallback: str = "item") -> str:
@@ -8749,7 +8801,7 @@ def compact_event_text(value: Any) -> str:
     if isinstance(value, str):
         return value.strip()
     if isinstance(value, dict):
-        for key in ("text", "message", "summary", "content", "output"):
+        for key in ("text", "message", "summary", "content", "output", "success"):
             text = compact_event_text(value.get(key))
             if text:
                 return text
@@ -8786,13 +8838,14 @@ def format_claude_event(line: str) -> str:
         return stripped
     if not isinstance(event, dict):
         return stripped[:900]
-    event_type = str(event.get("type") or "event")
+    event_type = str(event.get("type") or "event").strip() or "event"
     subtype = str(event.get("subtype") or "").strip()
-    label = f"{event_type}.{subtype}" if subtype else event_type
-    if event_type == "system" and subtype == "init":
+    label = event_type if "." in event_type or not subtype else f"{event_type}.{subtype}"
+    event_family = event_type.split(".", 1)[0].lower()
+    if event_family == "system" and subtype == "init":
         session_id = str(event.get("session_id") or "").strip()
         return f"{label}: session {session_id[:8]}" if session_id else label
-    if event_type in {"assistant", "user"}:
+    if event_family in {"assistant", "user"}:
         message = event.get("message") if isinstance(event.get("message"), dict) else event
         tool = next((block for block in claude_content_blocks(message) if str(block.get("type") or "") in {"tool_use", "tool_result"}), None)
         if tool:
@@ -8801,8 +8854,8 @@ def format_claude_event(line: str) -> str:
         text = claude_message_content_text(message, include_tools=False)
         if text:
             return f"{label}: {text[:900]}"
-    if event_type == "result":
-        text = event_payload_text(event.get("result") or event.get("error") or event)
+    if event_family == "result":
+        text = claude_result_text(event)
         if text:
             return f"{label}: {text[:900]}"
     text = compact_event_text(event)
@@ -9397,6 +9450,8 @@ def ensure_autoresearch_gate_for_loop() -> None:
 
 def research_session_snapshot() -> dict[str, Any]:
     reconcile_research_process_state()
+    if backfill_claude_result_transcript_from_raw_logs():
+        persist_research_session()
     with RESEARCH_LOCK:
         current_mode = str(RESEARCH_SESSION.get("mode", "") or "")
         current_proc = RESEARCH_SESSION.get("process")

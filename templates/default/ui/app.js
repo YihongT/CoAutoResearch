@@ -3751,6 +3751,10 @@ function framingMessageDedupeKey(message) {
   ].join("\n");
 }
 
+function isAssistantFramingMessage(message) {
+  return message?.role === "assistant" && message.kind !== "project";
+}
+
 function framingMessageTime(message, fallback) {
   const value = Date.parse(String(message?.created_at || ""));
   return Number.isFinite(value) ? value : fallback;
@@ -3861,12 +3865,48 @@ function isAssistantReplyCandidate(entry, cutWindows) {
   const rawType = String(entry?.raw_type || "").toLowerCase();
   const role = String(entry?.role || "").toLowerCase();
   const content = String(entry?.content || "").trim();
+  const replyRawType =
+    rawType === "assistant" ||
+    rawType.startsWith("assistant.") ||
+    rawType === "result" ||
+    rawType.startsWith("result.") ||
+    ["item.completed", "turn.completed"].includes(rawType);
   return (
     content &&
     !isEntryInsideEditedCut(entry, cutWindows) &&
     ["assistant", "final"].includes(role) &&
-    ["item.completed", "turn.completed"].includes(rawType)
+    replyRawType
   );
+}
+
+function hasAssistantReplyBetweenTimes(start, end, messages, transcript, cutWindows) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start === end) return false;
+  const lower = Math.min(start, end);
+  const upper = Math.max(start, end);
+  const messageReply = messages.some((message) => {
+    if (!isAssistantFramingMessage(message)) return false;
+    const value = framingMessageTime(message, 0);
+    return value > lower && value < upper;
+  });
+  if (messageReply) return true;
+  return transcript.some((entry) => {
+    if (!isAssistantReplyCandidate(entry, cutWindows)) return false;
+    const value = transcriptEntryTime(entry);
+    return value > lower && value < upper;
+  });
+}
+
+function isDuplicateRecoveredUserMessage(message, existingMessages, transcript, cutWindows) {
+  const id = String(message?.id || "");
+  if (id && existingMessages.some((item) => String(item?.id || "") === id)) return true;
+  const key = framingMessageDedupeKey(message);
+  const candidateTime = framingMessageTime(message, 0);
+  return existingMessages.some((existing) => {
+    if (framingMessageDedupeKey(existing) !== key) return false;
+    const existingTime = framingMessageTime(existing, 0);
+    if (hasAssistantReplyBetweenTimes(existingTime, candidateTime, existingMessages, transcript, cutWindows)) return false;
+    return true;
+  });
 }
 
 function transcriptReplyWindows(cutWindows) {
@@ -3937,7 +3977,7 @@ function recoveredFramingMessagesFromSession(existingMessages) {
         text,
         created_at: String(entry?.created_at || new Date().toISOString()),
       });
-      if (!message || existingIds.has(message.id) || existingKeys.has(framingMessageDedupeKey(message))) return null;
+      if (!message || isDuplicateRecoveredUserMessage(message, messagesWithRecovered, transcript, cutWindows)) return null;
       existingIds.add(message.id);
       existingKeys.add(framingMessageDedupeKey(message));
       messagesWithRecovered.push(message);
@@ -4496,7 +4536,7 @@ function currentRunReadableEntry(entries) {
 function currentRunReadableSummary(entries = currentProgressEntries()) {
   const entry = currentRunReadableEntry(entries);
   if (entry) return `${framingProgressTitle(entry)}: ${framingProgressContent(entry)}`;
-  return agentWaitStateText() || (isSessionRunning() ? "Waiting for Codex events..." : "Waiting for agent events...");
+  return agentWaitStateText() || (isSessionRunning() ? `Waiting for ${agentLabel(sessionBackend())} events...` : "Waiting for agent events...");
 }
 
 function isVisibleProcessUpdateEntry(entry) {
@@ -4534,7 +4574,7 @@ function currentRunProcessUpdatesHtml(entries = currentProgressEntries(), option
   if (!updates.length) return "";
   const className = options.className || "run-live-updates";
   return `
-    <div class="${escapeHtml(className)}" aria-label="${escapeHtml(options.label || "Codex updates")}">
+    <div class="${escapeHtml(className)}" aria-label="${escapeHtml(options.label || `${agentLabel(sessionBackend())} updates`)}">
       ${updates
         .map((entry) => `<p>${escapeHtml(compactText(visibleProcessUpdateText(entry), options.maxLength || 360))}</p>`)
         .join("")}
@@ -6645,7 +6685,7 @@ function runningTrialStatusHtml(trial) {
   const progress = trialProgressForIteration(iteration, report);
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
-  const processUpdates = currentRunProcessUpdatesHtml(liveEntries, { className: "trial-live-updates", label: "Codex trial updates", limit: 1, maxLength: 260 });
+  const processUpdates = currentRunProcessUpdatesHtml(liveEntries, { className: "trial-live-updates", label: `${agentLabel(sessionBackend())} trial updates`, limit: 1, maxLength: 260 });
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice);

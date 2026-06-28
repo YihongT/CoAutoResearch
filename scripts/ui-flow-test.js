@@ -1845,6 +1845,30 @@ function testDuplicateQueuedUserTurnsRestoreFromServerMessages() {
   assertJsonEqual(app.context.__messages().filter((message) => message.role === "user").map((message) => message.id), ["qd1", "qd2"], "server-persisted queued user turns should survive even when the text is identical");
 }
 
+function testRepeatedQueuedTranscriptUserTurnsAreRecovered() {
+  const app = loadAppContext();
+  app.run(`
+    __setServerMessages([
+      { id: "u1", role: "user", kind: "text", text: "Hi", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "Hi! How can I help?", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    __setSession({ id: "s1", session_id: "claude-sid", status: "completed", mode: "chat", backend: "claude", transcript: [] });
+    __setTranscript([
+      { id: "tu1", role: "user", kind: "user", raw_type: "ui.chat", content: "Hi", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "tf1", role: "final", kind: "final", raw_type: "result.success", content: "Hi! How can I help?", created_at: "2026-06-17T10:00:01.000Z" },
+      { id: "tu2", role: "user", kind: "user", raw_type: "ui.chat", content: "Hi", created_at: "2026-06-17T10:00:05.000Z" },
+      { id: "tf2", role: "final", kind: "final", raw_type: "result.success", content: "Hi again! Still here.", created_at: "2026-06-17T10:00:06.000Z" }
+    ]);
+    __restore();
+  `);
+  assertJsonEqual(app.context.__messages().filter((message) => message.kind !== "project").map((message) => `${message.role}:${message.text}`), [
+    "user:Hi",
+    "assistant:Hi! How can I help?",
+    "user:Hi",
+    "assistant:Hi again! Still here.",
+  ]);
+}
+
 async function testAttachmentOnlyMessage() {
   const app = loadAppContext();
   app.run('__setSelectedResources([{ path: "/tmp/paper.pdf", category: "literature" }])');
@@ -2128,6 +2152,28 @@ function testTranscriptRecoveryUsesOnlyFinalAssistant() {
   assert.equal(activity.hasWorked, true, "activity should fold before the final assistant response");
   assert.equal(activity.hasPartial, true, "intermediate status should live inside folded activity");
   assert.equal(activity.hasFinal, false, "final answer should not be hidden inside folded activity");
+}
+
+function testClaudeResultSuccessRecoversAssistantReply() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([]);
+    __setServerMessages([]);
+    __setSession({ id: "s1", session_id: "claude-sid", status: "completed", mode: "chat", backend: "claude", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+    __setTranscript([
+      { id: "tu1", role: "user", kind: "user", raw_type: "ui.chat", content: "Hi", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "tf1", role: "final", kind: "final", raw_type: "result.success", content: "Hi! How can I help you with your research project today?", created_at: "2026-06-17T10:00:01.000Z" }
+    ]);
+    __restore();
+  `);
+  const messages = app.context.__messages().filter((message) => message.kind !== "project");
+  assertJsonEqual(messages.map((message) => `${message.role}:${message.text}`), [
+    "user:Hi",
+    "assistant:Hi! How can I help you with your research project today?",
+  ]);
+  assert.equal(app.run("__latestUnansweredText()"), "", "Claude result.success should count as a saved assistant response");
+  const html = app.run("__framingThreadHtmlProbe()");
+  assert.equal(html.includes("The run completed without a saved response."), false, "Claude result.success must not render the no-response error state");
 }
 
 function testTranscriptEntriesDoNotExposeEdit() {
@@ -6352,6 +6398,7 @@ await testRunningSteeringLookingMessageIsQueuedTheSameWay();
 await testQueuedChatCanReorderAndDelete();
 await testStopAndSendQueuesPriorityThenStops();
 testDuplicateQueuedUserTurnsRestoreFromServerMessages();
+testRepeatedQueuedTranscriptUserTurnsAreRecovered();
 await testAttachmentOnlyMessage();
 await testResourceLinksDoNotRepeatAcrossMessages();
 await testResumeFromTrialRequiresConfirmationAndSendsPayload();
@@ -6366,6 +6413,7 @@ await testLegacyGoalRestartIgnoresRestartCancelFlag();
 await testTypedLegacyGoalControlsStayOnCommandEndpoint();
 testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
+testClaudeResultSuccessRecoversAssistantReply();
 testTranscriptEntriesDoNotExposeEdit();
 await testEditTruncatesLaterConversationBeforeResend();
 await testEditAfterAutoresearchFirstMessageUsesChat();

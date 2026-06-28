@@ -1897,6 +1897,12 @@ Confidence: medium
     !appJs.includes("function currentRunLiveStatusHtml()") ||
     !appJs.includes("function currentRunActivityDetailsHtml") ||
     !appJs.includes("function currentRunReadableSummary") ||
+    !appJs.includes('`Waiting for ${agentLabel(sessionBackend())} events...`') ||
+    !appJs.includes('`${agentLabel(sessionBackend())} updates`') ||
+    !appJs.includes('`${agentLabel(sessionBackend())} trial updates`') ||
+    appJs.includes("Waiting for Codex events") ||
+    appJs.includes('"Codex updates"') ||
+    appJs.includes('"Codex trial updates"') ||
     !appJs.includes('details class="run-live-details"') ||
     appJs.includes("${framingProgressHtml()}") ||
     !stylesCss.includes(".run-live-status") ||
@@ -1904,7 +1910,7 @@ Confidence: medium
     !stylesCss.includes(".run-live-details[open] > summary::before") ||
     !stylesCss.includes(":is(.run-live-details, .framing-progress-details)")
   ) {
-    throw new Error("running Codex progress must be scoped to the current run and collapsed by default");
+    throw new Error("running agent progress must be scoped to the current run, collapsed by default, and labeled for the active backend");
   }
   if (
     !appJs.includes("buildFramingActivityByMessage") ||
@@ -2647,10 +2653,20 @@ Confidence: medium
       "assistant_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Final assistant text.'}], 'stop_reason': 'end_turn', 'usage': {'input_tokens': 3, 'output_tokens': 5}}})",
       "tool_line = json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'pwd'}}], 'stop_reason': 'tool_use'}})",
       "result_line = json.dumps({'type': 'result', 'subtype': 'success', 'result': 'Done.', 'session_id': '00000000-0000-0000-0000-000000000999', 'total_cost_usd': 0.012})",
+      "result_success_line = json.dumps({'type': 'result.success', 'success': 'Hi! How can I help?', 'session_id': '00000000-0000-0000-0000-000000000999'})",
+      "nested_success_line = json.dumps({'type': 'result', 'subtype': 'success', 'result': {'success': 'Nested success reply.'}, 'session_id': '00000000-0000-0000-0000-000000000999'})",
       "assert module.transcript_from_claude_line(system_line) is None",
       "assert module.transcript_from_claude_line(assistant_line)['content'] == 'Final assistant text.'",
       "assert module.transcript_from_claude_line(tool_line)['kind'] == 'tool'",
       "assert module.transcript_from_claude_line(result_line)['role'] == 'final'",
+      "assert module.transcript_from_claude_line(result_success_line)['content'] == 'Hi! How can I help?'",
+      "assert module.transcript_from_claude_line(result_success_line)['raw_type'] == 'result.success'",
+      "assert module.transcript_from_claude_line(nested_success_line)['content'] == 'Nested success reply.'",
+      "assert module.format_claude_event(result_success_line) == 'result.success: Hi! How can I help?'",
+      "context.session.update({'backend': 'claude', 'settings': settings, 'status': 'completed', 'raw_logs': [result_success_line], 'transcript': [{'id': 'tu-old', 'role': 'user', 'kind': 'user', 'raw_type': 'ui.chat', 'content': 'Hi', 'created_at': '2026-06-17T10:00:00.000Z'}]})",
+      "assert module.backfill_claude_result_transcript_from_raw_logs() is True",
+      "assert any(item.get('raw_type') == 'result.success' and item.get('content') == 'Hi! How can I help?' for item in context.session['transcript']), context.session['transcript']",
+      "assert module.backfill_claude_result_transcript_from_raw_logs() is False",
       "module.append_research_log(system_line)",
       "module.append_research_log(assistant_line)",
       "module.append_research_log(tool_line)",
