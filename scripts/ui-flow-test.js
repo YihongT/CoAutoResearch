@@ -1520,6 +1520,8 @@ function testButtonInventoryHasHandlers() {
   assert.equal(appJs.includes('const card = cardPreview.closest(".context-card, .review-card")'), true, "Preview buttons must search both manuscript/context and review cards");
   assert.equal(appJs.includes('String(action || "").includes("data-card-preview")'), true, "context card previews must allocate an inline target slot");
   assert.equal(appJs.includes("[data-copy-text]"), true, "copy controls must have a delegated handler");
+  assert.equal(appJs.includes("function checkIconSvg()"), true, "message copy controls should render a check icon after copying");
+  assert.equal(appJs.includes("markCopyButtonCopied(copyText)"), true, "message copy controls should switch to copied state after successful copy");
   assert.equal(appJs.includes("[data-inline-fullscreen]"), true, "open controls must use the inline fullscreen handler");
 }
 
@@ -1625,7 +1627,7 @@ async function testSilentOverviewPollDoesNotShowLoading() {
     (async () => {
       __setProjectLoadPhase("ready");
       globalThis.__apiHandler = async (endpoint) => {
-        if (endpoint === "/api/overview") {
+        if (endpoint.startsWith("/api/overview")) {
           return {
             ...appState,
             generated_at: "2026-06-17T10:00:00.000Z",
@@ -1637,7 +1639,7 @@ async function testSilentOverviewPollDoesNotShowLoading() {
       await __loadOverviewImpl(true);
       const afterSuccess = __projectLoadingProbe();
       globalThis.__apiHandler = async (endpoint) => {
-        if (endpoint === "/api/overview") throw new Error("temporary network blip");
+        if (endpoint.startsWith("/api/overview")) throw new Error("temporary network blip");
         return { ok: true };
       };
       await __loadOverviewImpl(true);
@@ -2586,7 +2588,7 @@ async function testSteeringResendStartsVisibleNormalChatRun() {
         appState.framing.messages = body.messages || [];
         return { ok: true };
       }
-      if (endpoint === "/api/overview") {
+      if (endpoint.startsWith("/api/overview")) {
         return { ...appState, generated_at: "2026-06-17T10:01:00.000Z" };
       }
       if (endpoint === "/api/research/chat") {
@@ -2809,6 +2811,26 @@ function testStartAutoresearchAppearsAtAssistantReplyEnd() {
   assert.equal(html.includes("data-project-edit"), false, "assistant-attached PROJECT.md footer should not contain inline edit controls");
 }
 
+function testStartAutoresearchAppearsWhenProjectArtifactPrecedesReply() {
+  const app = loadAppContext();
+  app.run(`
+    __setSession({ id: "s1", session_id: "sid", status: "completed", mode: "chat", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "Let's discuss this prior work.", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "p1", role: "assistant", kind: "project", text: "Project draft", artifact: { path: "PROJECT.md", text: "# Project\\n\\nReady to launch." }, created_at: "2026-06-17T10:00:14.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "I recorded the launch framing in PROJECT.md.", created_at: "2026-06-17T10:00:29.000Z" }
+    ]);
+  `);
+  const html = app.run("__framingThreadHtmlProbe()");
+  const assistantIndex = html.indexOf("I recorded the launch framing in PROJECT.md.");
+  const linkIndex = html.indexOf('data-inline-fullscreen="PROJECT.md"');
+  const launchIndex = html.indexOf("data-project-launch");
+  assert.ok(assistantIndex >= 0, "final assistant reply should render");
+  assert.ok(linkIndex > assistantIndex, "PROJECT.md link should attach to the final assistant reply even when the artifact was recorded earlier");
+  assert.ok(launchIndex > linkIndex, "Start autoresearch should attach after the PROJECT.md link");
+  assert.equal(html.includes("Project draft"), false, "standalone project artifact message should stay collapsed out of the thread");
+}
+
 function testChatGeneratedProjectDraftIsSurfaced() {
   const app = loadAppContext();
   app.run(`
@@ -2929,6 +2951,7 @@ function testMessagesExposeCopyButtons() {
   assert.equal(userHtml.includes("message-copy-button"), true, "user messages should expose a copy icon");
   assert.equal(userHtml.includes(encodeURIComponent("Copy this user message")), true);
   assert.equal(assistantHtml.includes("message-copy-button"), true, "assistant messages should expose a copy icon");
+  assert.equal(assistantHtml.includes('aria-label="Copy response"'), true, "assistant copy icon should use response-oriented labeling");
   assert.equal(assistantHtml.includes(encodeURIComponent("Copy this assistant message")), true);
   assert.equal(projectHtml.includes("message-copy-button"), true, "compact PROJECT.md messages should expose a copy icon");
   assert.equal(projectHtml.includes(encodeURIComponent("# Copyable Project\n\nDraft body.")), true);
@@ -4894,7 +4917,7 @@ async function testStaleOverviewResponseDoesNotReopenPreviousProject() {
         summaries: { project: {}, manuscript: {} }
       };
       api = async (endpoint) => {
-        if (endpoint === "/api/overview") {
+        if (endpoint.startsWith("/api/overview")) {
           return {
             ok: true,
             active_project_id: "p1",
@@ -4940,10 +4963,60 @@ async function testStaleOverviewResponseDoesNotReopenPreviousProject() {
   assert.equal(result.projectText, "# New Project", "stale overview files must not render over the newly opened project");
 }
 
+async function testOverviewRequestPinsActiveProject() {
+  const app = loadAppContext();
+  const result = await app.run(`
+    (async () => {
+      activeProjectId = "pinned-project";
+      appState = {
+        active_project_id: "pinned-project",
+        project: { id: "pinned-project", display_name: "Pinned Project" },
+        projects: [{ id: "pinned-project", display_name: "Pinned Project" }],
+        multi_project: true,
+        files: { project: { text: "# Pinned Project" } },
+        framing: { messages: [], project_ready: true },
+        summaries: { project: {}, manuscript: {} }
+      };
+      let seenEndpoint = "";
+      api = async (endpoint) => {
+        seenEndpoint = endpoint;
+        return {
+          ok: true,
+          active_project_id: "pinned-project",
+          project: { id: "pinned-project", display_name: "Pinned Project" },
+          projects: [{ id: "pinned-project", display_name: "Pinned Project" }],
+          multi_project: true,
+          generated_at: "2026-06-28T00:00:00Z",
+          files: { project: { text: "# Pinned Project" } },
+          framing: { messages: [], project_ready: true },
+          summaries: { project: {}, manuscript: {} },
+          research_session: {}
+        };
+      };
+      await __loadOverviewImpl(true);
+      return seenEndpoint;
+    })()
+  `);
+  assert.equal(result, "/api/overview?project=pinned-project", "overview requests must be pinned to the active project at request start");
+}
+
 async function testProjectAliasCanonicalizesBeforeAvailability() {
   const app = loadAppContext();
   const result = await app.run(`
     (async () => {
+      window.location.href = "http://localhost/?project=abc&view=chat";
+      window.location.pathname = "/";
+      window.location.search = "?project=abc&view=chat";
+      window.location.hash = "";
+      window.history = {
+        replaceState(_state, _title, next) {
+          const url = new URL(next, window.location.href);
+          window.location.href = url.href;
+          window.location.pathname = url.pathname;
+          window.location.search = url.search;
+          window.location.hash = url.hash;
+        }
+      };
       activeProjectId = "abc";
       localStorage.setItem("coAutoResearchActiveProject", "abc");
       api = async (endpoint) => {
@@ -4966,6 +5039,7 @@ async function testProjectAliasCanonicalizesBeforeAvailability() {
       return {
         activeProjectId,
         stored: localStorage.getItem("coAutoResearchActiveProject"),
+        search: window.location.search,
         noProject: hasNoProject(),
         attachDisabled: Boolean(document.querySelector("#composer-attach-button")?.disabled),
         menuActionDisabled: Boolean(document.querySelector("[data-attachment-action]")?.disabled)
@@ -4974,6 +5048,7 @@ async function testProjectAliasCanonicalizesBeforeAvailability() {
   `);
   assert.equal(result.activeProjectId, "0dc5adcb-54e6-4b5c-abfa-37858f8a1736", "project display-name aliases should canonicalize to UUIDs");
   assert.equal(result.stored, "0dc5adcb-54e6-4b5c-abfa-37858f8a1736", "canonical UUID should replace the project alias in localStorage");
+  assert.equal(result.search, "?project=0dc5adcb-54e6-4b5c-abfa-37858f8a1736&view=chat", "canonical UUID should replace the project alias in the URL");
   assert.equal(result.noProject, false, "resolved project aliases must not trigger no-project mode");
   assert.equal(result.attachDisabled, false, "composer attach button should stay enabled after alias resolution");
   assert.equal(result.menuActionDisabled, false, "attachment menu actions should stay enabled after alias resolution");
@@ -6937,6 +7012,7 @@ await testEditPreProjectMessageDoesNotUseRegenerateConfirmation();
 await testEditAttachmentsCanRemoveRetainAndAdd();
 await testLaunchGoalMessageBeforeBackendWork();
 testStartAutoresearchAppearsAtAssistantReplyEnd();
+testStartAutoresearchAppearsWhenProjectArtifactPrecedesReply();
 testChatGeneratedProjectDraftIsSurfaced();
 testStartAutoresearchUsesCurrentProjectDraftWithoutArtifactMessage();
 testProjectLaunchFallbackWithoutAssistantReply();
@@ -6991,6 +7067,7 @@ testSettingsBackendSwitchNormalizesModelFamily();
 testReasoningOptionsFollowBackendModel();
 await testProjectCreateSendsBackendAndLoadsProjectDefault();
 await testStaleOverviewResponseDoesNotReopenPreviousProject();
+await testOverviewRequestPinsActiveProject();
 await testProjectAliasCanonicalizesBeforeAvailability();
 testEmptyDashboardStateSurvivesStaleActiveProject();
 testAgentReadinessStatusBlocksLaunchUi();

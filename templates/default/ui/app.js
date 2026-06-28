@@ -83,6 +83,8 @@ const editAttachmentDrafts = new Map();
 let activeEditResourceTargetId = "";
 let pendingPreProjectResendConfirm = null;
 let overviewPollTimer = null;
+let overviewPollGeneration = 0;
+const framingThreadScrollListeners = new WeakSet();
 let researchEventSource = null;
 let researchEventProjectId = "";
 let researchEventLastId = "";
@@ -731,10 +733,9 @@ function attachProjectDraftToLatestAssistant(messages) {
   const latest = currentProjectDraftFooterMessage(items);
   if (!latest) return items;
   const projectIndex = items.findIndex((message) => message?.id === latest.id);
-  const searchStart = projectIndex >= 0 ? projectIndex - 1 : items.length - 1;
   let hostId = "";
-  for (let index = searchStart; index >= 0; index -= 1) {
-    if (canHostProjectDraftAttachment(items[index])) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.id !== latest.id && canHostProjectDraftAttachment(items[index])) {
       hostId = items[index].id;
       break;
     }
@@ -1153,6 +1154,8 @@ function updateNavigationUrl(panel = activeNavigationPanel()) {
 }
 
 function scrollablePageNode() {
+  const framingThread = framingThreadScroller();
+  if (framingThread) return framingThread;
   return $(".main-stage") || document.scrollingElement || document.documentElement;
 }
 
@@ -2035,6 +2038,7 @@ function stopResearchEventStream(options = {}) {
 function clearOverviewPoll() {
   clearTimeout(overviewPollTimer);
   overviewPollTimer = null;
+  overviewPollGeneration += 1;
 }
 
 function queueStreamingOverviewRefresh() {
@@ -2667,6 +2671,7 @@ async function loadProjects(options = {}) {
   }
   if (String(activeProjectId || "") !== String(previousActiveProjectId || "")) {
     resetProjectClientState();
+    updateNavigationUrl();
   }
   appState = { ...(appState || {}), projects, active_project_id: activeProjectId, multi_project: Boolean(payload.multi_project) };
   renderProjectList();
@@ -2968,14 +2973,9 @@ async function loadOverview(silent = false) {
     if (showOverviewLoading && projectLoadPhase !== "overview" && projectLoadPhase !== "projects") setProjectLoadPhase("overview");
     const materialContent = $("#context-content");
     const holdMaterialTree = activeView === "materials" && Boolean(materialContent?.childElementCount);
-    const overviewPayload = await api("/api/overview");
-    const responseProjectId = String(overviewPayload.active_project_id || overviewPayload.project?.id || "");
-    if (
-      requestedProjectId &&
-      activeProjectId &&
-      requestedProjectId !== String(activeProjectId || "") &&
-      responseProjectId === requestedProjectId
-    ) {
+    const overviewPath = requestedProjectId ? `/api/overview?project=${encodeURIComponent(requestedProjectId)}` : "/api/overview";
+    const overviewPayload = await api(overviewPath);
+    if (requestedProjectId && activeProjectId && requestedProjectId !== String(activeProjectId || "")) {
       return;
     }
     appState = overviewPayload;
@@ -3050,15 +3050,23 @@ async function loadOverview(silent = false) {
   }
 }
 
-function scheduleOverviewPoll(delay) {
+function scheduleOverviewPoll(delay, options = {}) {
   clearTimeout(overviewPollTimer);
+  const generation = options.generation || (overviewPollGeneration += 1);
   overviewPollTimer = setTimeout(async () => {
+    if (generation !== overviewPollGeneration) return;
+    const pollProjectId = String(activeProjectId || "");
     if (activeProjectId) await loadOverview(true);
     else await loadProjects().catch((error) => {
       setProjectLoadPhase("error", { error: error.message });
       showToast(error.message, true);
     });
-    scheduleOverviewPoll(isSessionRunning() || framingDraftPending || framingReplyPending ? 1000 : 3500);
+    if (generation !== overviewPollGeneration) return;
+    if (pollProjectId !== String(activeProjectId || "")) {
+      scheduleOverviewPoll(1000);
+      return;
+    }
+    scheduleOverviewPoll(isSessionRunning() || framingDraftPending || framingReplyPending ? 1000 : 3500, { generation });
   }, delay);
 }
 
@@ -3290,7 +3298,7 @@ async function copyResumeCommand() {
 
 async function copyTextToClipboard(text, successMessage = "Copied.") {
   const value = String(text || "");
-  if (!value.trim()) return;
+  if (!value.trim()) return false;
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
@@ -3306,9 +3314,28 @@ async function copyTextToClipboard(text, successMessage = "Copied.") {
       textarea.remove();
     }
     showToast(successMessage);
+    return true;
   } catch (error) {
     showToast("Could not copy text.", true);
+    return false;
   }
+}
+
+function markCopyButtonCopied(button) {
+  if (!button?.classList?.contains("message-copy-button")) return;
+  const defaultLabel = button.dataset.copyDefaultLabel || button.getAttribute("aria-label") || button.title || "Copy response";
+  button.dataset.copyDefaultLabel = defaultLabel;
+  button.classList.add("is-copied");
+  button.innerHTML = checkIconSvg();
+  button.setAttribute("aria-label", "Copied");
+  button.title = "Copied";
+  clearTimeout(button._copyFeedbackTimer);
+  button._copyFeedbackTimer = setTimeout(() => {
+    button.classList.remove("is-copied");
+    button.innerHTML = copyIconSvg();
+    button.setAttribute("aria-label", defaultLabel);
+    button.title = defaultLabel;
+  }, 1800);
 }
 
 function hasLaunched() {
@@ -4755,7 +4782,7 @@ function framingMessageHtml(message) {
   const projectAttachmentMessage = role === "assistant" && message.attachedProjectDraft ? message.attachedProjectDraft : null;
   const launchAction = projectAttachmentMessage ? projectDraftLaunchButtonHtml(projectAttachmentMessage) : "";
   const actionItems = [
-    messageCopyButton(message.text, `Copy ${role === "user" ? "your" : "CoAutoResearch"} message`),
+    messageCopyButton(message.text, role === "user" ? "Copy your message" : "Copy response"),
     role === "user" && !message.resumeFromTrial
       ? `<button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button>`
       : "",
@@ -5285,11 +5312,66 @@ function updateBriefDockGeometry() {
   rootStyle?.setProperty?.("--brief-dock-width", `${width}px`);
   rootStyle?.setProperty?.("--brief-dock-height", `${height}px`);
   rootStyle?.setProperty?.("--brief-dock-bottom", `${bottom}px`);
+  updateFramingThreadGeometry(height, bottom);
   syncAutoresearchDockGeometry();
   requestAnimationFrame(updateFramingScrollButton);
 }
 
+function updateFramingThreadGeometry(dockHeight = null, dockBottom = null) {
+  const thread = $("#cold-start-workspace.has-framing-thread .framing-thread");
+  if (!thread || thread.hidden) return;
+  const rect = typeof thread.getBoundingClientRect === "function" ? thread.getBoundingClientRect() : { top: 0 };
+  const viewportHeight = Number(window.innerHeight || 0);
+  const height = Number.isFinite(dockHeight) ? dockHeight : Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--brief-dock-height")) || 132;
+  const bottom = Number.isFinite(dockBottom) ? dockBottom : Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--brief-dock-bottom")) || 22;
+  const minHeight = Number(window.innerWidth || 0) <= 760 ? 48 : 180;
+  const available = Math.max(minHeight, viewportHeight - Number(rect.top || 0) - height - bottom - 18);
+  document.documentElement?.style?.setProperty?.("--framing-thread-height", `${available}px`);
+}
+
+function markFramingThreadScrolling(thread) {
+  if (!thread) return;
+  thread.classList.add("is-scrolling");
+  clearTimeout(thread._framingScrollTimer);
+  thread._framingScrollTimer = setTimeout(() => thread.classList.remove("is-scrolling"), 760);
+}
+
+function ensureFramingThreadScrollListener(thread) {
+  if (!thread || framingThreadScrollListeners.has(thread)) return;
+  framingThreadScrollListeners.add(thread);
+  thread.addEventListener("scroll", () => {
+    markFramingThreadScrolling(thread);
+  }, { passive: true });
+}
+
+function framingThreadScroller() {
+  if (!document.body?.classList?.contains("has-brief-dock")) return null;
+  const thread = $("#cold-start-workspace.has-framing-thread .framing-thread");
+  if (!thread || thread.hidden) return null;
+  ensureFramingThreadScrollListener(thread);
+  return thread;
+}
+
+function handleFramingStageWheel(event) {
+  const thread = framingThreadScroller();
+  if (!thread || thread.contains(event.target)) return;
+  if (event.ctrlKey || event.metaKey) return;
+  if (event.target?.closest?.(".brief-editor-shell.is-framing-dock, dialog, input, textarea, select, .attachment-menu")) return;
+  const maxScroll = Math.max(0, thread.scrollHeight - thread.clientHeight);
+  if (!maxScroll) return;
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+  const delta = (event.deltaY || 0) * unit;
+  if (!delta) return;
+  const next = Math.max(0, Math.min(maxScroll, thread.scrollTop + delta));
+  if (next === thread.scrollTop) return;
+  event.preventDefault();
+  thread.scrollTop = next;
+  markFramingThreadScrolling(thread);
+}
+
 function pageScroller() {
+  const framingThread = framingThreadScroller();
+  if (framingThread) return framingThread;
   const main = $(".main-stage");
   if (main && main.scrollHeight > main.clientHeight + 2) return main;
   return document.scrollingElement || document.documentElement;
@@ -7844,7 +7926,7 @@ function transcriptEntryHtml(entry) {
     `;
   }
   const actionItems = [
-    messageCopyButton(content, `Copy ${role === "user" ? "your" : "transcript"} message`),
+    messageCopyButton(content, role === "user" ? "Copy your message" : "Copy response"),
   ].filter(Boolean);
   const actions = actionItems.length ? `<div class="transcript-actions message-action-row">${actionItems.join("")}</div>` : "";
   return `
@@ -7926,6 +8008,14 @@ function copyIconSvg() {
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <rect x="8" y="8" width="11" height="11" rx="2"></rect>
       <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path>
+    </svg>
+  `;
+}
+
+function checkIconSvg() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M5 12.5l4.2 4.2L19 6.8"></path>
     </svg>
   `;
 }
@@ -13534,6 +13624,7 @@ function bindEvents() {
     updateFramingScrollButton();
     schedulePersistActiveViewScrollPosition();
   }, { passive: true });
+  $(".main-stage")?.addEventListener("wheel", handleFramingStageWheel, { passive: false });
   $("#chat-form textarea").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -13873,7 +13964,11 @@ function bindEvents() {
       } catch {
         text = copyText.dataset.copyText || "";
       }
-      copyTextToClipboard(text, copyText.dataset.copyLabel || "Copied.").catch((error) => showToast(error.message, true));
+      copyTextToClipboard(text, copyText.dataset.copyLabel || "Copied.")
+        .then((copied) => {
+          if (copied) markCopyButtonCopied(copyText);
+        })
+        .catch((error) => showToast(error.message, true));
       return;
     }
     const removeResumeTrial = event.target.closest("[data-resume-trial-remove]");

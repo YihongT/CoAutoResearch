@@ -4733,9 +4733,8 @@ def list_files(relative_dir: str, recursive: bool = True) -> list[dict[str, Any]
     directory = repo_path(relative_dir)
     if not directory.exists() or not directory.is_dir():
         return []
-    follow_symlinks = is_resources_relative_path(relative_dir)
     files: list[dict[str, Any]] = []
-    for path, virtual_path, _depth in iter_tree_paths(directory, relative_dir, recursive=recursive, follow_symlink_dirs=follow_symlinks):
+    for path, virtual_path, _depth in iter_tree_paths(directory, relative_dir, recursive=recursive, follow_symlink_dirs=False):
         if not path.is_file():
             continue
         if path.name in {".gitkeep", ".DS_Store"}:
@@ -4774,13 +4773,12 @@ def directory_tree(relative_dir: str, max_depth: int | None = None, exclude_name
         return root
 
     nodes: dict[str, dict[str, Any]] = {tree_lookup_key(relative_dir): root}
-    follow_symlinks = is_resources_relative_path(relative_dir)
     for path, relative, _depth in iter_tree_paths(
         root_path,
         relative_dir,
         max_depth=max_depth,
         exclude_names=exclude_names,
-        follow_symlink_dirs=follow_symlinks,
+        follow_symlink_dirs=False,
     ):
         if is_duplicate_resource_copy(path):
             continue
@@ -13313,6 +13311,14 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("%s - %s\n" % (self.log_date_time_string(), fmt % args))
 
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except Exception as exc:
+            if is_client_disconnect_error(exc):
+                return
+            raise
+
     def send_json(self, payload: Any, status: int = 200) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         try:
@@ -13458,14 +13464,29 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         if not parsed.path.startswith("/api/"):
             self.serve_static(parsed.path)
             return
+        if parsed.path == "/api/overview":
+            requested_project_id = self.request_project_id(parsed)
+            try:
+                with using_project(requested_project_id):
+                    self.send_json(build_overview())
+                    return
+            except Exception as exc:
+                if is_client_disconnect_error(exc):
+                    return
+                if PROJECT_REGISTRY and requested_project_id and re.search(r"\bUnknown project\b", str(exc), re.IGNORECASE):
+                    PROJECT_REGISTRY.refresh()
+                    with using_project(""):
+                        payload = build_overview()
+                    payload["requested_project_unavailable"] = requested_project_id
+                    self.send_json(payload)
+                    return
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
         try:
             with using_project(self.request_project_id(parsed)):
                 if parsed.path == "/api/health":
                     context = current_project_context()
                     self.send_json({"ok": True, "repo_root": str(REPO_ROOT), "project": context.summary(), "time": now_iso()})
-                    return
-                if parsed.path == "/api/overview":
-                    self.send_json(build_overview())
                     return
                 if parsed.path == "/api/file":
                     query = parse_qs(parsed.query)

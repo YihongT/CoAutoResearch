@@ -906,6 +906,28 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
     if (!${desktop ? "true" : "false"} && main && (main.left < -1 || main.right > viewport.width + 1)) {
       issues.push({ type: 'mobile-main-overflow', message: 'main stage overflows mobile viewport', main, viewport });
     }
+    const dockedThread = document.querySelector('body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread');
+    if (visible(dockedThread)) {
+      const mainEl = document.querySelector('.main-stage');
+      const mainCs = mainEl ? getComputedStyle(mainEl) : null;
+      const threadCs = getComputedStyle(dockedThread);
+      const composerDock = document.querySelector('.brief-editor-shell.is-framing-dock');
+      const threadRect = rectFor(dockedThread);
+      const dockRect = rectFor(composerDock);
+      const mainRect = rectFor(mainEl);
+      if (mainEl && ['auto', 'scroll'].includes(mainCs.overflowY) && mainEl.scrollHeight > mainEl.clientHeight + 2) {
+        issues.push({ type: 'framing-outer-scroll', message: 'framing dock state should not leave the outer main stage scrollable', main: { scrollHeight: mainEl.scrollHeight, clientHeight: mainEl.clientHeight, overflowY: mainCs.overflowY } });
+      }
+      if (!['auto', 'scroll'].includes(threadCs.overflowY)) {
+        issues.push({ type: 'framing-thread-scroll', message: 'framing transcript should own vertical scrolling when the composer is docked', thread: { scrollHeight: dockedThread.scrollHeight, clientHeight: dockedThread.clientHeight, overflowY: threadCs.overflowY } });
+      }
+      if (dockRect && threadRect && threadRect.bottom > dockRect.top - 8) {
+        issues.push({ type: 'framing-thread-dock-overlap', message: 'framing transcript viewport extends behind the fixed composer', thread: threadRect, dock: dockRect });
+      }
+      if (mainRect && threadRect && (Math.abs(threadRect.left - mainRect.left) > 2 || Math.abs(threadRect.right - mainRect.right) > 2)) {
+        issues.push({ type: 'framing-scrollbar-edge', message: 'framing transcript scroller should span the workspace so its scrollbar sits on the page edge', thread: threadRect, main: mainRect });
+      }
+    }
     const workspaceLeft = rail && ${desktop ? "true" : "false"} ? rail.right : 0;
     const workspaceCenter = (workspaceLeft + viewport.width) / 2;
     const centerCheckSelectors = [

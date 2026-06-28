@@ -5148,37 +5148,57 @@ body.is-dragging-file .composer {
 }
 
 .message-copy-button {
+  --copy-button-feedback: #0b6bcb;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
-  color: rgba(32, 31, 27, 0.48);
+  color: color-mix(in srgb, var(--control-muted, var(--muted)) 88%, var(--control-ink, var(--ink)));
   cursor: pointer;
   line-height: 0;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .message-copy-button svg {
-  width: 17px;
-  height: 17px;
+  width: 19px;
+  height: 19px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .message-copy-button:hover,
 .message-copy-button:focus-visible {
-  border-color: rgba(32, 31, 27, 0.14);
-  background: rgba(255, 253, 247, 0.82);
-  color: var(--accent);
+  border-color: var(--control-border, var(--line));
+  background: var(--control-bg-hover, color-mix(in srgb, var(--ink) 7%, transparent));
+  color: var(--control-ink, var(--ink));
   outline: none;
+}
+
+.message-copy-button:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--copy-button-feedback) 55%, transparent);
+}
+
+.message-copy-button.is-copied,
+.message-copy-button.is-copied:hover,
+.message-copy-button.is-copied:focus-visible {
+  border-color: var(--copy-button-feedback);
+  background: transparent;
+  color: var(--copy-button-feedback);
+  box-shadow: inset 0 0 0 1px var(--copy-button-feedback);
+}
+
+html[data-theme="dark-glass"] .message-copy-button,
+html[data-theme="atelier-nocturne"] .message-copy-button {
+  --copy-button-feedback: #58a6ff;
 }
 
 .framing-edit-form {
@@ -15036,6 +15056,28 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 /* brief dock: model / reasoning selects as quiet mono ghosts */
 .brief-editor-shell #cold-file-editor::placeholder { color: var(--soft); }
 html[data-theme="atelier-nocturne"] .brief-editor-shell #cold-file-editor::placeholder { color: var(--muted); }
+html[data-theme="atelier-nocturne"] :is(input, textarea)::placeholder {
+  color: color-mix(in srgb, var(--control-muted) 84%, var(--control-bg));
+  opacity: 1;
+}
+html[data-theme="atelier-nocturne"] .cold-start-workspace:not(.has-framing-thread) .stage-panel[data-stage-panel="1"] .cold-card > .card-head .setup-copy,
+html[data-theme="atelier-nocturne"] .cold-start-workspace:not(.has-framing-thread) .stage-panel[data-stage-panel="1"] .brief-context-fields .field span,
+html[data-theme="atelier-nocturne"] .cold-start-workspace:not(.has-framing-thread) .stage-panel[data-stage-panel="1"] .brief-editor-shell .autosave-status,
+html[data-theme="atelier-nocturne"] .cold-start-workspace:not(.has-framing-thread) .material-actions-label {
+  color: var(--muted);
+}
+html[data-theme="atelier-nocturne"] .cold-start-workspace:not(.has-framing-thread) .stage-panel[data-stage-panel="1"] .brief-editor-shell #cold-file-editor {
+  color: var(--composer-ink);
+}
+html[data-theme="atelier-nocturne"] .stage-panel[data-stage-panel="1"] .brief-editor-shell #cold-file-editor::placeholder {
+  color: color-mix(in srgb, var(--composer-ink) 68%, var(--composer-bg));
+  opacity: 1;
+}
+html[data-theme="atelier-nocturne"] .stage-panel[data-stage-panel="1"] .brief-attach-button::after {
+  border-color: color-mix(in srgb, var(--primary-bg) 20%, transparent);
+  background: var(--primary-bg);
+  color: var(--primary-text);
+}
 .brief-run-controls label { color: var(--muted); }
 .brief-run-controls label:hover { border-color: var(--line); background: var(--surface-soft); }
 .brief-run-controls select {
@@ -16315,6 +16357,19 @@ html[data-theme] .run-live-details .framing-progress-row.is-collapsible pre {
   padding: 8px 0 0;
 }
 
+html[data-theme] .framing-run-activity {
+  color: var(--muted);
+}
+
+html[data-theme] .framing-run-activity > summary::after {
+  color: var(--muted);
+}
+
+html[data-theme] .framing-run-activity .current-run-events {
+  border-color: var(--line);
+  background: var(--panel-bg-strong);
+}
+
 /* the inline command/status message at the top reads as a quiet note,
    not a boxed pill */
 html[data-theme] .trial-report-actions .small-button { box-shadow: none; }
@@ -17099,4 +17154,83 @@ html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
     width: 100%;
     max-width: 100%;
   }
+}
+
+/* Final framing scroll containment: the fixed composer and resume/status chrome
+   must not create a tiny outer page scroll. Keep the page locked to one
+   viewport and let the transcript own vertical scrolling. */
+html[data-theme] body.has-brief-dock {
+  padding-bottom: 0 !important;
+}
+
+html[data-theme] body.has-brief-dock .main-stage,
+html[data-theme] body.has-brief-dock .chat-frame {
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+}
+
+html[data-theme] body.has-brief-dock #chat-view,
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread,
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .stage-panel[data-stage-panel="1"],
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .stage-panel[data-stage-panel="1"] .cold-card {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  margin-inline: 0 !important;
+  overflow: hidden !important;
+}
+
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .stage-panel[data-stage-panel="1"] .cold-card {
+  display: flex !important;
+  flex-direction: column !important;
+  padding-bottom: 0 !important;
+}
+
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
+  flex: 0 0 var(--framing-thread-height, calc(100dvh - var(--brief-dock-height, 132px) - var(--brief-dock-bottom, 22px) - 160px)) !important;
+  height: var(--framing-thread-height, calc(100dvh - var(--brief-dock-height, 132px) - var(--brief-dock-bottom, 22px) - 160px)) !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 0 !important;
+  max-height: var(--framing-thread-height, calc(100dvh - var(--brief-dock-height, 132px) - var(--brief-dock-bottom, 22px) - 160px)) !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding-inline: max(12px, calc((100% - var(--framing-column-width, 860px)) / 2)) !important;
+  padding-top: 24px !important;
+  padding-bottom: 34px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scroll-padding-bottom: 34px !important;
+  scrollbar-color: transparent transparent !important;
+  scrollbar-width: thin !important;
+}
+
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread.is-scrolling {
+  scrollbar-color: color-mix(in srgb, var(--panel-ink, var(--ink)) 16%, transparent) transparent !important;
+}
+
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread::-webkit-scrollbar-thumb {
+  border: 3px solid transparent !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  background-clip: content-box !important;
+}
+
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread.is-scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--panel-ink, var(--ink)) 16%, transparent) !important;
+  background-clip: content-box !important;
 }

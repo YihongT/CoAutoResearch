@@ -318,12 +318,15 @@ async function smokeRemoteCloudflareTimeoutSummary() {
   );
   await fsp.chmod(fakeCloudflared, 0o755);
   await runRemoteCliSmoke(
-    { COAUTO_CLOUDFLARED: fakeCloudflared, npm_command: "exec", npm_lifecycle_event: "npx" },
+    { COAUTO_CLOUDFLARED: fakeCloudflared, COAUTO_REMOTE_TUNNEL_RETRY_DELAY_MS: "10", npm_command: "exec", npm_lifecycle_event: "npx" },
     {
-      waitFor: (output) => output.includes("Details: failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded"),
+      waitFor: (output) => output.includes("Cloudflare link failed:") && output.includes("Details: failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded"),
       assert: (output) => {
         if (!output.includes("Details: failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded")) {
           throw new Error(`Cloudflare timeout should include the actionable failed request line:\n${output}`);
+        }
+        if (!output.includes("Cloudflare link attempt 1/3 failed:") || !output.includes("Retrying in 10ms")) {
+          throw new Error(`Cloudflare timeout should log retry attempts:\n${output}`);
         }
         if (output.includes("Thank you for trying Cloudflare Tunnel")) {
           throw new Error(`Cloudflare timeout should not print the long informational banner:\n${output}`);
@@ -350,16 +353,20 @@ async function smokeRemoteCloudflareTimeoutSuggestsGraftcp() {
   await runRemoteCliSmoke(
     {
       COAUTO_CLOUDFLARED: fakeCloudflared,
+      COAUTO_REMOTE_TUNNEL_RETRY_DELAY_MS: "10",
       COAUTO_REMOTE_PROXY_MODE: "off",
       HTTPS_PROXY: "http://10.21.11.21:8888",
       npm_command: "exec",
       npm_lifecycle_event: "npx"
     },
     {
-      waitFor: (output) => output.includes("cloudflared may bypass proxy environment variables") && output.includes("COAUTO_REMOTE_PROXY_MODE=off"),
+      waitFor: (output) => output.includes("Cloudflare link failed:") && output.includes("cloudflared may bypass proxy environment variables") && output.includes("COAUTO_REMOTE_PROXY_MODE=off"),
       assert: (output) => {
         if (!output.includes("cloudflared may bypass proxy environment variables") || !output.includes("COAUTO_REMOTE_PROXY_MODE=off")) {
           throw new Error(`Cloudflare timeout with proxy env should explain proxy bypass and disabled helper mode:\n${output}`);
+        }
+        if (!output.includes("Cloudflare link attempt 1/3 failed:") || !output.includes("Retrying in 10ms")) {
+          throw new Error(`Cloudflare timeout with proxy env should log retry attempts:\n${output}`);
         }
       }
     }
@@ -564,12 +571,15 @@ async function smokeRemoteSshMode() {
 
 async function smokeRemoteCloudflareFallback() {
   await runRemoteCliSmoke(
-    { COAUTO_REMOTE_TUNNEL_MOCK_FAIL: "1", npm_command: "exec", npm_lifecycle_event: "npx" },
+    { COAUTO_REMOTE_TUNNEL_MOCK_FAIL: "1", COAUTO_REMOTE_TUNNEL_RETRY_DELAY_MS: "10", npm_command: "exec", npm_lifecycle_event: "npx" },
     {
       waitFor: (output) => output.includes("Cloudflare link failed:") && output.includes("COAUTO_REMOTE_MODE=ssh npx --yes co-auto-research ui --remote"),
       assert: (output) => {
         if (!output.includes("Check that cloudflared can reach Cloudflare") || !output.includes("COAUTO_REMOTE_MODE=ssh npx --yes co-auto-research ui --remote")) {
           throw new Error(`Cloudflare failure should point to troubleshooting and explicit SSH fallback:\n${output}`);
+        }
+        if (!output.includes("Cloudflare link attempt 1/3 failed:") || !output.includes("Retrying in 10ms")) {
+          throw new Error(`Cloudflare failure should log retry attempts before fallback:\n${output}`);
         }
         if (output.includes("ssh -N -L")) {
           throw new Error(`Cloudflare failure should not print SSH tunnel command by default:\n${output}`);
@@ -3558,11 +3568,11 @@ Confidence: medium
     "assert explicit_saved and pathlib.Path(explicit_saved[0]['path']).parts[0] == 'resources', explicit_saved",
     "resources = module.collect_resources()",
     "ongoing = next(group for group in resources if group['path'] == 'resources/ongoing_work')",
-    "assert any(item['path'].endswith('LLMShopper-TBS-Test/README.md') for item in ongoing['files']), ongoing",
+    "assert not any(item['path'].endswith('LLMShopper-TBS-Test/README.md') for item in ongoing['files']), ongoing",
     "tree = module.directory_tree('resources')",
     "ongoing_tree = next(child for child in tree['children'] if child['name'] == 'ongoing_work')",
     "linked_tree = next(child for child in ongoing_tree['children'] if child['name'] == 'LLMShopper-TBS-Test')",
-    "assert linked_tree.get('is_symlink') is True and any(child['name'] == 'README.md' for child in linked_tree['children']), linked_tree",
+    "assert linked_tree.get('is_symlink') is True and linked_tree['children'] == [], linked_tree",
     "workspace_tree = module.directory_tree('.', max_depth=4, exclude_names={'node_modules', '.venv', 'venv', 'dist', 'build', '.pytest_cache', '.mypy_cache', '.ruff_cache'})",
     "instructions_tree = next(child for child in workspace_tree['children'] if child['name'] == 'instructions')",
     "assert any(child['name'] == 'COLD_START.md' for child in instructions_tree['children']), instructions_tree",

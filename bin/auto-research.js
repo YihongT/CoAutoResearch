@@ -1279,6 +1279,20 @@ function remoteMode() {
   return String(process.env.COAUTO_REMOTE_MODE || "cloudflare").trim().toLowerCase();
 }
 
+function remoteTunnelRetryDelayMs(env = process.env) {
+  const value = Number(env.COAUTO_REMOTE_TUNNEL_RETRY_DELAY_MS || 5000);
+  return Number.isFinite(value) && value >= 0 ? value : 5000;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function durationLabel(ms) {
+  const value = Math.max(0, Number(ms) || 0);
+  return value % 1000 === 0 ? `${value / 1000}s` : `${value}ms`;
+}
+
 function remoteProxyMode(env = process.env) {
   return String(env.COAUTO_REMOTE_PROXY_MODE || "auto").trim().toLowerCase();
 }
@@ -1833,52 +1847,66 @@ async function printRemoteAccessHint(url, options) {
     return null;
   }
   console.log("");
-  const spinner = startSpinner("Creating Cloudflare link...");
-  try {
-    const tunnel = await startRemoteTunnel(url, options);
-    spinner.stop();
-    console.log("");
-    console.log("Open:");
-    console.log(`  ${tunnel.url}`);
-    console.log("");
-    console.log("Keep this terminal open. Press Ctrl+C to stop.");
-    return tunnel;
-  } catch (error) {
-    spinner.stop();
-    console.log("");
-    if (error.code === "cloudflared_missing") {
-      printCloudflaredInstallInstructions(options);
-    } else if (error.code === "graftcp_missing") {
-      printGraftcpInstallInstructions(options);
-    } else {
-      const failure = summarizeCloudflaredFailure(error.message);
-      console.log(`Cloudflare link failed: ${failure.summary}`);
+  const maxAttempts = 3;
+  const retryDelayMs = remoteTunnelRetryDelayMs();
+  let spinner = startSpinner("Creating Cloudflare link...");
+  let error = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1) spinner = startSpinner(`Creating Cloudflare link (attempt ${attempt}/${maxAttempts})...`);
+    try {
+      const tunnel = await startRemoteTunnel(url, options);
+      spinner.stop();
+      console.log("");
+      console.log("Open:");
+      console.log(`  ${tunnel.url}`);
+      console.log("");
+      console.log("Keep this terminal open. Press Ctrl+C to stop.");
+      return tunnel;
+    } catch (attemptError) {
+      spinner.stop();
+      error = attemptError;
+      if (attemptError.code !== "cloudflared_failed" || attempt >= maxAttempts) break;
+      const failure = summarizeCloudflaredFailure(attemptError.message);
+      console.log("");
+      console.log(`Cloudflare link attempt ${attempt}/${maxAttempts} failed: ${failure.summary}`);
       if (failure.detail) console.log(`Details: ${failure.detail}`);
-      console.log("");
-      const rawProxy = configuredRemoteProxy(options);
-      if (rawProxy && !error.viaProxy) {
-        console.log("This server has an HTTP proxy configured, but cloudflared may bypass proxy environment variables.");
-        if (process.platform === "linux" && remoteProxyMode() !== "off") {
-          console.log("Install the proxy helper, then rerun:");
-          console.log(`  ${coAutoResearchCommand()} install-graftcp`);
-          console.log(`  ${remoteUiCommand(options)}`);
-        } else if (remoteProxyMode() === "off") {
-          console.log("Proxy helper mode is disabled by COAUTO_REMOTE_PROXY_MODE=off.");
-        }
-        console.log("");
-      }
-      if (error.viaProxy && /ptrace|operation not permitted|permission denied|not permitted/i.test(error.message)) {
-        console.log("The proxy helper could not trace cloudflared on this server.");
-        console.log("");
-      }
-      console.log("Check that cloudflared can reach Cloudflare, then rerun:");
-      console.log(`  ${remoteUiCommand(options)}`);
-      console.log("");
-      console.log("Advanced SSH fallback:");
-      console.log(`  COAUTO_REMOTE_MODE=ssh ${remoteUiCommand(options)}`);
+      console.log(`Retrying in ${durationLabel(retryDelayMs)}...`);
+      await sleep(retryDelayMs);
     }
-    return null;
   }
+  console.log("");
+  if (error.code === "cloudflared_missing") {
+    printCloudflaredInstallInstructions(options);
+  } else if (error.code === "graftcp_missing") {
+    printGraftcpInstallInstructions(options);
+  } else {
+    const failure = summarizeCloudflaredFailure(error.message);
+    console.log(`Cloudflare link failed: ${failure.summary}`);
+    if (failure.detail) console.log(`Details: ${failure.detail}`);
+    console.log("");
+    const rawProxy = configuredRemoteProxy(options);
+    if (rawProxy && !error.viaProxy) {
+      console.log("This server has an HTTP proxy configured, but cloudflared may bypass proxy environment variables.");
+      if (process.platform === "linux" && remoteProxyMode() !== "off") {
+        console.log("Install the proxy helper, then rerun:");
+        console.log(`  ${coAutoResearchCommand()} install-graftcp`);
+        console.log(`  ${remoteUiCommand(options)}`);
+      } else if (remoteProxyMode() === "off") {
+        console.log("Proxy helper mode is disabled by COAUTO_REMOTE_PROXY_MODE=off.");
+      }
+      console.log("");
+    }
+    if (error.viaProxy && /ptrace|operation not permitted|permission denied|not permitted/i.test(error.message)) {
+      console.log("The proxy helper could not trace cloudflared on this server.");
+      console.log("");
+    }
+    console.log("Check that cloudflared can reach Cloudflare, then rerun:");
+    console.log(`  ${remoteUiCommand(options)}`);
+    console.log("");
+    console.log("Advanced SSH fallback:");
+    console.log(`  COAUTO_REMOTE_MODE=ssh ${remoteUiCommand(options)}`);
+  }
+  return null;
 }
 
 function openBrowser(url) {
