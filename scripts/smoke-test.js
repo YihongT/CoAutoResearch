@@ -1134,6 +1134,12 @@ try {
   await fsp.access(path.join(projectDir, "AGENTS.md"));
   await fsp.access(path.join(projectDir, "ui", "server.py"));
   await fsp.access(path.join(projectDir, ".co-auto-research", "project.json"));
+  try {
+    await fsp.access(path.join(projectDir, "ui", ".runtime", "research_session.json"));
+    throw new Error("init copied local UI runtime state into a new project");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
   const projectMetadata = JSON.parse(await fsp.readFile(path.join(projectDir, ".co-auto-research", "project.json"), "utf8"));
   if (projectMetadata.displayName !== "project" || !projectMetadata.projectId) {
     throw new Error("project metadata was not initialized correctly");
@@ -2266,28 +2272,45 @@ Confidence: medium
     appJs.includes("Waiting for Codex events") ||
     appJs.includes('"Codex updates"') ||
     appJs.includes('"Codex trial updates"') ||
-    !appJs.includes('details class="run-live-details"') ||
+    appJs.includes('details class="run-live-details"') ||
+    appJs.includes('details class="trial-detail-activity"') ||
+    appJs.includes('details class="framing-run-activity"') ||
+    !appJs.includes("let activeActivityPanelKey") ||
+    !appJs.includes("let activeActivityPanelSource") ||
+    !appJs.includes("const activityPanelSources = new Map()") ||
+    !appJs.includes("function ensureActivityPanel()") ||
+    !appJs.includes("function openActivityPanel(key)") ||
+    !appJs.includes("function closeActivityPanel()") ||
+    !appJs.includes("function activityPanelHtml(source)") ||
+    !appJs.includes("function activityTimelineHtml(entries, options = {})") ||
+    !appJs.includes("data-activity-open") ||
+    !appJs.includes("data-activity-key") ||
+    !appJs.includes("data-activity-close") ||
     appJs.includes("${framingProgressHtml()}") ||
     !stylesCss.includes(".run-live-status") ||
-    !stylesCss.includes(".run-live-details > summary") ||
-    !stylesCss.includes(".run-live-details[open] > summary::before") ||
-    !stylesCss.includes(":is(.run-live-details, .framing-progress-details)")
+    !stylesCss.includes(".activity-panel") ||
+    !stylesCss.includes(".activity-open-button") ||
+    !stylesCss.includes(".activity-timeline") ||
+    !stylesCss.includes(".activity-event-card")
   ) {
-    throw new Error("running agent progress must be scoped to the current run, collapsed by default, and labeled for the active backend");
+    throw new Error("running agent progress must be scoped to the current run, opened through the Activity panel, and labeled for the active backend");
   }
   if (
     !appJs.includes("buildFramingActivityByMessage") ||
     !appJs.includes("transcriptRunGroups") ||
     !appJs.includes("inlineRunActivityHtml") ||
+    !appJs.includes("registerActivityPanelSource(activityKey") ||
+    !appJs.includes("activityOpenButtonHtml") ||
     !appJs.includes("Worked for") ||
     !appJs.includes("htmlBeforeMessageId") ||
     !appJs.includes("entry === finalEntry") ||
     !appJs.includes("messageText === finalText") ||
     !appJs.includes("omitLocal: true") ||
     !appJs.includes("omittedEntryIds") ||
-    !stylesCss.includes(".framing-run-activity")
+    !stylesCss.includes(".framing-run-activity") ||
+    !stylesCss.includes(".framing-run-activity.activity-open-button")
   ) {
-    throw new Error("Codex activity must render as a folded Worked row before its corresponding framing response");
+    throw new Error("Codex activity must render as a lightweight Worked Activity trigger before its corresponding framing response");
   }
   if (
     appJs.includes("Codex framing activity") ||
@@ -2297,7 +2320,7 @@ Confidence: medium
     appJs.includes("currentRunActivityHtml") ||
     stylesCss.includes(".current-run-card")
   ) {
-    throw new Error("framing/chat Codex events must render as Worked rows or trial activity, not separate current-session cards");
+    throw new Error("framing/chat Codex events must render as Activity panel triggers or trial activity, not separate current-session cards");
   }
   if (
     appJs.includes("canLaunchAutoresearchFromAssistant") ||

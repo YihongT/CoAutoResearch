@@ -21,6 +21,8 @@ const themes = [
 const shots = [
   { name: "dashboard-desktop", width: 1440, height: 1000, kind: "dashboard" },
   { name: "dashboard-mobile", width: 390, height: 844, kind: "dashboard" },
+  { name: "activity-desktop", width: 1440, height: 1000, kind: "activity" },
+  { name: "activity-mobile", width: 390, height: 844, kind: "activity" },
   { name: "settings-desktop", width: 1440, height: 1000, kind: "settings" },
   { name: "panels-desktop", width: 1440, height: 1200, kind: "panels" },
   { name: "shell-desktop", width: 1440, height: 1000, kind: "shell" },
@@ -234,7 +236,7 @@ async function captureScreenshot(chrome, { width, height, url, screenshot, userD
   }
 }
 
-function baseHead(theme, title) {
+function baseHead(theme, title, bodyClass = "visual-fixture") {
   return `<!doctype html>
 <html lang="en" data-theme="${theme}">
   <head>
@@ -252,6 +254,10 @@ function baseHead(theme, title) {
       .visual-fixture .framing-message.assistant, .visual-fixture .trial-history-card, .visual-fixture .autoresearch-dock, .visual-fixture .file-viewer-shell { width: min(1040px, 100%); justify-self: center; }
       .visual-fixture .framing-message.user .transcript-body { max-width: min(760px, 82%); }
       .visual-fixture .brief-editor-shell.is-framing-dock { position: fixed; left: max(260px, 50%); bottom: 34px; transform: translateX(-50%); width: min(1040px, calc(100vw - 320px)); min-height: 148px; z-index: 20; }
+      .visual-fixture.has-activity-panel .brief-editor-shell.is-framing-dock {
+        left: calc(var(--rail-width, 224px) + (100vw - var(--rail-width, 224px) - var(--activity-panel-width, min(480px, calc(100vw - 32px)))) / 2);
+        width: min(980px, calc(100vw - var(--rail-width, 224px) - var(--activity-panel-width, min(480px, calc(100vw - 32px))) - 56px));
+      }
       .visual-fixture .autoresearch-dock { position: relative; left: auto; top: auto; bottom: auto; transform: none; max-width: 100%; }
       .visual-fixture .autoresearch-dock + .autoresearch-dock { margin-top: 18px; }
       .visual-fixture .file-viewer-shell { overflow: hidden; border-radius: 24px; }
@@ -291,7 +297,7 @@ function baseHead(theme, title) {
       }
     </style>
   </head>
-  <body class="visual-fixture">
+  <body class="${bodyClass}">
     <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
       <symbol id="brand-mark-glyph" viewBox="0 0 32 32">
         <circle cx="5.5" cy="24" r="2.7" fill="none" stroke="currentColor" stroke-width="1.9" />
@@ -493,6 +499,143 @@ function dashboardHtml(theme, label) {
         </section>
       </main>
     </div>
+  </body>
+</html>`;
+}
+
+function activityHtml(theme, label) {
+  return `${baseHead(theme, `${label} activity`, "visual-fixture has-activity-panel")}
+    <div class="app-shell">
+      ${railHtml()}
+      <main class="main-stage">
+        <section class="chat-frame">
+          <section class="framing-thread">
+            <article class="framing-message user">
+              <div class="transcript-meta">You</div>
+              <div class="transcript-body">Convert the manuscript to a PDF and verify the result.</div>
+            </article>
+            <article class="framing-message assistant">
+              <div class="transcript-meta">CoAutoResearch</div>
+              <div class="transcript-body thinking-bubble">
+                <section class="run-live-status">
+                  <div class="run-live-status-head">
+                    <div class="thinking-status-row run-live-status-title">
+                      <span class="thinking-dot"></span>
+                      <span class="thinking-dot"></span>
+                      <span class="thinking-dot"></span>
+                      <span class="working-duration">Working for 3m 27s</span>
+                    </div>
+                    <div class="run-live-status-actions"><span>6 events</span></div>
+                  </div>
+                  <div class="run-live-updates" aria-label="Codex updates">
+                    <p>Checking the exported PDF metadata and reviewing the rendered page count.</p>
+                    <p>Verifying the final manuscript preview before handing back the file.</p>
+                  </div>
+                  <div class="run-live-activity-entry">
+                    <button class="activity-open-button run-live-activity-button" type="button" data-activity-open data-activity-key="fixture">
+                      <span class="activity-open-label">Run activity</span>
+                      <span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>6 events</strong>
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </article>
+            <button class="activity-open-button framing-run-activity" type="button" data-activity-open data-activity-key="worked">
+              <span class="activity-open-label">Worked for 3m 27s</span>
+              <span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>6 events</strong>
+            </button>
+          </section>
+          ${composerHtml()}
+        </section>
+      </main>
+    </div>
+    <aside id="activity-panel" class="activity-panel" style="--activity-progress: 42%;" role="complementary" aria-label="Activity">
+      <header class="activity-panel-header">
+        <div>
+          <h2>Activity <span>&middot; 3m 27s</span></h2>
+          <p>Codex run</p>
+        </div>
+        <button class="activity-panel-close" type="button" data-activity-close aria-label="Close activity">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="activity-panel-progress" aria-hidden="true"><span></span></div>
+      <div class="activity-panel-body" tabindex="0">
+        <div class="activity-timeline" aria-label="Activity timeline">
+          <article class="activity-timeline-item assistant is-reasoning">
+            <div class="activity-timeline-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/></svg></div>
+            <div class="activity-timeline-content">
+              <header class="activity-timeline-title"><strong>Reasoning</strong><span>10:02 AM</span></header>
+              <div class="activity-readable-text is-reasoning">
+                <p>Everything looks good so far, but I should verify the PDF metadata, page count, and final rendered page before completing the turn.</p>
+              </div>
+            </div>
+          </article>
+          <article class="activity-timeline-item assistant is-update">
+            <div class="activity-timeline-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/></svg></div>
+            <div class="activity-timeline-content">
+              <header class="activity-timeline-title"><strong>Update</strong><span>10:03 AM</span></header>
+              <div class="activity-readable-text">
+                <p>Verified PDF metadata and page count. The exported file is readable and contains the expected nine pages.</p>
+              </div>
+            </div>
+          </article>
+          <article class="activity-timeline-item tool is-file-change">
+            <div class="activity-timeline-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg></div>
+            <div class="activity-timeline-content">
+              <header class="activity-timeline-title"><strong>File change</strong><span>10:04 AM</span></header>
+              <p class="activity-timeline-summary">Constructive_Reviewer_Report.pdf updated, completed</p>
+              <div class="activity-event-card">
+                <article class="transcript-message tool is-file-change">
+                  <details class="file-change-event" open>
+                    <summary><span>File</span><strong>Reviewer_Report.pdf</strong><em>update / completed</em><code>outputs/Reviewer_Report.pdf</code></summary>
+                    <div class="inline-file"><div class="tree-empty">Open to load file.</div></div>
+                  </details>
+                </article>
+              </div>
+            </div>
+          </article>
+          <article class="activity-timeline-item command is-command">
+            <div class="activity-timeline-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 9 3 3-3 3"/><path d="M13 15h3"/></svg></div>
+            <div class="activity-timeline-content">
+              <header class="activity-timeline-title"><strong>Command</strong><span>10:05 AM</span></header>
+              <p class="activity-timeline-summary">python scripts/verify_pdf.py outputs/Reviewer_Report.pdf</p>
+              <div class="activity-event-card">
+                <article class="transcript-message command is-compact">
+                  <details class="tool-event" open>
+                    <summary><span>Python</span><code>python scripts/verify_pdf.py outputs/Reviewer_Report.pdf</code></summary>
+                    <pre>PDF: outputs/Reviewer_Report.pdf
+Pages: 9
+Encrypted: False</pre>
+                  </details>
+                </article>
+              </div>
+            </div>
+          </article>
+          <article class="activity-timeline-item assistant is-done">
+            <div class="activity-timeline-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 6.8"/></svg></div>
+            <div class="activity-timeline-content">
+              <header class="activity-timeline-title"><strong>Done</strong><span>10:06 AM</span></header>
+              <div class="activity-readable-text">
+                <p>The PDF is ready. Metadata and page count match the expected manuscript output.</p>
+              </div>
+              <div class="activity-event-card">
+                <article class="transcript-message assistant is-status-card">
+                  <div class="status-card">
+                    <div class="status-card-head"><div><span>Output</span><strong>PDF verification</strong></div><em>passed</em></div>
+                    <div class="status-card-grid">
+                      <div class="status-metric"><span>Pages</span><strong>9</strong></div>
+                      <div class="status-metric"><span>Encrypted</span><strong>false</strong></div>
+                      <div class="status-metric"><span>Readable</span><strong>yes</strong></div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </aside>
   </body>
 </html>`;
 }
@@ -775,7 +918,9 @@ async function main() {
           ? panelsHtml(theme, label)
           : shot.kind === "shell"
             ? shellHtml(theme, label)
-            : dashboardHtml(theme, label);
+            : shot.kind === "activity"
+              ? activityHtml(theme, label)
+              : dashboardHtml(theme, label);
       const htmlPath = path.join(outDir, `${theme}-${shot.name}.html`);
       const pngPath = path.join(outDir, `${theme}-${shot.name}.png`);
       const userDataDir = path.join(os.tmpdir(), `co-auto-research-chrome-${process.pid}-${theme}-${shot.name}`);
@@ -798,7 +943,7 @@ async function main() {
 
   console.log(`Theme screenshots written to ${path.relative(root, outDir)}/`);
   for (const [theme] of themes) {
-    console.log(`- ${theme}: dashboard desktop/mobile, settings desktop`);
+    console.log(`- ${theme}: dashboard desktop/mobile, activity desktop/mobile, settings desktop`);
   }
 }
 

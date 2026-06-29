@@ -130,9 +130,13 @@ let chatScrollRestoredProjectId = "";
 let composerDraft = "";
 let autoresearchDockElement = null;
 let lastAutoresearchDockHtml = "";
+let activityPanelElement = null;
+let activeActivityPanelKey = "";
+let activeActivityPanelSource = null;
 let targetVenueProjectId = activeProjectId || "";
 const localMessages = [];
 const openRunActivityDetails = new Set();
+const activityPanelSources = new Map();
 let activeResourceCategory = "ongoing_work";
 const selectedResourceItems = [];
 const selectedUploadItems = [];
@@ -2667,6 +2671,8 @@ function resetProjectClientState() {
   targetVenueProjectId = activeProjectId || "";
   composerDraft = "";
   openRunActivityDetails.clear();
+  closeActivityPanel();
+  activityPanelSources.clear();
   localMessages.splice(0);
   selectedResourceItems.splice(0);
   selectedUploadItems.splice(0);
@@ -3948,6 +3954,277 @@ function rememberRunActivityDetailsState(details) {
   else openRunActivityDetails.delete(key);
 }
 
+function activityDurationFromLabel(label) {
+  return String(label || "")
+    .replace(/^(?:Working|Worked)\s+for\s+/i, "")
+    .replace(/^(?:Working|Worked)$/i, "")
+    .trim();
+}
+
+function activityEntriesDurationText(entries) {
+  const times = (entries || []).map(entryTimeValue).filter((value) => Number.isFinite(value) && value > 0);
+  if (times.length < 2) return "";
+  const start = Math.min(...times);
+  const end = Math.max(...times);
+  if (end - start < 2000) return "";
+  return formatWorkedDuration((end - start) / 1000);
+}
+
+function activitySourceDurationText(source) {
+  const explicit = activityDurationFromLabel(source?.durationText || source?.durationLabel || "");
+  if (explicit) return explicit;
+  return activityEntriesDurationText(source?.entries || []);
+}
+
+function registerActivityPanelSource(key, source = {}) {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey) return "";
+  const normalized = {
+    key: normalizedKey,
+    title: source.title || "Activity",
+    subtitle: source.subtitle || "",
+    durationText: source.durationText || source.durationLabel || "",
+    eventLabel: source.eventLabel || "",
+    entries: Array.isArray(source.entries) ? source.entries : [],
+    options: source.options || {},
+  };
+  activityPanelSources.set(normalizedKey, normalized);
+  return normalizedKey;
+}
+
+function activityOpenButtonHtml(options = {}) {
+  const key = String(options.key || "").trim();
+  if (!key) return "";
+  const label = options.label || "Activity";
+  const eventLabel = options.eventLabel || "";
+  const className = options.className || "";
+  const ariaLabel = [label, eventLabel].filter(Boolean).join(", ");
+  return `
+    <button class="activity-open-button ${escapeHtml(className)}" type="button" data-activity-open data-activity-key="${escapeHtml(key)}" aria-label="${escapeHtml(ariaLabel || "Open activity")}">
+      <span class="activity-open-label">${escapeHtml(label)}</span>
+      ${eventLabel ? `<span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>${escapeHtml(eventLabel)}</strong>` : ""}
+    </button>
+  `;
+}
+
+function ensureActivityPanel() {
+  if (activityPanelElement) return activityPanelElement;
+  const existing = document.getElementById?.("activity-panel") || $("#activity-panel");
+  if (existing) {
+    activityPanelElement = existing;
+    return existing;
+  }
+  const panel = document.createElement("aside");
+  panel.id = "activity-panel";
+  panel.className = "activity-panel";
+  panel.hidden = true;
+  panel.setAttribute("role", "complementary");
+  panel.setAttribute("aria-label", "Activity");
+  document.body.appendChild(panel);
+  activityPanelElement = panel;
+  return panel;
+}
+
+function updateActivityPanelProgress() {
+  const panel = activityPanelElement || $("#activity-panel");
+  if (!panel || panel.hidden) return;
+  const body = panel.querySelector?.(".activity-panel-body");
+  if (!body) return;
+  const total = Number(body.scrollHeight || 0);
+  const visible = Number(body.clientHeight || 0);
+  const top = Number(body.scrollTop || 0);
+  const progress = total > visible ? Math.min(1, Math.max(0.08, (top + visible) / total)) : 1;
+  panel.style?.setProperty?.("--activity-progress", `${Math.round(progress * 1000) / 10}%`);
+}
+
+function renderActivityPanel() {
+  const panel = ensureActivityPanel();
+  if (!activeActivityPanelKey || !activeActivityPanelSource) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    document.body?.classList?.remove("has-activity-panel");
+    updateActivityLayoutGeometry();
+    return;
+  }
+  const oldBody = panel.querySelector?.(".activity-panel-body");
+  const scrollTop = oldBody ? Number(oldBody.scrollTop || 0) : 0;
+  panel.innerHTML = activityPanelHtml(activeActivityPanelSource);
+  panel.hidden = false;
+  document.body?.classList?.add("has-activity-panel");
+  const body = panel.querySelector?.(".activity-panel-body");
+  if (body) {
+    body.scrollTop = scrollTop;
+    body.addEventListener("scroll", updateActivityPanelProgress, { passive: true });
+  }
+  requestAnimationFrame(updateActivityPanelProgress);
+  updateActivityLayoutGeometry();
+}
+
+function updateActivityLayoutGeometry() {
+  requestAnimationFrame(() => {
+    updateBriefDockGeometry();
+    updateFramingScrollButton();
+  });
+}
+
+function refreshActivityPanel() {
+  if (!activeActivityPanelKey) return;
+  const source = activityPanelSources.get(activeActivityPanelKey);
+  if (!source) {
+    closeActivityPanel();
+    return;
+  }
+  activeActivityPanelSource = source;
+  renderActivityPanel();
+}
+
+function openActivityPanel(key) {
+  const normalizedKey = String(key || "").trim();
+  const source = activityPanelSources.get(normalizedKey);
+  if (!source) return;
+  activeActivityPanelKey = normalizedKey;
+  activeActivityPanelSource = source;
+  renderActivityPanel();
+}
+
+function closeActivityPanel() {
+  activeActivityPanelKey = "";
+  activeActivityPanelSource = null;
+  const panel = activityPanelElement || $("#activity-panel");
+  if (panel) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+  }
+  document.body?.classList?.remove("has-activity-panel");
+  updateActivityLayoutGeometry();
+}
+
+function activityPanelHtml(source) {
+  const duration = activitySourceDurationText(source);
+  return `
+    <header class="activity-panel-header">
+      <div>
+        <h2>${escapeHtml(source?.title || "Activity")}${duration ? ` <span>&middot; ${escapeHtml(duration)}</span>` : ""}</h2>
+        ${source?.subtitle ? `<p>${escapeHtml(source.subtitle)}</p>` : ""}
+      </div>
+      <button class="activity-panel-close" type="button" data-activity-close aria-label="Close activity" title="Close activity">
+        ${activityCloseIconSvg()}
+      </button>
+    </header>
+    <div class="activity-panel-progress" aria-hidden="true"><span></span></div>
+    <div class="activity-panel-body" tabindex="0">
+      ${activityTimelineHtml(source?.entries || [], source?.options || {})}
+    </div>
+  `;
+}
+
+function visibleActivityEntries(entries, options = {}) {
+  const includeUser = Boolean(options.includeUser);
+  return (entries || []).filter((entry) => {
+    const role = transcriptRole(entry);
+    const rawType = String(entry?.raw_type || "").toLowerCase();
+    const content = String(entry?.content || "").trim();
+    if (!content) return false;
+    if (!includeUser && role === "user") return false;
+    if (isNoisyAgentLifecycleEntry(entry)) return false;
+    if (rawType.startsWith("session.")) return false;
+    if (rawType.startsWith("turn.") && !["assistant", "final"].includes(role)) return false;
+    return true;
+  });
+}
+
+function activityTimelineHtml(entries, options = {}) {
+  const visibleEntries = visibleActivityEntries(entries, options);
+  if (!visibleEntries.length) {
+    return `<div class="activity-panel-empty">${agentWaitStateHtml() || escapeHtml(options.emptyText || "Waiting for agent events...")}</div>`;
+  }
+  return `
+    <div class="activity-timeline" aria-label="${escapeHtml(options.label || "Activity timeline")}">
+      ${visibleEntries.map((entry, index) => activityTimelineItemHtml(entry, index)).join("")}
+    </div>
+  `;
+}
+
+function activityEntryTimeLabel(entry) {
+  const value = entryTimeValue(entry);
+  if (!value) return "";
+  try {
+    return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function activityTimelineItemHtml(entry, index) {
+  const title = framingProgressTitle(entry);
+  const role = transcriptRole(entry);
+  const content = framingProgressContent(entry);
+  const time = activityEntryTimeLabel(entry);
+  const showSummary = activityTimelineHasRichDetail(entry, role);
+  return `
+    <article class="activity-timeline-item ${escapeHtml(role)} is-${escapeHtml(title.toLowerCase().replace(/[^a-z0-9]+/g, "-"))}" data-activity-index="${escapeHtml(index)}">
+      <div class="activity-timeline-icon" aria-hidden="true">${activityTimelineIconSvg(title, role)}</div>
+      <div class="activity-timeline-content">
+        <header class="activity-timeline-title">
+          <strong>${escapeHtml(title)}</strong>
+          ${time ? `<span>${escapeHtml(time)}</span>` : ""}
+        </header>
+        ${showSummary && content ? `<p class="activity-timeline-summary">${escapeHtml(content)}</p>` : ""}
+        ${activityTimelineDetailHtml(entry, title, role)}
+      </div>
+    </article>
+  `;
+}
+
+function activityTimelineHasRichDetail(entry, role) {
+  const content = String(entry?.content || "").trim();
+  return Boolean(
+    content && (
+      isUiCommandResult(entry) ||
+      webSearchActivityInfo(entry) ||
+      parseFileChangeInfo(content) ||
+      role === "tool" ||
+      role === "command"
+    )
+  );
+}
+
+function activityTimelineDetailHtml(entry, title, role) {
+  const content = String(entry?.content || "").trim();
+  if (!content) return "";
+  if (activityTimelineHasRichDetail(entry, role)) {
+    return `<div class="activity-event-card">${transcriptEntryHtml(entry)}</div>`;
+  }
+  const markdown = role === "assistant" || role === "final";
+  const copy = messageCopyButton(content, title === "Reasoning" ? "Copy reasoning summary" : "Copy activity item");
+  return `
+    <div class="activity-readable-text ${title === "Reasoning" ? "is-reasoning" : ""}">
+      ${transcriptContentHtml(content, { markdown })}
+      ${copy ? `<div class="activity-readable-actions">${copy}</div>` : ""}
+    </div>
+  `;
+}
+
+function activityTimelineIconSvg(title, role) {
+  if (title === "Command" || role === "command") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m8 9 3 3-3 3"/><path d="M13 15h3"/></svg>';
+  }
+  if (title === "Tool" || title === "Web search") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14.7 6.3 3 3"/><path d="M8 16l8.5-8.5a2.1 2.1 0 0 1 3 3L11 19H7v-4Z"/></svg>';
+  }
+  if (title === "File change") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>';
+  }
+  if (title === "Done") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.2 4.2L19 6.8"/></svg>';
+  }
+  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/></svg>';
+}
+
+function activityCloseIconSvg() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+}
+
 function canPauseActiveRunAfterCurrentTurn() {
   return isAutoresearchActiveRun();
 }
@@ -5227,14 +5504,30 @@ function currentRunActivityDetailsHtml(entries = currentProgressEntries()) {
   const count = entries.length;
   const activityKey = activeRunActivityDetailsKey();
   const eventLabel = currentRunActivityEventLabel(count);
+  const session = sessionState();
+  const run = activeRun();
+  const started = currentRunStartedAtString(run.started_at || session.started_at || "");
+  const durationText = isRunVisiblyPending() ? workingDurationText(started, { serverClock: Boolean(started) }) : activityEntriesDurationText(entries);
+  registerActivityPanelSource(activityKey, {
+    title: "Activity",
+    subtitle: `${agentLabel(sessionBackend())} run`,
+    durationText,
+    eventLabel,
+    entries,
+    options: {
+      emptyText: `Waiting for ${agentLabel(sessionBackend())} events...`,
+      label: "Run activity timeline",
+    },
+  });
   return `
-    <details class="run-live-details" data-run-activity-details="${escapeHtml(activityKey)}"${runActivityOpenAttribute(activityKey)}>
-      <summary>
-        <span>Run activity</span>
-        <strong>${escapeHtml(eventLabel)}</strong>
-      </summary>
-      ${framingProgressRowsHtml(entries)}
-    </details>
+    <div class="run-live-activity-entry">
+      ${activityOpenButtonHtml({
+        key: activityKey,
+        label: "Run activity",
+        eventLabel,
+        className: "run-live-activity-button",
+      })}
+    </div>
   `;
 }
 
@@ -5333,6 +5626,7 @@ function projectDraftCardHtml(message) {
 function renderFramingConversation() {
   const thread = $("#framing-thread");
   if (!thread) return;
+  activityPanelSources.clear();
   reconcileFramingPending(localMessages);
   const wasNearBottom = isPageNearBottom();
   const visibleMessages = visibleFramingMessagesForRender(localMessages);
@@ -5390,6 +5684,7 @@ function renderFramingConversation() {
   renderAutoresearchDock(autoresearchDockHtml, activeView === "chat" && hasThreadContent);
   renderComposerSuggestions();
   updateFramingScrollButton();
+  refreshActivityPanel();
 }
 
 function ensureAutoresearchDock() {
@@ -7310,6 +7605,32 @@ function cleanTrialReportSummaryText(value) {
   return text;
 }
 
+function trialActivityPanelEntryHtml(key, label, iteration, activity, options = {}) {
+  if (!activity.length) return "";
+  const eventLabel = options.eventLabel || currentRunActivityEventLabel(activity.length);
+  registerActivityPanelSource(key, {
+    title: "Activity",
+    subtitle: `Trial ${iteration}${options.running ? `, ${agentLabel(sessionBackend())} running` : ""}`,
+    durationText: options.durationText || activityEntriesDurationText(activity),
+    eventLabel,
+    entries: activity,
+    options: {
+      label: `Trial ${iteration} activity timeline`,
+      emptyText: "No activity for this trial yet.",
+    },
+  });
+  return `
+    <div class="trial-detail-activity is-panel-entry">
+      ${activityOpenButtonHtml({
+        key,
+        label,
+        eventLabel,
+        className: "trial-detail-activity-button",
+      })}
+    </div>
+  `;
+}
+
 function comparableTrialReportText(value) {
   return normalizedTranscriptText(value)
     .toLowerCase()
@@ -7358,15 +7679,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
       </div>
       ${(() => {
         const activity = trialActivityEntries(entries);
-        return activity.length
-          ? `<details class="trial-detail-activity" data-run-activity-details="trial-report-${escapeHtml(iteration)}"${runActivityOpenAttribute(`trial-report-${iteration}`)}>
-              <summary>
-                <span>Trial activity</span>
-                <strong>${escapeHtml(activity.length)} event${activity.length === 1 ? "" : "s"}</strong>
-              </summary>
-              <div class="trial-detail-events">${transcriptEntriesHtml(activity)}</div>
-            </details>`
-          : "";
+        return trialActivityPanelEntryHtml(`trial-report-${iteration}`, "Trial activity", iteration, activity);
       })()}
     </article>
   `;
@@ -7430,13 +7743,11 @@ function runningTrialStatusHtml(trial) {
       </div>
       ${
         activity.length
-          ? `<details class="trial-detail-activity" data-run-activity-details="trial-live-${escapeHtml(iteration)}"${runActivityOpenAttribute(`trial-live-${iteration}`)}>
-              <summary>
-                <span>Live trial activity</span>
-                <strong>${escapeHtml(eventLabel)}</strong>
-              </summary>
-              <div class="trial-detail-events">${transcriptEntriesHtml(activity)}</div>
-            </details>`
+          ? trialActivityPanelEntryHtml(`trial-live-${iteration}`, "Live trial activity", iteration, activity, {
+              eventLabel,
+              running: true,
+              durationText: workingDurationText(currentRunStartedAtString(activeRun().started_at || sessionState().started_at || ""), { serverClock: true }),
+            })
           : ""
       }
     </article>
@@ -7849,20 +8160,30 @@ function workedDurationLabel(userEntry, entries) {
 function inlineRunActivityHtml(userEntry, entries) {
   if (!entries.length) return "";
   const label = workedDurationLabel(userEntry, entries);
+  const eventLabel = currentRunActivityEventLabel(entries.length);
   const activityKey = [
     "inline",
     activeProjectId || appState?.active_project_id || "",
     String(userEntry?.id || entryTimeValue(userEntry) || ""),
   ].join(":");
+  registerActivityPanelSource(activityKey, {
+    title: "Activity",
+    subtitle: `${agentLabel(sessionBackend())} worked activity`,
+    durationText: label,
+    eventLabel,
+    entries,
+    options: {
+      label: "Worked activity timeline",
+      emptyText: "No activity was recorded for this turn.",
+    },
+  });
   return `
-    <details class="framing-run-activity" data-run-activity-details="${escapeHtml(activityKey)}"${runActivityOpenAttribute(activityKey)}>
-      <summary aria-label="${escapeHtml(`${label}, ${entries.length} event${entries.length === 1 ? "" : "s"}`)}">
-        <span>${escapeHtml(label)}</span>
-      </summary>
-      <div class="current-run-events">
-        ${transcriptEntriesHtml(entries)}
-      </div>
-    </details>
+    ${activityOpenButtonHtml({
+      key: activityKey,
+      label,
+      eventLabel,
+      className: "framing-run-activity",
+    })}
   `;
 }
 
@@ -13897,8 +14218,10 @@ function bindEvents() {
     if (event.key === "Escape") {
       setAttachmentMenuOpen(false);
       closeUploadSourcePicker();
+      closeActivityPanel();
     }
   });
+  window.addEventListener("resize", updateActivityPanelProgress, { passive: true });
   $("#composer-file-input")?.addEventListener("change", (event) => {
     const category = resourceCategories[event.target.dataset.resourceCategory] ? event.target.dataset.resourceCategory : "user_input";
     const editMessageId = String(event.target.dataset.editMessageId || "");
@@ -13973,6 +14296,18 @@ function bindEvents() {
   });
 
   document.body.addEventListener("click", (event) => {
+    const activityClose = event.target.closest("[data-activity-close]");
+    if (activityClose) {
+      event.preventDefault();
+      closeActivityPanel();
+      return;
+    }
+    const activityOpen = event.target.closest("[data-activity-open]");
+    if (activityOpen) {
+      event.preventDefault();
+      openActivityPanel(activityOpen.dataset.activityKey || "");
+      return;
+    }
     const projectMenuButton = event.target.closest("[data-project-menu]");
     if (projectMenuButton) {
       const projectId = projectMenuButton.dataset.projectMenu;

@@ -1003,6 +1003,10 @@ async function commandInit(args) {
   await fsp.cp(TEMPLATE_ROOT, target, {
     recursive: true,
     errorOnExist: false,
+    filter: (source) => {
+      const relative = path.relative(TEMPLATE_ROOT, source).split(path.sep).join("/");
+      return relative !== "ui/.runtime" && !relative.startsWith("ui/.runtime/");
+    },
     force: false,
     preserveTimestamps: true
   });

@@ -74,6 +74,52 @@ const baseScenarios = [
     requireAttachmentMenu: true,
   },
   {
+    name: "activity-panel",
+    path: "/?view=chat",
+    kind: "activity",
+    requireActivityPanel: true,
+    action: `
+      const now = Date.now();
+      const iso = (offset) => new Date(now + offset).toISOString();
+      appState.research_session = {
+        id: 'audit-activity',
+        session_id: 'audit-activity-session',
+        status: 'running',
+        mode: 'chat',
+        backend: 'codex',
+        started_at: iso(-207000),
+        active_run: {
+          running: true,
+          mode: 'chat',
+          run_id: 'audit-activity',
+          started_at: iso(-207000),
+          trial_iteration: null,
+          trial_label: '',
+          status_label: 'Codex is working'
+        },
+        transcript: [
+          { id: 'u1', role: 'user', kind: 'user', raw_type: 'ui.chat', content: 'Export the manuscript PDF and verify the result.', created_at: iso(-207000) },
+          { id: 'r1', role: 'assistant', kind: 'reasoning', raw_type: 'reasoning.summary', content: 'I need to verify the PDF metadata, page count, and rendered output before completing the response.', created_at: iso(-190000) },
+          { id: 'a1', role: 'assistant', kind: 'assistant', raw_type: 'item.completed', content: 'Checking the exported PDF metadata and page count.', created_at: iso(-170000) },
+          { id: 'a2', role: 'assistant', kind: 'assistant', raw_type: 'item.completed', content: 'Reviewing the final page preview for obvious layout issues.', created_at: iso(-150000) },
+          { id: 'c1', role: 'command', kind: 'command', raw_type: 'process.started', content: 'python scripts/verify_pdf.py outputs/Reviewer_Report.pdf', created_at: iso(-130000) },
+          { id: 'a3', role: 'assistant', kind: 'assistant', raw_type: 'item.completed', content: 'The PDF has nine pages and is not encrypted.', created_at: iso(-110000) },
+          { id: 'c2', role: 'command', kind: 'command', raw_type: 'process.started', content: 'python scripts/render_pdf_preview.py outputs/Reviewer_Report.pdf --page 9', created_at: iso(-90000) },
+          { id: 'a4', role: 'assistant', kind: 'assistant', raw_type: 'item.completed', content: 'The final page preview is readable and framed correctly.', created_at: iso(-70000) },
+          { id: 'a5', role: 'assistant', kind: 'assistant', raw_type: 'item.completed', content: 'Preparing a concise handoff with the verified file path.', created_at: iso(-50000) }
+        ]
+      };
+      localMessages.splice(0);
+      framingReplyPending = true;
+      framingPendingSince = now - 207000;
+      pendingFramingUserMessageId = 'u1';
+      renderFramingConversation();
+      const activityButton = document.querySelector('[data-activity-open]');
+      if (!activityButton) throw new Error('Activity button missing');
+      activityButton.click();
+    `,
+  },
+  {
     name: "resource-browser",
     path: "/?view=resources",
     kind: "dialog",
@@ -868,7 +914,7 @@ async function evaluate(client, sessionId, expression, options = {}) {
   return result.result?.value;
 }
 
-function browserAuditExpression({ desktop, requireManuscriptCentering, requireAttachmentMenu, emptyMode }) {
+function browserAuditExpression({ desktop, requireManuscriptCentering, requireAttachmentMenu, requireActivityPanel, emptyMode }) {
   return `(() => {
     const issues = [];
     const viewport = { width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth };
@@ -898,8 +944,14 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
     }
     const rail = rectFor(document.querySelector('.rail'));
     const main = rectFor(document.querySelector('.main-stage'));
+    const activityPanel = document.querySelector('#activity-panel.activity-panel');
+    const activityPanelRect = rectFor(activityPanel);
+    const activityPanelVisible = Boolean(activityPanel && visible(activityPanel) && !activityPanel.hidden);
+    const workspaceRight = (${requireActivityPanel ? "true" : "false"} && activityPanelVisible && ${desktop ? "true" : "false"})
+      ? activityPanelRect.left
+      : viewport.width;
     if (${desktop ? "true" : "false"} && rail && main) {
-      if (Math.abs(main.left - rail.right) > 1 || Math.abs(main.width - (viewport.width - rail.right)) > 1) {
+      if (Math.abs(main.left - rail.right) > 1 || Math.abs(main.width - (workspaceRight - rail.right)) > 1) {
         issues.push({ type: 'main-stage-geometry', message: 'main stage is not aligned to the fixed rail workspace', rail, main, viewport });
       }
     }
@@ -933,7 +985,6 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
     const centerCheckSelectors = [
       ['material-header', '.material-view.is-active .material-header'],
       ['context-content', '.material-view.is-active .context-content'],
-      ['manuscript-export', '.material-view.is-active .manuscript-export-bar'],
       ['context-card', '.material-view.is-active .context-content > .context-card'],
     ];
     if (${desktop ? "true" : "false"} && (${requireManuscriptCentering ? "true" : "false"} || document.querySelector('.material-view.is-active'))) {
@@ -961,6 +1012,69 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
         }
         if (!inViewport(menuRect)) {
           issues.push({ type: 'attachment-menu-viewport', message: 'attachment menu opens outside the viewport', rect: menuRect, viewport });
+        }
+      }
+    }
+    if (${requireActivityPanel ? "true" : "false"}) {
+      const panel = activityPanel;
+      const panelBody = panel?.querySelector?.('.activity-panel-body');
+      const close = panel?.querySelector?.('[data-activity-close]');
+      const panelRect = activityPanelRect;
+      const bodyRect = rectFor(panelBody);
+      const closeRect = rectFor(close);
+      if (!visible(panel) || panel.hidden) {
+        issues.push({ type: 'activity-panel-hidden', message: 'Activity panel did not open', rect: panelRect });
+      } else {
+        if (panelRect.left < -2 || panelRect.right > viewport.width + 2 || panelRect.top < -2 || panelRect.bottom > viewport.height + 2) {
+          issues.push({ type: 'activity-panel-bounds', message: 'Activity panel is outside the viewport', rect: panelRect, viewport });
+        }
+        if (!visible(close) || !inViewport(closeRect)) {
+          issues.push({ type: 'activity-panel-close', message: 'Activity panel close button is not visible in the viewport', rect: closeRect, panel: panelRect });
+        }
+        if (!panelBody || !['auto', 'scroll'].includes(getComputedStyle(panelBody).overflowY)) {
+          issues.push({ type: 'activity-panel-scroll', message: 'Activity panel body should own vertical scrolling', body: bodyRect });
+        }
+        if (panelBody && panelBody.scrollWidth > panelBody.clientWidth + 1) {
+          issues.push({ type: 'activity-panel-horizontal-overflow', message: 'Activity panel body has horizontal overflow', body: { scrollWidth: panelBody.scrollWidth, clientWidth: panelBody.clientWidth }, rect: bodyRect });
+        }
+        if (!document.querySelector('.activity-timeline-item') || !document.querySelector('.activity-event-card')) {
+          issues.push({ type: 'activity-panel-content', message: 'Activity panel is missing timeline or event card content' });
+        }
+        const timeline = panel.querySelector('.activity-timeline');
+        const icon = panel.querySelector('.activity-timeline-icon');
+        if (timeline && icon) {
+          const timelineRect = rectFor(timeline);
+          const iconRect = rectFor(icon);
+          const axisLeft = Number.parseFloat(getComputedStyle(timeline, '::before').left || '0');
+          const axisCenter = timelineRect.left + axisLeft + 0.5;
+          const iconCenter = (iconRect.left + iconRect.right) / 2;
+          if (Math.abs(iconCenter - axisCenter) > 1) {
+            issues.push({ type: 'activity-axis-alignment', message: 'Activity timeline icon center is not aligned with the vertical axis', axisCenter, iconCenter, icon: iconRect, timeline: timelineRect });
+          }
+        }
+        const content = panel.querySelector('.activity-timeline-content');
+        if (content) {
+          const contentRect = rectFor(content);
+          const leftInset = contentRect.left - panelRect.left;
+          const rightInset = panelRect.right - contentRect.right;
+          if (leftInset - rightInset > 42) {
+            issues.push({ type: 'activity-content-balance', message: 'Activity timeline content has too much left gutter compared with the right margin', leftInset, rightInset, content: contentRect, panel: panelRect });
+          }
+        }
+        if (${desktop ? "true" : "false"} && viewport.width >= 1100) {
+          const mainRect = rectFor(document.querySelector('.main-stage'));
+          const composerDock = document.querySelector('.brief-editor-shell.is-framing-dock');
+          const composerRect = rectFor(composerDock);
+          if (mainRect && panelRect && mainRect.right > panelRect.left + 2) {
+            issues.push({ type: 'activity-panel-overlap', message: 'Activity panel should occupy a separate right column instead of covering the main stage', main: mainRect, panel: panelRect });
+          }
+          if (visible(composerDock) && mainRect && composerRect) {
+            const composerCenter = (composerRect.left + composerRect.right) / 2;
+            const mainCenter = (mainRect.left + mainRect.right) / 2;
+            if (Math.abs(composerCenter - mainCenter) > 3) {
+              issues.push({ type: 'activity-composer-centering', message: 'Composer should stay centered in the middle column while Activity is open', composer: composerRect, main: mainRect, offset: composerCenter - mainCenter });
+            }
+          }
         }
       }
     }
@@ -1087,6 +1201,7 @@ async function runScenario({ client, server, mode, scenario, theme, viewport, ch
         desktop: viewport.width > 820,
         requireManuscriptCentering: Boolean(scenario.requireManuscriptCentering),
         requireAttachmentMenu: Boolean(scenario.requireAttachmentMenu),
+        requireActivityPanel: Boolean(scenario.requireActivityPanel),
         emptyMode: mode === "empty",
       })
     );

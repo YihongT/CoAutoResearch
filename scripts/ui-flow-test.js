@@ -1088,15 +1088,33 @@ function loadAppContext() {
     globalThis.__latestUnansweredText = () => latestUnansweredUserMessage(localMessages)?.text || "";
     globalThis.__restore = () => restoreFramingMessages();
     globalThis.__activityProbe = () => {
+      activityPanelSources.clear();
       const entries = sessionTranscriptEntries();
       const activity = buildFramingActivityByMessage(localMessages, entries);
       const assistant = localMessages.find((message) => message.role === "assistant" && message.kind !== "project");
       const html = assistant ? (activity.htmlBeforeMessageId.get(assistant.id) || "") : "";
+      const source = [...activityPanelSources.values()].find((item) => String(item.subtitle || "").includes("worked activity")) || null;
+      const panelHtml = source ? activityPanelHtml(source) : "";
       return {
         hasWorked: html.includes("Worked for"),
+        hasActivityOpen: html.includes("data-activity-open"),
+        hasInlineDetails: html.includes("<details"),
         hasPartial: html.includes("partial status"),
         hasFinal: html.includes("Final **answer**"),
+        panelHasPartial: panelHtml.includes("partial status"),
+        panelHasFinal: panelHtml.includes("Final **answer**"),
+        sourceKeys: [...activityPanelSources.keys()],
         omittedCount: activity.omittedEntryIds.size,
+      };
+    };
+    globalThis.__activityPanelProbe = (key = "") => {
+      const sourceKey = key || [...activityPanelSources.keys()][0] || "";
+      if (sourceKey) openActivityPanel(sourceKey);
+      return {
+        key: activeActivityPanelKey,
+        hidden: Boolean(activityPanelElement?.hidden),
+        bodyClass: document.body.classList.toString(),
+        html: activityPanelElement?.innerHTML || "",
       };
     };
     globalThis.__messageHtml = (index = 0) => framingMessageHtml(localMessages[index]);
@@ -2423,9 +2441,12 @@ function testTranscriptRecoveryUsesOnlyFinalAssistant() {
     "assistant:Final **answer**",
   ]);
   const activity = app.run("__activityProbe()");
-  assert.equal(activity.hasWorked, true, "activity should fold before the final assistant response");
-  assert.equal(activity.hasPartial, true, "intermediate status should live inside folded activity");
-  assert.equal(activity.hasFinal, false, "final answer should not be hidden inside folded activity");
+  assert.equal(activity.hasWorked, true, "activity entry should render before the final assistant response");
+  assert.equal(activity.hasActivityOpen, true, "worked activity should open the Activity panel");
+  assert.equal(activity.hasInlineDetails, false, "worked activity should no longer expand inline");
+  assert.equal(activity.hasPartial, false, "intermediate status should move out of the main thread");
+  assert.equal(activity.panelHasPartial, true, "intermediate status should live inside the Activity panel");
+  assert.equal(activity.panelHasFinal, false, "final answer should not be hidden inside worked activity");
 }
 
 function testClaudeResultSuccessRecoversAssistantReply() {
@@ -2448,6 +2469,34 @@ function testClaudeResultSuccessRecoversAssistantReply() {
   assert.equal(app.run("__latestUnansweredText()"), "", "Claude result.success should count as a saved assistant response");
   const html = app.run("__framingThreadHtmlProbe()");
   assert.equal(html.includes("The run completed without a saved response."), false, "Claude result.success must not render the no-response error state");
+}
+
+function testClaudeWorkedActivityUsesActivityPanel() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([]);
+    __setServerMessages([]);
+    __setSession({ id: "s1", session_id: "claude-sid", status: "completed", mode: "chat", backend: "claude", started_at: "2026-06-17T10:00:00.000Z", transcript: [] });
+    __setTranscript([
+      { id: "tu1", role: "user", kind: "user", raw_type: "ui.chat", content: "Summarize", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "th1", role: "assistant", kind: "reasoning", raw_type: "thinking", content: "Reading the manuscript context and deciding what to summarize.", created_at: "2026-06-17T10:00:01.000Z" },
+      { id: "ta1", role: "assistant", kind: "assistant", raw_type: "assistant", content: "Drafting a concise summary.", created_at: "2026-06-17T10:00:02.000Z" },
+      { id: "tf1", role: "final", kind: "final", raw_type: "result.success", content: "Here is the summary.", created_at: "2026-06-17T10:00:03.000Z" }
+    ]);
+    __restore();
+  `);
+  assertJsonEqual(app.context.__messages().filter((message) => message.kind !== "project").map((message) => `${message.role}:${message.text}`), [
+    "user:Summarize",
+    "assistant:Here is the summary.",
+  ]);
+  const activity = app.run("__activityProbe()");
+  assert.equal(activity.hasActivityOpen, true, "Claude worked activity should open the Activity panel");
+  assert.equal(activity.hasInlineDetails, false, "Claude worked activity should not expand inline");
+  assert.equal(activity.panelHasPartial, false, "Claude fixture should not depend on the Codex partial status text");
+  const panel = app.run(`__activityPanelProbe(${JSON.stringify(activity.sourceKeys[0])})`);
+  assert.equal(panel.html.includes("Reading the manuscript context"), true, "Claude thinking should render inside Activity panel");
+  assert.equal(panel.html.includes("Drafting a concise summary."), true, "Claude assistant update should render inside Activity panel");
+  assert.equal(panel.html.includes("Here is the summary."), false, "Claude final answer should stay in the main conversation");
 }
 
 async function testResearchEventStreamUpsertsTranscriptAndCompletes() {
@@ -3952,7 +4001,10 @@ function testRunningTrialIgnoresPreviousRunUpdate() {
   assert.equal(html.includes("Update:"), false, "running trial should not show an Update line before the current run has a readable update");
   assert.equal(html.includes("Command: codex exec resume"), false, "running trial should not expose raw commands as the main summary");
   assert.equal(html.includes("Trial 18 has started, but its trial directory is not visible yet."), true, "running trial should still show current progress detail");
-  assert.equal(html.includes("codex exec resume"), true, "folded live activity should keep current raw command details");
+  assert.equal(html.includes("codex exec resume"), false, "running trial should not inline raw command details");
+  const panel = app.run("__activityPanelProbe()");
+  assert.equal(panel.hidden, false, "live activity should open in the Activity panel");
+  assert.equal(panel.html.includes("codex exec resume"), true, "Activity panel should keep current raw command details");
 }
 
 function testPassedGoalDoesNotShowStaleRunningTrial() {
@@ -4221,20 +4273,20 @@ function testChatRunThinkingUsesLiveStatus() {
   assert.equal(html.includes("Synthesizing"), false, "ordinary chat thinking should not render trial progress stages");
   assert.equal(html.includes("Gate update"), false, "ordinary chat thinking should not render trial progress stages");
   assert.equal(app.run("__progressSummaryProbe()"), "Update: Comparing the manuscript title against the current story logic.", "chat run summary should prefer readable updates over later commands");
-  const expandedHtml = app.run(`
-    openRunActivityDetails.add(activeRunActivityDetailsKey());
-    __progressDetailsProbe();
-  `);
-  assert.match(expandedHtml, /data-run-activity-details="[^"]+" open/, "run activity should stay expanded across re-render");
-  assert.equal(expandedHtml.includes("git diff -- PROJECT.md"), true, "folded run activity should still include raw command details");
-  assert.equal(expandedHtml.includes("thread/settings/updated"), false, "folded run activity should hide Codex thread settings lifecycle events");
-  assert.equal(expandedHtml.includes("thread/status/changed"), false, "folded run activity should hide Codex thread status lifecycle events");
-  assert.equal(expandedHtml.includes("mcpServer/startupStatus/updated"), false, "folded run activity should hide Codex MCP startup lifecycle events");
-  assert.equal(expandedHtml.includes("remoteControl/status/changed"), false, "folded run activity should hide Codex remote-control lifecycle events");
-  assert.equal(expandedHtml.includes("/.codex/sessions/"), false, "folded run activity should hide Codex thread ACK payloads");
-  assert.equal(expandedHtml.includes("notLoaded inProgress"), false, "folded run activity should hide Codex turn ACK payloads");
-  assert.equal(expandedHtml.includes("Plan only. Do not implement"), false, "folded run activity should hide Codex hidden prompt lifecycle items");
-  assert.equal(expandedHtml.includes("turn/completed"), false, "folded run activity should hide Codex turn completion lifecycle events");
+  const activityButtonHtml = app.run("__progressDetailsProbe()");
+  assert.equal(activityButtonHtml.includes("data-activity-open"), true, "run activity should render an Activity panel trigger");
+  assert.equal(activityButtonHtml.includes("git diff -- PROJECT.md"), false, "run activity trigger should not inline raw command details");
+  const panel = app.run("__activityPanelProbe(activeRunActivityDetailsKey())");
+  assert.equal(panel.hidden, false, "run activity panel should stay open across re-render");
+  assert.equal(panel.html.includes("git diff -- PROJECT.md"), true, "Activity panel should still include raw command details");
+  assert.equal(panel.html.includes("thread/settings/updated"), false, "Activity panel should hide Codex thread settings lifecycle events");
+  assert.equal(panel.html.includes("thread/status/changed"), false, "Activity panel should hide Codex thread status lifecycle events");
+  assert.equal(panel.html.includes("mcpServer/startupStatus/updated"), false, "Activity panel should hide Codex MCP startup lifecycle events");
+  assert.equal(panel.html.includes("remoteControl/status/changed"), false, "Activity panel should hide Codex remote-control lifecycle events");
+  assert.equal(panel.html.includes("/.codex/sessions/"), false, "Activity panel should hide Codex thread ACK payloads");
+  assert.equal(panel.html.includes("notLoaded inProgress"), false, "Activity panel should hide Codex turn ACK payloads");
+  assert.equal(panel.html.includes("Plan only. Do not implement"), false, "Activity panel should hide Codex hidden prompt lifecycle items");
+  assert.equal(panel.html.includes("turn/completed"), false, "Activity panel should hide Codex turn completion lifecycle events");
 }
 
 function testChatRunCommandOnlyKeepsRawCommandFolded() {
@@ -4267,8 +4319,10 @@ function testChatRunCommandOnlyKeepsRawCommandFolded() {
   assert.equal(summary.includes("codex exec resume"), false, "command-only chat runs should not expose raw commands as the main summary");
   assert.match(summary, /Waiting|No agent events|Last event|Rate limit/i, "command-only chat runs should show a user-readable waiting summary");
   assert.equal(html.includes("Preparing response..."), true, "command-only chat runs should show a quiet pending placeholder until the first process update arrives");
-  assert.equal(html.includes("Run activity"), true, "command-only chat runs should still expose folded activity details");
-  assert.equal(html.includes("codex exec resume"), true, "folded activity details should retain raw command content for debugging");
+  assert.equal(html.includes("Run activity"), true, "command-only chat runs should still expose Activity details");
+  assert.equal(html.includes("codex exec resume"), false, "command-only chat runs should not inline raw command content");
+  const panel = app.run("__activityPanelProbe(activeRunActivityDetailsKey())");
+  assert.equal(panel.html.includes("codex exec resume"), true, "Activity panel should retain raw command content for debugging");
   assert.equal(html.includes("Current run activity"), false, "command-only chat runs should not use the legacy activity label");
 }
 
@@ -7220,6 +7274,7 @@ await testTypedLegacyGoalControlsStayOnCommandEndpoint();
 testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 testClaudeResultSuccessRecoversAssistantReply();
+testClaudeWorkedActivityUsesActivityPanel();
 await testResearchEventStreamUpsertsTranscriptAndCompletes();
 testResearchEventStreamSyncsPlanArtifact();
 testResearchEventStreamProjectSwitchAndErrorFallback();
