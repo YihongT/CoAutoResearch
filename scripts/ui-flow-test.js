@@ -2924,6 +2924,13 @@ function testMarkdownImagesResolveRelativeToSourceFile() {
   assert.equal(html.includes('class="markdown-image-preview"'), true, "markdown images should render as image previews");
   assert.equal(html.includes('src="/api/file/raw?path=manuscript%2Ffigures%2Fgenerated%2Fcalibration.png'), true, "relative blueprint images should resolve under manuscript/");
   assert.equal(html.includes('data-inline-fullscreen="figures/generated/calibration.png"'), false, "markdown image syntax should not degrade into a file button");
+
+  const checkpointHtml = app.run('markdownToHtml("![Figure F000001](figures/generated/calibration.png)", { basePath: "research_trajectory/checkpoints/000021_source_integration/manuscript/BLUEPRINT.md" })');
+  assert.equal(
+    checkpointHtml.includes('src="/api/file/raw?path=research_trajectory%2Fcheckpoints%2F000021_source_integration%2Fmanuscript%2Ffigures%2Fgenerated%2Fcalibration.png'),
+    true,
+    "checkpoint manuscript images should resolve to the checkpoint snapshot, not the latest manuscript"
+  );
 }
 
 function testMessagesExposeCopyButtons() {
