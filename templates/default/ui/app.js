@@ -6491,7 +6491,7 @@ function renderChatState() {
   textarea.placeholder = canQueue
     ? "Queue a follow-up for when the agent finishes..."
     : canMessage()
-      ? "Message the current agent session..."
+      ? "Steer the research, add constraints, answer questions, or ask for status..."
       : "Run cold start before messaging...";
   renderComposerActionButtons();
   renderComposerSuggestions();
@@ -6504,10 +6504,10 @@ function coldComposerPlaceholder(hasFramingThread) {
     return "Queue a follow-up for when the agent finishes...";
   }
   if (hasLaunched()) {
-    return "Message the research agent...";
+    return "Steer the research, add constraints, answer questions, or ask for status...";
   }
   if (hasProjectDraftReady()) {
-    return "Ask the agent to revise PROJECT.md, narrow the scope, change the target venue, or add constraints...";
+    return "Refine the research direction, scope, venue, or constraints before autoresearch starts...";
   }
   return hasFramingThread
     ? "Ask a follow-up, describe the project, attach materials, or discuss next steps..."
