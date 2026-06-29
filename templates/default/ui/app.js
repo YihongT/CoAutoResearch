@@ -7395,6 +7395,35 @@ function latestTrialUpdateText(activeTrialData, runningTrialData = null) {
   return compactText(`${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`, 180);
 }
 
+function runningTrialClarityHtml(iteration, progress, activityCount, needsUserAction) {
+  const stageLabel = cleanText(progress?.stage_label, "") || "Running";
+  const stageIndex = Math.max(1, Number(progress?.stage_index || 0));
+  const expectedByStage = {
+    1: "PLAN.md + reviewer gate update",
+    2: "source or evidence updates",
+    3: "synthesis notes + manuscript-ready claims",
+    4: "trial report + manuscript snapshot",
+    5: "reviewer findings",
+    6: "final gate update",
+  };
+  const expected = cleanText(progress?.expected_output, "") || expectedByStage[stageIndex] || "next manuscript-quality update";
+  const userAction = needsUserAction ? "Review the agent request" : "No action needed";
+  const activity = activityCount ? `${activityCount} live event${activityCount === 1 ? "" : "s"}` : "waiting for first event";
+  return `
+    <div class="trial-run-clarity" aria-label="Current run summary">
+      <div>
+        <span>Current run</span>
+        <strong>Trial ${escapeHtml(iteration)} is ${escapeHtml(stageLabel.toLowerCase())} the next manuscript-quality step.</strong>
+      </div>
+      <dl>
+        <div><dt>Expected output</dt><dd>${escapeHtml(expected)}</dd></div>
+        <div><dt>User action</dt><dd>${escapeHtml(userAction)}</dd></div>
+        <div><dt>Runtime</dt><dd>${workingDurationHtml()}</dd></div>
+        <div><dt>Activity</dt><dd>${escapeHtml(activity)}</dd></div>
+      </dl>
+    </div>
+  `;
+}
 function runningTrialStatusHtml(trial) {
   const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
   if (!iteration || !isTrialLive(iteration)) return "";
@@ -7410,6 +7439,7 @@ function runningTrialStatusHtml(trial) {
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice);
+  const runClarity = runningTrialClarityHtml(iteration, progress, activity.length, showWaitNotice);
   return `
     <article class="trial-report-card is-running" data-trial-panel="${escapeHtml(iteration)}" aria-live="polite">
       <div class="trial-report-head">
@@ -7421,6 +7451,7 @@ function runningTrialStatusHtml(trial) {
         </div>
       </div>
       ${trialProgressStepperHtml(progress)}
+      ${runClarity}
       ${!processUpdates && progressSummary ? `<p class="trial-progress-summary">${escapeHtml(compactText(progressSummary, 220))}</p>` : ""}
       ${processUpdates}
       ${trialHumanResponseHtml(iteration)}
@@ -7762,7 +7793,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
             <span class="trial-history-latest-update">
               <span class="trial-history-disclosure" aria-hidden="true">›</span>
               <span>Agent update</span>
-              <em>${escapeHtml(latestUpdate || "No recent agent update.")}</em>
+              <em>${escapeHtml(latestUpdate || (running ? "Waiting for the first agent update. No action needed yet." : "No recent agent update."))}</em>
             </span>
           </span>
         </button>
@@ -10011,6 +10042,7 @@ function renderManuscriptPanel() {
   `;
   const reader = [
     renderManuscriptExportBar(),
+    manuscriptReadinessStripHtml(manuscript),
     `<div id="manuscript-story-section">${contextCard("Manuscript story map", renderManuscriptArchitecture(manuscript), "Finished-results paper map in manuscript reading order.")}</div>`,
     `<div id="manuscript-appendix-section">${contextCard("Appendix / supplement", renderManuscriptAppendixPanel(manuscript), "Supporting material and supplement files tied to the manuscript deliverable.")}</div>`,
     `<div id="manuscript-audit-section">${contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs"))}</div>`,
@@ -10026,6 +10058,47 @@ function renderManuscriptPanel() {
       <div class="manuscript-reader">
         ${reader}
       </div>
+    </section>
+  `;
+}
+
+function manuscriptReadinessStripHtml(manuscript) {
+  manuscript = manuscript || {};
+  const map = buildManuscriptStoryMap(manuscript);
+  const sections = (map.sections || []).filter((node) => sectionHasRealContent(node.section));
+  const artifacts = [
+    ...sections.flatMap((node) => node.artifacts || []),
+    ...(map.unplaced || []),
+  ].filter(sectionHasRealContent);
+  const figures = artifacts.filter((block) => String(block.kind || "").toLowerCase() === "figure");
+  const tables = artifacts.filter((block) => String(block.kind || "").toLowerCase() === "table");
+  const references = (manuscript.references || []).filter((ref) => hasRealText(ref?.reference) || hasRealText(ref?.key));
+  const missingEvidence = (manuscript.missing_evidence || []).filter((item) => !looksPlaceholder(item));
+  const latestTrial = latestTrajectoryTrialIteration();
+  const label = !sections.length
+    ? "Not draftable yet"
+    : missingEvidence.length
+      ? "Draftable with evidence gaps"
+      : "Paper package ready";
+  const facts = [
+    `${sections.length} section${sections.length === 1 ? "" : "s"}`,
+    `${figures.length} figure${figures.length === 1 ? "" : "s"}`,
+    `${tables.length} table${tables.length === 1 ? "" : "s"}`,
+    `${references.length} reference${references.length === 1 ? "" : "s"}`,
+    latestTrial ? `Last updated from Trial ${latestTrial}` : "",
+  ].filter(Boolean);
+  const action = missingEvidence.length
+    ? `${missingEvidence.length} evidence gap${missingEvidence.length === 1 ? "" : "s"} recorded`
+    : sections.length
+      ? "Ready for human-machine drafting"
+      : "Run autoresearch until manuscript sections exist";
+  return `
+    <section class="manuscript-readiness-strip" aria-label="Manuscript readiness">
+      <div>
+        <strong>${escapeHtml(label)}</strong>
+        <p>${escapeHtml(facts.join(" | "))}</p>
+      </div>
+      <span>${escapeHtml(action)}</span>
     </section>
   `;
 }
@@ -10319,8 +10392,12 @@ function renderExportPanel() {
   const busy = activeExportJob && !exportJobTerminal(activeExportJob);
   return `
     <div class="export-panel">
+      <div class="export-panel-intro">
+        <strong>Paper-writing handoff</strong>
+        <p>A clean manuscript package for GPT, Claude, or human co-writing.</p>
+      </div>
       <div class="export-actions export-package-list">
-        <section class="export-package-option">
+        <section class="export-package-option is-primary">
           <div>
             <header>
               <strong>Paper-writing pack</strong>
@@ -10328,7 +10405,7 @@ function renderExportPanel() {
             </header>
             <p>Includes BLUEPRINT.md, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets when available.</p>
           </div>
-          <button class="secondary-button small-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download paper-writing pack</button>
+          <button class="primary-button small-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download paper-writing pack</button>
         </section>
         <section class="export-package-option">
           <div>
