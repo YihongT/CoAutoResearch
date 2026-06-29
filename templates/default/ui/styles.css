@@ -5688,6 +5688,33 @@ body.is-project-loading .cold-card > :not(.project-loading-state) {
   align-items: center;
 }
 
+.plan-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plan-message-meta em {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--muted) 24%, transparent);
+  border-radius: 999px;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plan-message-body {
+  display: grid;
+  gap: 12px;
+}
+
 .plan-status {
   display: inline-flex;
   align-items: center;
@@ -17286,4 +17313,35 @@ html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .f
 html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread.is-scrolling::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--panel-ink, var(--ink)) 16%, transparent) !important;
   background-clip: content-box !important;
+}
+
+/* Keep composer text visually aligned with rendered agent prose. */
+:root {
+  --conversation-text-size: 14px;
+  --conversation-line-height: 1.5;
+}
+
+html[data-theme] :is(
+  .framing-message.assistant > .transcript-body,
+  .transcript-message.assistant > .transcript-body,
+  .transcript-message.final > .transcript-body
+) {
+  font-size: var(--conversation-text-size);
+  line-height: var(--conversation-line-height);
+}
+
+html[data-theme] :is(
+  #chat-form textarea,
+  .brief-editor-shell #cold-file-editor,
+  .brief-editor-shell.is-framing-dock #cold-file-editor,
+  .brief-editor-shell:not(.is-framing-dock) .brief-composer-row #cold-file-editor
+) {
+  font-size: var(--conversation-text-size) !important;
+  line-height: var(--conversation-line-height) !important;
+}
+
+html[data-theme] #chat-form textarea::placeholder,
+html[data-theme] .brief-editor-shell #cold-file-editor::placeholder,
+html[data-theme] .brief-editor-shell:not(.is-framing-dock) .brief-composer-row #cold-file-editor::placeholder {
+  line-height: var(--conversation-line-height) !important;
 }

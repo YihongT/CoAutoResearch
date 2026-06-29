@@ -2116,10 +2116,16 @@ Confidence: medium
     !appJs.includes("Live trial activity") ||
     !appJs.includes("data-pause-autoresearch") ||
     !appJs.includes("Pause after current turn") ||
-    !appJs.includes("data-stop-current-run") ||
-    !appJs.includes("Stop current run") ||
+    appJs.includes("data-stop-current-run") ||
+    appJs.includes("Stop current run") ||
+    !appJs.includes("function canStopCurrentRun()") ||
+    !appJs.includes("function composerStopIconHtml()") ||
+    !appJs.includes('button.dataset.stopMode = stopMode ? "true" : "false"') ||
+    !appJs.includes("const coldStopMode = canStopCurrentRun() && !coldComposerHasSendableContent()") ||
+    !appJs.includes("const chatStopMode = canStopCurrentRun() && !chatComposerHasSendableContent()") ||
     !appJs.includes("trial-report-control-actions") ||
     !stylesCss.includes(".current-run-control-button") ||
+    !stylesCss.includes(".is-stop-mode") ||
     !stylesCss.includes(".trial-report-card") ||
     !stylesCss.includes(".trial-report-control-actions") ||
     appJs.includes("const liveIteration = isLiveGoalSession() ? Number(sessionState().loop_iteration || 0) : 0") ||
@@ -3091,7 +3097,11 @@ Confidence: medium
       "claude_final = json.dumps({'type': 'result', 'subtype': 'success', 'result': 'Hello Claude', 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "module.append_research_log(claude_final)",
       "assert len(context.session['transcript']) == 1 and context.session['transcript'][0]['content'] == 'Hello Claude' and not context.session['transcript'][0].get('streaming'), context.session['transcript']",
-      "context.session.clear(); context.session.update(module.new_research_session()); context.session.update({'id': 'S_codex_stream', 'backend': 'codex', 'settings': codex_settings, 'status': 'running', 'mode': 'chat', 'transcript': []})",
+      "context.session.clear(); context.session.update(module.new_research_session()); context.session.update({'id': 'S_codex_stream', 'backend': 'codex', 'settings': codex_settings, 'status': 'running', 'mode': 'chat', 'transcript': [], 'last_event_summary': 'Preparing response'})",
+      "codex_lifecycle_lines = [json.dumps({'method': 'thread/settings/updated', 'params': {'model': 'gpt-5.5', 'cwd': '/tmp/project'}}), json.dumps({'method': 'thread/status/changed', 'params': {'status': 'active'}}), json.dumps({'method': 'mcpServer/startupStatus/updated', 'params': {'server': 'codex_apps', 'status': 'ready'}}), json.dumps({'method': 'remoteControl/status/changed', 'params': {'status': 'disabled', 'serverName': 'Mac.local'}}), json.dumps({'id': 2, 'result': {'thread': {'id': '019f121a-f385-7541-98e0-3ef965165505', 'sessionId': '019f121a-f385-7541-98e0-3ef965165505', 'status': {'type': 'idle'}, 'path': '/Users/yihong/.codex/sessions/2026/06/29/rollout.jsonl'}, 'modelProvider': 'openai'}}), json.dumps({'id': 3, 'result': {'turn': {'id': '019f121a-f445-77e0-b818-e36c876eee50', 'itemsView': 'notLoaded', 'status': 'inProgress'}}}), json.dumps({'method': 'item/started', 'params': {'item': {'type': 'userMessage', 'content': [{'type': 'text', 'text': 'Plan only. Do not implement.'}]}}}), json.dumps({'method': 'item/completed', 'params': {'item': {'type': 'userMessage', 'content': [{'type': 'text', 'text': 'Plan only. Do not implement.'}]}}}), json.dumps({'method': 'turn/completed', 'params': {'turn': {'id': '019f121a-f445-77e0-b818-e36c876eee50', 'itemsView': 'notLoaded', 'status': 'completed'}}})]",
+      "[module.append_research_log(line) for line in codex_lifecycle_lines]",
+      "assert context.session['transcript'] == [] and context.session['logs'] == [] and context.session['last_event_summary'] == 'Preparing response', context.session",
+      "assert all(module.format_codex_event(line) == '' and module.transcript_from_codex_line(line) is None for line in codex_lifecycle_lines)",
       "codex_delta_a = json.dumps({'type': 'item/agentMessage/delta', 'delta': 'Hello '})",
       "codex_delta_b = json.dumps({'type': 'item/agentMessage/delta', 'delta': 'Codex'})",
       "module.append_research_log(codex_delta_a); module.append_research_log(codex_delta_b)",

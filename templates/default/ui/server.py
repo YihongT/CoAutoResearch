@@ -3541,6 +3541,140 @@ def event_payload_text(value: Any) -> str:
     return ""
 
 
+def codex_web_search_query(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = compact_single_line(value, 260)
+        lowered = text.lower()
+        if (
+            not text
+            or text.startswith("ws_")
+            or lowered in {"web_search", "web_search_call", "completed", "in_progress", "queued"}
+            or re.match(r"^(?:item|turn|response|session)[._/-]", lowered)
+        ):
+            return ""
+        return text
+    if isinstance(value, list):
+        for item in value:
+            text = codex_web_search_query(item)
+            if text:
+                return text
+        return ""
+    if isinstance(value, dict):
+        for key in ("query", "search_query", "searchQuery", "q", "keywords", "search_terms", "searchTerms"):
+            text = codex_web_search_query(value.get(key))
+            if text:
+                return text
+        for key, item in value.items():
+            if str(key).lower() in {"id", "call_id", "callid", "type", "kind", "name", "status", "method", "event", "role", "raw_type", "session_id", "run_id", "backend", "model", "usage"}:
+                continue
+            text = codex_web_search_query(item)
+            if text:
+                return text
+    return ""
+
+
+def codex_event_name(event: Any) -> str:
+    if not isinstance(event, dict):
+        return ""
+    raw = str(event.get("method") or event.get("type") or event.get("event") or event.get("kind") or "")
+    return re.sub(r"[\s._]+", "/", raw.strip().lower())
+
+
+def codex_event_params(event: Any) -> dict[str, Any]:
+    if not isinstance(event, dict):
+        return {}
+    params = event.get("params")
+    return params if isinstance(params, dict) else event
+
+
+def codex_event_item(event: Any) -> dict[str, Any]:
+    if not isinstance(event, dict):
+        return {}
+    params = codex_event_params(event)
+    item = params.get("item") if isinstance(params.get("item"), dict) else event.get("item")
+    return item if isinstance(item, dict) else {}
+
+
+def is_ignored_codex_lifecycle_event(event: Any) -> bool:
+    if not isinstance(event, dict):
+        return False
+    if (
+        "result" in event
+        and "id" in event
+        and not any(key in event for key in ("method", "type", "event", "kind"))
+    ):
+        return True
+    raw_type = codex_event_name(event)
+    if "delta" in raw_type:
+        return True
+    if raw_type.startswith(("account/", "remotecontrol/", "thread/")):
+        return True
+    if raw_type.startswith("mcpserver/") and "toolcall" not in raw_type:
+        return True
+    if raw_type.startswith("turn/"):
+        payload = codex_event_params(event)
+        has_result_text = any(
+            key in payload or key in event
+            for key in ("text", "message", "content", "output", "result", "success")
+        )
+        return not has_result_text
+    if raw_type in {
+        "thread/started",
+        "turn/started",
+        "thread/settings/updated",
+        "thread/status/changed",
+        "thread/tokenusage/updated",
+        "thread/token-usage/updated",
+        "thread/token_usage/updated",
+        "thread/token/usage/updated",
+        "account/ratelimits/updated",
+        "account/rate-limits/updated",
+        "account/rate_limits/updated",
+        "account/rate/limits/updated",
+        "mcpserver/startupstatus/updated",
+        "mcpserver/startup-status/updated",
+        "mcpserver/startup_status/updated",
+        "mcpserver/startup/status/updated",
+    }:
+        return True
+    item = codex_event_item(event)
+    item_type = str(item.get("type") or item.get("kind") or item.get("role") or "").lower()
+    if raw_type == "item/started":
+        return True
+    return raw_type == "item/completed" and item_type in {"reasoning", "agentmessage", "agent_message", "message", "plan", "usermessage", "user_message"}
+
+
+def claude_event_label(event: Any) -> tuple[str, str, str, str]:
+    if not isinstance(event, dict):
+        return ("", "", "", "")
+    event_type = str(event.get("type") or "event").strip() or "event"
+    subtype = str(event.get("subtype") or "").strip()
+    label = event_type if "." in event_type or not subtype else f"{event_type}.{subtype}"
+    return event_type, subtype, label, label.lower()
+
+
+def is_ignored_claude_lifecycle_event(event: Any) -> bool:
+    if not isinstance(event, dict):
+        return False
+    event_type, subtype, _label, label_lower = claude_event_label(event)
+    event_family = event_type.split(".", 1)[0].lower()
+    if event_family == "system" and subtype == "init":
+        return True
+    return "delta" in label_lower or "partial" in label_lower
+
+
+def should_suppress_agent_event_summary(line: str, backend: str) -> bool:
+    try:
+        event = json.loads(str(line or "").strip())
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if normalize_agent_backend(backend) == "claude":
+        return is_ignored_claude_lifecycle_event(event)
+    return is_ignored_codex_lifecycle_event(event)
+
+
 def transcript_from_codex_line(line: str) -> dict[str, Any] | None:
     stripped = line.strip()
     if not stripped:
@@ -3556,15 +3690,25 @@ def transcript_from_codex_line(line: str) -> dict[str, Any] | None:
 
     raw_type = str(event.get("method") or event.get("type") or event.get("event") or event.get("kind") or "event")
     raw_type_lower = raw_type.lower()
-    if raw_type_lower in {"thread.started", "turn.started"}:
+    raw_type_key = codex_event_name(event)
+    if raw_type_key in {"thread/started", "turn/started"}:
         return None
     if "delta" in raw_type_lower or raw_type_lower.endswith("/delta"):
         return None
-    if raw_type_lower == "turn.completed" and set(event.keys()).issubset({"type", "usage"}):
+    if raw_type_key == "turn/completed" and set(event.keys()).issubset({"type", "usage"}):
         return None
 
-    item = event.get("item") if isinstance(event.get("item"), dict) else {}
+    item = codex_event_item(event)
     item_type = str(item.get("type") or item.get("kind") or item.get("role") or "").lower()
+    type_text = f"{raw_type_lower} {item_type}".strip()
+    completed_message = raw_type_key == "item/completed" and item_type in {"agentmessage", "agent_message", "message"}
+    if is_ignored_codex_lifecycle_event(event) and not completed_message:
+        return None
+    if "web_search" in type_text or "websearch" in type_text:
+        query = codex_web_search_query(item) or codex_web_search_query(event)
+        content = f"Searching the web: {query}" if query else "Searching the web"
+        return {"role": "tool", "kind": "tool", "title": "Web search", "content": content[:8000], "raw_type": raw_type, "editable": False}
+
     content_source: Any = item or event
     content = event_payload_text(content_source)
     if not content or content in {raw_type, item_type}:
@@ -3574,7 +3718,6 @@ def transcript_from_codex_line(line: str) -> dict[str, Any] | None:
     kind = "assistant"
     title = "Assistant"
     editable = False
-    type_text = f"{raw_type_lower} {item_type}".strip()
 
     if any(token in type_text for token in ("tool", "exec", "command", "shell", "patch", "file", "stdout", "stderr")):
         role = "tool"
@@ -9328,7 +9471,15 @@ def format_codex_event(line: str) -> str:
         event = json.loads(stripped)
     except json.JSONDecodeError:
         return stripped
-    event_type = str(event.get("type") or event.get("event") or "event")
+    event_type = str(event.get("method") or event.get("type") or event.get("event") or "event")
+    item = codex_event_item(event)
+    item_type = str(item.get("type") or item.get("kind") or item.get("role") or "").lower()
+    type_text = f"{event_type.lower()} {item_type}".strip()
+    if is_ignored_codex_lifecycle_event(event):
+        return ""
+    if "web_search" in type_text or "websearch" in type_text:
+        query = codex_web_search_query(item) or codex_web_search_query(event)
+        return f"Web search: {query[:860]}" if query else "Web search"
     text = compact_event_text(event)
     if text and text != event_type:
         return f"{event_type}: {text[:900]}"
@@ -9345,13 +9496,10 @@ def format_claude_event(line: str) -> str:
         return stripped
     if not isinstance(event, dict):
         return stripped[:900]
-    event_type = str(event.get("type") or "event").strip() or "event"
-    subtype = str(event.get("subtype") or "").strip()
-    label = event_type if "." in event_type or not subtype else f"{event_type}.{subtype}"
+    if is_ignored_claude_lifecycle_event(event):
+        return ""
+    event_type, _subtype, label, _label_lower = claude_event_label(event)
     event_family = event_type.split(".", 1)[0].lower()
-    if event_family == "system" and subtype == "init":
-        session_id = str(event.get("session_id") or "").strip()
-        return f"{label}: session {session_id[:8]}" if session_id else label
     if event_family in {"assistant", "user"}:
         message = event.get("message") if isinstance(event.get("message"), dict) else event
         tool = next((block for block in claude_content_blocks(message) if str(block.get("type") or "") in {"tool_use", "tool_result"}), None)
@@ -10106,6 +10254,7 @@ def append_research_log(line: str) -> None:
     streaming_update = None if transcript else streaming_update_from_agent_line(line, backend)
     event_at = now_iso()
     notice = agent_notice_from_event(line, display)
+    suppress_summary = should_suppress_agent_event_summary(line, backend)
     transcript_update: dict[str, Any] | None = None
     event_kind = "agent_event" if display or line.strip() else "session"
     with RESEARCH_LOCK:
@@ -10115,7 +10264,7 @@ def append_research_log(line: str) -> None:
         if display:
             RESEARCH_SESSION["logs"].append(display)
             RESEARCH_SESSION["last_event_summary"] = compact_single_line(display, 260)
-        elif line.strip():
+        elif line.strip() and not suppress_summary:
             RESEARCH_SESSION["last_event_summary"] = compact_single_line(line, 260)
         if notice:
             RESEARCH_SESSION["agent_notice"] = notice

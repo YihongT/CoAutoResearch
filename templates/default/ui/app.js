@@ -740,7 +740,7 @@ function attachProjectDraftToLatestAssistant(messages) {
       break;
     }
   }
-  if (!hostId) return projectIndex >= 0 ? items.filter((message) => message?.id !== latest.id) : items;
+  if (!hostId) return items;
   return items
     .filter((message) => projectIndex < 0 || message?.id !== latest.id)
     .map((message) => (message?.id === hostId ? { ...message, attachedProjectDraft: latest } : message));
@@ -2119,6 +2119,20 @@ function upsertSessionTranscriptEntry(session, entry) {
   return true;
 }
 
+function syncPlanArtifactFromTranscriptEntry(entry, session = null) {
+  const artifact = entry?.artifact && typeof entry.artifact === "object" ? entry.artifact : null;
+  if (!artifact || artifact.type !== "plan" || !artifact.id) return false;
+  if (!appState) appState = {};
+  appState.latest_plan = artifact;
+  if (session && typeof session === "object") {
+    session.latest_plan = artifact;
+  } else if (appState.research_session && typeof appState.research_session === "object") {
+    appState.research_session.latest_plan = artifact;
+  }
+  if (upsertLatestPlanMessage(localMessages, artifact)) lastFramingHtml = "";
+  return true;
+}
+
 function applyResearchEventPayload(payload) {
   if (!payload || typeof payload !== "object") return false;
   const eventProjectId = String(payload.project_id || "").trim();
@@ -2140,6 +2154,7 @@ function applyResearchEventPayload(payload) {
     ...sessionPatch,
   };
   upsertSessionTranscriptEntry(nextSession, payload.transcript_entry);
+  syncPlanArtifactFromTranscriptEntry(payload.transcript_entry, nextSession);
   if (payload.log) {
     const logs = Array.isArray(nextSession.logs) ? [...nextSession.logs] : [];
     const line = String(payload.log || "");
@@ -3527,7 +3542,8 @@ function agentWaitStateText(waitState = activeRunWaitState()) {
   const kind = String(wait.kind || "").toLowerCase();
   const age = Number(wait.last_event_age_seconds);
   const ageText = Number.isFinite(age) ? formatWorkedDuration(age) : "";
-  const summary = String(wait.last_event_summary || "").trim();
+  const rawSummary = String(wait.last_event_summary || "").trim();
+  const summary = isNoisyAgentLifecycleText(rawSummary) || isNoisyCodexResultText(rawSummary) ? "" : rawSummary;
   if (kind === "rate_limited") {
     return `Rate limit reported${ageText ? ` · last event ${ageText} ago` : ""}`;
   }
@@ -3744,7 +3760,7 @@ function renderProjectLaunchFallbackPanel(show) {
 function renderQueueActionMenu() {
   const controls = ensureQueueActionMenu();
   if (!controls) return;
-  const show = canQueueComposerWhileRunning();
+  const show = canQueueComposerWhileRunning() && coldComposerHasSendableContent();
   controls.button.hidden = !show;
   controls.menu.hidden = !show || !queueActionMenuOpen;
   controls.button.setAttribute("aria-expanded", show && queueActionMenuOpen ? "true" : "false");
@@ -3938,10 +3954,9 @@ function canPauseActiveRunAfterCurrentTurn() {
 
 function runControlButtonsHtml() {
   if (!isSessionRunning()) return "";
-  return `
-    ${canPauseActiveRunAfterCurrentTurn() ? `<button class="secondary-button small-button current-run-control-button" type="button" data-pause-autoresearch>Pause after current turn</button>` : ""}
-    <button class="secondary-button small-button current-run-control-button" type="button" data-stop-current-run>Stop current run</button>
-  `;
+  return canPauseActiveRunAfterCurrentTurn()
+    ? `<button class="secondary-button small-button current-run-control-button" type="button" data-pause-autoresearch>Pause after current turn</button>`
+    : "";
 }
 
 function composerSendIconHtml() {
@@ -3963,37 +3978,56 @@ function syncComposerActionButton(button, { stopMode, disabled, sendHtml, sendLa
   button.innerHTML = stopMode ? composerStopIconHtml() : sendHtml;
 }
 
+function coldComposerHasSendableContent() {
+  return Boolean(
+    String($("#cold-file-editor")?.value || "").trim() ||
+    currentComposerAttachments().length ||
+    selectedResumeTrialPayload()
+  );
+}
+
+function chatComposerHasSendableContent() {
+  return Boolean(
+    String($("#chat-form textarea")?.value || "").trim() ||
+    currentComposerAttachments().length ||
+    selectedResumeTrialPayload()
+  );
+}
+
 function renderComposerActionButtons() {
   renderComposerModeControls();
-  const stopMode = false;
   const queueMode = canQueueComposerWhileRunning();
   const resourceBlocked = hasBlockingResourceImports();
   const blockedMessage = blockingResourceImportMessage();
   const loading = isProjectLoading();
+  const coldStopMode = canStopCurrentRun() && !coldComposerHasSendableContent();
   syncComposerActionButton($("#prepare-cold-start"), {
-    stopMode,
+    stopMode: coldStopMode,
     disabled: hasNoProject() || resourceBlocked || loading,
     sendHtml: composerSendIconHtml(),
     sendLabel: queueMode ? "Queue follow-up" : "Send",
   });
   const coldButton = $("#prepare-cold-start");
-  if (coldButton && !stopMode) {
+  if (coldButton && !coldStopMode) {
     if (resourceBlocked) coldButton.title = blockedMessage;
     else if (queueMode) coldButton.title = "Queue follow-up";
     coldButton.dataset.queueMode = queueMode ? "true" : "false";
   }
 
   const send = $("#chat-form .send-button");
+  const chatStopMode = canStopCurrentRun() && !chatComposerHasSendableContent();
   syncComposerActionButton(send, {
-    stopMode,
+    stopMode: chatStopMode,
     disabled: !(canMessage() || queueMode) || resourceBlocked || hasNoProject() || loading,
     sendHtml: queueMode ? "Queue" : "Send",
     sendLabel: queueMode ? "Queue follow-up" : "Send",
   });
   if (send) {
     send.type = "submit";
-    if (resourceBlocked) send.title = blockedMessage;
-    else if (queueMode) send.title = "Queue follow-up";
+    if (!chatStopMode) {
+      if (resourceBlocked) send.title = blockedMessage;
+      else if (queueMode) send.title = "Queue follow-up";
+    }
   }
   renderQueuedChatPanel();
   renderQueueActionMenu();
@@ -4529,8 +4563,8 @@ function latestPlanMessageIndex(messages = localMessages, planId = "") {
   return -1;
 }
 
-function upsertLatestPlanMessage(messages) {
-  const latestPlan = appState?.research_session?.latest_plan || appState?.latest_plan || {};
+function upsertLatestPlanMessage(messages, planArtifact = null) {
+  const latestPlan = planArtifact || appState?.research_session?.latest_plan || appState?.latest_plan || {};
   const message = planMessageFromArtifact(latestPlan);
   if (!message) return false;
   const index = latestPlanMessageIndex(messages, message.artifact?.id || "");
@@ -4773,19 +4807,34 @@ function planCardHtml(message) {
   const approved = status === "approved";
   const provider = agentLabel(artifact.provider || sessionBackend());
   const model = String(artifact.model || "").trim();
+  if (!planText && !error) {
+    return `
+      <article class="framing-message assistant plan-card-message" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="plan">
+        <div class="transcript-meta plan-message-meta">
+          <span>CoAutoResearch</span>
+          <em>Plan mode</em>
+          <em class="plan-status ${escapeHtml(status)}">${escapeHtml(planStatusLabel(status))}</em>
+        </div>
+        <div class="transcript-body plan-message-body">
+          ${planStepsHtml(artifact.steps)}
+          <p class="plan-empty">Planning...</p>
+        </div>
+      </article>
+    `;
+  }
   const body = error
     ? `<div class="plan-error">${escapeHtml(error)}</div>`
-    : planText
-      ? `<div class="plan-rendered markdown-preview">${markdownToHtml(planText)}</div>`
-      : `<div class="plan-empty">Waiting for the planning result...</div>`;
-  const actions = `
-    <div class="project-card-actions plan-card-actions">
-      ${messageCopyButton(planText, "Copy plan", "Plan copied.")}
-      ${ready ? `<button class="secondary-button small-button" type="button" data-plan-revise="${escapeHtml(planId)}">Revise</button>` : ""}
-      ${ready ? `<button class="primary-button small-button" type="button" data-plan-approve="${escapeHtml(planId)}">Approve &amp; run</button>` : ""}
-      ${approved ? `<span class="plan-approved-note">Implementation started.</span>` : ""}
-    </div>
-  `;
+    : `<div class="plan-rendered markdown-preview">${markdownToHtml(planText)}</div>`;
+  const actionItems = [
+    planText ? messageCopyButton(planText, "Copy plan", "Plan copied.") : "",
+    projectDraftLaunchButtonHtml(currentProjectDraftFooterMessage()),
+    ready ? `<button class="secondary-button small-button" type="button" data-plan-revise="${escapeHtml(planId)}">Revise</button>` : "",
+    ready ? `<button class="primary-button small-button" type="button" data-plan-approve="${escapeHtml(planId)}">Approve &amp; run</button>` : "",
+    approved ? `<span class="plan-approved-note">Implementation started.</span>` : "",
+  ].filter(Boolean);
+  const actions = actionItems.length
+    ? `<div class="project-card-actions plan-card-actions">${actionItems.join("")}</div>`
+    : "";
   return `
     <article class="framing-message assistant plan-card-message" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="plan">
       <div class="transcript-meta">CoAutoResearch / Plan</div>
@@ -4897,6 +4946,7 @@ function framingProgressTitle(entry) {
   const content = String(entry?.content || "");
   if (kind === "error" || rawType.includes("failed") || rawType.includes("error")) return "Error";
   if (rawType.includes("reasoning") || kind === "reasoning") return "Reasoning";
+  if (webSearchActivityInfo(entry)) return "Web search";
   if (content.includes("file_change")) return "File change";
   if (role === "command" || /\/bin\/(?:zsh|bash|sh)\s+-lc/.test(content)) return "Command";
   if (role === "tool" || kind === "tool") return "Tool";
@@ -4909,6 +4959,8 @@ function framingProgressContent(entry) {
   const kind = String(entry?.kind || "").toLowerCase();
   const content = String(entry?.content || "").trim();
   if (!content) return "";
+  const webSearch = webSearchActivityInfo(entry);
+  if (webSearch) return webSearch.summary;
   if (rawType.includes("reasoning") || kind === "reasoning") {
     return compactText(content, 220);
   }
@@ -4920,6 +4972,77 @@ function framingProgressContent(entry) {
     return compactText(`${file ? basename(file) : "file"} ${action}${state ? `, ${state}` : ""}`, 180);
   }
   return compactText(content.replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, ""), 220);
+}
+
+function normalizedAgentEventPrefix(value) {
+  return String(value || "")
+    .trim()
+    .split(/\s+/, 1)[0]
+    .replace(/[._]+/g, "/")
+    .replace(/-+/g, "-")
+    .replace(/:+$/, "")
+    .toLowerCase();
+}
+
+function isNoisyAgentLifecycleText(value) {
+  const eventName = normalizedAgentEventPrefix(value);
+  if (
+    eventName.startsWith("account/") ||
+    eventName.startsWith("remotecontrol/") ||
+    eventName.startsWith("thread/") ||
+    eventName.startsWith("turn/") ||
+    (eventName.startsWith("mcpserver/") && !eventName.includes("toolcall"))
+  ) {
+    return true;
+  }
+  return new Set([
+    "thread/started",
+    "turn/started",
+    "thread/settings/updated",
+    "thread/status/changed",
+    "thread/tokenusage/updated",
+    "thread/token-usage/updated",
+    "thread/token_usage/updated",
+    "thread/token/usage/updated",
+    "account/ratelimits/updated",
+    "account/rate-limits/updated",
+    "account/rate_limits/updated",
+    "account/rate/limits/updated",
+    "mcpserver/startupstatus/updated",
+    "mcpserver/startup-status/updated",
+    "mcpserver/startup_status/updated",
+    "mcpserver/startup/status/updated",
+  ]).has(eventName);
+}
+
+function isNoisyCodexResultText(value) {
+  const text = String(value || "")
+    .trim()
+    .replace(/^[A-Za-z][\w./-]*:\s+/, "");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(text)) return false;
+  return (
+    /\/\.codex\/sessions\//i.test(text) ||
+    /\bnotLoaded\s+inProgress\b/i.test(text) ||
+    /\breadOnly\b/i.test(text) ||
+    /^[0-9a-f-]{36}\s+[0-9a-f-]{36}\s+(?:true|false)\s+\w+/i.test(text)
+  );
+}
+
+function isNoisyAgentLifecycleEntry(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  const rawType = String(entry.raw_type || "");
+  const content = String(entry.content || "");
+  const rawEventName = normalizedAgentEventPrefix(rawType);
+  const role = String(entry.role || "").toLowerCase();
+  const kind = String(entry.kind || "").toLowerCase();
+  if ((role === "final" || kind === "final") && !isNoisyCodexResultText(content)) return false;
+  return (
+    isNoisyAgentLifecycleText(rawType) ||
+    isNoisyAgentLifecycleText(content) ||
+    rawEventName === "item/started" ||
+    (rawEventName === "item/completed" && /(?:Plan only\. Do not implement|Authoritative UI conversation history|Use this history as the current UI truth)/i.test(content)) ||
+    ((normalizedAgentEventPrefix(rawType) === "event" || !rawType.trim()) && isNoisyCodexResultText(content))
+  );
 }
 
 function hasLocalPendingRunScope() {
@@ -4973,6 +5096,7 @@ function currentProgressEntries() {
       const role = transcriptRole(entry);
       const content = String(entry?.content || "").trim();
       const rawType = String(entry?.raw_type || "").toLowerCase();
+      if (isNoisyAgentLifecycleEntry(entry)) return false;
       if (progressStart) {
         const createdAt = entryTimeValue(entry);
         if (createdAt && createdAt < progressStart - leeway) return false;
@@ -5075,7 +5199,7 @@ function framingProgressRowsHtml(entries) {
           const title = framingProgressTitle(entry);
           const content = framingProgressContent(entry);
           const role = transcriptRole(entry);
-          const collapsible = ["Command", "Tool", "File change"].includes(title) || role === "command" || role === "tool";
+          const collapsible = ["Command", "Tool", "Web search", "File change"].includes(title) || role === "command" || role === "tool";
           if (collapsible) {
             return `
               <details class="framing-progress-row is-collapsible ${escapeHtml(role)}">
@@ -6845,6 +6969,35 @@ function compactCommandText(content) {
   return String(content || "").replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, "").trim();
 }
 
+function webSearchActivityInfo(entry) {
+  const content = String(typeof entry === "string" ? entry : entry?.content || "").replace(/\s+/g, " ").trim();
+  const rawType = String(typeof entry === "string" ? "" : entry?.raw_type || "").toLowerCase();
+  const title = String(typeof entry === "string" ? "" : entry?.title || "").toLowerCase();
+  if (!content && !rawType && !title) return null;
+  let query = "";
+  const legacyMatch = content.match(/^ws_[a-z0-9_-]+\s+web_search(?:_call)?\b\s*(.*)$/i);
+  const friendlyMatch = content.match(/^Searching the web(?:\s*:\s*(.*))?$/i);
+  if (legacyMatch) {
+    query = legacyMatch[1] || "";
+  } else if (friendlyMatch) {
+    query = friendlyMatch[1] || "";
+  } else if (rawType.includes("web_search") || title.includes("web search")) {
+    query = content;
+  } else {
+    return null;
+  }
+  query = query
+    .replace(/\bws_[a-z0-9_-]+\b/gi, "")
+    .replace(/\bweb_search(?:_call)?\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return {
+    title: "Web search",
+    summary: query ? `Searching the web: ${compactText(query, 180)}` : "Searching the web",
+    raw: content,
+  };
+}
+
 function repoRelativePath(path) {
   const raw = String(path || "").trim();
   if (!raw) return "";
@@ -6886,6 +7039,7 @@ function sessionTranscriptEntries() {
     const content = String(entry?.content || "").trim();
     if (!content) return;
     const originalRawType = String(entry?.raw_type || "");
+    if (isNoisyAgentLifecycleEntry(entry)) return;
     if (isHiddenUiTranscript(entry)) return;
     if (isLegacySyntheticUiCommand(entry)) {
       previousIncludedWasUserCommand = false;
@@ -7868,6 +8022,7 @@ function isCollapsibleToolEntry(entry) {
 }
 
 function toolGroupKind(entry) {
+  if (webSearchActivityInfo(entry)) return "search";
   const content = compactCommandText(String(entry?.content || ""));
   if (/\b(rg|grep|find|fd)\b/.test(content)) return "search";
   if (/\b(sed|cat|head|tail|nl|wc|ls)\b/.test(content)) return "read";
@@ -7951,8 +8106,22 @@ function transcriptEntryHtml(entry) {
   const meta = transcriptMeta(entry);
   const fileChange = parseFileChangeInfo(content);
   const statusPayload = isUiCommandResult(entry) ? parseStatusCardPayload(content) : null;
+  const webSearch = webSearchActivityInfo(entry);
   if (statusPayload) {
     return statusCardHtml(statusPayload, entry);
+  }
+  if (webSearch) {
+    return `
+      <article class="transcript-message tool is-compact" data-transcript-id="${escapeHtml(id)}">
+        <details class="tool-event">
+          <summary>
+            <span>${escapeHtml(webSearch.title)}</span>
+            <code>${escapeHtml(webSearch.summary)}</code>
+          </summary>
+          <pre>${escapeHtml(webSearch.raw)}</pre>
+        </details>
+      </article>
+    `;
   }
   if (fileChange) {
     const status = [fileChange.action, fileChange.status].filter(Boolean).join(" / ");
@@ -12553,6 +12722,7 @@ function clearFramingComposerText(expectedText = "") {
   clearComposerDraft();
   resizeColdEditor();
   renderColdPreview();
+  renderComposerActionButtons();
 }
 
 function closeResumeTrialDialog(confirmed = false) {
@@ -13189,6 +13359,10 @@ async function startFramingRun(brief, options = {}) {
 }
 
 async function coldStartFromPrepare() {
+  if ($("#prepare-cold-start")?.dataset?.stopMode === "true") {
+    await handleStopSession();
+    return;
+  }
   if (!ensureResourceImportsReady()) return;
   if (!hasActiveProject()) {
     openProjectCreateDialog();
@@ -13621,6 +13795,7 @@ function bindEvents() {
     }
     resizeColdEditor();
     renderColdPreview();
+    renderComposerActionButtons();
   });
   $("#target-venue").addEventListener("input", (event) => {
     scopedSet("autoResearchTargetVenue", event.target.value || "");
@@ -13675,7 +13850,10 @@ function bindEvents() {
   $("#composer-reasoning")?.addEventListener("change", updateSessionSettingsFromComposer);
   $("#framing-scroll-bottom")?.addEventListener("click", scrollFramingToBottom);
   $("#copy-resume-command")?.addEventListener("click", copyResumeCommand);
-  $("#chat-form textarea").addEventListener("input", resizeComposer);
+  $("#chat-form textarea").addEventListener("input", () => {
+    resizeComposer();
+    renderComposerActionButtons();
+  });
   $("#browser-search").addEventListener("input", (event) => {
     handleBrowserSearchInput(event.target.value || "");
   });
@@ -14050,13 +14228,6 @@ function bindEvents() {
     const removeResumeTrial = event.target.closest("[data-resume-trial-remove]");
     if (removeResumeTrial) {
       clearResumeTrialContext();
-      return;
-    }
-    const stopCurrentRun = event.target.closest("[data-stop-current-run]");
-    if (stopCurrentRun) {
-      event.preventDefault();
-      event.stopPropagation();
-      handleStopSession();
       return;
     }
     const pauseAutoresearch = event.target.closest("[data-pause-autoresearch]");

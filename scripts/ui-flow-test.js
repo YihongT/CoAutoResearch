@@ -774,6 +774,19 @@ function loadAppContext() {
       stored: localStorage.getItem(scopedStorageKey("autoResearchComposerDraft")),
       legacy: localStorage.getItem("autoResearchComposerDraft"),
     });
+    globalThis.__composerActionButtonsProbe = () => {
+      renderComposerActionButtons();
+      const cold = document.querySelector("#prepare-cold-start");
+      const chat = document.querySelector("#chat-form .send-button");
+      return {
+        coldStopMode: cold?.dataset?.stopMode || "",
+        coldClass: cold?.classList?.toString?.() || "",
+        coldDisabled: Boolean(cold?.disabled),
+        chatStopMode: chat?.dataset?.stopMode || "",
+        chatClass: chat?.classList?.toString?.() || "",
+        chatDisabled: Boolean(chat?.disabled),
+      };
+    };
     globalThis.__setProjectId = (projectId) => {
       activeProjectId = projectId;
       resetProjectClientState();
@@ -1799,6 +1812,10 @@ async function testPlanRequestBlockedDuringActiveRun() {
 async function testPlanCardApproveReviseAndResend() {
   const app = loadAppContext();
   app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
     appState.research_session.latest_plan = {
       id: "P_ready",
       provider: "codex",
@@ -1815,7 +1832,7 @@ async function testPlanCardApproveReviseAndResend() {
   const html = app.run('framingMessageHtml(localMessages.find((message) => message.kind === "plan"))');
   assert.equal(html.includes("data-plan-approve"), true, "ready plan card should show approve action");
   assert.equal(html.includes("data-plan-revise"), true, "ready plan card should show revise action");
-  assert.equal(html.includes("data-project-launch"), false, "plan card must not show PROJECT.md launch action");
+  assert.equal(html.includes("data-project-launch"), false, "plan card should not show Start without a ready PROJECT.md");
 
   app.run('revisePlan("P_ready")');
   app.coldEditor.value = "Make it more conservative.";
@@ -1829,6 +1846,56 @@ async function testPlanCardApproveReviseAndResend() {
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan/approve", "approve should call the plan approve endpoint");
   assert.equal(app.context.__apiCalls[0].body.planId, "P_ready");
   assert.equal(app.run('isPlanComposerMode()'), false, "approving a plan should return the composer to chat mode");
+}
+
+async function testPlanCardShowsLaunchWhenProjectReady() {
+  const app = loadAppContext();
+  app.run(`
+    appState.research_session.latest_plan = {
+      id: "P_ready",
+      provider: "codex",
+      model: "gpt-5.5",
+      status: "ready",
+      plan_text: "# Plan\\n\\n1. Start the research loop after review.",
+      steps: [],
+      created_at: "2026-06-26T10:00:00.000Z"
+    };
+    restoreFramingMessages();
+  `);
+  const launchState = app.run("__prelaunchState()");
+  assert.equal(launchState.showStart, true, `ready PROJECT.md should pass prelaunch Start gating: ${JSON.stringify(launchState)}`);
+  assert.equal(app.run('planCardHtml.toString().includes("projectDraftLaunchButtonHtml")'), true, "plan card implementation should render the PROJECT.md launch button");
+  const html = app.run('framingMessageHtml(localMessages.find((message) => message.kind === "plan"))');
+  assert.equal(html.includes("data-project-launch"), true, "ready PROJECT.md should expose Start autoresearch from the plan card");
+  assert.equal(html.includes("data-plan-approve"), true, "plan approval should remain available on the plan card");
+  assert.equal(html.includes("data-plan-revise"), true, "plan revision should remain available on the plan card");
+  await app.run("openLaunchDialog()");
+  assert.equal(app.launchDialog.open, true, "plan card Start autoresearch should use the existing launch dialog");
+
+  app.context.__apiCalls.length = 0;
+  app.run(`__setSession({ id: "done", session_id: "", status: "completed", mode: "plan", active_run: { running: false }, transcript: [] });`);
+  await app.run('approvePlan("P_ready")');
+  assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan/approve", "plan approval must stay on the plan approve endpoint");
+}
+
+function testPlanCardHidesLaunchAfterAutoresearchStarts() {
+  const app = loadAppContext();
+  app.run(`
+    appState.research_session.latest_plan = {
+      id: "P_ready",
+      provider: "codex",
+      model: "gpt-5.5",
+      status: "ready",
+      plan_text: "# Plan\\n\\n1. Start the research loop after review.",
+      steps: [],
+      created_at: "2026-06-26T10:00:00.000Z"
+    };
+    __setSession({ id: "g1", session_id: "sid", status: "completed", mode: "goal", loop_iteration: 1, transcript: [], latest_plan: appState.research_session.latest_plan });
+    restoreFramingMessages();
+  `);
+  const html = app.run('framingMessageHtml(localMessages.find((message) => message.kind === "plan"))');
+  assert.equal(html.includes("data-project-launch"), false, "plan card should hide Start after autoresearch starts");
+  assert.equal(html.includes("data-plan-approve"), true, "plan approval remains a plan-specific action");
 }
 
 async function testFreshRemoteProjectFirstMessageSends() {
@@ -2463,6 +2530,66 @@ async function testResearchEventStreamUpsertsTranscriptAndCompletes() {
   assertJsonEqual(state.overviewCalls, [true], "completion should request one silent overview reconciliation");
 }
 
+function testResearchEventStreamSyncsPlanArtifact() {
+  const app = loadAppContext();
+  const state = app.run(`
+    appState.latest_plan = {
+      type: "plan",
+      id: "P_old_global",
+      status: "ready",
+      plan_text: "# Old global plan"
+    };
+    appState.research_session.latest_plan = {
+      type: "plan",
+      id: "P_old_session",
+      status: "ready",
+      plan_text: "# Old session plan"
+    };
+    startResearchEventStream();
+    const first = globalThis.__eventSources.at(-1);
+    first.emit("research", {
+      schema_version: 1,
+      event_id: 1,
+      kind: "transcript",
+      project_id: "p1",
+      run_id: "s-plan",
+      backend: "codex",
+      mode: "plan",
+      status: "running",
+      session_patch: { status: "running", last_event_summary: "Planning." },
+      transcript_entry: {
+        id: "tp-stream",
+        role: "assistant",
+        kind: "plan",
+        title: "Plan",
+        content: "# Plan\\n\\nStreamed plan.",
+        raw_type: "ui.plan.artifact",
+        artifact: {
+          type: "plan",
+          id: "P_stream",
+          provider: "codex",
+          model: "gpt-5.5",
+          status: "ready",
+          plan_text: "# Plan\\n\\nStreamed plan.",
+          steps: []
+        }
+      }
+    });
+    const planMessage = localMessages.find((message) => message.kind === "plan" && message.artifact?.id === "P_stream");
+    const html = planMessage ? framingMessageHtml(planMessage) : "";
+    ({
+      latestId: appState.latest_plan?.id || "",
+      sessionLatestId: appState.research_session.latest_plan?.id || "",
+      messageStatus: planMessage?.artifact?.status || "",
+      htmlHasApprove: html.includes("data-plan-approve")
+    });
+  `);
+  assert.equal(state.latestId, "P_stream", "streamed plan artifact should update appState.latest_plan");
+  assert.equal(state.sessionLatestId, "P_stream", "streamed plan artifact should update the live session latest_plan");
+  assert.equal(state.messageStatus, "ready", "streamed plan artifact should upsert the visible plan message");
+  assert.equal(state.htmlHasApprove, true, "streamed ready plan should render plan-specific actions immediately");
+}
+
 function testResearchEventStreamProjectSwitchAndErrorFallback() {
   const app = loadAppContext();
   const state = app.run(`
@@ -3039,8 +3166,12 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(html.includes("trial-report-card is-running"), true, "running trial panel should use the standard trial report card layout");
   assert.equal(html.includes("Pause after current turn"), true, "running trial panel should expose a loop pause button");
   assert.equal(html.includes("data-pause-autoresearch"), true, "contextual pause button should pause the loop after the current turn");
-  assert.equal(html.includes("Stop current run"), true, "running trial panel should expose a contextual stop button");
-  assert.equal(html.includes("data-stop-current-run"), true, "contextual stop button should stop the active Codex process");
+  assert.equal(html.includes("Stop current run"), false, "running trial panel should not duplicate the composer stop control");
+  assert.equal(html.includes("data-stop-current-run"), false, "running trial panel should not render a separate stop control");
+  const actionButtons = app.run("__composerActionButtonsProbe()");
+  assert.equal(actionButtons.coldStopMode, "true", "empty autoresearch composer should turn the send button into stop");
+  assert.equal(actionButtons.coldClass.includes("is-stop-mode"), true, "composer stop affordance should use stop-mode styling");
+  assert.equal(actionButtons.coldDisabled, false, "composer stop affordance should remain clickable while the run is active");
   assert.equal(html.includes("trial-report-control-actions"), true, "running trial controls should use the standard trial action row");
   assert.equal(html.includes("Live trial activity"), true, "running trial event details should be folded under the standard trial card");
   assert.equal(html.includes("data-resume-autoresearch"), false, "running trial panel should not duplicate resume controls");
@@ -4032,6 +4163,15 @@ function testChatRunThinkingUsesLiveStatus() {
         status_label: "Codex is working"
       },
       transcript: [
+        { id: "tn1", role: "assistant", kind: "assistant", raw_type: "thread/settings/updated", content: "thread/settings/updated 019f1203-693c-7312-923f-e42bca2d2e00 /tmp/project never user readOnly True gpt-5.5 openai high", created_at: "2026-06-17T10:00:00.500Z" },
+        { id: "tn2", role: "assistant", kind: "assistant", raw_type: "thread/status/changed", content: "thread/status/changed 019f1203-693c-7312-923f-e42bca2d2e00 active", created_at: "2026-06-17T10:00:00.700Z" },
+        { id: "tn3", role: "assistant", kind: "assistant", raw_type: "mcpServer/startupStatus/updated", content: "mcpServer/startupStatus/updated codex_apps ready", created_at: "2026-06-17T10:00:00.900Z" },
+        { id: "tn4", role: "assistant", kind: "assistant", raw_type: "remoteControl/status/changed", content: "remoteControl/status/changed disabled Mac.local 66182b41-c2ff-49c3-8778-894df1788109", created_at: "2026-06-17T10:00:01.000Z" },
+        { id: "tn5", role: "assistant", kind: "assistant", raw_type: "event", content: "019f121a-f385-7541-98e0-3ef965165505 019f121a-f385-7541-98e0-3ef965165505 False openai 1782715184 1782715184 idle /Users/yihong/.codex/sessions/2026/06/29/rollout.jsonl", created_at: "2026-06-17T10:00:01.100Z" },
+        { id: "tn6", role: "assistant", kind: "assistant", raw_type: "event", content: "019f121a-f445-77e0-b818-e36c876eee50 notLoaded inProgress", created_at: "2026-06-17T10:00:01.200Z" },
+        { id: "tn7", role: "assistant", kind: "assistant", raw_type: "item/started", content: "Plan only. Do not implement.\\n\\nUser request:\\nhi\\n\\nAuthoritative UI conversation history for this chat turn:", created_at: "2026-06-17T10:00:01.300Z" },
+        { id: "tn8", role: "assistant", kind: "assistant", raw_type: "item/completed", content: "Plan only. Do not implement.\\n\\nUser request:\\nhi\\n\\nUse this history as the current UI truth for this chat turn.", created_at: "2026-06-17T10:00:01.400Z" },
+        { id: "tn9", role: "assistant", kind: "assistant", raw_type: "turn/completed", content: "turn/completed\\n019f121a-f385-7541-98e0-3ef965165505\\n019f121a-f445-77e0-b818-e36c876eee50\\nnotLoaded\\ncompleted", created_at: "2026-06-17T10:00:01.450Z" },
         { id: "tr0", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Update: Preparing the current project context.", created_at: "2026-06-17T10:00:01.500Z" },
         { id: "tr1", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Checking the selected trial boundary.", created_at: "2026-06-17T10:00:02.000Z" },
         { id: "tr2", role: "assistant", kind: "assistant", raw_type: "item.completed", content: "Comparing the manuscript title against the current story logic.", created_at: "2026-06-17T10:00:02.500Z" },
@@ -4040,15 +4180,36 @@ function testChatRunThinkingUsesLiveStatus() {
     });
   `);
   const html = app.run("__thinkingProbe()");
+  const transcriptText = app.run("sessionTranscriptEntries().map((entry) => entry.content).join('\\n')");
+  assert.equal(transcriptText.includes("thread/settings/updated"), false, "stored transcript should filter Codex thread settings lifecycle events");
+  assert.equal(transcriptText.includes("thread/status/changed"), false, "stored transcript should filter Codex thread status lifecycle events");
+  assert.equal(transcriptText.includes("mcpServer/startupStatus/updated"), false, "stored transcript should filter Codex MCP startup lifecycle events");
+  assert.equal(transcriptText.includes("remoteControl/status/changed"), false, "stored transcript should filter Codex remote-control lifecycle events");
+  assert.equal(transcriptText.includes("/.codex/sessions/"), false, "stored transcript should filter Codex thread ACK payloads");
+  assert.equal(transcriptText.includes("notLoaded inProgress"), false, "stored transcript should filter Codex turn ACK payloads");
+  assert.equal(transcriptText.includes("Plan only. Do not implement"), false, "stored transcript should filter hidden Codex prompt lifecycle items");
+  assert.equal(transcriptText.includes("turn/completed"), false, "stored transcript should filter Codex turn completion lifecycle events");
   assert.equal(html.includes("run-live-status"), true, "running chat sessions should use the lightweight live status surface");
+  assert.equal(html.includes("thread/settings/updated"), false, "Codex thread settings lifecycle events should not render in the running UI");
+  assert.equal(html.includes("thread/status/changed"), false, "Codex thread status lifecycle events should not render in the running UI");
+  assert.equal(html.includes("mcpServer/startupStatus/updated"), false, "Codex MCP startup lifecycle events should not render in the running UI");
+  assert.equal(html.includes("remoteControl/status/changed"), false, "Codex remote-control lifecycle events should not render in the running UI");
+  assert.equal(html.includes("/.codex/sessions/"), false, "Codex thread ACK payloads should not render in the running UI");
+  assert.equal(html.includes("notLoaded inProgress"), false, "Codex turn ACK payloads should not render in the running UI");
+  assert.equal(html.includes("Plan only. Do not implement"), false, "Codex hidden prompt lifecycle items should not render in the running UI");
+  assert.equal(html.includes("turn/completed"), false, "Codex turn completion lifecycle events should not render in the running UI");
   assert.equal(html.includes("Codex is working"), false, "running chat status should not render the verbose active run label");
   assert.equal(html.includes("Working for"), true, "running chat status should show elapsed running time");
   assert.equal(html.includes("Run activity"), true, "running chat sessions should keep raw events folded under run activity");
   assert.equal(html.includes("Current run activity"), false, "running chat sessions should not show the legacy current-run activity panel");
   assert.equal(html.includes("Pause after current turn"), false, "running chat sessions should not show autoresearch loop pause");
   assert.equal(html.includes("data-pause-autoresearch"), false, "chat runs do not have an autoresearch next turn to pause");
-  assert.equal(html.includes("Stop current run"), true, "running chat sessions should expose a current-run stop control");
-  assert.equal(html.includes("data-stop-current-run"), true, "current-run stop must terminate the active process");
+  assert.equal(html.includes("Stop current run"), false, "running chat sessions should not duplicate the composer stop control");
+  assert.equal(html.includes("data-stop-current-run"), false, "running chat sessions should not render a separate stop control");
+  const actionButtons = app.run("__composerActionButtonsProbe()");
+  assert.equal(actionButtons.chatStopMode, "true", "empty chat composer should turn the send button into stop");
+  assert.equal(actionButtons.chatClass.includes("is-stop-mode"), true, "chat composer stop affordance should use stop-mode styling");
+  assert.equal(actionButtons.chatDisabled, false, "chat composer stop affordance should remain clickable while the run is active");
   assert.equal(html.includes("Update: Comparing the manuscript title against the current story logic."), false, "chat run status should not duplicate updates as a prefixed summary");
   const visibleUpdates = html.match(/<div class="run-live-updates"[\s\S]*?<\/div>/)?.[0] || "";
   assert.equal(visibleUpdates.includes("Preparing the current project context."), true, "chat run should show assistant updates even when the raw transcript used an Update prefix");
@@ -4066,6 +4227,14 @@ function testChatRunThinkingUsesLiveStatus() {
   `);
   assert.match(expandedHtml, /data-run-activity-details="[^"]+" open/, "run activity should stay expanded across re-render");
   assert.equal(expandedHtml.includes("git diff -- PROJECT.md"), true, "folded run activity should still include raw command details");
+  assert.equal(expandedHtml.includes("thread/settings/updated"), false, "folded run activity should hide Codex thread settings lifecycle events");
+  assert.equal(expandedHtml.includes("thread/status/changed"), false, "folded run activity should hide Codex thread status lifecycle events");
+  assert.equal(expandedHtml.includes("mcpServer/startupStatus/updated"), false, "folded run activity should hide Codex MCP startup lifecycle events");
+  assert.equal(expandedHtml.includes("remoteControl/status/changed"), false, "folded run activity should hide Codex remote-control lifecycle events");
+  assert.equal(expandedHtml.includes("/.codex/sessions/"), false, "folded run activity should hide Codex thread ACK payloads");
+  assert.equal(expandedHtml.includes("notLoaded inProgress"), false, "folded run activity should hide Codex turn ACK payloads");
+  assert.equal(expandedHtml.includes("Plan only. Do not implement"), false, "folded run activity should hide Codex hidden prompt lifecycle items");
+  assert.equal(expandedHtml.includes("turn/completed"), false, "folded run activity should hide Codex turn completion lifecycle events");
 }
 
 function testChatRunCommandOnlyKeepsRawCommandFolded() {
@@ -4517,7 +4686,12 @@ function testComposerPlaceholderBecomesGeneralAfterLaunch() {
     });
   `);
   const framingPlaceholder = app.run("coldComposerPlaceholder(true)");
-  assert.equal(framingPlaceholder.includes("PROJECT.md"), true, "prelaunch framing placeholder should mention PROJECT.md");
+  assert.equal(framingPlaceholder.includes("PROJECT.md"), false, "prelaunch framing placeholder should not sound like a file-editing command");
+  assert.equal(
+    framingPlaceholder,
+    "Refine the research direction, scope, venue, or constraints before autoresearch starts...",
+    "prelaunch framing placeholder should describe how to guide autoresearch",
+  );
   app.run(`
     __setSession({
       id: "s1",
@@ -4532,7 +4706,11 @@ function testComposerPlaceholderBecomesGeneralAfterLaunch() {
   `);
   const launchedPlaceholder = app.run("coldComposerPlaceholder(true)");
   assert.equal(launchedPlaceholder.includes("PROJECT.md"), false, "launched placeholder should not be limited to PROJECT.md edits");
-  assert.equal(launchedPlaceholder, "Message the research agent...", "launched placeholder should stay concise");
+  assert.equal(
+    launchedPlaceholder,
+    "Steer the research, add constraints, answer questions, or ask for status...",
+    "launched placeholder should describe follow-up steering options",
+  );
 }
 
 function testSettingsRenderPreservesComposerDraft() {
@@ -7016,6 +7194,8 @@ await testPlanChipCanReturnToChat();
 await testTypedPlanSlashIsConvertedLocally();
 await testPlanRequestBlockedDuringActiveRun();
 await testPlanCardApproveReviseAndResend();
+await testPlanCardShowsLaunchWhenProjectReady();
+testPlanCardHidesLaunchAfterAutoresearchStarts();
 await testFreshRemoteProjectFirstMessageSends();
 await testFreshRemoteProjectStaleRunningSnapshotStillSends();
 testPrestartPendingExpectedTrialDoesNotShowAutoresearchPanel();
@@ -7041,6 +7221,7 @@ testStaleOverviewDoesNotSwallowPendingUser();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 testClaudeResultSuccessRecoversAssistantReply();
 await testResearchEventStreamUpsertsTranscriptAndCompletes();
+testResearchEventStreamSyncsPlanArtifact();
 testResearchEventStreamProjectSwitchAndErrorFallback();
 testTranscriptEntriesDoNotExposeEdit();
 await testEditTruncatesLaterConversationBeforeResend();
@@ -7140,3 +7321,4 @@ testSettingsDialogResizeHandlePersistsSize();
 await testManuscriptPanelRendersPaperFiguresTablesAndTraceability();
 
 console.log("UI flow test passed.");
+process.exit(0);
