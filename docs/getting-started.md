@@ -4,15 +4,19 @@ Start here if you want to use CoAutoResearch from a local machine.
 
 ## Quick Start
 
-Open the dashboard:
+Open the dashboard from any folder:
 
 ```bash
 npx --yes co-auto-research ui
 ```
 
-This command downloads the CLI if needed, starts the local UI, and opens it in
-your browser. Create projects, attach files, revise framing, and start
-autoresearch from the UI.
+No repository clone is needed for this path. The command downloads the CLI if
+needed, starts the local UI, and opens it in your browser. If you run it from
+inside a cloned CoAutoResearch checkout, npm resolves that local checkout
+instead.
+
+Create projects, attach files, revise framing, and start autoresearch from the
+UI.
 
 On first launch, the dashboard checks Codex and Claude Code readiness before it
 opens project creation. Projects can still be created before runtime setup is

@@ -22,14 +22,18 @@ research trajectory you can actually use.
 
 ## Quick Start
 
-Open the dashboard:
+Open the dashboard from any folder:
 
 ```bash
 npx --yes co-auto-research ui
 ```
 
-This starts the local dashboard and opens it in your browser. Create projects,
-attach files, revise framing, and start autoresearch from the UI.
+No repository clone is needed for this path. It starts the local dashboard and
+opens it in your browser. If you run it from inside a cloned CoAutoResearch
+checkout, npm resolves that local checkout instead.
+
+Create projects, attach files, revise framing, and start autoresearch from the
+UI.
 
 For repeated use, install once with `npm install -g co-auto-research`, then run
 `co-auto-research ui`.

@@ -38,15 +38,21 @@ Full history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Quick start
 
+From any folder, run the published CLI without installing it:
+
 ```bash
 npx --yes co-auto-research ui
 ```
 
-This downloads the CLI if needed, starts a local dashboard, and opens it in your
-browser. Click **+** in the sidebar to create a project, then describe where your
-research should begin. Attach local files with the composer `+` button — they're
-copied into your project's `resources/user_input/attachments/` so the agent can
-cite them later.
+No repository clone is needed for this path. It downloads the CLI if needed,
+starts a local dashboard, and opens it in your browser. If you run the same
+`npx` command from inside a cloned CoAutoResearch checkout, npm resolves that
+local checkout instead.
+
+Click **+** in the sidebar to create a project, then describe where your research
+should begin. Attach local files with the composer `+` button — they're copied
+into your project's `resources/user_input/attachments/` so the agent can cite
+them later.
 
 On first launch, the dashboard checks Codex and Claude Code readiness before it
 opens project creation. You can still create a project before runtime setup is
