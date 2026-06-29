@@ -362,9 +362,10 @@ final pass. It must include target venue/audience/article type, organization
 rationale, core story, architecture overview/table of contents, manuscript
 architecture in target-venue reading order, compact reader-facing section
 briefs, local claim/evidence/result explanations, reader takeaways for inline
-figure/table/algorithm/dataset/benchmark/result blocks, reference/literature
-grounding plan, appendix/supplement plan, blocking missing evidence, required
-qualifications, provenance/audit index, deprecated ideas, and
+figure/table/algorithm/dataset/benchmark/result blocks, Markdown preview images
+for image-source figures, reference/literature grounding plan,
+appendix/supplement plan, blocking missing evidence, required qualifications,
+provenance/audit index, deprecated ideas, and
 submission-readiness summary.
 
 Do not use a separate claim/evidence map, `Figure Plan`, `Table Plan`, or
@@ -378,8 +379,9 @@ active claims presented as final while local manuscript sections still describe
 them as candidate, `Blocking Missing Evidence` containing real unresolved
 blockers, active artifacts only described in a back-matter plan,
 figures/tables/algorithms/results missing inline placement, captions or source
-paths, or wording such as "tentative until source-level evidence checks are
-completed" after evidence/final gates are claimed as pass.
+paths, image-source figures without inline Markdown preview images, or wording
+such as "tentative until source-level evidence checks are completed" after
+evidence/final gates are claimed as pass.
 
 Before marking any gate as `pass`, read `instructions/reviewers/REVIEW_TAXONOMY.md`. Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results and require `continue` unless the relevant reviewer standard is fully satisfied.
 

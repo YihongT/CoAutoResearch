@@ -61,12 +61,13 @@ artifact traceable, caption precise, labels readable, and target-audience fit
 checked. The final blueprint must also be self-contained for figure/table status
 and rationale in the exact manuscript location where each display belongs.
 Candidate assets, unresolved display inventory, missing captions, missing
-source artifacts, display specs that only live in `FIGURE_SPECS.md`, active
-figures/tables that only appear in a back-matter plan, active tables that are
-only column/row/comparison specs or source links rather than publication-ready
-inline tables, missing local placement, missing result mapping, missing
-target-venue rationale, stale bundle notes, or "acceptable for now" displays
-require `Decision: continue`.
+source artifacts, image-source figures without a Markdown preview image in the
+inline BLUEPRINT.md figure block, display specs that only live in
+`FIGURE_SPECS.md`, active figures/tables that only appear in a back-matter plan,
+active tables that are only column/row/comparison specs or source links rather
+than publication-ready inline tables, missing local placement, missing result
+mapping, missing target-venue rationale, stale bundle notes, or "acceptable for
+now" displays require `Decision: continue`.
 
 ## Output Schema
 

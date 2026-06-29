@@ -756,14 +756,60 @@ function setHiddenProjectDraft(text) {
   updateProjectDraftPreview();
 }
 
-function markdownLinkHtml(label, href) {
+const MARKDOWN_IMAGE_SUFFIXES = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"]);
+
+function normalizeMarkdownPath(path) {
+  const parts = [];
+  for (const part of String(path || "").replace(/\\/g, "/").split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (!parts.length) return "";
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join("/");
+}
+
+function markdownBaseDir(path) {
+  const value = repoRelativePath(path);
+  const index = value.lastIndexOf("/");
+  return index >= 0 ? value.slice(0, index) : "";
+}
+
+function markdownFilePath(target, options = {}) {
+  const raw = repoRelativePath(target);
+  if (!raw || raw.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("#")) return raw;
+  if (/^(resources|research_trajectory|manuscript|workspace|archive|instructions|templates|ui|data|analysis)\//.test(raw)) {
+    return normalizeMarkdownPath(raw);
+  }
+  const baseDir = markdownBaseDir(options.basePath || "");
+  return normalizeMarkdownPath(baseDir ? `${baseDir}/${raw}` : raw);
+}
+
+function markdownImageHtml(label, href, options = {}) {
+  const text = String(label || "").trim() || "Image";
+  const target = String(href || "").trim();
+  if (!target) return escapeHtml(text);
+  if (/^https?:\/\//i.test(target)) {
+    return `<img class="markdown-image-preview" src="${escapeHtml(target)}" alt="${escapeHtml(text)}" loading="lazy">`;
+  }
+  const path = markdownFilePath(target, options);
+  if (path && !path.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/i.test(path) && MARKDOWN_IMAGE_SUFFIXES.has(extension(path))) {
+    return `<img class="markdown-image-preview" src="${escapeHtml(rawFileUrl(path))}" alt="${escapeHtml(text)}" loading="lazy">`;
+  }
+  return `!${markdownLinkHtml(text, target, options)}`;
+}
+
+function markdownLinkHtml(label, href, options = {}) {
   const text = String(label || "").trim();
   const target = String(href || "").trim();
   if (!text || !target) return escapeHtml(text || target);
   if (/^(https?:\/\/|mailto:)/i.test(target)) {
     return `<a href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
   }
-  const path = repoRelativePath(target);
+  const path = markdownFilePath(target, options);
   if (path && !path.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/i.test(path)) {
     return markdownFileButtonHtml(path, text);
   }
@@ -786,9 +832,10 @@ function markdownCodeHtml(value) {
   return `<code>${escapeHtml(text)}</code>`;
 }
 
-function inlineMarkup(text) {
+function inlineMarkup(text, options = {}) {
   return escapeHtml(text)
-    .replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, label, href) => markdownLinkHtml(label, href))
+    .replaceAll(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, label, href) => markdownImageHtml(label, href, options))
+    .replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_, label, href) => markdownLinkHtml(label, href, options))
     .replaceAll(/`([^`]+)`/g, (_, value) => markdownCodeHtml(value))
     .replaceAll(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
@@ -819,7 +866,7 @@ function markdownToHtml(text, options = {}) {
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
-    html.push(`<p>${inlineMarkup(paragraph.join(" "))}</p>`);
+    html.push(`<p>${inlineMarkup(paragraph.join(" "), options)}</p>`);
     paragraph = [];
   };
   const flushList = () => {
@@ -829,17 +876,17 @@ function markdownToHtml(text, options = {}) {
       const startAttr = start === 1 ? "" : ` start="${escapeHtml(start)}"`;
       html.push(`<ol class="is-explicit-markers"${startAttr}>${list.map((item) => {
         const marker = Math.max(1, Number(item.marker || 1));
-        return `<li value="${escapeHtml(marker)}" data-marker="${escapeHtml(marker)}">${inlineMarkup(item.text)}</li>`;
+        return `<li value="${escapeHtml(marker)}" data-marker="${escapeHtml(marker)}">${inlineMarkup(item.text, options)}</li>`;
       }).join("")}</ol>`);
     } else {
-      html.push(`<ul>${list.map((item) => `<li>${inlineMarkup(item.text)}</li>`).join("")}</ul>`);
+      html.push(`<ul>${list.map((item) => `<li>${inlineMarkup(item.text, options)}</li>`).join("")}</ul>`);
     }
     list = [];
     listType = "ul";
   };
   const flushQuote = () => {
     if (!quote.length) return;
-    html.push(`<blockquote>${inlineMarkup(quote.join(" "))}</blockquote>`);
+    html.push(`<blockquote>${inlineMarkup(quote.join(" "), options)}</blockquote>`);
     quote = [];
   };
   const flushCode = () => {
@@ -867,7 +914,7 @@ function markdownToHtml(text, options = {}) {
       return "left";
     });
   const tableCellHtml = (cell, tag, align) =>
-    `<${tag}${align && align !== "left" ? ` style="text-align:${align}"` : ""}>${inlineMarkup(cell)}</${tag}>`;
+    `<${tag}${align && align !== "left" ? ` style="text-align:${align}"` : ""}>${inlineMarkup(cell, options)}</${tag}>`;
   const tableHtml = (rows, alignments) => {
     const [head, ...body] = rows;
     return `
@@ -952,7 +999,7 @@ function markdownToHtml(text, options = {}) {
         const id = count ? `${baseId}-${count + 1}` : baseId;
         idAttr = ` id="${escapeHtml(id)}"`;
       }
-      html.push(`<h${level}${idAttr}>${inlineMarkup(heading[2])}</h${level}>`);
+      html.push(`<h${level}${idAttr}>${inlineMarkup(heading[2], options)}</h${level}>`);
       continue;
     }
     const orderedItem = line.match(/^(\d{1,9})\.\s+(.+)$/);
@@ -7312,6 +7359,19 @@ function trialHeaderStatusLabel(iteration, trial) {
   return progressLabel || lifecycleLabel;
 }
 
+function trialWorkingOnText(trial) {
+  if (!String(trial?.plan_path || "").trim()) return "";
+  const objective = cleanText(trial?.objective, "");
+  if (!objective || /^objective\s+not\s+recorded\.?$/i.test(objective)) return "";
+  return compactText(objective.replace(/^[-*]\s+/, ""), 160);
+}
+
+function trialWorkingOnHtml(trial) {
+  const text = trialWorkingOnText(trial);
+  if (!text) return "";
+  return `<span class="trial-history-working-on" title="${escapeHtml(`Working on: ${text}`)}">Working on: ${escapeHtml(text)}</span>`;
+}
+
 function resetTrialStripToAuto(liveIteration = liveTrialStripIteration()) {
   trialStripScrollState = {
     ...trialStripScrollState,
@@ -7515,8 +7575,9 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
   const miniTrialIteration = miniTrialData?.iteration || activeTrial || 0;
   const miniTrialReport = miniTrialData?.report || null;
   const miniTrialLabel = miniTrialIteration ? trialHeaderStatusLabel(miniTrialIteration, miniTrialReport) : "Active";
+  const miniTrialWorkingOn = trialWorkingOnHtml(miniTrialReport);
   const kickerStatus = miniTrialIteration
-    ? `<span class="trial-history-kicker-status">Trial ${escapeHtml(miniTrialIteration)}: ${escapeHtml(miniTrialLabel)}</span>`
+    ? `<span class="trial-history-kicker-status"><span>Trial ${escapeHtml(miniTrialIteration)}: ${escapeHtml(miniTrialLabel)}</span>${miniTrialWorkingOn}</span>`
     : "";
   const collapsedCompleteBadge = collapsed ? autoresearchCompleteBadgeHtml() : "";
   const latestUpdate = latestTrialUpdateText(activeTrialData, runningTrialData);
@@ -8443,6 +8504,8 @@ const figureSpecFieldLabels = new Set([
   "Linked evidence",
   "Source trial",
   "Source artifact path",
+  "Source artifact or spec path",
+  "Preview image",
   "Existing source files",
   "Inclusion status",
   "Target-venue fit",
@@ -8517,7 +8580,7 @@ function figureImageGenerationAvailable() {
 }
 
 function isFigureImagePath(path) {
-  return [".png", ".jpg", ".jpeg", ".webp"].includes(extension(path));
+  return [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(extension(path));
 }
 
 function figureSourceImageHtml(path, title = "Figure image") {
@@ -9755,11 +9818,10 @@ function manuscriptOutlineHtml(manuscript) {
         </div>
       </div>
       <nav class="manuscript-outline-nav">
-        ${manuscriptOutlineGroupHtml("Overview", [
-          { href: "#manuscript-export", type: "Export", label: "Final bundles", meta: "Downloads" },
-          { href: "#manuscript-story-map", type: "Story", label: "Manuscript story map", meta: map.sections.length ? `${map.sections.length} sections` : "" },
-        ], { open: true })}
         ${manuscriptOutlineGroupHtml("Outline", sectionItems, { open: true })}
+        ${manuscriptOutlineGroupHtml("Manuscript", [
+          { href: "#manuscript-blueprint-section", type: "File", label: "Current manuscript file", meta: "BLUEPRINT.md" },
+        ], { open: true })}
         ${manuscriptOutlineGroupHtml("Figures", artifactItems("figure"))}
         ${manuscriptOutlineGroupHtml("Tables", artifactItems("table"))}
         ${manuscriptOutlineGroupHtml("Results / methods", methodItems)}
@@ -9785,7 +9847,9 @@ function renderManuscriptPanel() {
     `<div id="manuscript-audit-section">${contextCard("Audit / provenance", renderManuscriptAuditPanel(manuscript), "Secondary links and legacy indexes; not the primary reading path.", inlineOpenButton("manuscript/figures/FIGURE_SPECS.md", "Open specs"))}</div>`,
     `<div id="manuscript-references-section">${contextCard("References", renderManuscriptReferences(manuscript), "Resolved reference list for the current source candidate.", inlineOpenButton("manuscript/references.bib", "Open .bib"))}</div>`,
     `<div id="manuscript-missing-evidence-section">${contextCard("Missing evidence", list(manuscript.missing_evidence, "No evidence gaps recorded yet."))}</div>`,
-    `<div id="manuscript-blueprint-section">${contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", `<button class="secondary-button small-button" type="button" data-inline-fullscreen="manuscript/BLUEPRINT.md">Open latest manuscript</button>`)}</div>`,
+    `<div id="manuscript-blueprint-section">${contextCard("Current manuscript file", blueprintViewer, "Raw BLUEPRINT.md for editing and audit.", manuscriptActionsHtml([
+      `<button class="secondary-button small-button" type="button" data-download-single-file="${escapeHtml(LATEST_MANUSCRIPT_PATH)}">Download BLUEPRINT.md</button>`,
+    ]))}</div>`,
   ].join("");
   return `
     <section class="manuscript-layout">
@@ -9799,12 +9863,7 @@ function renderManuscriptPanel() {
 
 function renderManuscriptExportBar() {
   return `
-    <section class="manuscript-export-bar" id="manuscript-export" aria-label="Final result export">
-      <div class="manuscript-export-copy">
-        <strong>Export final results</strong>
-        <span>Clean final bundles without autoresearch trajectory.</span>
-        <p class="export-note">Markdown is one file. Packs add final referenced files; trajectory, runtime, archive, secrets, caches, and agent instructions stay out.</p>
-      </div>
+    <section class="manuscript-export-bar" id="manuscript-export" aria-label="Manuscript downloads">
       ${renderExportPanel()}
     </section>
   `;
@@ -9986,7 +10045,7 @@ function formatBytes(value) {
 }
 
 function exportKindLabel(kind) {
-  return kind === "final_project" ? "Final Project Pack" : "Blueprint Pack";
+  return kind === "final_project" ? "Clean Project Package" : "Paper-Writing Pack";
 }
 
 function exportJobTerminal(job) {
@@ -10091,10 +10150,27 @@ function renderExportPanel() {
   const busy = activeExportJob && !exportJobTerminal(activeExportJob);
   return `
     <div class="export-panel">
-      <div class="export-actions">
-        <button class="secondary-button" type="button" data-download-single-file="${escapeHtml(LATEST_MANUSCRIPT_PATH)}">Download BLUEPRINT.md</button>
-        <button class="secondary-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download blueprint pack</button>
-        <button class="secondary-button" type="button" data-export-kind="final_project" ${busy ? "disabled" : ""}>Download final project pack</button>
+      <div class="export-actions export-package-list">
+        <section class="export-package-option">
+          <div>
+            <header>
+              <strong>Paper-writing pack</strong>
+              <em>Best for GPT/Claude drafting</em>
+            </header>
+            <p>Includes BLUEPRINT.md, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets when available.</p>
+          </div>
+          <button class="secondary-button small-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download paper-writing pack</button>
+        </section>
+        <section class="export-package-option">
+          <div>
+            <header>
+              <strong>Clean project package</strong>
+              <em>Best for project handoff</em>
+            </header>
+            <p>Includes final-facing manuscript, workspace, resources, and generated outputs; excludes autoresearch logs, checkpoints, caches, and secrets.</p>
+          </div>
+          <button class="secondary-button small-button" type="button" data-export-kind="final_project" ${busy ? "disabled" : ""}>Download clean project package</button>
+        </section>
       </div>
       ${renderExportProgress(activeExportJob)}
     </div>
@@ -11477,7 +11553,7 @@ function inlineFileBodyHtml(payload, mode) {
     return `<iframe class="file-pdf-preview" src="${escapeHtml(url)}" title="${escapeHtml(path)}"></iframe>`;
   }
   if (kind === "markdown" && mode === "rendered") {
-    return `<div class="markdown-preview inline-preview">${markdownToHtml(text)}</div>`;
+    return `<div class="markdown-preview inline-preview">${markdownToHtml(text, { basePath: path })}</div>`;
   }
   if (["json", "jsonl", "yaml", "xml"].includes(kind) && mode === "preview") {
     return `<pre class="file-code-preview"><code>${escapeHtml(structuredText(text, kind))}</code></pre>`;
@@ -11829,7 +11905,7 @@ function renderBlueprintInspector(payload) {
   inlineFileModes[path] = mode;
   const editableInSource = payload.editable && mode === "source";
   const renderedBody = payload.kind === "markdown" && mode === "rendered"
-    ? blueprintStructuredBodyHtml(manuscript) || `<div class="markdown-preview inline-preview blueprint-rendered">${markdownToHtml(payload.text || "", { headingAnchors: true })}</div>`
+    ? blueprintStructuredBodyHtml(manuscript) || `<div class="markdown-preview inline-preview blueprint-rendered">${markdownToHtml(payload.text || "", { headingAnchors: true, basePath: path })}</div>`
     : inlineFileBodyHtml(payload, mode);
   return `
     <div class="blueprint-inspector">

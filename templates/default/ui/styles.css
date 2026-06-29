@@ -688,6 +688,16 @@ h3 {
   font-size: 12px;
 }
 
+.markdown-image-preview {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 10px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
 .markdown-preview pre {
   overflow: auto;
   padding: 12px;
@@ -2593,9 +2603,9 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
     justify-content: flex-start;
   }
 
-  .manuscript-export-copy .export-note {
-    max-width: none;
-    text-align: left;
+  .export-package-option {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
   }
 
   .architecture-field-list {
@@ -2645,11 +2655,7 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
   position: sticky;
   top: 10px;
   z-index: 30;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 14px;
-  align-items: start;
+  display: block;
   padding: 12px 14px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -2660,40 +2666,10 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
     0 14px 34px rgba(17, 24, 39, 0.16);
 }
 
-.manuscript-export-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  flex: 1 1 360px;
-  max-width: 680px;
-}
-
-.manuscript-export-copy strong {
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.25;
-}
-
-.manuscript-export-copy span {
-  color: var(--soft);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 .manuscript-export-bar .export-panel {
-  justify-items: end;
+  width: 100%;
+  justify-items: stretch;
   min-width: 0;
-  flex: 0 1 auto;
-}
-
-.manuscript-export-bar .export-actions {
-  justify-content: flex-end;
-}
-
-.manuscript-export-copy .export-note {
-  max-width: 640px;
-  padding-top: 4px;
-  text-align: left;
 }
 
 .manuscript-export-bar .export-job {
@@ -2713,7 +2689,61 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
   align-items: center;
 }
 
-.export-note,
+.export-actions.export-package-list {
+  display: grid;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.export-package-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.export-package-option:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.export-package-option header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.export-package-option strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.export-package-option em,
+.export-package-option p {
+  margin: 0;
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.export-package-option em {
+  font-style: normal;
+}
+
+.export-package-option p {
+  max-width: 520px;
+}
+
+.export-package-option .small-button {
+  justify-self: end;
+  white-space: nowrap;
+}
+
 .export-muted {
   margin: 0;
   color: var(--soft);
@@ -10419,6 +10449,14 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   flex: 1 1 auto;
 }
 
+.trial-history-kicker-status,
+.trial-history-working-on {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .trial-history-head .small-button {
   flex: 0 0 auto;
 }
@@ -15706,6 +15744,7 @@ html[data-theme] .trial-history-kicker {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  max-width: 100%;
   width: fit-content;
   margin-bottom: 14px;
   font-family: var(--mono);
@@ -15793,11 +15832,25 @@ html[data-theme] .trial-history-kicker-status {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  max-width: 100%;
   color: color-mix(in srgb, var(--soft) 88%, var(--ink));
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: none;
+}
+html[data-theme] .trial-history-kicker-status > span:first-child {
+  flex: 0 0 auto;
+}
+html[data-theme] .trial-history-working-on {
+  display: inline-block;
+  max-width: min(520px, 48vw);
+  color: color-mix(in srgb, var(--soft) 92%, var(--ink));
+}
+html[data-theme] .trial-history-working-on::before {
+  content: "·";
+  margin-right: 10px;
+  color: color-mix(in srgb, var(--soft) 72%, transparent);
 }
 html[data-theme] .trial-history-kicker-status::before {
   content: "";

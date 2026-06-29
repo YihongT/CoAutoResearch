@@ -81,7 +81,8 @@ Check:
 - every active figure is placed inline in `Manuscript Architecture` and has a
   title, placement, inclusion status, purpose/result role, content and panel
   layout, visual style, caption draft/current caption, source artifact or spec
-  path, result shown or conceptual basis, provenance links, target-venue fit
+  path, preview image using Markdown image syntax when the source is an image
+  file, result shown or conceptual basis, provenance links, target-venue fit
   rationale, and remaining blocker value.
 - every active table is placed inline in `Manuscript Architecture` and has a
   title, placement, inclusion status, purpose/result role, publication-ready

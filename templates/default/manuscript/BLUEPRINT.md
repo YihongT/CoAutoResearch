@@ -142,6 +142,10 @@ Caption draft or current caption:
 
 Source artifact or spec path:
 
+Preview image:
+
+<Markdown image preview if the source is an image file, e.g. `![Figure F000000: <title>](figures/<file>.png)`; otherwise `none`.>
+
 Result shown or conceptual basis:
 
 Provenance links:

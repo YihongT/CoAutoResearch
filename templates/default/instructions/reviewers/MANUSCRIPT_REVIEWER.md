@@ -64,9 +64,10 @@ target-venue section titles/order/depth, abstract plan when applicable,
 compact reader-facing section briefs, paragraph-level writing plans, local
 claim/evidence/result explanations, inline figure/table/algorithm/dataset/
 benchmark/result blocks with reader takeaways, captions, publication-ready
-inline table bodies for every active table, references, appendix/supplement
-posture, blocking missing evidence, required qualifications, provenance/audit
-index, and submission-readiness must all be explicit and mutually consistent.
+inline table bodies for every active table, Markdown preview images for
+image-source figures, references, appendix/supplement posture, blocking missing
+evidence, required qualifications, provenance/audit index, and
+submission-readiness must all be explicit and mutually consistent.
 
 Each active titled unit must specify the target-venue role, a section brief
 that reads as finished-results paper-map prose, reader question answered, local
@@ -77,6 +78,12 @@ relevant local evidence/result/artifact, display/method/result block, citation
 posture, qualification, and transition job. Generic rows such as "discuss
 results", unplaced figures/tables/algorithms/results, or sections that only
 point to claim/evidence IDs require `Decision: continue`.
+
+Active figure blocks must include the figure's placement, caption, source
+artifact/spec path, and a `Preview image` Markdown image when the source artifact
+is an image file. If the image exists but the blueprint only points to a side
+spec or path without a visible preview in the inline figure block, use
+`Decision: continue`.
 
 Separate claim/evidence maps, `Figure Plan`, `Table Plan`, or
 `manuscript/figures/FIGURE_SPECS.md` entries may support provenance, but they

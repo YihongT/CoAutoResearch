@@ -1315,8 +1315,8 @@ function loadAppContext() {
     globalThis.__beginExportFlowProbe = async (kind, estimate, startJob = null) => {
       globalThis.__apiHandler = async (endpoint, body) => {
         if (endpoint.startsWith("/api/export/estimate")) return { ok: true, ...estimate };
-        if (endpoint === "/api/export/start") return { ok: true, export: startJob || { id: "ex1", kind: body.kind, label: "Blueprint Pack", status: "packaging", phase: "packaging", total_bytes: estimate.total_bytes || 0, bytes_done: 0, file_count: estimate.file_count || 0, files_done: 0 } };
-        if (endpoint.startsWith("/api/export/status")) return { ok: true, export: startJob || { id: "ex1", kind, label: "Blueprint Pack", status: "ready", phase: "ready", total_bytes: estimate.total_bytes || 0, bytes_done: estimate.total_bytes || 0, file_count: estimate.file_count || 0, files_done: estimate.file_count || 0, download_url: "/api/export/download?id=ex1" } };
+        if (endpoint === "/api/export/start") return { ok: true, export: startJob || { id: "ex1", kind: body.kind, label: "Paper-Writing Pack", status: "packaging", phase: "packaging", total_bytes: estimate.total_bytes || 0, bytes_done: 0, file_count: estimate.file_count || 0, files_done: 0 } };
+        if (endpoint.startsWith("/api/export/status")) return { ok: true, export: startJob || { id: "ex1", kind, label: "Paper-Writing Pack", status: "ready", phase: "ready", total_bytes: estimate.total_bytes || 0, bytes_done: estimate.total_bytes || 0, file_count: estimate.file_count || 0, files_done: estimate.file_count || 0, download_url: "/api/export/download?id=ex1" } };
         return { ok: true };
       };
       await beginExportFlow(kind);
@@ -2918,6 +2918,14 @@ function testMarkdownOrderedListsPreserveExplicitNumbers() {
   assert.equal(jump.includes('<li value="8" data-marker="8">Eight</li>'), true, "subsequent explicit marker should be preserved");
 }
 
+function testMarkdownImagesResolveRelativeToSourceFile() {
+  const app = loadAppContext();
+  const html = app.run('markdownToHtml("Preview image:\\n\\n![Figure F000001](figures/generated/calibration.png)", { basePath: "manuscript/BLUEPRINT.md" })');
+  assert.equal(html.includes('class="markdown-image-preview"'), true, "markdown images should render as image previews");
+  assert.equal(html.includes('src="/api/file/raw?path=manuscript%2Ffigures%2Fgenerated%2Fcalibration.png'), true, "relative blueprint images should resolve under manuscript/");
+  assert.equal(html.includes('data-inline-fullscreen="figures/generated/calibration.png"'), false, "markdown image syntax should not degrade into a file button");
+}
+
 function testMessagesExposeCopyButtons() {
   const app = loadAppContext();
   app.run(`
@@ -3227,8 +3235,10 @@ function testAutoresearchPanelCollapsePersists() {
       iteration: 18,
       status: "reported",
       is_closed: true,
+      plan_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/PLAN.md",
       report_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/REPORT.md",
       review_path: "research_trajectory/trials/000018_best_effect_analysis_method_design/reviews/FINAL_GATE_REVIEW.md",
+      objective: "Compare candidate effect-analysis designs before the final gate.",
       report_summary: "Gate complete."
     }];
     __setSession({
@@ -3256,6 +3266,7 @@ function testAutoresearchPanelCollapsePersists() {
   assert.equal(initial.html.includes("trial-history-micro-spinner"), false, "completed autoresearch header should not animate");
   assert.equal(initial.html.includes("trial-history-kicker-status"), true, "trial history header should render inline trial status");
   assert.equal(initial.html.includes("Trial 18: Done"), true, "trial status should sit beside the autoresearch label");
+  assert.equal(initial.html.includes("Working on: Compare candidate effect-analysis designs before the final gate."), true, "trial header should include the plan objective when PLAN.md exists");
   assert.equal(initial.html.includes("trial-history-collapsed-summary"), false, "collapsed state should not render the old compact summary row");
   assert.equal(initial.html.includes("trial-history-latest\">Latest:"), false, "collapsed state should not render the redundant latest artifact line");
   assert.equal(initial.html.includes("trial-history-mini-axis"), false, "collapsed state should not render a right-side mini trial axis");
@@ -6224,23 +6235,23 @@ async function testCopyTextHelperWritesClipboard() {
 async function testExportBundleFlow() {
   const base = loadAppContext();
   const panel = base.run("__renderExportPanelProbe(null)");
-  assert.equal(panel.includes("Download BLUEPRINT.md"), true);
-  assert.equal(panel.includes('data-download-single-file="manuscript/BLUEPRINT.md"'), true);
-  assert.equal(panel.includes("Download blueprint pack"), true);
-  assert.equal(panel.includes("Download final project pack"), true);
-  const singleFileHref = base.run(`
-    downloadSingleFile("manuscript/BLUEPRINT.md");
-    window.location.href;
-  `);
-  assert.equal(singleFileHref.includes("/api/file/raw?"), true);
-  assert.equal(singleFileHref.includes("path=manuscript%2FBLUEPRINT.md"), true);
-  assert.equal(singleFileHref.includes("project=p1"), true);
-  assert.equal(singleFileHref.includes("download=1"), true);
+  assert.equal(panel.includes("Download paper-writing pack"), true);
+  assert.equal(panel.includes('data-export-kind="blueprint"'), true);
+  assert.equal(panel.includes("Download clean project package"), true);
+  assert.equal(panel.includes('data-export-kind="final_project"'), true);
+  assert.equal(panel.includes("Best for GPT/Claude drafting"), true);
+  assert.equal(panel.includes("Best for project handoff"), true);
+  assert.equal(panel.includes('class="secondary-button small-button" type="button" data-export-kind="blueprint"'), true);
+  assert.equal(panel.includes('class="secondary-button small-button" type="button" data-export-kind="final_project"'), true);
+  assert.equal(panel.includes("Open BLUEPRINT.md"), false);
+  assert.equal(panel.includes("Paper-writing handoff"), false);
+  assert.equal(panel.includes("Download blueprint pack"), false);
+  assert.equal(panel.includes("Download final project pack"), false);
 
   const readyPanel = base.run(`__renderExportPanelProbe(${JSON.stringify({
     id: "ex_ready",
     kind: "blueprint",
-    label: "Blueprint Pack",
+    label: "Paper-Writing Pack",
     status: "ready",
     phase: "ready",
     total_bytes: 2048,
@@ -6255,7 +6266,7 @@ async function testExportBundleFlow() {
   const cancelledPanel = base.run(`__renderExportPanelProbe(${JSON.stringify({
     id: "ex_cancelled",
     kind: "final_project",
-    label: "Final Project Pack",
+    label: "Clean Project Package",
     status: "cancelled",
     phase: "cancelled",
     total_bytes: 4096,
@@ -6269,7 +6280,7 @@ async function testExportBundleFlow() {
   const under = loadAppContext();
   const underResult = await under.run(`__beginExportFlowProbe("blueprint", ${JSON.stringify({
     kind: "blueprint",
-    label: "Blueprint Pack",
+    label: "Paper-Writing Pack",
     total_bytes: 500000,
     file_count: 4,
     largest_files: [],
@@ -6281,7 +6292,7 @@ async function testExportBundleFlow() {
   })}, ${JSON.stringify({
     id: "ex_under",
     kind: "blueprint",
-    label: "Blueprint Pack",
+    label: "Paper-Writing Pack",
     status: "packaging",
     phase: "packaging",
     total_bytes: 500000,
@@ -6292,14 +6303,17 @@ async function testExportBundleFlow() {
   })})`);
   assert.equal(underResult.dialogOpen, false);
   assert.equal(underResult.calls.some((call) => call.endpoint.startsWith("/api/export/estimate")), true);
-  assert.equal(underResult.calls.some((call) => call.endpoint === "/api/export/start"), true);
+  assert.equal(underResult.calls.some((call) => call.endpoint === "/api/export/start" && call.body.kind === "blueprint"), true);
   assert.equal(underResult.activeExportJob.status, "packaging");
   assert.equal(underResult.panel.includes("BLUEPRINT.md"), true);
+  assert.equal(underResult.panel.includes('data-export-kind="blueprint" disabled'), true);
+  assert.equal(underResult.panel.includes('data-export-kind="final_project" disabled'), true);
+  assert.equal(underResult.panel.includes("Open BLUEPRINT.md"), false);
 
   const over = loadAppContext();
   const overEstimate = {
     kind: "final_project",
-    label: "Final Project Pack",
+    label: "Clean Project Package",
     total_bytes: 2 * 1024 * 1024 * 1024,
     file_count: 12,
     largest_files: [{ bundle_path: "workspace/results/model.bin", source_path: "workspace/results/model.bin", size: 1500000000 }],
@@ -6316,11 +6330,11 @@ async function testExportBundleFlow() {
   assert.equal(overResult.dialogSummary.includes("research_trajectory"), true);
   await over.run("confirmExportDialog()");
   const overCalls = over.run("globalThis.__apiCalls");
-  assert.equal(overCalls.some((call) => call.endpoint === "/api/export/start" && call.body.confirmed === true), true);
+  assert.equal(overCalls.some((call) => call.endpoint === "/api/export/start" && call.body.kind === "final_project" && call.body.confirmed === true), true);
 
   const download = loadAppContext();
   const href = download.run(`
-    activeExportJob = { id: "ex_dl", kind: "blueprint", label: "Blueprint Pack", status: "ready", phase: "ready", download_url: "/api/export/download?id=ex_dl" };
+    activeExportJob = { id: "ex_dl", kind: "blueprint", label: "Paper-Writing Pack", status: "ready", phase: "ready", download_url: "/api/export/download?id=ex_dl" };
     downloadExportJob("ex_dl");
     window.location.href;
   `);
@@ -6358,7 +6372,8 @@ function testBlueprintInspectorRendersSidebarForLatestManuscriptOnly() {
         "Placement: Section 2 paragraph P1.",
         "Inclusion status: active.",
         "Reader takeaway: The calibration map is the visual result for Section 2.",
-        "Source artifact or spec path: `manuscript/figures/calibration_map.pdf`"
+        "Source artifact or spec path: `manuscript/figures/calibration_map.pdf`",
+        "Preview image: none"
       ].join("\n")
     }, {
       title: "Table T000001: Evidence Matrix",
@@ -6619,6 +6634,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "Visual style: restrained.",
         "Caption draft or current caption: Calibration map caption.",
         "Source artifact or spec path: `manuscript/figures/calibration_map.pdf`",
+        "Preview image: none",
         "Result shown or conceptual basis: Evidence E1.",
         "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
         "Target-venue fit rationale: Fits a compact result-led display.",
@@ -6639,6 +6655,9 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "Visual style: restrained.",
         "Caption draft or current caption: Rendered image caption.",
         "Source artifact or spec path: `manuscript/figures/generated/rendered_image.png`",
+        "Preview image:",
+        "",
+        "![Figure F000002: Rendered Image](figures/generated/rendered_image.png)",
         "Result shown or conceptual basis: Evidence E2.",
         "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
         "Target-venue fit rationale: Fits an image-led display.",
@@ -6707,19 +6726,32 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("manuscript-outline-panel"), true, "manuscript panel should render a left outline panel");
   assert.equal(html.includes("manuscript-reader"), true, "manuscript panel should render a centered reader column");
   assert.equal(html.indexOf("manuscript-outline-panel") < html.indexOf("manuscript-reader"), true, "outline should render before the reader column");
-  assert.equal(html.includes('href="#manuscript-story-map"'), true, "outline should link to the story map");
+  assert.equal(html.includes('id="manuscript-story-map"'), true, "manuscript panel should still render the story map section");
   assert.equal(html.includes('href="#section-2-calibration-result"'), true, "outline should link to manuscript sections");
   assert.equal(html.includes('href="#table-t000001-evidence-matrix"'), true, "outline should link to table artifacts");
+  assert.equal(html.includes('href="#manuscript-blueprint-section"'), true, "outline should link to the current manuscript file");
   assert.equal(html.includes("manuscript-export-bar"), true);
+  assert.equal(html.includes("Paper-writing handoff"), false);
+  assert.equal(html.includes("Download paper-writing pack"), true);
+  assert.equal(html.includes("Download clean project package"), true);
+  assert.equal(html.includes("Best for GPT/Claude drafting"), true);
+  assert.equal(html.includes("Best for project handoff"), true);
+  assert.equal(html.includes("Open BLUEPRINT.md"), false);
   assert.equal(html.includes("Download BLUEPRINT.md"), true);
+  assert.equal(html.includes('data-inline-fullscreen="manuscript/BLUEPRINT.md"'), false);
   assert.equal(html.includes('data-download-single-file="manuscript/BLUEPRINT.md"'), true);
-  assert.equal(html.includes("Download blueprint pack"), true);
-  assert.equal(html.includes("Download final project pack"), true);
+  assert.equal(html.includes("<span>Manuscript</span>"), true);
+  assert.equal(html.includes("Current manuscript file"), true);
+  assert.equal(html.includes('href="#manuscript-export"'), false, "manuscript outline group should not link to the export package");
+  assert.equal(html.includes("<span>Overview</span>"), false);
+  assert.equal(html.includes("Export final results"), false);
+  assert.equal(html.includes("Download blueprint pack"), false);
+  assert.equal(html.includes("Download final project pack"), false);
   assert.equal(html.indexOf("manuscript-export-bar") < html.indexOf("context-card"), true, "export controls should render before manuscript context cards");
   assert.equal(
-    html.indexOf('class="export-note"') < html.indexOf('<div class="export-panel">'),
+    html.indexOf('<div class="export-panel">') < html.indexOf("Download paper-writing pack"),
     true,
-    "export explanatory note should live with the left-side copy, not under the right-side buttons"
+    "export panel should render the package choices directly"
   );
   assert.equal(html.includes("Manuscript story map"), true);
   assert.equal(html.includes("manuscript-story-map"), true);
@@ -6729,9 +6761,9 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("Perspective"), true);
   assert.equal(html.includes("Audit / provenance"), true);
   assert.equal(html.includes("Appendix / supplement"), true);
-  assert.equal(html.indexOf("manuscript-story-map") < html.indexOf("Appendix / supplement"), true, "story map should render before appendix and audit sections");
-  assert.equal(html.indexOf("Appendix / supplement") < html.indexOf("Audit / provenance"), true, "appendix should render before audit and provenance");
-  assert.equal(html.indexOf("manuscript-story-map") < html.indexOf("Audit / provenance"), true, "story map should render before audit and raw file sections");
+  assert.equal(html.indexOf('id="manuscript-story-section"') < html.indexOf('id="manuscript-appendix-section"'), true, "story map should render before appendix and audit sections");
+  assert.equal(html.indexOf('id="manuscript-appendix-section"') < html.indexOf('id="manuscript-audit-section"'), true, "appendix should render before audit and provenance");
+  assert.equal(html.indexOf('id="manuscript-story-section"') < html.indexOf('id="manuscript-audit-section"'), true, "story map should render before audit and raw file sections");
   assert.equal(html.includes("manuscript-abstract-card"), true);
   assert.equal(html.includes("architecture-field-list"), true);
   assert.equal(html.includes("architecture-field-row is-long"), true);
@@ -6808,6 +6840,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
       "Visual style: restrained.",
       "Caption draft or current caption: Third image caption.",
       "Source artifact or spec path: `manuscript/figures/third_missing.pdf`",
+      "Preview image: none",
     ].join("\n")
   }, {
     title: "Figure F000004: Fourth Missing Image",
@@ -6822,6 +6855,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
       "Visual style: restrained.",
       "Caption draft or current caption: Fourth image caption.",
       "Source artifact or spec path: `manuscript/figures/fourth_missing.pdf`",
+      "Preview image: none",
     ].join("\n")
   });
   const fourMissingAuto = await app.run(`__autoFigureImageProbe(${JSON.stringify(fourMissingPayload)}, { backend: "codex", status: "running" })`);
@@ -7018,6 +7052,7 @@ testStartAutoresearchUsesCurrentProjectDraftWithoutArtifactMessage();
 testProjectLaunchFallbackWithoutAssistantReply();
 testMarkdownSoftBreakRendersAsSeparator();
 testMarkdownOrderedListsPreserveExplicitNumbers();
+testMarkdownImagesResolveRelativeToSourceFile();
 testMessagesExposeCopyButtons();
 testFileTreePdfPreviewControls();
 testSessionTimelineDoesNotRenderCurrentActivityCard();

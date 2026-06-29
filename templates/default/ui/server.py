@@ -50,7 +50,7 @@ EXPORT_STORE_WITHOUT_COMPRESSION_BYTES = 16 * 1024 * 1024
 RESEARCH_EVENT_BUFFER_MAX = 500
 RESEARCH_EVENT_HEARTBEAT_SECONDS = 15
 STREAMING_TRANSCRIPT_MAX_CHARS = 8000
-FIGURE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+FIGURE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
 REMOTE_AUTH_TOKEN = os.environ.get("COAUTO_REMOTE_AUTH_TOKEN", "").strip()
 REMOTE_AUTH_QUERY = "coauto_token"
 REMOTE_AUTH_COOKIE = "coauto_remote_auth"
@@ -6906,8 +6906,8 @@ def collect_resources() -> list[dict[str, Any]]:
 
 
 EXPORT_KIND_LABELS = {
-    "blueprint": "Blueprint Pack",
-    "final_project": "Final Project Pack",
+    "blueprint": "Paper-Writing Pack",
+    "final_project": "Clean Project Package",
 }
 EXPORT_EXCLUDED_NAMES = {
     ".DS_Store",
@@ -6971,7 +6971,7 @@ def export_project_label() -> str:
 
 def export_filename(kind: str) -> str:
     stem = slugify(export_project_label(), "project")
-    suffix = "blueprint-pack" if kind == "blueprint" else "final-project-pack"
+    suffix = "paper-writing-pack" if kind == "blueprint" else "clean-project-package"
     return f"{stem}-{suffix}.zip"
 
 
@@ -7021,14 +7021,14 @@ def blueprint_asset_skip_reason(relative_path: str, source: Path) -> str:
     if not parts:
         return "invalid path"
     if parts[0] in BLUEPRINT_REFERENCE_ONLY_ROOTS:
-        return "reference-only source/workspace path; use Final Project Pack for raw resources and working outputs"
+        return "reference-only source/workspace path; use Clean Project Package for raw resources and working outputs"
     if source.is_dir():
-        return "referenced directory; Blueprint Pack includes explicit final files only"
+        return "referenced directory; Paper-Writing Pack includes explicit final files only"
     suffix = Path(normalized).suffix.lower()
     if suffix in BLUEPRINT_ARCHIVE_SUFFIXES:
-        return "reference-only archive; raw source bundles are not included in Blueprint Pack"
+        return "reference-only archive; raw source bundles are not included in Paper-Writing Pack"
     if normalized.startswith("research_trajectory/") and "/artifacts/" not in normalized:
-        return "reference-only trajectory provenance; autoresearch trajectory is not included in Blueprint Pack"
+        return "reference-only trajectory provenance; autoresearch trajectory is not included in Paper-Writing Pack"
     return ""
 
 
@@ -7164,9 +7164,9 @@ def add_directory_export_entries(
 def export_readme(kind: str, estimate_only: bool = False) -> str:
     label = EXPORT_KIND_LABELS[kind]
     scope = (
-        "This package is a self-contained manuscript blueprint and final findings handoff."
+        "This package is a clean manuscript handoff for human-machine paper writing. It includes the manuscript blueprint, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets when available."
         if kind == "blueprint"
-        else "This package is a clean final project handoff. It intentionally excludes autoresearch trajectory, runtime, archive, and agent scaffolding."
+        else "This package is a clean project handoff with final-facing manuscript, workspace, and resource files. It intentionally excludes autoresearch trajectory, runtime, archive, caches, secrets, and agent scaffolding."
     )
     return "\n".join(
         [
@@ -7188,7 +7188,7 @@ def export_method_runbook() -> str:
         [
             "# Method Runbook",
             "",
-            "This clean handoff contains final project-facing files only.",
+            "This clean project package contains final project-facing files only.",
             "",
             "- `PROJECT.md`: final research direction.",
             "- `FINDINGS.md`: promoted current findings summary.",
@@ -7196,7 +7196,7 @@ def export_method_runbook() -> str:
             "- `workspace/`: executable method code, configs, notebooks, and final generated outputs.",
             "- `resources/`: raw inputs and project resources needed by the final workspace.",
             "",
-            "Autoresearch trials, reviews, logs, checkpoints, runtime state, secrets, and agent instructions are intentionally excluded.",
+            "Autoresearch trials, reviews, logs, checkpoints, runtime state, caches, secrets, and agent instructions are intentionally excluded.",
             "",
         ]
     )
@@ -8971,7 +8971,54 @@ def markdown_line_is_field(line: str) -> bool:
     return bool(re.match(r"^[A-Z]", label)) and not re.search(r"[.;!?]", label)
 
 
-def replace_or_insert_source_path(block: str, output_path: str) -> str:
+def figure_preview_markdown_path(output_path: str) -> str:
+    normalized = normalize_figure_source_path(output_path)
+    if not normalized or Path(normalized).suffix.lower() not in FIGURE_IMAGE_SUFFIXES:
+        return ""
+    return os.path.relpath(normalized, "manuscript").replace("\\", "/")
+
+
+def figure_preview_markdown(title: str, output_path: str) -> str:
+    preview_path = figure_preview_markdown_path(output_path)
+    if not preview_path:
+        return ""
+    alt = re.sub(r"[\[\]\n\r]", " ", str(title or "Figure image")).strip() or "Figure image"
+    return f"Preview image:\n\n![{alt}]({preview_path})"
+
+
+def replace_or_insert_preview_image(block: str, output_path: str, title: str = "Figure image") -> str:
+    preview = figure_preview_markdown(title, output_path)
+    if not preview:
+        return block
+    lines = block.splitlines()
+    preview_lines = preview.splitlines()
+    preview_re = re.compile(r"^\s*Preview image\s*:\s*.*$", re.IGNORECASE)
+    source_re = re.compile(r"^\s*(Source artifact or spec path|Source artifact path):\s*.*$", re.IGNORECASE)
+    for index, line in enumerate(lines):
+        if not preview_re.match(line):
+            continue
+        end = index + 1
+        while end < len(lines) and not markdown_line_is_field(lines[end]):
+            end += 1
+        return "\n".join([*lines[:index], *preview_lines, *lines[end:]]).strip()
+
+    insert_at = len(lines)
+    for index, line in enumerate(lines):
+        if not source_re.match(line):
+            continue
+        insert_at = index + 1
+        while insert_at < len(lines) and not markdown_line_is_field(lines[insert_at]):
+            insert_at += 1
+        break
+    insert = [*preview_lines]
+    if insert_at > 0 and lines[insert_at - 1].strip():
+        insert.insert(0, "")
+    if insert_at < len(lines) and lines[insert_at].strip():
+        insert.append("")
+    return "\n".join([*lines[:insert_at], *insert, *lines[insert_at:]]).strip()
+
+
+def replace_or_insert_source_path(block: str, output_path: str, title: str = "Figure image") -> str:
     lines = block.splitlines()
     source_line = f"Source artifact or spec path: `{output_path}`"
     source_re = re.compile(r"^\s*(Source artifact or spec path|Source artifact path):\s*.*$", re.IGNORECASE)
@@ -8981,7 +9028,8 @@ def replace_or_insert_source_path(block: str, output_path: str) -> str:
         end = index + 1
         while end < len(lines) and not markdown_line_is_field(lines[end]):
             end += 1
-        return "\n".join([*lines[:index], source_line, *lines[end:]]).strip()
+        updated = "\n".join([*lines[:index], source_line, *lines[end:]]).strip()
+        return replace_or_insert_preview_image(updated, output_path, title)
 
     insert_at = len(lines)
     for index, line in enumerate(lines):
@@ -9001,7 +9049,8 @@ def replace_or_insert_source_path(block: str, output_path: str) -> str:
         insert.insert(0, "")
     if insert_at < len(lines) and lines[insert_at].strip():
         insert.append("")
-    return "\n".join([*lines[:insert_at], *insert, *lines[insert_at:]]).strip()
+    updated = "\n".join([*lines[:insert_at], *insert, *lines[insert_at:]]).strip()
+    return replace_or_insert_preview_image(updated, output_path, title)
 
 
 def update_blueprint_figure_source_path(title: str, output_path: str) -> bool:
@@ -9018,7 +9067,7 @@ def update_blueprint_figure_source_path(title: str, output_path: str) -> bool:
     next_heading = re.search(rf"^#{{1,{level}}}\s+.+$", text[body_start:], re.MULTILINE)
     body_end = body_start + next_heading.start() if next_heading else len(text)
     body = text[body_start:body_end].strip()
-    updated_body = replace_or_insert_source_path(body, output_path)
+    updated_body = replace_or_insert_source_path(body, output_path, title)
     updated_text = f"{text[:body_start]}\n\n{updated_body}\n\n{text[body_end:].lstrip()}"
     if updated_text != text:
         blueprint.write_text(updated_text, encoding="utf-8")
@@ -9627,6 +9676,7 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Content and panel layout:",
             "Caption draft or current caption:",
             "Source artifact or spec path:",
+            "Preview image:",
             "Result shown or conceptual basis:",
             "Provenance links:",
             "Target-venue fit rationale:",
@@ -9634,6 +9684,11 @@ def final_blueprint_consistency_blockers() -> list[str]:
         ):
             if label not in body:
                 blockers.append(f"Inline figure `{title}` is missing `{label}`.")
+        source_value = value_after_label(body, "Source artifact or spec path") or value_after_label(body, "Source artifact path")
+        source_path = normalize_figure_source_path(source_value)
+        preview_value = value_after_label(body, "Preview image")
+        if source_path and Path(source_path).suffix.lower() in FIGURE_IMAGE_SUFFIXES and not re.search(r"!\[[^\]\n]*\]\([^)]+\)", preview_value):
+            blockers.append(f"Inline figure `{title}` points to an image file but is missing a Markdown `Preview image`.")
     for title, body in table_blocks:
         if not active_block(body):
             continue
@@ -11311,10 +11366,11 @@ and `manuscript/figures/FIGURE_SPECS.md` as needed. The final blueprint must be
 self-contained and target-venue-ready in final manuscript reading order:
 architecture overview/table of contents, section/subsection architecture, local
 claim/evidence/result explanations, inline figure/table/algorithm/dataset/
-benchmark/result blocks with captions/content/source/provenance/venue
-rationale, reference/literature grounding, appendix/supplement posture, blocking
-missing evidence, required qualifications, provenance/audit index, deprecated
-ideas, and submission-readiness summary must all be current. Separate
+benchmark/result blocks with captions/content/source/provenance/venue rationale,
+and Markdown preview images for image-source figures, reference/literature
+grounding, appendix/supplement posture, blocking missing evidence, required
+qualifications, provenance/audit index, deprecated ideas, and
+submission-readiness summary must all be current. Separate
 claim/evidence maps, Figure Plan, Table Plan, or FIGURE_SPECS entries may
 support audit only; they do not satisfy final readability by themselves. If
 `Blocking Missing Evidence` is non-empty, if an active artifact lacks inline

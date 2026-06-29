@@ -216,6 +216,8 @@ Every active figure block must include:
 - visual style;
 - exact caption draft or current caption;
 - source artifact path or source specification path;
+- preview image as Markdown image syntax when the source artifact is an image
+  file, or `none` when the source is a PDF/spec/non-image artifact;
 - result shown or conceptual basis;
 - provenance links to findings, trials, or source files;
 - target-venue fit rationale;

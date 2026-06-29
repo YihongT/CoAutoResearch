@@ -143,6 +143,7 @@ for (const requiredText of [
   "Placement:",
   "Publication-ready table:",
   "Caption draft or current caption:",
+  "Preview image:",
   "Key result or conceptual contrast shown:",
   "Source code or artifact links:"
 ]) {

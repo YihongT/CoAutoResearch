@@ -2338,8 +2338,10 @@ Confidence: medium
     throw new Error("remote project loading must show an immediate professional loading/error state");
   }
   if (
-    !appJs.includes("Open latest manuscript") ||
-    !appJs.includes('data-inline-fullscreen="manuscript/BLUEPRINT.md"') ||
+    appJs.includes("Open BLUEPRINT.md") ||
+    appJs.includes('data-inline-fullscreen="${escapeHtml(LATEST_MANUSCRIPT_PATH)}"') ||
+    !appJs.includes('data-autoload-file="manuscript/BLUEPRINT.md"') ||
+    !appJs.includes('data-download-single-file="${escapeHtml(LATEST_MANUSCRIPT_PATH)}"') ||
     !appJs.includes("Raw BLUEPRINT.md for editing and audit.") ||
     !appJs.includes("function composerPromptNextValue") ||
     !appJs.includes("function isComposerCommandLine") ||
@@ -2478,9 +2480,14 @@ Confidence: medium
     !stylesCss.includes(".paragraph-plan-block") ||
     !stylesCss.includes(".manuscript-actions") ||
     !stylesCss.includes(".traceability-details") ||
+    !appJs.includes("Download paper-writing pack") ||
+    !appJs.includes("Best for GPT/Claude drafting") ||
+    !appJs.includes("Best for project handoff") ||
+    appJs.includes("Open BLUEPRINT.md") ||
     !appJs.includes("Download BLUEPRINT.md") ||
     !appJs.includes("data-download-single-file") ||
     !appJs.includes("downloadSingleFile") ||
+    appJs.includes('data-inline-fullscreen="${escapeHtml(LATEST_MANUSCRIPT_PATH)}"') ||
     !serverPy.includes('query.get("download"') ||
     !serverPy.includes('"attachment" if download else "inline"')
   ) {
@@ -3153,8 +3160,9 @@ Confidence: medium
       "assert module.figure_image_output_path(title, 'manuscript/figures/custom.pdf') == 'manuscript/figures/generated/figure_f000001_calibration_map.png'",
       "prompt = module.figure_image_prompt(title, 'Purpose: test description', 'manuscript/figures/generated/out.png')",
       "assert 'Use your built-in image generation tool only' in prompt and 'Purpose: test description' in prompt and 'manuscript/figures/generated/out.png' in prompt",
-      "inserted = module.replace_or_insert_source_path('Caption draft or current caption: Caption.\\n\\nResult shown or conceptual basis: Evidence.', 'manuscript/figures/generated/inserted.png')",
+      "inserted = module.replace_or_insert_source_path('Caption draft or current caption: Caption.\\n\\nResult shown or conceptual basis: Evidence.', 'manuscript/figures/generated/inserted.png', title)",
       "assert 'Source artifact or spec path: `manuscript/figures/generated/inserted.png`' in inserted and inserted.index('Source artifact') < inserted.index('Result shown'), inserted",
+      "assert 'Preview image:' in inserted and '![Figure F000001: Calibration Map](figures/generated/inserted.png)' in inserted, inserted",
       "try:",
       "    module.start_manuscript_figure_image({'title': title, 'description': 'Purpose: generated figure'})",
       "    raise AssertionError('Saved Claude backend should not start Codex image generation')",
@@ -3193,6 +3201,7 @@ Confidence: medium
       "assert (project_root / status['output_path']).read_bytes().startswith(b'\\x89PNG'), status",
       "blueprint_text = blueprint.read_text(encoding='utf-8')",
       "assert 'manuscript/figures/generated/figure_f000001_calibration_map.png' in blueprint_text and 'old.pdf' not in blueprint_text, blueprint_text",
+      "assert 'Preview image:' in blueprint_text and '![Figure F000001: Calibration Map](figures/generated/figure_f000001_calibration_map.png)' in blueprint_text, blueprint_text",
       "assert 'manuscript/tables/evidence.csv' in blueprint_text, blueprint_text",
       "print(json.dumps({'status': status['status'], 'output': status['output_path'], 'thread': status['thread_id']}))"
     ].join("\n")
@@ -4347,6 +4356,8 @@ Confidence: medium
       "        module.EXPORT_CONFIRMATION_BYTES = 32",
       "        final_estimate = module.export_estimate('final_project')",
       "        assert final_estimate['requires_confirmation'] is True, final_estimate",
+      "        assert final_estimate['label'] == 'Clean Project Package', final_estimate",
+      "        assert final_estimate['filename'].endswith('-clean-project-package.zip'), final_estimate",
       "        final_plan = module.build_export_plan('final_project')",
       "        final_paths = {item['bundle_path'] for item in final_plan['entries']}",
       "        assert 'manuscript/BLUEPRINT.md' in final_paths, final_paths",
@@ -4356,6 +4367,8 @@ Confidence: medium
       "        if symlink_created:",
       "            assert any(item['path'] == 'resources/data_sources/missing.csv' for item in final_estimate['missing_externals']), final_estimate['missing_externals']",
       "        blueprint_estimate = module.export_estimate('blueprint')",
+      "        assert blueprint_estimate['label'] == 'Paper-Writing Pack', blueprint_estimate",
+      "        assert blueprint_estimate['filename'].endswith('-paper-writing-pack.zip'), blueprint_estimate",
       "        blueprint_paths = {item['bundle_path'] for item in blueprint_estimate['largest_files']}",
       "        assert 'FINDINGS.md' in blueprint_paths, blueprint_paths",
       "        assert any(path.startswith('assets/') for path in blueprint_paths), blueprint_paths",
@@ -4381,6 +4394,9 @@ Confidence: medium
       "            assert 'assets/raw_bundle.zip' not in names, names",
       "            assert 'assets/model.bin' not in names, names",
       "            assert not any(name.startswith('research_trajectory/') for name in names), names",
+      "            readme = archive.read('README.md').decode('utf-8')",
+      "            assert '# Paper-Writing Pack' in readme, readme",
+      "            assert 'human-machine paper writing' in readme, readme",
       "            manifest = json.loads(archive.read('MANIFEST.json').decode('utf-8'))",
       "            assert any(item['bundle_path'] == 'FINDINGS.md' and item['sha256'] for item in manifest['files']), manifest",
       "    finally:",
