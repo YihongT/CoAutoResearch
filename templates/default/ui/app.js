@@ -1090,6 +1090,14 @@ function resizeColdEditor() {
     editor.classList.remove("is-compact-single-line");
     editor.style.height = "auto";
     const measuredHeight = Math.max(editor.scrollHeight || minHeight, minHeight);
+    const singleLine = !String(editor.value || "").includes("\n") && measuredHeight <= minHeight + 6;
+    editor.classList.toggle("is-compact-single-line", singleLine);
+    if (singleLine) {
+      editor.style.height = `${minHeight}px`;
+      editor.style.overflowY = "hidden";
+      updateBriefDockGeometry();
+      return;
+    }
     const nextHeight = Math.min(measuredHeight, maxHeight);
     editor.style.height = `${nextHeight}px`;
     editor.style.overflowY = measuredHeight > maxHeight ? "auto" : "hidden";
@@ -4551,6 +4559,20 @@ function messageHasAssistantAfter(messageId, messages = localMessages) {
   return messages.slice(index + 1, endIndex).some((message) => message?.role === "assistant" && message.kind !== "project");
 }
 
+function pendingFramingMessageNeedsReply(messages = localMessages) {
+  if (!pendingFramingUserMessageId) return false;
+  const hasPendingMessage = messages.some((message) => message?.id === pendingFramingUserMessageId && message.role === "user");
+  return hasPendingMessage && !messageHasAssistantAfter(pendingFramingUserMessageId, messages);
+}
+
+function clearFramingReplyPendingForTerminalSession(messageId = "") {
+  const status = String(sessionState().status || "").toLowerCase();
+  if (isSessionRunning() || !["completed", "failed", "interrupted"].includes(status)) return;
+  framingReplyPending = false;
+  if (!messageId || pendingFramingUserMessageId === messageId) pendingFramingUserMessageId = "";
+  if (!framingDraftPending) framingPendingSince = 0;
+}
+
 function isControlFramingMessage(message) {
   const text = String(message?.text || "").trim();
   return message?.kind === "command" || message?.kind === "goal-launch" || text.startsWith("/") || isGoalLaunchMessage(message);
@@ -4570,20 +4592,23 @@ function latestUnansweredUserMessage(messages = localMessages) {
 function reconcileFramingPending(messages = localMessages) {
   const session = sessionState();
   const terminalStatus = ["completed", "failed", "interrupted", "idle"].includes(String(session.status || "").toLowerCase());
-  if (!isSessionRunning() && terminalStatus) {
+  const running = isSessionRunning();
+  const pendingMessageNeedsReply = pendingFramingMessageNeedsReply(messages);
+  const unansweredUser = latestUnansweredUserMessage(messages);
+  if (!running && terminalStatus && !pendingMessageNeedsReply) {
     framingDraftPending = false;
     framingReplyPending = false;
     pendingFramingUserMessageId = "";
   }
-  if (framingReplyPending && pendingFramingUserMessageId && messageHasAssistantAfter(pendingFramingUserMessageId, messages)) {
+  if (!running && framingReplyPending && pendingFramingUserMessageId && !pendingMessageNeedsReply) {
     framingReplyPending = false;
     pendingFramingUserMessageId = "";
   }
-  if (framingReplyPending && !latestUnansweredUserMessage(messages)) {
+  if (!running && framingReplyPending && !pendingMessageNeedsReply && !unansweredUser) {
     framingReplyPending = false;
     pendingFramingUserMessageId = "";
   }
-  if (!framingReplyPending && !framingDraftPending && !isSessionRunning()) {
+  if (!framingReplyPending && !framingDraftPending && !running) {
     framingPendingSince = 0;
   }
 }
@@ -5074,7 +5099,13 @@ function planStepsHtml(steps = []) {
   `;
 }
 
-function planCardHtml(message) {
+function inlineActivitySummaryHtml(options = {}) {
+  const html = String(options.activityHtml || "").trim();
+  return html ? `<div class="inline-run-activity-summary">${html}</div>` : "";
+}
+
+function planCardHtml(message, options = {}) {
+  const activitySummary = inlineActivitySummaryHtml(options);
   const artifact = message.artifact || {};
   const planId = String(artifact.id || message.planId || "").trim();
   const status = String(artifact.status || "pending").toLowerCase();
@@ -5092,6 +5123,7 @@ function planCardHtml(message) {
           <em>Plan mode</em>
           <em class="plan-status ${escapeHtml(status)}">${escapeHtml(planStatusLabel(status))}</em>
         </div>
+        ${activitySummary}
         <div class="transcript-body plan-message-body">
           ${planStepsHtml(artifact.steps)}
           <p class="plan-empty">Planning...</p>
@@ -5115,6 +5147,7 @@ function planCardHtml(message) {
   return `
     <article class="framing-message assistant plan-card-message" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="plan">
       <div class="transcript-meta">CoAutoResearch / Plan</div>
+      ${activitySummary}
       <div class="transcript-body project-draft-bubble plan-card-bubble">
         <div class="project-card-head plan-card-head">
           <div>
@@ -5131,12 +5164,13 @@ function planCardHtml(message) {
   `;
 }
 
-function framingMessageHtml(message) {
-  if (message.kind === "project" && message.artifact?.text) return projectDraftCardHtml(message);
-  if (message.kind === "plan" && message.artifact?.id) return planCardHtml(message);
+function framingMessageHtml(message, options = {}) {
+  if (message.kind === "project" && message.artifact?.text) return projectDraftCardHtml(message, options);
+  if (message.kind === "plan" && message.artifact?.id) return planCardHtml(message, options);
   if (isControlFramingMessage(message)) return framingControlMessageHtml(message);
   const role = message.role === "user" ? "user" : "assistant";
   const title = role === "user" ? "You" : "CoAutoResearch";
+  const activitySummary = role === "assistant" ? inlineActivitySummaryHtml(options) : "";
   if (role === "user" && editingFramingId === message.id) {
     return `
       <article class="framing-message ${role} is-editing" data-framing-id="${escapeHtml(message.id)}">
@@ -5167,6 +5201,7 @@ function framingMessageHtml(message) {
   return `
     <article class="framing-message ${role}" data-framing-id="${escapeHtml(message.id)}">
       <div class="transcript-meta">${title}</div>
+      ${activitySummary}
       ${messageAttachmentsHtml(message)}
       <div class="transcript-body">${transcriptContentHtml(message.text, { markdown: role === "assistant" })}</div>
       ${projectAttachment}
@@ -5610,11 +5645,13 @@ function projectDraftAttachmentHtml(message) {
   `;
 }
 
-function projectDraftCardHtml(message) {
+function projectDraftCardHtml(message, options = {}) {
   const summary = String(message?.text || "").trim() || "PROJECT.md was updated.";
+  const activitySummary = inlineActivitySummaryHtml(options);
   return `
     <article class="framing-message assistant project-draft-message is-compact-project" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="project">
       <div class="transcript-meta">CoAutoResearch</div>
+      ${activitySummary}
       <div class="transcript-body">
         ${transcriptContentHtml(summary, { markdown: true })}
         ${projectDraftActionsHtml(message)}
@@ -5634,7 +5671,7 @@ function renderFramingConversation() {
   const transcriptEntries = sessionTranscriptEntries();
   const activity = buildFramingActivityByMessage(visibleMessages, transcriptEntries);
   const messages = visibleMessages
-    .map((message) => `${activity.htmlBeforeMessageId.get(message.id) || ""}${framingMessageHtml(message)}`)
+    .map((message) => framingMessageHtml(message, { activityHtml: activity.htmlBeforeMessageId.get(message.id) || "" }))
     .join("");
   const hasLocalTranscript = transcriptEntries.some(isUiLocalTranscript);
   const unansweredUser = latestUnansweredUserMessage(visibleMessages);
@@ -5722,6 +5759,10 @@ function renderAutoresearchDock(html, active = true) {
     requestAnimationFrame(restoreTrialStripScroll);
   }
   dock.hidden = !nextHtml;
+  const cardClass = nextHtml.match(/class="[^"]*\btrial-history-card\b([^"]*)"/)?.[0] || "";
+  dock.classList.toggle("is-collapsed", /\bis-collapsed\b/.test(cardClass));
+  dock.classList.toggle("is-expanded", /\bis-expanded\b/.test(cardClass));
+  dock.classList.toggle("is-running", /\bis-running\b/.test(cardClass));
   document.body.classList.toggle("has-autoresearch-dock", Boolean(nextHtml));
   syncAutoresearchDockGeometry();
   requestAnimationFrame(() => {
@@ -5807,6 +5848,8 @@ function ensureFramingThreadScrollListener(thread) {
   framingThreadScrollListeners.add(thread);
   thread.addEventListener("scroll", () => {
     markFramingThreadScrolling(thread);
+    updateFramingScrollButton();
+    schedulePersistActiveViewScrollPosition();
   }, { passive: true });
 }
 
@@ -5859,12 +5902,19 @@ function isPageNearBottom(threshold = 24) {
   return scrollHeight - (scrollTop + viewportHeight) <= threshold;
 }
 
+function framingScrollButtonRevealThreshold(metrics = scrollerMetrics()) {
+  const viewportHeight = Number(metrics.viewportHeight || window.innerHeight || 0);
+  return Math.round(Math.min(560, Math.max(320, viewportHeight * 0.55)));
+}
+
 function updateFramingScrollButton() {
   const button = $("#framing-scroll-bottom");
   if (!button) return;
   const dockActive = Boolean($(".brief-editor-shell.is-framing-dock"));
   const chatVisible = activeView === "chat" && !$("#chat-view")?.hidden;
-  const shouldShow = chatVisible && dockActive && !isPageNearBottom(36);
+  const metrics = scrollerMetrics();
+  const distanceFromBottom = metrics.scrollHeight - (metrics.scrollTop + metrics.viewportHeight);
+  const shouldShow = chatVisible && dockActive && distanceFromBottom > framingScrollButtonRevealThreshold(metrics);
   const wasShowing = document.body.classList.contains("has-framing-scroll-button");
   button.hidden = !shouldShow;
   document.body.classList.toggle("has-framing-scroll-button", shouldShow);
@@ -7737,6 +7787,235 @@ function runningTrialClarityHtml(iteration, progress, activityCount, needsUserAc
     </div>
   `;
 }
+
+function trialHistoryActivityButtonHtml(iteration, entries = [], options = {}) {
+  const activity = Array.isArray(entries) ? entries : [];
+  const eventLabel = options.eventLabel || currentRunActivityEventLabel(activity.length);
+  const activityKey = [
+    "trial-history",
+    activeProjectId || appState?.active_project_id || "",
+    String(iteration || "current"),
+    options.running ? "running" : "selected",
+  ].join(":");
+  registerActivityPanelSource(activityKey, {
+    title: "Activity",
+    subtitle: iteration
+      ? `Trial ${iteration}${options.running ? `, ${agentLabel(sessionBackend())} running` : ""}`
+      : `${agentLabel(sessionBackend())} autoresearch`,
+    durationText: options.durationText || activityEntriesDurationText(activity),
+    eventLabel,
+    entries: activity,
+    options: {
+      label: iteration ? `Trial ${iteration} activity timeline` : "Autoresearch activity timeline",
+      emptyText: options.emptyText || "Waiting for agent update.",
+    },
+  });
+  return activityOpenButtonHtml({
+    key: activityKey,
+    label: "Activity",
+    eventLabel,
+    className: "trial-history-activity-button",
+  });
+}
+
+function trajectoryActivityEntry(id, content, createdAt = "") {
+  return {
+    id,
+    role: "assistant",
+    kind: "update",
+    raw_type: "trajectory.update",
+    content,
+    created_at: createdAt,
+  };
+}
+
+function trajectoryRegisterActivity(keyParts, source) {
+  const key = ["trajectory", activeProjectId || appState?.active_project_id || "", ...keyParts].join(":");
+  registerActivityPanelSource(key, {
+    title: source.title || "Research trajectory",
+    subtitle: source.subtitle || "",
+    eventLabel: source.eventLabel || "details",
+    entries: source.entries || [],
+    options: {
+      label: source.label || "Research trajectory detail",
+      emptyText: "No trajectory detail is available.",
+      includeUser: true,
+    },
+  });
+  return key;
+}
+
+function trajectoryInterventionActivityButtonHtml(intervention) {
+  const id = cleanText(intervention?.id, "");
+  if (!id) return "";
+  const status = cleanText(intervention?.status, "pending").toLowerCase();
+  const path = cleanText(intervention?.path, "");
+  const summary = cleanText(intervention?.summary, "");
+  const lines = [
+    `Intervention ${id}`,
+    "",
+    `Status: ${status}`,
+    path ? `Path: ${path}` : "",
+    summary ? `Summary: ${summary}` : "",
+    cleanText(intervention?.applied_in_trial, "") ? `Applied in: ${intervention.applied_in_trial}` : "",
+    cleanText(intervention?.superseded_by, "") ? `Superseded by: ${intervention.superseded_by}` : "",
+  ].filter(Boolean);
+  const key = trajectoryRegisterActivity(["intervention", id], {
+    title: "Intervention",
+    subtitle: `${id} · ${status}`,
+    eventLabel: status,
+    entries: [trajectoryActivityEntry(`trajectory-intervention-${id}`, lines.join("\n"), intervention?.created_at || "")],
+    label: `${id} trajectory intervention`,
+  });
+  return `
+    <button class="trajectory-intervention-badge is-${escapeHtml(status)}" type="button" data-activity-open data-activity-key="${escapeHtml(key)}" title="${escapeHtml(summary || `${id} ${status}`)}">
+      <span>${escapeHtml(id)}</span>
+      <em>${escapeHtml(status)}</em>
+    </button>
+  `;
+}
+
+function trajectoryInterventionBadgesHtml(interventions) {
+  const items = Array.isArray(interventions) ? interventions : [];
+  if (!items.length) return "";
+  const visible = items.filter((item) => cleanText(item?.status, "") !== "superseded");
+  const superseded = items.filter((item) => cleanText(item?.status, "") === "superseded");
+  return `
+    <div class="trajectory-interventions" aria-label="Interventions">
+      ${visible.map((item) => trajectoryInterventionActivityButtonHtml(item)).join("")}
+      ${superseded.length ? `<span class="trajectory-intervention-badge is-superseded-count">${escapeHtml(superseded.length)} superseded</span>` : ""}
+    </div>
+  `;
+}
+
+function trajectoryStatusLabel(trial) {
+  if (trial?.is_next_expected) return "Pending";
+  if (trial?.is_latest_active) return "Latest";
+  if (trial?.is_active_base) return "Base";
+  if (trial?.is_closed) return "Reported";
+  return cleanText(trial?.status, "Active");
+}
+
+function trajectoryTrialNodeHtml(trial, interventions) {
+  const iteration = Number(trial?.iteration || 0);
+  if (!iteration) return "";
+  const title = cleanText(trial?.title, `Trial ${iteration}`);
+  const status = trajectoryStatusLabel(trial);
+  const classes = [
+    "trajectory-node",
+    trial?.is_active_base ? "is-base" : "",
+    trial?.is_latest_active ? "is-latest" : "",
+    trial?.is_next_expected ? "is-next" : "",
+  ].filter(Boolean).join(" ");
+  const buttonHtml = trial?.is_next_expected
+    ? `
+      <button class="trajectory-trial-button" type="button" aria-disabled="true" title="${escapeHtml(title)}">
+        <span class="trajectory-trial-index">Trial ${escapeHtml(iteration)}</span>
+        <strong>${escapeHtml(compactText(title, 76))}</strong>
+        <em>${escapeHtml(status)}</em>
+      </button>
+    `
+    : `
+      <button class="trajectory-trial-button" type="button" data-trial-select="${escapeHtml(iteration)}" title="${escapeHtml(title)}">
+        <span class="trajectory-trial-index">Trial ${escapeHtml(iteration)}</span>
+        <strong>${escapeHtml(compactText(title, 76))}</strong>
+        <em>${escapeHtml(status)}</em>
+      </button>
+    `;
+  return `
+    <div class="${escapeHtml(classes)}">
+      ${buttonHtml}
+      ${trajectoryInterventionBadgesHtml(interventions)}
+    </div>
+  `;
+}
+
+function trajectoryForkActivityButtonHtml(fork, index, trialColumn, side) {
+  const forkId = cleanText(fork?.fork_id, "");
+  if (!forkId) return "";
+  const forkNumber = cleanText(fork?.fork_number, forkId);
+  const baseTrial = cleanText(fork?.base_trial, "");
+  const archived = Array.isArray(fork?.archived_trials) ? fork.archived_trials : [];
+  const intervention = cleanText(fork?.intervention_id, "");
+  const summary = cleanText(fork?.user_instruction_summary, "Continue from the selected trial boundary.");
+  const archivedLines = archived.length
+    ? archived.map((item) => `- ${cleanText(item?.id, "trial")}: ${cleanText(item?.to, "") || cleanText(item?.from, "")}`).join("\n")
+    : "- No later active trials were archived.";
+  const content = [
+    `${forkNumber} continue branch`,
+    "",
+    `Base trial: ${baseTrial || "unknown"}`,
+    `Restore mode: ${cleanText(fork?.restore_mode, "unknown")}`,
+    intervention ? `Intervention: ${intervention}` : "",
+    cleanText(fork?.manifest_path, "") ? `Manifest: ${fork.manifest_path}` : "",
+    "",
+    "User instruction:",
+    summary,
+    "",
+    "Archived trials:",
+    archivedLines,
+  ].filter(Boolean).join("\n");
+  const key = trajectoryRegisterActivity(["fork", forkId], {
+    title: "Continue branch",
+    subtitle: `${forkNumber}${baseTrial ? ` · ${baseTrial}` : ""}`,
+    eventLabel: archived.length ? `${archived.length} archived` : "manifest",
+    entries: [trajectoryActivityEntry(`trajectory-fork-${forkId}`, content, fork?.created_at || "")],
+    label: `${forkNumber} continue branch`,
+  });
+  const span = Math.max(1, Math.min(2, Number(fork?.archived_trials?.length || 0) + 1));
+  return `
+    <button class="trajectory-branch is-${escapeHtml(side)}" type="button" data-activity-open data-activity-key="${escapeHtml(key)}" style="grid-column: ${escapeHtml(trialColumn)} / span ${escapeHtml(span)};" title="${escapeHtml(summary)}">
+      <span class="trajectory-branch-kicker">${escapeHtml(forkNumber)} · Continue</span>
+      <strong>From Trial ${escapeHtml(fork?.base_trial_iteration || trialIterationValue({ id: baseTrial }) || "")}</strong>
+      <em>${escapeHtml(archived.length ? `Archived branch · ${archived.length} trials` : "No archived trials")}</em>
+    </button>
+  `;
+}
+
+function researchTrajectoryGraphHtml(graph) {
+  if (!graph || typeof graph !== "object") return "";
+  const trials = Array.isArray(graph.trials) ? graph.trials.filter((trial) => Number(trial?.iteration || 0) > 0) : [];
+  if (!trials.length) return "";
+  const interventions = Array.isArray(graph.interventions) ? graph.interventions : [];
+  const byIteration = new Map();
+  interventions.forEach((item) => {
+    const iteration = Number(item?.target_iteration || 0);
+    if (!iteration) return;
+    byIteration.set(iteration, [...(byIteration.get(iteration) || []), item]);
+  });
+  const columnByIteration = new Map(trials.map((trial, index) => [Number(trial.iteration || 0), index + 1]));
+  const forks = Array.isArray(graph.forks) ? graph.forks : [];
+  const branchRows = { above: [], below: [] };
+  forks.forEach((fork, index) => {
+    const baseIteration = Number(fork?.base_trial_iteration || trialIterationValue({ id: fork?.base_trial }) || 0);
+    const column = columnByIteration.get(baseIteration) || 1;
+    const side = index % 2 ? "above" : "below";
+    branchRows[side].push(trajectoryForkActivityButtonHtml(fork, index, column, side));
+  });
+  const pendingCount = interventions.filter((item) => cleanText(item?.status, "") === "pending").length;
+  const activeFork = cleanText(graph?.active?.fork_id, "");
+  return `
+    <section class="research-trajectory-graph" aria-label="Research trajectory">
+      <header class="research-trajectory-head">
+        <div>
+          <span>Research trajectory</span>
+          <strong>${escapeHtml(activeFork ? `Active fork ${activeFork.split("_")[0]}` : "Active path")}</strong>
+        </div>
+        <p>${escapeHtml(pendingCount ? `${pendingCount} pending intervention${pendingCount === 1 ? "" : "s"}` : "No pending interventions")}</p>
+      </header>
+      <div class="trajectory-scroll" tabindex="0">
+        <div class="trajectory-canvas" style="--trajectory-count: ${escapeHtml(trials.length)};">
+          <div class="trajectory-branch-row is-above">${branchRows.above.join("")}</div>
+          <div class="trajectory-lane">
+            ${trials.map((trial) => trajectoryTrialNodeHtml(trial, byIteration.get(Number(trial.iteration || 0)) || [])).join("")}
+          </div>
+          <div class="trajectory-branch-row is-below">${branchRows.below.join("")}</div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function runningTrialStatusHtml(trial) {
   const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
   if (!iteration || !isTrialLive(iteration)) return "";
@@ -8063,53 +8342,86 @@ function iterationNavHtml(trials, activeTrial) {
   `;
 }
 
+function trialHistoryStatusModel(trials, activeTrial, activeTrialData, runningTrialData = null) {
+  const latest = trials[trials.length - 1] || null;
+  const collapsed = autoresearchPanelCollapsed();
+  const running = Boolean(runningTrialData);
+  const miniTrialData = activeTrialData || latest || null;
+  const iteration = miniTrialData?.iteration || activeTrial || 0;
+  const report = miniTrialData?.report || null;
+  const label = iteration ? trialHeaderStatusLabel(iteration, report) : "Active";
+  const rawEntries = Array.isArray((runningTrialData || miniTrialData)?.entries) ? (runningTrialData || miniTrialData).entries : [];
+  const scopedEntries = running ? currentRunScopedEntries(rawEntries) : rawEntries;
+  const activity = trialActivityEntries(scopedEntries);
+  const durationText = running
+    ? workingDurationText(currentRunStartedAtString(activeRun().started_at || sessionState().started_at || ""), { serverClock: true })
+    : activityEntriesDurationText(activity);
+  const latestUpdate = latestTrialUpdateText(activeTrialData || latest, runningTrialData) || "Waiting for agent update.";
+  const activityButton = trialHistoryActivityButtonHtml(iteration, activity, {
+    running,
+    durationText,
+    emptyText: running ? "Waiting for agent update." : "No activity for this trial yet.",
+  });
+  return {
+    collapsed,
+    running,
+    iteration,
+    label,
+    latestUpdate,
+    workingOnHtml: trialWorkingOnHtml(report),
+    activityButton,
+    collapsedCompleteBadge: collapsed ? autoresearchCompleteBadgeHtml() : "",
+  };
+}
+
+function trialHistoryChevronIconHtml() {
+  return '<span class="trial-history-disclosure" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m9 18 6-6-6-6"/></svg></span>';
+}
+
 function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData = null) {
   if (!trials.length) return "";
-  const latest = trials[trials.length - 1];
-  const collapsed = autoresearchPanelCollapsed();
-  const miniTrialData = activeTrialData || latest || null;
-  const miniTrialIteration = miniTrialData?.iteration || activeTrial || 0;
-  const miniTrialReport = miniTrialData?.report || null;
-  const miniTrialLabel = miniTrialIteration ? trialHeaderStatusLabel(miniTrialIteration, miniTrialReport) : "Active";
-  const miniTrialWorkingOn = trialWorkingOnHtml(miniTrialReport);
-  const kickerStatus = miniTrialIteration
-    ? `<span class="trial-history-kicker-status"><span>Trial ${escapeHtml(miniTrialIteration)}: ${escapeHtml(miniTrialLabel)}</span>${miniTrialWorkingOn}</span>`
-    : "";
-  const collapsedCompleteBadge = collapsed ? autoresearchCompleteBadgeHtml() : "";
-  const latestUpdate = latestTrialUpdateText(activeTrialData, runningTrialData);
-  const running = Boolean(runningTrialData);
+  const model = trialHistoryStatusModel(trials, activeTrial, activeTrialData, runningTrialData);
   const activeTrialIsRunning = runningTrialData
     && activeTrialData
     && Number(runningTrialData.iteration) === Number(activeTrialData.iteration);
   const shouldShowActiveTrialReport = activeTrialData && !activeTrialIsRunning;
   return `
-    <section class="trial-history-card ${collapsed ? "is-collapsed" : "is-expanded"} ${running ? "is-running" : ""}" aria-label="Autoresearch trials" data-autoresearch-panel-collapsed="${collapsed ? "true" : "false"}">
+    <section class="trial-history-card ${model.collapsed ? "is-collapsed" : "is-expanded"} ${model.running ? "is-running" : ""}" aria-label="Autoresearch trials" data-autoresearch-panel-collapsed="${model.collapsed ? "true" : "false"}">
       <header class="trial-history-head">
-        <div class="trial-history-kicker" aria-label="Autoresearch">
-          ${
-            running
-              ? `<span class="trial-history-micro-spinner" aria-hidden="true"></span>`
-              : `<span class="trial-history-kicker-icon" aria-hidden="true">
-                  <svg class="brand-glyph" viewBox="0 0 32 32" focusable="false">
-                    <use href="#brand-mark-glyph"></use>
-                  </svg>
-                </span>`
-          }
-          <span>Autoresearch</span>
-          ${kickerStatus}
-          ${collapsedCompleteBadge}
-        </div>
-        <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="${collapsed ? "false" : "true"}">
-          <span class="trial-history-toggle-copy">
-            <span class="trial-history-latest-update">
-              <span class="trial-history-disclosure" aria-hidden="true">›</span>
-              <span>Agent update</span>
-              <em>${escapeHtml(latestUpdate || (running ? "Waiting for the first agent update. No action needed yet." : "No recent agent update."))}</em>
+        <div class="trial-live-strip">
+          <button class="trial-history-toggle trial-live-main" type="button" data-autoresearch-panel-toggle aria-expanded="${model.collapsed ? "false" : "true"}">
+            <span class="trial-history-kicker trial-live-brand" aria-label="Autoresearch">
+              ${
+                model.running
+                  ? `<span class="trial-history-micro-spinner" aria-hidden="true"></span>`
+                  : `<span class="trial-history-kicker-icon" aria-hidden="true">
+                      <svg class="brand-glyph" viewBox="0 0 32 32" focusable="false">
+                        <use href="#brand-mark-glyph"></use>
+                      </svg>
+                    </span>`
+              }
+              <span>Autoresearch</span>
             </span>
-          </span>
-        </button>
+            <span class="trial-history-kicker-status trial-live-primary">
+              ${model.iteration ? `<span>Trial ${escapeHtml(model.iteration)} · ${escapeHtml(model.label)}</span>` : `<span>${escapeHtml(model.label)}</span>`}
+              ${model.workingOnHtml}
+            </span>
+            <span class="trial-history-latest-update trial-live-update">
+              <span>Agent update</span>
+              <em>${escapeHtml(model.latestUpdate)}</em>
+            </span>
+          </button>
+          <div class="trial-live-actions">
+            ${model.activityButton}
+            ${model.collapsedCompleteBadge}
+            <button class="trial-live-chevron" type="button" data-autoresearch-panel-toggle aria-expanded="${model.collapsed ? "false" : "true"}" aria-label="${model.collapsed ? "Expand autoresearch" : "Collapse autoresearch"}">
+              ${trialHistoryChevronIconHtml()}
+            </button>
+          </div>
+        </div>
       </header>
       <div class="trial-history-body">
+        ${model.collapsed ? "" : researchTrajectoryGraphHtml(appState?.trajectory_graph)}
         ${iterationNavHtml(trials, activeTrial)}
         ${runningTrialData ? runningTrialStatusHtml(runningTrialData) : ""}
         ${shouldShowActiveTrialReport ? trialReportSummaryHtml(activeTrialData.iteration, activeTrialData.entries, activeTrialData.report) : ""}
@@ -13716,6 +14028,7 @@ async function sendSessionComposerMessage(message, options = {}) {
   if (planSlashMessage !== null) setComposerMode("plan");
   if (isPlanRequest) pendingPlanRevisionId = "";
   await notifyResourceHandlingFromResponse(response);
+  if (appendedMessage) clearFramingReplyPendingForTerminalSession(appendedMessage.id);
   reconcileFramingPending(localMessages);
   renderFramingConversation();
   renderSelectedResources();

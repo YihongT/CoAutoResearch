@@ -117,6 +117,19 @@ function loadAppContext() {
   const resumeCommandLabel = element();
   const resumeCommandText = element();
   const copyResumeCommand = element();
+  const framingThread = element({
+    clientHeight: 600,
+    scrollHeight: 1200,
+    scrollTop: 0,
+    scrollTo(options) {
+      this.scrollTop = Number(options?.top || 0);
+    },
+    contains(target) {
+      return target === this;
+    },
+  });
+  const briefEditorShell = element({ parentElement: null });
+  const coldStartWorkspace = element();
   const trialStripScroll = element({
     clientWidth: 300,
     scrollWidth: 1200,
@@ -299,11 +312,11 @@ function loadAppContext() {
     [".trial-strip-scroll", trialStripScroll],
     ["#project-draft-editor", projectEditor],
     ["#target-venue", element()],
-    ["#framing-thread", element()],
-    ["#brief-editor-shell", element({ parentElement: null })],
+    ["#framing-thread", framingThread],
+    ["#brief-editor-shell", briefEditorShell],
     ["#brief-editor-anchor", element()],
     ["#framing-scroll-bottom", element()],
-    ["#cold-start-workspace", element()],
+    ["#cold-start-workspace", coldStartWorkspace],
     ["#framing-project-panel", element()],
     ["#chat-eyebrow", element()],
     ["#chat-title", element()],
@@ -469,6 +482,12 @@ function loadAppContext() {
         return elements.get(`#${id}`) || null;
       },
       querySelector(selector) {
+        if (selector === ".brief-editor-shell.is-framing-dock") {
+          return briefEditorShell.classList.contains("is-framing-dock") ? briefEditorShell : null;
+        }
+        if (selector === "#cold-start-workspace.has-framing-thread .framing-thread") {
+          return coldStartWorkspace.classList.contains("has-framing-thread") && !framingThread.hidden ? framingThread : null;
+        }
         return elements.get(selector) || null;
       },
       querySelectorAll(selector) {
@@ -1092,12 +1111,13 @@ function loadAppContext() {
       const entries = sessionTranscriptEntries();
       const activity = buildFramingActivityByMessage(localMessages, entries);
       const assistant = localMessages.find((message) => message.role === "assistant" && message.kind !== "project");
-      const html = assistant ? (activity.htmlBeforeMessageId.get(assistant.id) || "") : "";
+      const html = assistant ? framingMessageHtml(assistant, { activityHtml: activity.htmlBeforeMessageId.get(assistant.id) || "" }) : "";
       const source = [...activityPanelSources.values()].find((item) => String(item.subtitle || "").includes("worked activity")) || null;
       const panelHtml = source ? activityPanelHtml(source) : "";
       return {
         hasWorked: html.includes("Worked for"),
         hasActivityOpen: html.includes("data-activity-open"),
+        hasInlineContainer: html.includes("inline-run-activity-summary"),
         hasInlineDetails: html.includes("<details"),
         hasPartial: html.includes("partial status"),
         hasFinal: html.includes("Final **answer**"),
@@ -1140,6 +1160,7 @@ function loadAppContext() {
       return {
         dockHtml: lastAutoresearchDockHtml,
         dockHidden: Boolean(autoresearchDockElement?.hidden),
+        dockClass: autoresearchDockElement?.classList?.toString?.() || autoresearchDockElement?.className || "",
         threadHtml: $("#framing-thread")?.innerHTML || "",
         bodyClass: document.body.classList.toString(),
         shellDocked: Boolean($("#brief-editor-shell")?.classList.contains("is-framing-dock")),
@@ -1565,6 +1586,10 @@ async function testImmediateUserMessage() {
     appState.framing.project_ready = false;
     appState.trials = [];
     __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    renderFramingConversation = () => {
+      globalThis.__renderCount += 1;
+      globalThis.__renderFramingConversationImpl();
+    };
   `);
   app.coldEditor.value = "Can you explain the project?";
   app.run("__installBlockingCollect()");
@@ -1576,6 +1601,10 @@ async function testImmediateUserMessage() {
   assert.equal(pendingState.reply, true, "normal chat messages should show immediate pending feedback");
   assert.equal(pendingState.pendingId, app.context.__messages()[0].id, "normal chat pending state should be tied to the sent message");
   assert.ok(pendingState.since > 0, "normal chat pending state should start a visible working timer");
+  const threadHtml = app.run('document.querySelector("#framing-thread")?.innerHTML || ""');
+  assert.equal(threadHtml.includes("run-live-status"), true, "normal chat sends should render the working status immediately");
+  assert.equal(threadHtml.includes("Preparing response..."), true, "normal chat sends should show the pending placeholder before backend polling responds");
+  assert.equal(threadHtml.includes("Working"), true, "normal chat sends should show a visible working timer before backend polling responds");
   assertJsonEqual(
     app.context.__messages().map((message) => `${message.role}:${message.text}`),
     ["user:Can you explain the project?"],
@@ -1587,6 +1616,41 @@ async function testImmediateUserMessage() {
   assert.equal(app.context.__apiCalls[0].body.message, "Can you explain the project?");
   assert.equal(app.context.__startedFramingBrief, undefined, "pre-project chat must not start a PROJECT.md framing run");
   assert.equal(app.context.__messages().some((message) => message.kind === "project"), false, "ordinary pre-project chat should not create a draft card by itself");
+}
+
+async function testTerminalSendResponseClearsImmediatePending() {
+  const app = loadAppContext();
+  app.context.__apiResponse = {
+    ok: true,
+    result: {
+      session: {
+        id: "s-terminal",
+        session_id: "sid",
+        status: "completed",
+        mode: "chat",
+        started_at: "2026-06-17T10:01:00.000Z",
+        active_run: { running: false, mode: "chat", run_id: "s-terminal", started_at: "2026-06-17T10:01:00.000Z" },
+        transcript: [],
+      },
+    },
+  };
+  app.run(`
+    document.querySelector("#project-draft-editor").value = "";
+    coldFiles["PROJECT.md"] = "";
+    appState.files.project.text = "";
+    appState.framing.project_ready = false;
+    appState.trials = [];
+    __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    renderFramingConversation = () => {
+      globalThis.__renderCount += 1;
+      globalThis.__renderFramingConversationImpl();
+    };
+  `);
+  await app.run('sendSessionComposerMessage("Can you explain the project?")');
+  const pendingState = app.context.__pendingState();
+  const threadHtml = app.run('document.querySelector("#framing-thread")?.innerHTML || ""');
+  assert.equal(pendingState.reply, false, "terminal backend responses without a reply should not leave chat permanently pending");
+  assert.equal(threadHtml.includes("The run completed without a saved response."), true, "terminal backend responses without a reply should show the existing no-response status");
 }
 
 async function testExistingProjectComposerUsesChatEndpoint() {
@@ -1763,6 +1827,10 @@ async function testPlanComposerModeUsesPlanEndpoint() {
     appState.framing.project_ready = false;
     appState.trials = [];
     __setSession({ id: "", session_id: "", status: "idle", mode: "", transcript: [] });
+    renderFramingConversation = () => {
+      globalThis.__renderCount += 1;
+      globalThis.__renderFramingConversationImpl();
+    };
   `);
   assert.equal(app.run('document.querySelector("[data-composer-mode]") === null'), true, "Plan mode should not render a Chat/Plan segmented control");
   assert.equal(app.run('document.querySelectorAll("[data-plan-mode-toggle]").length >= 1'), true, "Plan mode should render a single Plan chip");
@@ -1770,7 +1838,13 @@ async function testPlanComposerModeUsesPlanEndpoint() {
   assert.equal(app.run('isPlanComposerMode()'), true, "using the Plan chip should enable plan mode");
   assert.equal(app.run('document.querySelector("[data-plan-mode-toggle]").classList.contains("is-active")'), true, "enabled Plan chip should show active state");
   app.coldEditor.value = "Plan the first implementation pass.";
-  await app.run("coldStartFromPrepare()");
+  app.run("__installBlockingCollect()");
+  const pending = app.run("coldStartFromPrepare()");
+  const threadHtml = app.run('document.querySelector("#framing-thread")?.innerHTML || ""');
+  assert.equal(threadHtml.includes("run-live-status"), true, "Plan mode sends should render the working status immediately");
+  assert.equal(threadHtml.includes("Preparing response..."), true, "Plan mode sends should show the pending placeholder before backend polling responds");
+  app.context.__resolveCollect();
+  await pending;
   assert.equal(app.context.__apiCalls[0].endpoint, "/api/research/plan", "Plan mode should use the real plan endpoint");
   assert.equal(app.context.__apiCalls[0].body.message, "Plan the first implementation pass.");
   assert.equal(app.context.__apiCalls[0].body.conversationHistory.length >= 1, true, "plan requests should send conversation history");
@@ -2423,6 +2497,50 @@ function testStaleOverviewDoesNotSwallowPendingUser() {
   assert.ok(texts.includes("message survives"), "pending user message should survive stale overview restore");
 }
 
+function testRunningReplyKeepsWorkingAfterShortAnswer() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", text: "What does this table mean?", created_at: "2026-06-17T10:00:00.000Z" },
+      { id: "a1", role: "assistant", kind: "text", text: "I am checking the table before answering.", created_at: "2026-06-17T10:00:03.000Z" }
+    ]);
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "running",
+      mode: "chat",
+      loop_active: false,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "chat",
+        run_id: "s1",
+        started_at: "2026-06-17T10:00:00.000Z",
+        status_label: "Codex is working"
+      },
+      transcript: [
+        { id: "tu1", role: "user", kind: "user", raw_type: "ui.chat", content: "What does this table mean?", created_at: "2026-06-17T10:00:00.000Z" },
+        { id: "tc1", role: "command", kind: "command", raw_type: "process.started", content: "codex exec resume", created_at: "2026-06-17T10:00:01.000Z" }
+      ]
+    });
+    framingReplyPending = true;
+    pendingFramingUserMessageId = "u1";
+    framingPendingSince = Date.parse("2026-06-17T10:00:00.000Z");
+    renderFramingConversation = () => {
+      globalThis.__renderCount += 1;
+      globalThis.__renderFramingConversationImpl();
+    };
+  `);
+  const html = app.run("__framingThreadHtmlProbe()");
+  const pendingState = app.context.__pendingState();
+  assert.equal(pendingState.reply, true, "running chat should keep reply pending after a visible short assistant answer");
+  assert.equal(html.includes("I am checking the table before answering."), true, "short assistant answer should remain visible");
+  assert.equal(html.includes("run-live-status"), true, "running chat should keep showing the live working status after a short answer");
+  assert.equal(html.includes("Working"), true, "running chat should keep showing a working timer after a short answer");
+  assert.equal(html.includes("Preparing response..."), true, "running chat should keep a quiet pending placeholder when no readable update exists yet");
+  assert.equal(html.includes("data-activity-open"), true, "running chat should keep an Activity entry available after a short answer");
+}
+
 function testTranscriptRecoveryUsesOnlyFinalAssistant() {
   const app = loadAppContext();
   app.run(`
@@ -2443,10 +2561,14 @@ function testTranscriptRecoveryUsesOnlyFinalAssistant() {
   const activity = app.run("__activityProbe()");
   assert.equal(activity.hasWorked, true, "activity entry should render before the final assistant response");
   assert.equal(activity.hasActivityOpen, true, "worked activity should open the Activity panel");
+  assert.equal(activity.hasInlineContainer, true, "worked activity should render inside the assistant turn, not as a standalone thread item");
   assert.equal(activity.hasInlineDetails, false, "worked activity should no longer expand inline");
   assert.equal(activity.hasPartial, false, "intermediate status should move out of the main thread");
   assert.equal(activity.panelHasPartial, true, "intermediate status should live inside the Activity panel");
   assert.equal(activity.panelHasFinal, false, "final answer should not be hidden inside worked activity");
+  const html = app.run("__framingThreadHtmlProbe()");
+  assert.equal(html.includes("partial status"), false, "completed turns should not expose intermediate updates as main-thread reply text");
+  assert.equal(html.includes("run-live-status"), false, "completed turns should not keep the live working status after final recovery");
 }
 
 function testClaudeResultSuccessRecoversAssistantReply() {
@@ -2491,6 +2613,7 @@ function testClaudeWorkedActivityUsesActivityPanel() {
   ]);
   const activity = app.run("__activityProbe()");
   assert.equal(activity.hasActivityOpen, true, "Claude worked activity should open the Activity panel");
+  assert.equal(activity.hasInlineContainer, true, "Claude worked activity should render inside the assistant turn");
   assert.equal(activity.hasInlineDetails, false, "Claude worked activity should not expand inline");
   assert.equal(activity.panelHasPartial, false, "Claude fixture should not depend on the Codex partial status text");
   const panel = app.run(`__activityPanelProbe(${JSON.stringify(activity.sourceKeys[0])})`);
@@ -3452,7 +3575,7 @@ function testAutoresearchPanelCollapsePersists() {
   assert.equal(initial.html.includes('href="#brand-mark-glyph"'), true, "trial history header should reuse the app brand glyph");
   assert.equal(initial.html.includes("trial-history-micro-spinner"), false, "completed autoresearch header should not animate");
   assert.equal(initial.html.includes("trial-history-kicker-status"), true, "trial history header should render inline trial status");
-  assert.equal(initial.html.includes("Trial 18: Done"), true, "trial status should sit beside the autoresearch label");
+  assert.equal(initial.html.includes("Trial 18 · Done"), true, "trial status should render in the live strip meta column");
   assert.equal(initial.html.includes("Working on: Compare candidate effect-analysis designs before the final gate."), true, "trial header should include the plan objective when PLAN.md exists");
   assert.equal(initial.html.includes("trial-history-collapsed-summary"), false, "collapsed state should not render the old compact summary row");
   assert.equal(initial.html.includes("trial-history-latest\">Latest:"), false, "collapsed state should not render the redundant latest artifact line");
@@ -3462,6 +3585,12 @@ function testAutoresearchPanelCollapsePersists() {
   assert.equal(initial.html.includes("trial-history-toggle-icon"), false, "collapsed state should not render the old standalone chevron button");
   assert.equal(initial.html.includes("trial-history-latest-update"), true, "collapsed state should render the latest process update");
   assert.equal(initial.html.includes("Synthesizing the latest evidence table."), true, "collapsed state should include the latest agent progress text");
+  assert.equal(initial.html.includes("trial-live-strip"), true, "trial history header should render the live strip shell");
+  assert.equal(initial.html.includes("trial-live-main"), true, "live strip should keep the main collapse target separate");
+  assert.equal(initial.html.includes("trial-live-actions"), true, "live strip should render a separate action cluster");
+  assert.equal(initial.html.includes("trial-history-activity-button"), true, "live strip should expose an Activity button");
+  const initialMainButton = initial.html.match(/<button class="trial-history-toggle trial-live-main"[\s\S]*?<\/button>/)?.[0] || "";
+  assert.equal(initialMainButton.includes("data-activity-open"), false, "Activity button must not be nested inside the collapse button");
   const collapsed = app.run("__toggleAutoresearchPanelCollapse()");
   assert.equal(collapsed.collapsed, true, "toggle should collapse the autoresearch panel");
   assert.equal(collapsed.stored, "true", "collapsed state should persist in scoped localStorage");
@@ -3482,8 +3611,210 @@ function testAutoresearchPanelCollapsePersists() {
     };
   `);
   const reviewing = app.run("__autoresearchPanelCollapseProbe()");
-  assert.equal(reviewing.html.includes("Trial 18: Reviewing"), true, "trial header should use the selected trial's real progress label when it is not complete");
+  assert.equal(reviewing.html.includes("Trial 18 · Reviewing"), true, "trial header should use the selected trial's real progress label when it is not complete");
   assert.equal(reviewing.html.includes("Trial 18: Incomplete"), false, "trial header should not collapse active progress into a generic incomplete status");
+}
+
+function testAutoresearchLiveStripZeroEventActivity() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [];
+    activityPanelSources.clear();
+    __setSession({
+      id: "s22",
+      session_id: "sid",
+      status: "running",
+      mode: "goal",
+      loop_active: true,
+      loop_iteration: 22,
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: {
+        running: true,
+        mode: "goal",
+        run_id: "s22",
+        started_at: "2026-06-17T10:00:00.000Z",
+        trial_iteration: 22,
+        trial_label: "Trial 22",
+        status_label: "Codex is working on Trial 22",
+        progress: {
+          stage_index: 1,
+          stage_label: "Planning",
+          detail: "Trial 22 is being prepared."
+        }
+      },
+      transcript: [
+        { id: "tu22", role: "user", kind: "user", raw_type: "ui.goal", content: "Continue autoresearch.", created_at: "2026-06-17T10:00:00.000Z" }
+      ]
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("trial-live-strip"), true, "zero-event running trial should still render the live strip");
+  assert.equal(html.includes("Trial 22 · Planning"), true, "zero-event running trial should show the active planning state");
+  assert.equal(html.includes("Waiting for agent update."), true, "zero-event running trial should show a friendly waiting update");
+  assert.equal(html.includes("trial-history-activity-button"), true, "zero-event running trial should still expose Activity");
+  assert.equal(html.includes("<strong>waiting</strong>"), true, "zero-event Activity button should show waiting");
+  const mainButton = html.match(/<button class="trial-history-toggle trial-live-main"[\s\S]*?<\/button>/)?.[0] || "";
+  assert.equal(mainButton.includes("data-activity-open"), false, "zero-event Activity button must remain outside the collapse button");
+  const keys = app.run("[...activityPanelSources.keys()]");
+  assert.equal(keys.includes("trial-history:p1:22:running"), true, "zero-event live strip should register a running Activity source");
+  const panel = app.run('__activityPanelProbe("trial-history:p1:22:running")');
+  assert.equal(panel.hidden, false, "zero-event live strip Activity should open the Activity panel");
+  assert.equal(panel.html.includes("Waiting for agent update."), true, "zero-event Activity panel should render the waiting empty state");
+  const dock = app.run("__autoresearchDockProbe()");
+  assert.equal(dock.dockClass.includes("is-running"), true, "floating dock should expose the running state class");
+}
+
+function testAutoresearchTrajectoryGraphRendersBranchesAndInterventions() {
+  const app = loadAppContext();
+  app.run(`
+    activityPanelSources.clear();
+    appState.trials = [
+      {
+        id: "000016_reference_and_submission_source_repair",
+        iteration: 16,
+        status: "reported",
+        is_closed: true,
+        report_path: "research_trajectory/trials/000016_reference_and_submission_source_repair/REPORT.md",
+        review_path: "research_trajectory/trials/000016_reference_and_submission_source_repair/reviews/FINAL_GATE_REVIEW.md",
+        objective: "Repair reference and source handling.",
+        report_summary: "Reference repair complete."
+      },
+      {
+        id: "000021_source_integration",
+        iteration: 21,
+        status: "reported",
+        is_closed: true,
+        report_path: "research_trajectory/trials/000021_source_integration/REPORT.md",
+        review_path: "research_trajectory/trials/000021_source_integration/reviews/FINAL_GATE_REVIEW.md",
+        objective: "Integrate public safety sources.",
+        report_summary: "Source integration complete."
+      }
+    ];
+    appState.trajectory_graph = {
+      schema_version: 1,
+      active: {
+        fork_id: "F0008_20260624_211521_455665_from_000016_reference_and_submission_source_repair",
+        base_trial: "000016_reference_and_submission_source_repair",
+        latest_active_trial: "000021_source_integration",
+        next_trial_number: 22,
+        expected_trial_iteration: 22
+      },
+      trials: [
+        {
+          id: "000016_reference_and_submission_source_repair",
+          iteration: 16,
+          title: "Repair reference and source handling.",
+          path: "research_trajectory/trials/000016_reference_and_submission_source_repair",
+          status: "reported",
+          is_active_base: true,
+          is_latest_active: false,
+          is_next_expected: false,
+          is_closed: true
+        },
+        {
+          id: "000021_source_integration",
+          iteration: 21,
+          title: "Integrate public safety sources.",
+          path: "research_trajectory/trials/000021_source_integration",
+          status: "reported",
+          is_active_base: false,
+          is_latest_active: true,
+          is_next_expected: false,
+          is_closed: true
+        },
+        {
+          id: "expected_trial_22",
+          iteration: 22,
+          title: "Next trial",
+          path: "",
+          status: "pending",
+          is_active_base: false,
+          is_latest_active: false,
+          is_next_expected: true,
+          is_closed: false
+        }
+      ],
+      forks: [
+        {
+          fork_id: "F0008_20260624_211521_455665_from_000016_reference_and_submission_source_repair",
+          fork_number: "F0008",
+          created_at: "2026-06-24T21:15:21-04:00",
+          base_trial: "000016_reference_and_submission_source_repair",
+          base_trial_iteration: 16,
+          base_trial_path: "research_trajectory/trials/000016_reference_and_submission_source_repair",
+          restore_mode: "checkpoint",
+          manifest_path: "archive/resume_forks/F0008/MANIFEST.md",
+          intervention_id: "I0007",
+          intervention_path: "research_trajectory/human_interventions/I0007_resume.md",
+          archived_trials: [{ id: "000017_superseded", from: "research_trajectory/trials/000017_superseded", to: "archive/resume_forks/F0008/superseded_trials/000017_superseded" }],
+          user_instruction_summary: "Continue from Trial 16 and repair the result table."
+        }
+      ],
+      interventions: [
+        {
+          id: "I0014",
+          path: "research_trajectory/human_interventions/I0014_main_result_table_not_good_enough.md",
+          created_at: "2026-06-29T16:20:00-04:00",
+          status: "pending",
+          summary: "Main result table is not strong enough.",
+          applied_in_trial: "",
+          superseded_by: "",
+          target_iteration: 22
+        },
+        {
+          id: "I0013",
+          path: "research_trajectory/human_interventions/I0013_title.md",
+          created_at: "2026-06-27T15:40:33-04:00",
+          status: "applied",
+          summary: "Title framing was applied.",
+          applied_in_trial: "000021_source_integration",
+          superseded_by: "",
+          target_iteration: 21
+        },
+        {
+          id: "I0010",
+          path: "research_trajectory/human_interventions/I0010_old.md",
+          created_at: "2026-06-25T00:53:06-04:00",
+          status: "superseded",
+          summary: "Older method note.",
+          applied_in_trial: "",
+          superseded_by: "I0012",
+          target_iteration: 22
+        }
+      ]
+    };
+    __setSession({
+      id: "s21",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 21,
+      trajectory: appState.trajectory_graph.active,
+      transcript: []
+    });
+  `);
+  const expanded = app.run("__sessionTimelineProbe()");
+  assert.equal(expanded.includes("research-trajectory-graph"), true, "expanded dock should render the trajectory graph");
+  assert.equal(expanded.includes("trajectory-lane"), true, "trajectory graph should render a horizontal lane");
+  assert.equal(expanded.includes("Trial 16"), true, "trajectory graph should render the base trial");
+  assert.equal(expanded.includes("Trial 22"), true, "trajectory graph should render the next expected trial");
+  assert.equal(expanded.includes("F0008"), true, "trajectory graph should render the current continue fork");
+  assert.equal(expanded.includes("I0014"), true, "trajectory graph should render pending intervention badges");
+  assert.equal(expanded.includes("1 superseded"), true, "trajectory graph should collapse superseded interventions into a count");
+  assert.equal(expanded.includes('data-trial-select="16"'), true, "real trial nodes should reuse trial selection hooks");
+  const keys = app.run("[...activityPanelSources.keys()]");
+  const forkKey = keys.find((key) => key.includes(":fork:F0008_"));
+  const interventionKey = keys.find((key) => key.includes(":intervention:I0014"));
+  assert.equal(Boolean(forkKey), true, "fork branch should register an Activity source");
+  assert.equal(Boolean(interventionKey), true, "intervention badge should register an Activity source");
+  const forkPanel = app.run(`__activityPanelProbe(${JSON.stringify(forkKey)})`);
+  assert.equal(forkPanel.html.includes("Archived trials"), true, "fork Activity panel should include archived trial details");
+  const interventionPanel = app.run(`__activityPanelProbe(${JSON.stringify(interventionKey)})`);
+  assert.equal(interventionPanel.html.includes("Main result table is not strong enough."), true, "intervention Activity panel should include the intervention summary");
+  const collapsed = app.run("__toggleAutoresearchPanelCollapse()");
+  assert.equal(collapsed.html.includes("research-trajectory-graph"), false, "collapsed dock should not render the trajectory graph");
+  assert.equal(collapsed.html.includes("trial-live-strip"), true, "collapsed dock should keep the live strip");
 }
 
 function testAutoresearchPanelRendersInFloatingDock() {
@@ -3517,7 +3848,10 @@ function testAutoresearchPanelRendersInFloatingDock() {
   const dock = app.run("__autoresearchDockProbe()");
   assert.equal(dock.dockHidden, false, "autoresearch panel should be visible in the floating dock");
   assert.equal(dock.dockHtml.includes("trial-history-card"), true, "floating dock should own the trial history card");
-  assert.equal(dock.dockHtml.includes("Trial 18: Done"), true, "floating dock should preserve the panel header content");
+  assert.equal(dock.dockHtml.includes("trial-live-strip"), true, "floating dock should render the research live strip");
+  assert.equal(dock.dockHtml.includes("Trial 18 · Done"), true, "floating dock should preserve the panel header content");
+  assert.equal(dock.dockHtml.includes("trial-history-activity-button"), true, "floating dock should expose the Activity trigger");
+  assert.equal(dock.dockClass.includes("is-expanded"), true, "floating dock should expose the expanded state class");
   assert.equal(dock.threadHtml.includes("trial-history-card"), false, "trial history card should not remain in the transcript thread");
   assert.equal(dock.bodyClass.includes("has-autoresearch-dock"), true, "body should expose the autoresearch dock state");
   assert.equal(dock.shellDocked, true, "composer dock should stay active while the autoresearch dock is visible");
@@ -6396,28 +6730,28 @@ async function testLargeBrowserUploadsUseResourceCopyFlow() {
 function testCompactComposerAutosizesFromCenteredBase() {
   const app = loadAppContext();
   let state = app.run('__resizeColdEditorProbe({ value: "", scrollHeight: 44 })');
-  assert.equal(state.singleLine, false, "compact composer should not rely on a forced single-line class");
+  assert.equal(state.singleLine, true, "empty compact composer should use the single-line centering class");
   assert.equal(state.rows, 1, "compact composer should start from a one-row textarea");
   assert.equal(state.height, "44px");
   assert.equal(state.overflowY, "hidden");
 
   state = app.run('__resizeColdEditorProbe({ value: "S", scrollHeight: 44 })');
-  assert.equal(state.singleLine, false, "single-character input should stay on the normal autosize path");
+  assert.equal(state.singleLine, true, "single-line input should use the centering class");
   assert.equal(state.height, "44px");
   assert.equal(state.overflowY, "hidden");
 
   state = app.run('__resizeColdEditorProbe({ value: "Line one\\nLine two", scrollHeight: 88 })');
-  assert.equal(state.singleLine, false);
+  assert.equal(state.singleLine, false, "explicit multiline input should not use single-line centering");
   assert.equal(state.height, "88px");
   assert.equal(state.overflowY, "hidden");
 
   state = app.run('__resizeColdEditorProbe({ value: "A long wrapped composer line", scrollHeight: 88 })');
-  assert.equal(state.singleLine, false);
+  assert.equal(state.singleLine, false, "wrapped input should not use single-line centering");
   assert.equal(state.height, "88px");
   assert.equal(state.overflowY, "hidden");
 
   state = app.run('__resizeColdEditorProbe({ value: "Overflowing composer content", scrollHeight: 400 })');
-  assert.equal(state.singleLine, false);
+  assert.equal(state.singleLine, false, "overflowing input should not use single-line centering");
   assert.equal(state.height, "306px");
   assert.equal(state.overflowY, "auto");
 }
@@ -7185,6 +7519,45 @@ function testNavigationStatePersistsPanelAndScroll() {
   assert.equal(state.scrollTop, 720, "material panel scroll position should be restored after re-render");
 }
 
+function testFramingThreadScrollUpdatesBottomButtonImmediately() {
+  const app = loadAppContext();
+  const state = app.run(`
+    activeView = "chat";
+    document.querySelector("#chat-view").hidden = false;
+    document.querySelector("#brief-editor-shell").classList.add("is-framing-dock");
+    document.querySelector("#cold-start-workspace").classList.add("has-framing-thread");
+    document.body.classList.add("has-brief-dock");
+
+    const thread = document.querySelector("#framing-thread");
+    const button = document.querySelector("#framing-scroll-bottom");
+    thread.hidden = false;
+    thread.clientHeight = 600;
+    thread.scrollHeight = 1400;
+    thread.scrollTop = 0;
+
+    updateFramingScrollButton();
+    const visibleBefore = !button.hidden && document.body.classList.contains("has-framing-scroll-button");
+
+    thread.scrollTop = 800;
+    thread.dispatchEvent({ type: "scroll", target: thread });
+    const hiddenAtBottom = button.hidden && !document.body.classList.contains("has-framing-scroll-button");
+
+    thread.scrollTop = 520;
+    thread.dispatchEvent({ type: "scroll", target: thread });
+    const hiddenNearBottom = button.hidden && !document.body.classList.contains("has-framing-scroll-button");
+
+    thread.scrollTop = 120;
+    thread.dispatchEvent({ type: "scroll", target: thread });
+    const visibleAfterLeavingBottom = !button.hidden && document.body.classList.contains("has-framing-scroll-button");
+
+    ({ visibleBefore, hiddenAtBottom, hiddenNearBottom, visibleAfterLeavingBottom });
+  `);
+  assert.equal(state.visibleBefore, true, "scroll-to-bottom button should show when the framing thread is away from the bottom");
+  assert.equal(state.hiddenAtBottom, true, "framing thread scroll events should hide the button immediately at the bottom");
+  assert.equal(state.hiddenNearBottom, true, "scroll-to-bottom button should stay hidden until the thread is meaningfully away from the bottom");
+  assert.equal(state.visibleAfterLeavingBottom, true, "framing thread scroll events should show the button immediately after crossing the reveal threshold");
+}
+
 function testAgentPanelScrollRestoreAndEntryBehavior() {
   const app = loadAppContext();
   const state = app.run(`
@@ -7237,8 +7610,10 @@ function testAgentPanelScrollRestoreAndEntryBehavior() {
 
 testButtonInventoryHasHandlers();
 testNavigationStatePersistsPanelAndScroll();
+testFramingThreadScrollUpdatesBottomButtonImmediately();
 testAgentPanelScrollRestoreAndEntryBehavior();
 await testImmediateUserMessage();
+await testTerminalSendResponseClearsImmediatePending();
 await testExistingProjectComposerUsesChatEndpoint();
 await testEmptyProjectPrepareUsesChatEndpoint();
 testProjectLoadingStates();
@@ -7273,6 +7648,7 @@ await testLegacyGoalRestartCommandUsesCommandEndpoint();
 await testLegacyGoalRestartIgnoresRestartCancelFlag();
 await testTypedLegacyGoalControlsStayOnCommandEndpoint();
 testStaleOverviewDoesNotSwallowPendingUser();
+testRunningReplyKeepsWorkingAfterShortAnswer();
 testTranscriptRecoveryUsesOnlyFinalAssistant();
 testClaudeResultSuccessRecoversAssistantReply();
 testClaudeWorkedActivityUsesActivityPanel();
@@ -7305,6 +7681,8 @@ testTrialOpenButtonsUseManuscriptSnapshotWhenAvailable();
 testTrialOpenButtonsFallBackToLatestManuscript();
 testManualTrialSelectionOverridesRunningPanel();
 testAutoresearchPanelCollapsePersists();
+testAutoresearchLiveStripZeroEventActivity();
+testAutoresearchTrajectoryGraphRendersBranchesAndInterventions();
 testAutoresearchPanelRendersInFloatingDock();
 testPausedAutoresearchActionsRenderInTrialPanel();
 testAutoresearchPanelPersistsAfterFramingReply();

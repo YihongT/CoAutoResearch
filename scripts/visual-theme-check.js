@@ -357,7 +357,7 @@ function composerHtml() {
     </div>
     <div class="brief-composer-row">
       <button class="composer-attach-button" type="button" aria-label="Attach resources" aria-haspopup="menu" aria-expanded="false">+</button>
-      <textarea aria-label="Message" placeholder="Message the research agent..."></textarea>
+      <textarea class="is-compact-single-line" aria-label="Message" placeholder="Message the research agent..."></textarea>
       <div class="brief-run-controls">
         <label><select><option>GPT-5.5</option></select></label>
         <label><select><option>Medium</option></select></label>
@@ -372,6 +372,36 @@ function composerHtml() {
       <button class="composer-suggestion-chip" type="button">Show autoresearch</button>
       <button class="composer-suggestion-chip" type="button">Status</button>
       <button class="composer-suggestion-chip" type="button">Diff</button>
+    </div>
+  </section>`;
+}
+
+function trajectoryFixtureHtml() {
+  return `<section class="research-trajectory-graph" aria-label="Research trajectory">
+    <header class="research-trajectory-head">
+      <div><span>Research trajectory</span><strong>Active fork F0008</strong></div>
+      <p>1 pending intervention</p>
+    </header>
+    <div class="trajectory-scroll" tabindex="0">
+      <div class="trajectory-canvas" style="--trajectory-count: 3;">
+        <div class="trajectory-branch-row is-above"></div>
+        <div class="trajectory-lane">
+          <div class="trajectory-node is-base">
+            <button class="trajectory-trial-button" type="button" data-trial-select="16"><span class="trajectory-trial-index">Trial 16</span><strong>Source repair</strong><em>Base</em></button>
+          </div>
+          <div class="trajectory-node is-latest">
+            <button class="trajectory-trial-button" type="button" data-trial-select="21"><span class="trajectory-trial-index">Trial 21</span><strong>Source integration</strong><em>Latest</em></button>
+            <div class="trajectory-interventions"><button class="trajectory-intervention-badge is-applied" type="button"><span>I0013</span><em>applied</em></button></div>
+          </div>
+          <div class="trajectory-node is-next">
+            <button class="trajectory-trial-button" type="button" aria-disabled="true"><span class="trajectory-trial-index">Trial 22</span><strong>Next trial</strong><em>Pending</em></button>
+            <div class="trajectory-interventions"><button class="trajectory-intervention-badge is-pending" type="button"><span>I0014</span><em>pending</em></button><span class="trajectory-intervention-badge is-superseded-count">1 superseded</span></div>
+          </div>
+        </div>
+        <div class="trajectory-branch-row is-below">
+          <button class="trajectory-branch is-below" type="button" style="grid-column: 1 / span 2;"><span class="trajectory-branch-kicker">F0008 · Continue</span><strong>From Trial 16</strong><em>Archived branch · 1 trials</em></button>
+        </div>
+      </div>
     </div>
   </section>`;
 }
@@ -411,21 +441,26 @@ function dashboardHtml(theme, label) {
                 </div>
               </div>
             </article>
-            <div class="autoresearch-dock">
+            <div class="autoresearch-dock is-expanded is-running">
               <section class="trial-history-card is-expanded is-running" data-autoresearch-panel-collapsed="false">
                 <header class="trial-history-head">
-                  <div class="trial-history-kicker" aria-label="Autoresearch">
-                    <span class="trial-history-micro-spinner" aria-hidden="true"></span>
-                    <span>Autoresearch</span>
-                    <span class="trial-history-kicker-status">Trial 8: Running</span>
+                  <div class="trial-live-strip">
+                    <button class="trial-history-toggle trial-live-main" type="button" data-autoresearch-panel-toggle aria-expanded="true">
+                      <span class="trial-history-kicker trial-live-brand" aria-label="Autoresearch">
+                        <span class="trial-history-micro-spinner" aria-hidden="true"></span>
+                        <span>Autoresearch</span>
+                      </span>
+                      <span class="trial-history-kicker-status trial-live-primary"><span>Trial 8 · Running</span><span class="trial-history-working-on" title="Working on: Stabilize the final review gate.">Working on: Stabilize the final review gate.</span></span>
+                      <span class="trial-history-latest-update trial-live-update"><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
+                    </button>
+                    <div class="trial-live-actions">
+                      <button class="activity-open-button trial-history-activity-button" type="button" data-activity-open data-activity-key="visual-trial-expanded"><span class="activity-open-label">Activity</span><span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>6 events</strong></button>
+                      <button class="trial-live-chevron" type="button" data-autoresearch-panel-toggle aria-expanded="true" aria-label="Collapse autoresearch"><span class="trial-history-disclosure" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m9 18 6-6-6-6"/></svg></span></button>
+                    </div>
                   </div>
-                  <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="true">
-                    <span class="trial-history-toggle-copy">
-                      <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
-                    </span>
-                  </button>
                 </header>
                 <div class="trial-history-body">
+                  ${trajectoryFixtureHtml()}
                   <nav class="trial-strip" aria-label="Autoresearch trials">
                     <button class="trial-scroll-button" type="button">&lt;</button>
                     <div class="trial-strip-scroll">
@@ -464,19 +499,23 @@ function dashboardHtml(theme, label) {
                 </div>
               </section>
             </div>
-            <div class="autoresearch-dock">
+            <div class="autoresearch-dock is-collapsed is-running">
               <section class="trial-history-card is-collapsed is-running" data-autoresearch-panel-collapsed="true">
                 <header class="trial-history-head">
-                  <div class="trial-history-kicker" aria-label="Autoresearch">
-                    <span class="trial-history-micro-spinner" aria-hidden="true"></span>
-                    <span>Autoresearch</span>
-                    <span class="trial-history-kicker-status">Trial 8: Running</span>
+                  <div class="trial-live-strip">
+                    <button class="trial-history-toggle trial-live-main" type="button" data-autoresearch-panel-toggle aria-expanded="false">
+                      <span class="trial-history-kicker trial-live-brand" aria-label="Autoresearch">
+                        <span class="trial-history-micro-spinner" aria-hidden="true"></span>
+                        <span>Autoresearch</span>
+                      </span>
+                      <span class="trial-history-kicker-status trial-live-primary"><span>Trial 8 · Running</span></span>
+                      <span class="trial-history-latest-update trial-live-update"><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
+                    </button>
+                    <div class="trial-live-actions">
+                      <button class="activity-open-button trial-history-activity-button" type="button" data-activity-open data-activity-key="visual-trial-collapsed"><span class="activity-open-label">Activity</span><span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>6 events</strong></button>
+                      <button class="trial-live-chevron" type="button" data-autoresearch-panel-toggle aria-expanded="false" aria-label="Expand autoresearch"><span class="trial-history-disclosure" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m9 18 6-6-6-6"/></svg></span></button>
+                    </div>
                   </div>
-                  <button class="trial-history-toggle" type="button" data-autoresearch-panel-toggle aria-expanded="false">
-                    <span class="trial-history-toggle-copy">
-                      <span class="trial-history-latest-update"><span class="trial-history-disclosure" aria-hidden="true">›</span><span>Agent update</span><em>Update: Prepared final gate handoff.</em></span>
-                    </span>
-                  </button>
                 </header>
                 <div class="trial-history-body">
                   <nav class="trial-strip" aria-label="Autoresearch trials"></nav>
@@ -540,10 +579,16 @@ function activityHtml(theme, label) {
                 </section>
               </div>
             </article>
-            <button class="activity-open-button framing-run-activity" type="button" data-activity-open data-activity-key="worked">
-              <span class="activity-open-label">Worked for 3m 27s</span>
-              <span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>6 events</strong>
-            </button>
+            <article class="framing-message assistant">
+              <div class="transcript-meta">CoAutoResearch</div>
+              <div class="inline-run-activity-summary">
+                <button class="activity-open-button framing-run-activity" type="button" data-activity-open data-activity-key="worked">
+                  <span class="activity-open-label">Worked for 3m 27s</span>
+                  <span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>6 events</strong>
+                </button>
+              </div>
+              <div class="transcript-body">The PDF is ready and the rendered page count matches the source.</div>
+            </article>
           </section>
           ${composerHtml()}
         </section>
@@ -768,6 +813,57 @@ function panelsHtml(theme, label) {
           <h1>Working blueprint</h1>
           <p>Editorial document layout — mono eyebrows, Fraunces titles, hairline rules.</p>
         </header>
+
+        <div class="autoresearch-dock is-collapsed is-running" style="position:relative; left:auto; top:auto; bottom:auto; transform:none; width:100%; max-width:100%; margin:0; z-index:1;">
+          <section class="trial-history-card is-collapsed is-running" data-autoresearch-panel-collapsed="true">
+            <header class="trial-history-head">
+              <div class="trial-live-strip">
+                <button class="trial-history-toggle trial-live-main" type="button" data-autoresearch-panel-toggle aria-expanded="false">
+                  <span class="trial-history-kicker trial-live-brand" aria-label="Autoresearch"><span class="trial-history-micro-spinner" aria-hidden="true"></span><span>Autoresearch</span></span>
+                  <span class="trial-history-kicker-status trial-live-primary"><span>Trial 22 · Planning</span></span>
+                  <span class="trial-history-latest-update trial-live-update"><span>Agent update</span><em>Waiting for agent update.</em></span>
+                </button>
+                <div class="trial-live-actions">
+                  <button class="activity-open-button trial-history-activity-button" type="button" data-activity-open data-activity-key="visual-live-waiting"><span class="activity-open-label">Activity</span><span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>waiting</strong></button>
+                  <button class="trial-live-chevron" type="button" data-autoresearch-panel-toggle aria-expanded="false" aria-label="Expand autoresearch"><span class="trial-history-disclosure" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m9 18 6-6-6-6"/></svg></span></button>
+                </div>
+              </div>
+            </header>
+            <div class="trial-history-body"></div>
+          </section>
+        </div>
+
+        <div class="autoresearch-dock is-expanded is-running" style="position:relative; left:auto; top:auto; bottom:auto; transform:none; width:100%; max-width:100%; margin:0; z-index:1;">
+          <section class="trial-history-card is-expanded is-running" data-autoresearch-panel-collapsed="false">
+            <header class="trial-history-head">
+              <div class="trial-live-strip">
+                <button class="trial-history-toggle trial-live-main" type="button" data-autoresearch-panel-toggle aria-expanded="true">
+                  <span class="trial-history-kicker trial-live-brand" aria-label="Autoresearch"><span class="trial-history-micro-spinner" aria-hidden="true"></span><span>Autoresearch</span></span>
+                  <span class="trial-history-kicker-status trial-live-primary"><span>Trial 22 · Planning</span><span class="trial-history-working-on" title="Working on: Rebuild the source/result relationship.">Working on: Rebuild the source/result relationship.</span></span>
+                  <span class="trial-history-latest-update trial-live-update"><span>Agent update</span><em>Update: mapping the evidence table into the final result argument.</em></span>
+                </button>
+                <div class="trial-live-actions">
+                  <button class="activity-open-button trial-history-activity-button" type="button" data-activity-open data-activity-key="visual-live-expanded"><span class="activity-open-label">Activity</span><span class="activity-open-separator" aria-hidden="true">&middot;</span><strong>11 events</strong></button>
+                  <button class="trial-live-chevron" type="button" data-autoresearch-panel-toggle aria-expanded="true" aria-label="Collapse autoresearch"><span class="trial-history-disclosure" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m9 18 6-6-6-6"/></svg></span></button>
+                </div>
+              </div>
+            </header>
+            <div class="trial-history-body">
+              ${trajectoryFixtureHtml()}
+              <nav class="trial-strip" aria-label="Autoresearch trials">
+                <span>Trials</span>
+                <button class="trial-scroll-button" type="button">&lt;</button>
+                <div class="trial-strip-scroll">
+                  <button class="trial-chip" type="button"><strong class="trial-chip-index">20</strong><span class="trial-chip-status">Reported</span></button>
+                  <button class="trial-chip is-continued" type="button"><strong class="trial-chip-index">21</strong><span class="trial-chip-status">Continued</span></button>
+                  <button class="trial-chip is-active is-running" type="button"><strong class="trial-chip-index">22</strong><span class="trial-chip-status">Running</span></button>
+                </div>
+                <button class="trial-scroll-button" type="button">&gt;</button>
+              </nav>
+              <article class="trial-report-card is-running"><div class="trial-report-head"><div><strong>Trial 22</strong><em>running</em><span class="trial-report-head-progress">Planning result claim and evidence coverage.</span></div></div><p class="trial-progress-summary">The live strip stays compact while the inspector keeps trial details available.</p></article>
+            </div>
+          </section>
+        </div>
 
         <section class="manuscript-layout">
           <aside class="manuscript-outline-panel" aria-label="Manuscript outline">

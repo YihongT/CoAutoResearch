@@ -964,6 +964,7 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
       const mainCs = mainEl ? getComputedStyle(mainEl) : null;
       const threadCs = getComputedStyle(dockedThread);
       const composerDock = document.querySelector('.brief-editor-shell.is-framing-dock');
+      const composerEditor = composerDock?.querySelector?.('#cold-file-editor');
       const threadRect = rectFor(dockedThread);
       const dockRect = rectFor(composerDock);
       const mainRect = rectFor(mainEl);
@@ -978,6 +979,17 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
       }
       if (mainRect && threadRect && (Math.abs(threadRect.left - mainRect.left) > 2 || Math.abs(threadRect.right - mainRect.right) > 2)) {
         issues.push({ type: 'framing-scrollbar-edge', message: 'framing transcript scroller should span the workspace so its scrollbar sits on the page edge', thread: threadRect, main: mainRect });
+      }
+      if (visible(composerEditor) && composerEditor.classList.contains('is-compact-single-line')) {
+        const editorRect = rectFor(composerEditor);
+        const editorStyle = getComputedStyle(composerEditor);
+        const paddingTop = Number.parseFloat(editorStyle.paddingTop || '0');
+        const lineHeight = Number.parseFloat(editorStyle.lineHeight || '0');
+        const lineCenter = paddingTop + lineHeight / 2;
+        const editorCenter = editorRect.height / 2;
+        if (Math.abs(lineCenter - editorCenter) > 2) {
+          issues.push({ type: 'composer-text-vertical-centering', message: 'Single-line composer text is not vertically centered in the input box', lineCenter, editorCenter, editor: editorRect, paddingTop, lineHeight });
+        }
       }
     }
     const workspaceLeft = rail && ${desktop ? "true" : "false"} ? rail.right : 0;

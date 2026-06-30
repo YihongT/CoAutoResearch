@@ -6845,12 +6845,13 @@ def update_resume_forks_index(
     index_path = root / "RESUME_FORKS.md"
     existing = safe_read(index_path) if index_path.exists() else "# Resume Forks\n\nFork history for human-directed continue-from-trial branches.\n"
     instruction = compact_single_line(user_instruction, 180) or "Continue from the selected trial boundary."
+    created_at = now_iso()
     entry = "\n".join(
         [
             "",
             f"## F{fork_sequence:04d} · {trial.get('id', '')}",
             "",
-            f"- Created: {now_iso()}",
+            f"- Created: {created_at}",
             f"- Fork id: `{fork_id}`",
             f"- Base trial: `{trial.get('id', '')}`",
             f"- Base trial path: `{trial.get('path', '')}`",
@@ -6863,7 +6864,250 @@ def update_resume_forks_index(
     )
     if f"## F{fork_sequence:04d} ·" not in existing:
         index_path.write_text(existing.rstrip() + entry + "\n", encoding="utf-8")
+    write_resume_fork_index_entry(
+        {
+            "fork_id": fork_id,
+            "fork_number": f"F{fork_sequence:04d}",
+            "created_at": created_at,
+            "base_trial": str(trial.get("id") or ""),
+            "base_trial_path": str(trial.get("path") or ""),
+            "restore_mode": restore_mode,
+            "manifest_path": fork_manifest,
+            "intervention_id": intervention_id_from_path(intervention_path),
+            "intervention_path": intervention_path,
+            "archived_trials": archived_trials,
+            "user_instruction_summary": instruction,
+        }
+    )
     return rel_path(index_path)
+
+
+def resume_fork_index_json_path() -> Path:
+    return resume_forks_root() / "INDEX.json"
+
+
+def normalize_archived_trial_records(records: Any) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    if not isinstance(records, list):
+        return normalized
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        source = str(record.get("from") or "").strip()
+        destination = str(record.get("to") or "").strip()
+        trial_id = str(record.get("id") or Path(source or destination).name).strip()
+        if not trial_id and not source and not destination:
+            continue
+        normalized.append({"id": trial_id, "from": source, "to": destination})
+    return normalized
+
+
+def resume_fork_number_value(value: str) -> int:
+    match = re.match(r"F0*(\d+)", str(value or "").strip(), re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def normalize_resume_fork_entry(entry: Any) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    fork_id = str(entry.get("fork_id") or "").strip()
+    fork_number = str(entry.get("fork_number") or "").strip()
+    if not fork_number and fork_id:
+        match = re.match(r"(F0*\d+)", fork_id, re.IGNORECASE)
+        if match:
+            fork_number = match.group(1).upper()
+    if not fork_id and fork_number:
+        fork_id = fork_number
+    if not fork_id:
+        return None
+    manifest_path = str(entry.get("manifest_path") or "").strip()
+    intervention_path = str(entry.get("intervention_path") or "").strip()
+    intervention_id = str(entry.get("intervention_id") or intervention_id_from_path(intervention_path)).strip()
+    base_trial = str(entry.get("base_trial") or "").strip()
+    return {
+        "fork_id": fork_id,
+        "fork_number": fork_number or fork_id,
+        "created_at": str(entry.get("created_at") or "").strip(),
+        "base_trial": base_trial,
+        "base_trial_iteration": trial_iteration_from_id(base_trial),
+        "base_trial_path": str(entry.get("base_trial_path") or "").strip(),
+        "restore_mode": str(entry.get("restore_mode") or "").strip(),
+        "manifest_path": manifest_path,
+        "intervention_id": intervention_id,
+        "intervention_path": intervention_path,
+        "archived_trials": normalize_archived_trial_records(entry.get("archived_trials")),
+        "user_instruction_summary": compact_single_line(str(entry.get("user_instruction_summary") or ""), 180),
+    }
+
+
+def archived_trials_from_manifest(text: str) -> list[dict[str, str]]:
+    section = extract_section(text, "Archived Later Trials")
+    records: list[dict[str, str]] = []
+    for line in section.splitlines():
+        match = re.match(r"\s*-\s+`?([^`\n]+?)`?\s*->\s*`?([^`\n]+?)`?\s*$", line.strip())
+        if not match:
+            continue
+        source = match.group(1).strip()
+        destination = match.group(2).strip()
+        records.append({"id": Path(source).name, "from": source, "to": destination})
+    return records
+
+
+def resume_fork_entry_from_manifest(path: Path) -> dict[str, Any] | None:
+    text = safe_read(path, 80_000)
+    if not text.strip():
+        return None
+    fork_id = regex_first_value(text, [r"^-?\s*Fork id:\s*`?([^`\n]+)`?"])
+    fork_number = regex_first_value(text, [r"^-?\s*Fork number:\s*`?([^`\n]+)`?"])
+    base_trial = regex_first_value(text, [r"^-?\s*Base trial:\s*`?([^`\n]+)`?"])
+    intervention_path = regex_first_value(text, [r"^-?\s*Intervention:\s*`?([^`\n]+)`?"])
+    return normalize_resume_fork_entry(
+        {
+            "fork_id": fork_id or path.parent.name,
+            "fork_number": fork_number,
+            "created_at": regex_first_value(text, [r"^-?\s*Created:\s*`?([^`\n]+)`?"]),
+            "base_trial": base_trial,
+            "base_trial_path": regex_first_value(text, [r"^-?\s*Base trial path:\s*`?([^`\n]+)`?"]),
+            "restore_mode": regex_first_value(text, [r"^-?\s*Restore mode:\s*`?([^`\n]+)`?"]),
+            "manifest_path": rel_path(path),
+            "intervention_id": intervention_id_from_path(intervention_path),
+            "intervention_path": intervention_path,
+            "archived_trials": archived_trials_from_manifest(text),
+            "user_instruction_summary": first_meaningful_line(extract_section(text, "User Instruction"), ""),
+        }
+    )
+
+
+def collect_resume_forks_from_manifests() -> list[dict[str, Any]]:
+    root = resume_forks_root()
+    if not root.is_dir():
+        return []
+    forks: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for manifest in sorted(root.glob("F*/MANIFEST.md")):
+        entry = resume_fork_entry_from_manifest(manifest)
+        if not entry or entry["fork_id"] in seen:
+            continue
+        seen.add(entry["fork_id"])
+        forks.append(entry)
+    return sorted(forks, key=lambda item: (resume_fork_number_value(str(item.get("fork_number") or "")), str(item.get("fork_id") or "")))
+
+
+def read_resume_fork_index() -> dict[str, Any]:
+    path = resume_fork_index_json_path()
+    payload: dict[str, Any] = {"schema_version": 1, "forks": []}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload.update(loaded)
+        except (OSError, json.JSONDecodeError):
+            payload = {"schema_version": 1, "forks": []}
+    forks = [item for item in (normalize_resume_fork_entry(entry) for entry in payload.get("forks", [])) if item is not None]
+    if not forks:
+        forks = collect_resume_forks_from_manifests()
+    payload["schema_version"] = 1
+    payload["forks"] = sorted(forks, key=lambda item: (resume_fork_number_value(str(item.get("fork_number") or "")), str(item.get("fork_id") or "")))
+    return payload
+
+
+def write_resume_fork_index_entry(entry: dict[str, Any]) -> None:
+    normalized = normalize_resume_fork_entry(entry)
+    if normalized is None:
+        return
+    path = resume_fork_index_json_path()
+    existing = read_resume_fork_index().get("forks", [])
+    by_id = {str(item.get("fork_id") or ""): item for item in existing if str(item.get("fork_id") or "").strip()}
+    by_id[normalized["fork_id"]] = normalized
+    payload = {
+        "schema_version": 1,
+        "forks": sorted(by_id.values(), key=lambda item: (resume_fork_number_value(str(item.get("fork_number") or "")), str(item.get("fork_id") or ""))),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def collect_resume_forks() -> list[dict[str, Any]]:
+    return list(read_resume_fork_index().get("forks", []))
+
+
+def collect_trajectory_graph(trials: list[dict[str, Any]], trajectory: dict[str, Any]) -> dict[str, Any]:
+    marker = read_expected_trial_marker()
+    expected_iteration = active_expected_trial_iteration(marker) or int(trajectory.get("next_trial_number") or 0)
+    base_trial = str(trajectory.get("base_trial") or "")
+    latest_active = str(trajectory.get("latest_active_trial") or "")
+    active_trials = sorted(
+        [trial for trial in trials if trial.get("is_active") and str(trial.get("epoch") or "current") == "current"],
+        key=trial_sort_key,
+    )
+    graph_trials: list[dict[str, Any]] = []
+    active_iterations = set()
+    for trial in active_trials:
+        iteration = int(trial.get("iteration") or trial_iteration_from_id(str(trial.get("id") or "")) or 0)
+        active_iterations.add(iteration)
+        graph_trials.append(
+            {
+                "id": str(trial.get("id") or ""),
+                "iteration": iteration,
+                "title": str(trial.get("objective") or trial.get("id") or ""),
+                "path": str(trial.get("path") or ""),
+                "status": str(trial.get("status") or ""),
+                "is_active_base": str(trial.get("id") or "") == base_trial,
+                "is_latest_active": str(trial.get("id") or "") == latest_active,
+                "is_next_expected": False,
+                "is_closed": bool(trial.get("is_closed")),
+            }
+        )
+    if expected_iteration > 0 and expected_iteration not in active_iterations:
+        graph_trials.append(
+            {
+                "id": f"expected_trial_{expected_iteration}",
+                "iteration": expected_iteration,
+                "title": "Next trial",
+                "path": "",
+                "status": "pending",
+                "is_active_base": False,
+                "is_latest_active": False,
+                "is_next_expected": True,
+                "is_closed": False,
+            }
+        )
+    interventions: list[dict[str, Any]] = []
+    for entry in read_human_intervention_index().get("interventions", []):
+        status = str(entry.get("status") or "pending").strip().lower()
+        applied_trial = str(entry.get("applied_in_trial") or "").strip()
+        target_iteration = trial_iteration_from_id(applied_trial) if status == "applied" else 0
+        if status == "pending":
+            target_iteration = expected_iteration
+        interventions.append(
+            {
+                "id": str(entry.get("id") or ""),
+                "path": str(entry.get("path") or ""),
+                "created_at": str(entry.get("created_at") or ""),
+                "source": str(entry.get("source") or ""),
+                "status": status,
+                "summary": str(entry.get("summary") or ""),
+                "applied_in_trial": applied_trial,
+                "applied_trial_path": str(entry.get("applied_trial_path") or ""),
+                "superseded_by": str(entry.get("superseded_by") or ""),
+                "target_iteration": target_iteration,
+            }
+        )
+    forks = collect_resume_forks()
+    return {
+        "schema_version": 1,
+        "active": {
+            "fork_id": str(trajectory.get("fork_id") or ""),
+            "base_trial": base_trial,
+            "latest_active_trial": latest_active,
+            "next_trial_number": int(trajectory.get("next_trial_number") or 0),
+            "expected_trial_iteration": expected_iteration,
+        },
+        "trials": sorted(graph_trials, key=lambda item: (int(item.get("iteration") or 0), str(item.get("id") or ""))),
+        "forks": forks,
+        "interventions": interventions,
+        "expected_trial": marker if isinstance(marker, dict) else {},
+    }
 
 
 def regex_first_value(text: str, patterns: list[str]) -> str:
@@ -7863,6 +8107,7 @@ def build_overview() -> dict[str, Any]:
     figure_text = figure_specs.get("text", "")
     project_overview = project_summary(project_text)
     manuscript_overview = manuscript_summary(blueprint_text, figure_text)
+    trials = collect_trials()
     return {
         "active_project_id": context.id,
         "project": context.summary(),
@@ -7890,7 +8135,8 @@ def build_overview() -> dict[str, Any]:
         "inputs": {
             "target_venue": current_target_venue(project_text, blueprint_text, project_overview, manuscript_overview),
         },
-        "trials": collect_trials(),
+        "trials": trials,
+        "trajectory_graph": collect_trajectory_graph(trials, trajectory),
         "reviews": collect_reviews(),
         "interventions": collect_interventions(),
         "resources": collect_resources(),
@@ -11641,6 +11887,80 @@ Response language:
 """
 
 
+QUESTION_EXPLANATION_PATTERNS = [
+    r"\?",
+    r"\bwhat\b",
+    r"\bwhy\b",
+    r"\bhow\b",
+    r"\bexplain\b",
+    r"\bmeaning\b",
+    r"\bmean\b",
+    r"\bclarify\b",
+    r"什么",
+    r"啥",
+    r"什么意思",
+    r"什么意义",
+    r"为啥",
+    r"为什么",
+    r"怎么理解",
+    r"如何理解",
+    r"哪[个些]",
+    r"吗",
+    r"呢",
+]
+
+EXPLICIT_MUTATION_PATTERNS = [
+    r"\bintervention\b",
+    r"\brecord\b",
+    r"\bapply\b",
+    r"\bimplement\b",
+    r"\bupdate\b",
+    r"\bchange\b",
+    r"\brevise\b",
+    r"\brewrite\b",
+    r"\bedit\b",
+    r"\bfix\b",
+    r"\brun\b",
+    r"\bstart\b",
+    r"\bresume\b",
+    r"\bcontinue\b",
+    r"记录",
+    r"应用",
+    r"执行",
+    r"更新",
+    r"修改",
+    r"改成",
+    r"改为",
+    r"重写",
+    r"修复",
+    r"继续",
+    r"启动",
+    r"开始",
+    r"跑",
+]
+
+
+def latest_message_is_explanation_request(message: str) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in EXPLICIT_MUTATION_PATTERNS):
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in QUESTION_EXPLANATION_PATTERNS)
+
+
+def chat_intent_prompt_section(message: str) -> str:
+    if not latest_message_is_explanation_request(message):
+        return ""
+    return """
+Latest-message intent hint:
+- Treat the latest user message as an ordinary explanation/question, not as a formal human intervention, launch-framing update, or file-edit request.
+- Answer the concrete question first and directly. For terms like "what does this table mean?", explain the table's role, content, and why it may or may not be convincing.
+- Do not create or update pending intervention files, `PROJECT.md`, manuscript files, or trajectory files for this turn.
+- If your answer suggests follow-up research changes, ask whether the user wants those changes recorded after you answer; do not record them proactively.
+"""
+
+
 def chat_research_prompt(
     message: str = "",
     conversation_history: Any = None,
@@ -11656,6 +11976,7 @@ User message:
 {resend_prompt_section(resend_context)}
 {queued_chat_prompt_section(queued_messages)}
 {response_language_prompt_section()}
+{chat_intent_prompt_section(extra)}
 
 Hard boundary:
 - Do not create, edit, delete, rename, or summarize as newly completed anything under `research_trajectory/trials/`.
@@ -11671,7 +11992,7 @@ Allowed behavior:
 - After autoresearch starts, revise `PROJECT.md` only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
 - If resources were attached or mentioned, follow `instructions/RESOURCE_INTAKE.md` before treating them as project evidence or active inputs for `PROJECT.md`.
 - If the answer depends on attached resource content, perform the full-resource pass required by the Content Inspection Gate before making venue-fit, contribution, evidence, methods, results, manuscript-status, or project-framing claims. Reading only `RESOURCE_MANIFEST.md`, listing a symlink, or using a resource name counts as path-level intake only.
-- Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you.
+- Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you, except when the Latest-message intent hint above explicitly says the latest message is an ordinary explanation/question.
 - Before autoresearch starts, do not create or update human intervention files. Treat venue, scope, outline, objective, contribution, success-gate, constraint, exclusion, and output changes as `PROJECT.md` launch-framing updates instead.
 - After autoresearch starts, if the message is a formal human intervention, create or update a pending intervention file under `research_trajectory/human_interventions/` using the protocol's pending-intervention structure, and update `research_trajectory/human_interventions/INDEX.md` and `INDEX.json`.
 - If a post-start message clarifies an existing pending intervention, update that same pending intervention instead of creating a new ID. Create a new ID only for a distinct intervention topic.

@@ -1814,6 +1814,9 @@ Confidence: medium
   }
   if (
     !serverPy.includes("def chat_research_prompt") ||
+    !serverPy.includes("def chat_intent_prompt_section") ||
+    !serverPy.includes("Latest-message intent hint") ||
+    !serverPy.includes("ordinary explanation/question") ||
     !serverPy.includes("This is not an autoresearch launch") ||
     !serverPy.includes("the server has not classified it for you") ||
     !serverPy.includes("Before autoresearch starts, do not create or update human intervention files") ||
@@ -3330,6 +3333,11 @@ Confidence: medium
       "assert 'server has not classified it for you' in captured[-1]['prompt'], captured[-1]['prompt']",
       "assert ordinary['files'].get('intervention') is None, ordinary",
       "captured.clear()",
+      "module.start_research_chat({'message': '我觉得现在正文里那个结果，还是不够好，现在那个 table 啥意思啊?', 'settings': settings})",
+      "assert 'Latest-message intent hint' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'ordinary explanation/question' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "assert 'Do not create or update pending intervention files' in captured[-1]['prompt'], captured[-1]['prompt']",
+      "captured.clear()",
       "codex_chat_settings = module.normalize_research_settings({'backend': 'codex', 'reviewCheckpointInterval': 5})",
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'chat', 'loop_active': False, 'loop_iteration': 0, 'settings': codex_chat_settings, 'session_id': '', 'logs': [], 'raw_logs': [], 'transcript': []})",
       "module.start_research_chat({'message': 'Recommend a venue and outline before launch.', 'settings': codex_chat_settings})",
@@ -3421,6 +3429,7 @@ Confidence: medium
       "context.session.update({'process': None, 'status': 'completed', 'mode': 'goal', 'loop_active': False, 'loop_iteration': 2, 'settings': claude_settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "module.start_research_chat({'message': 'intervention: change method to simulation', 'settings': claude_settings})",
       "assert captured and captured[-1]['mode'] == 'chat' and captured[-1]['settings']['backend'] == 'claude', captured",
+      "assert 'Treat the latest user message as an ordinary explanation/question' not in captured[-1]['prompt'], captured[-1]['prompt']",
       "captured.clear()",
       "context.session.update({'process': RunningProc(), 'status': 'running', 'mode': 'goal', 'loop_active': True, 'loop_iteration': 3, 'settings': claude_settings, 'session_id': '00000000-0000-0000-0000-000000000abc'})",
       "queued_without_settings = module.start_research_chat({'message': 'queue without explicit settings', 'clientMessageId': 'qc'})",
@@ -4117,6 +4126,11 @@ Confidence: medium
     "assert calls and calls[0]['kwargs']['resume'] is False, calls",
     "assert 'archived' in calls[0]['prompt'].lower(), calls[0]['prompt']",
     "assert 'The next active trial is Trial 2' in calls[0]['prompt'], calls[0]['prompt']",
+    "json_index = root / 'archive' / 'resume_forks' / 'INDEX.json'",
+    "assert json_index.exists(), 'resume fork JSON index should be written'",
+    "json_payload = json.loads(json_index.read_text(encoding='utf-8'))",
+    "assert json_payload['forks'][0]['fork_id'] == fork['fork_id'], json_payload",
+    "assert json_payload['forks'][0]['archived_trials'][0]['id'] == '000002_later_superseded', json_payload",
     "shutil.rmtree(trials_root, ignore_errors=True)",
     "shutil.rmtree(checkpoints_root, ignore_errors=True)",
     "trials_root.mkdir(parents=True, exist_ok=True)",
@@ -4135,7 +4149,17 @@ Confidence: medium
     "index_text = pathlib.Path(root / best_fork['fork_index']).read_text(encoding='utf-8')",
     "assert '## F0001' in index_text and '## F0002' in index_text, index_text",
     "assert 'resume from checkpoint' in index_text and 'resume without checkpoint' in index_text, index_text",
-    "print(json.dumps({'checkpoint': fork['restore_mode'], 'best_effort': best_fork['restore_mode'], 'archived': len(fork['archived_trials']) + len(best_fork['archived_trials']), 'sequences': [fork['fork_sequence'], best_fork['fork_sequence']]}))"
+    "json_payload = json.loads(json_index.read_text(encoding='utf-8'))",
+    "assert [item['fork_number'] for item in json_payload['forks']] == ['F0001', 'F0002'], json_payload",
+    "overview = module.build_overview()",
+    "graph = overview['trajectory_graph']",
+    "assert graph['active']['fork_id'] == best_fork['fork_id'], graph",
+    "assert any(item['fork_number'] == 'F0002' for item in graph['forks']), graph",
+    "assert any(item.get('is_next_expected') for item in graph['trials']), graph",
+    "json_index.unlink()",
+    "fallback_forks = module.collect_resume_forks()",
+    "assert len(fallback_forks) == 2 and fallback_forks[0]['fork_number'] == 'F0001', fallback_forks",
+    "print(json.dumps({'checkpoint': fork['restore_mode'], 'best_effort': best_fork['restore_mode'], 'archived': len(fork['archived_trials']) + len(best_fork['archived_trials']), 'sequences': [fork['fork_sequence'], best_fork['fork_sequence']], 'graph_forks': len(graph['forks'])}))"
   ].join("\n");
   const resumeForkOutput = execFileSync(python.command, [
     ...python.args,
