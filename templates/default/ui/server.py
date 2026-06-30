@@ -10535,7 +10535,7 @@ def append_research_log(line: str) -> None:
             session_id = find_session_identifier(json.loads(line))
         except json.JSONDecodeError:
             session_id = find_session_identifier(line)
-        if session_id:
+        if session_id and str(RESEARCH_SESSION.get("mode") or "").strip().lower() != "plan":
             RESEARCH_SESSION["session_id"] = session_id
         RESEARCH_SESSION["raw_logs"] = RESEARCH_SESSION["raw_logs"][-2000:]
         RESEARCH_SESSION["logs"] = RESEARCH_SESSION["logs"][-2000:]
@@ -10933,7 +10933,13 @@ def should_resume_research_session(settings_payload: Any | None = None) -> bool:
     status = str(RESEARCH_SESSION.get("status") or "").strip().lower()
     if status in {"interrupted", "failed"}:
         return False
-    if not str(RESEARCH_SESSION.get("session_id") or "").strip():
+    mode = str(RESEARCH_SESSION.get("mode") or "").strip().lower()
+    if mode == "plan":
+        return False
+    session_id = str(RESEARCH_SESSION.get("session_id") or "").strip()
+    if not session_id:
+        return False
+    if session_id == str(RESEARCH_SESSION.get("plan_thread_id") or "").strip():
         return False
     if settings_payload is not None:
         target_backend = normalize_agent_backend(normalize_research_settings(settings_payload).get("backend"))
@@ -10971,6 +10977,8 @@ def start_research_run(
         status = str(RESEARCH_SESSION.get("status") or "")
         if (proc and proc.poll() is None) or session_startup_without_process(status, RESEARCH_SESSION.get("started_at")):
             raise ValueError(f"A {agent_display_name(backend)} run is already active.")
+        if resume and not should_resume_research_session(settings):
+            resume = False
         previous_session_id = str(RESEARCH_SESSION.get("session_id") or "")
         command = agent_command_for_prompt(resume, settings)
         protected_snapshot = create_chat_protected_snapshot() if mode == "chat" else None
