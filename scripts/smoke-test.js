@@ -1526,12 +1526,26 @@ Confidence: medium
     !serverPy.includes("First try useful non-human work") ||
     serverPy.includes("If PROJECT.md is insufficient or contradictory, ask for clarification in the final message, set `Status: needs_human`") ||
     !appJs.includes("function parseSubagentUpdateLine") ||
+    !appJs.includes("function liveStatusHtml") ||
+    !appJs.includes("function liveStatusIconHtml") ||
+    !appJs.includes("function subagentAgentKind") ||
+    !appJs.includes("function subagentOutputLinkHtml") ||
+    !appJs.includes('class="trial-live-status-block"') ||
+    !appJs.includes('data-inline-fullscreen="${escapeHtml(path)}"') ||
+    !appJs.includes("agentWaitStateHtml(waitState, { suppressIdle: true })") ||
+    appJs.includes("const processUpdates = currentRunProcessUpdatesHtml(liveEntries") ||
+    appJs.includes("const subagentActivity = subagentActivityHtml(liveEntries)") ||
     !appJs.includes("function subagentActivityHtml") ||
     !appJs.includes("trial-subagent-activity") ||
     !appJs.includes("The top-level agent may be waiting on a subagent") ||
+    !stylesCss.includes(".trial-live-status-block") ||
+    !stylesCss.includes(".trial-live-status-block-icon") ||
+    !stylesCss.includes(".trial-live-status-block-output.is-link") ||
     !stylesCss.includes(".trial-subagent-activity") ||
     appJs.includes("trial-subagent-activity is-blocked") ||
-    stylesCss.includes(".trial-subagent-activity.is-blocked")
+    stylesCss.includes(".trial-subagent-activity.is-blocked") ||
+    appJs.includes("trial-live-status-block is-blocked") ||
+    stylesCss.includes(".trial-live-status-block.is-blocked")
   ) {
     throw new Error("subagent visibility and whole-loop hard-stop prompts must be wired without blocked-gate styling");
   }
@@ -2370,9 +2384,12 @@ Confidence: medium
     !appJs.includes("function currentRunLiveStatusHtml()") ||
     !appJs.includes("function currentRunActivityDetailsHtml") ||
     !appJs.includes("function currentRunReadableSummary") ||
+    !appJs.includes("function liveStatusHtml") ||
+    !appJs.includes("const liveStatus = liveStatusHtml(liveEntries, progress, waitState)") ||
+    !appJs.includes("agentWaitStateHtml(waitState, { suppressIdle: true })") ||
+    !appJs.includes('class="trial-live-status-block"') ||
     !appJs.includes('`Waiting for ${agentLabel(sessionBackend())} events...`') ||
     !appJs.includes('`${agentLabel(sessionBackend())} updates`') ||
-    !appJs.includes('`${agentLabel(sessionBackend())} trial updates`') ||
     appJs.includes("Waiting for Codex events") ||
     appJs.includes('"Codex updates"') ||
     appJs.includes('"Codex trial updates"') ||
@@ -2392,6 +2409,7 @@ Confidence: medium
     !appJs.includes("data-activity-close") ||
     appJs.includes("${framingProgressHtml()}") ||
     !stylesCss.includes(".run-live-status") ||
+    !stylesCss.includes(".trial-live-status-block") ||
     !stylesCss.includes(".activity-panel") ||
     !stylesCss.includes(".activity-open-button") ||
     !stylesCss.includes(".activity-timeline") ||

@@ -3352,10 +3352,11 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(html.includes("Report pending"), false, "running trial should not render a low-information pending report card");
   assert.equal(html.includes("Report is not available yet."), false, "running trial should not render a low-information pending report card");
   assert.equal(html.includes("<span>Trial activity</span>"), false, "running trial details should keep the live activity label instead of a duplicate report label");
-  const visibleTrialUpdates = html.match(/<div class="trial-live-updates"[\s\S]*?<\/div>/)?.[0] || "";
-  assert.equal(visibleTrialUpdates.includes("Checking sources."), false, "running trial should keep older process updates in the folded activity");
-  assert.equal(visibleTrialUpdates.includes("Narrowing the evidence matrix for Trial 1."), true, "running trial should show the latest process update outside the folded activity");
-  assert.equal(visibleTrialUpdates.includes("git status --short"), false, "running trial visible updates should not promote raw commands");
+  const liveStatusBlock = html.match(/<section class="trial-live-status-block"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.equal(liveStatusBlock.includes("Live status"), true, "running trial should render the unified live status section");
+  assert.equal(liveStatusBlock.includes("Checking sources."), false, "running trial should keep older process updates in the folded activity");
+  assert.equal(liveStatusBlock.includes("Narrowing the evidence matrix for Trial 1."), true, "running trial should show the latest process update outside the folded activity");
+  assert.equal(liveStatusBlock.includes("git status --short"), false, "running trial visible updates should not promote raw commands");
   const composer = app.run("__composerSuggestionsProbe()");
   assert.equal(composer.hidden, true, "autoresearch composer suggestion row should stay hidden while running");
   assert.equal(composer.html.includes("Show autoresearch"), false, "composer suggestions should not expose Show autoresearch");
@@ -3368,8 +3369,8 @@ function testSessionTimelineDoesNotRenderCurrentActivityCard() {
   assert.equal(thinkingHtml.includes("Current run activity"), false, "autoresearch working bubble should not duplicate the trial live activity panel");
   assert.equal(thinkingHtml.includes("Live trial activity"), true, "autoresearch working bubble should keep the trial live activity panel");
   assert.equal(thinkingHtml.includes("<span>Run activity</span>"), false, "autoresearch working bubble should not use the ordinary chat activity label");
-  const thinkingVisibleTrialUpdates = thinkingHtml.match(/<div class="trial-live-updates"[\s\S]*?<\/div>/)?.[0] || "";
-  assert.equal(thinkingVisibleTrialUpdates.includes("Update: Narrowing the evidence matrix for Trial 1."), false, "trial live status should not duplicate updates as a prefixed summary");
+  const thinkingLiveStatusBlock = thinkingHtml.match(/<section class="trial-live-status-block"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.equal(thinkingLiveStatusBlock.includes("Update: Narrowing the evidence matrix for Trial 1."), false, "trial live status should not duplicate updates as a prefixed summary");
   assert.equal(app.run("__progressSummaryProbe()"), "Update: Narrowing the evidence matrix for Trial 1.", "collapsed current run summary should prefer readable Codex updates over later commands");
 }
 

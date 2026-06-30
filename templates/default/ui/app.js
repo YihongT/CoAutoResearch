@@ -3657,10 +3657,11 @@ function agentWaitStateText(waitState = activeRunWaitState()) {
   return String(wait.message || "").trim();
 }
 
-function agentWaitStateHtml(waitState = activeRunWaitState()) {
+function agentWaitStateHtml(waitState = activeRunWaitState(), options = {}) {
   const wait = waitState && typeof waitState === "object" ? waitState : {};
   const kind = String(wait.kind || "").toLowerCase();
   if (!["idle", "rate_limited"].includes(kind)) return "";
+  if (kind === "idle" && options.suppressIdle) return "";
   const text = agentWaitStateText(wait);
   if (!text) return "";
   return `<p class="run-waiting is-${escapeHtml(kind)}">${escapeHtml(text)}</p>`;
@@ -5648,6 +5649,103 @@ function subagentActivityHtml(entries = currentProgressEntries()) {
         }).join("")}
       </ul>
     </div>
+  `;
+}
+
+function liveStatusCssToken(value) {
+  return String(value || "item").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+}
+
+function subagentAgentKind(agent) {
+  const text = String(agent || "").toLowerCase();
+  if (text.includes("resource scout")) return "resource-scout";
+  if (text.includes("reviewer scope")) return "reviewer-scope";
+  if (text.includes("specialized")) return "specialized-reviewer";
+  return "subagent";
+}
+
+function liveStatusIconHtml(kind) {
+  const icons = {
+    agent: '<path d="M4 7h16" /><path d="M7 7v10a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7" /><path d="M9 4h6" /><path d="m9 12 2 2 4-4" />',
+    "resource-scout": '<circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="M11 8v3l2 2" />',
+    "reviewer-scope": '<path d="M12 3 5 6v5c0 4.5 3 8.2 7 10 4-1.8 7-5.5 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-5" />',
+    "specialized-reviewer": '<path d="M10 3h4" /><path d="M12 3v6" /><path d="M8 21h8" /><path d="M10 9 5 19" /><path d="m14 9 5 10" /><path d="M7 15h10" />',
+    subagent: '<path d="M8 4h8v5H8z" /><path d="M12 9v4" /><path d="M5 20v-3a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v3" />',
+  };
+  const key = icons[kind] ? kind : "subagent";
+  return `<span class="trial-live-status-block-icon is-${escapeHtml(liveStatusCssToken(key))}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${icons[key]}</svg></span>`;
+}
+
+function subagentStatusPillHtml(status) {
+  const value = cleanText(status, "working").toLowerCase();
+  return `<span class="trial-live-status-block-pill is-${escapeHtml(liveStatusCssToken(value))}"><span aria-hidden="true"></span>${escapeHtml(value)}</span>`;
+}
+
+function isRepoRelativeOutputPath(output) {
+  const text = cleanText(output, "");
+  if (!text || text.toLowerCase() === "none") return false;
+  if (/^(?:[a-z]+:|\/|~)/i.test(text)) return false;
+  if (text.includes("..")) return false;
+  return /^[\w./ -]+$/.test(text) && /\.[a-z0-9]+$/i.test(text);
+}
+
+function subagentOutputLinkHtml(output) {
+  const path = cleanText(output, "");
+  if (!path || path.toLowerCase() === "none") return "";
+  if (!isRepoRelativeOutputPath(path)) {
+    return `<code class="trial-live-status-block-output">${escapeHtml(compactText(path, 180))}</code>`;
+  }
+  return `
+    <button class="trial-live-status-block-output is-link" type="button" data-inline-fullscreen="${escapeHtml(path)}" title="${escapeHtml(path)}" aria-label="Open ${escapeHtml(basename(path))}">
+      ${escapeHtml(basename(path))}
+    </button>
+  `;
+}
+
+function liveStatusIdleHintHtml(waitState, subagents = []) {
+  const wait = waitState && typeof waitState === "object" ? waitState : {};
+  if (String(wait.kind || "").toLowerCase() !== "idle") return "";
+  const age = Number(wait.last_event_age_seconds);
+  const ageText = Number.isFinite(age) ? formatWorkedDuration(age) : "";
+  const waiting = subagents.find((item) => ["waiting", "starting"].includes(String(item.status || "").toLowerCase()));
+  const text = waiting
+    ? `Waiting on ${waiting.agent}${ageText ? ` · ${ageText} since last top-level update` : ""}`
+    : `Still running${ageText ? ` · no new top-level update for ${ageText}` : ""} · open Activity for details`;
+  return `<p class="trial-live-status-block-hint">${escapeHtml(text)}</p>`;
+}
+
+function liveStatusHtml(entries = currentProgressEntries(), progress = {}, waitState = activeRunWaitState()) {
+  const update = currentRunProcessUpdateEntries(entries, 1).at(-1);
+  const mainText = update
+    ? visibleProcessUpdateText(update)
+    : trialProgressSummaryText(progress, "");
+  const subagents = latestSubagentUpdates(entries, 3);
+  const hint = liveStatusIdleHintHtml(waitState, subagents);
+  if (!mainText && !subagents.length && !hint) return "";
+  return `
+    <section class="trial-live-status-block" aria-label="Live status">
+      <strong>Live status</strong>
+      ${mainText ? `
+        <div class="trial-live-status-block-row is-main">
+          ${liveStatusIconHtml("agent")}
+          <p>${escapeHtml(compactText(mainText, 300))}</p>
+        </div>
+      ` : ""}
+      ${subagents.map((update) => `
+        <div class="trial-live-status-block-row is-subagent">
+          ${liveStatusIconHtml(subagentAgentKind(update.agent))}
+          <div class="trial-live-status-block-copy">
+            <div class="trial-live-status-block-meta">
+              <strong>${escapeHtml(update.agent)}</strong>
+              ${subagentStatusPillHtml(update.status)}
+            </div>
+            ${update.task ? `<p>${escapeHtml(compactText(update.task, 180))}</p>` : ""}
+            ${subagentOutputLinkHtml(update.output)}
+          </div>
+        </div>
+      `).join("")}
+      ${hint}
+    </section>
   `;
 }
 
@@ -7990,10 +8088,10 @@ function runningTrialStatusHtml(trial) {
   const progress = trialProgressForIteration(iteration, report);
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
-  const processUpdates = currentRunProcessUpdatesHtml(liveEntries, { className: "trial-live-updates", label: `${agentLabel(sessionBackend())} trial updates`, limit: 1, maxLength: 260 });
-  const subagentActivity = subagentActivityHtml(liveEntries);
+  const waitState = activeRunWaitState();
+  const liveStatus = liveStatusHtml(liveEntries, progress, waitState);
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
-  const waitNotice = agentWaitStateHtml();
+  const waitNotice = agentWaitStateHtml(waitState, { suppressIdle: true });
   const showWaitNotice = Boolean(waitNotice);
   const runClarity = runningTrialClarityHtml(iteration, progress, activity.length, showWaitNotice);
   return `
@@ -8008,9 +8106,8 @@ function runningTrialStatusHtml(trial) {
       </div>
       ${trialProgressStepperHtml(progress)}
       ${runClarity}
-      ${!processUpdates && progressSummary ? `<p class="trial-progress-summary">${escapeHtml(compactText(progressSummary, 220))}</p>` : ""}
-      ${processUpdates}
-      ${subagentActivity}
+      ${!liveStatus && progressSummary ? `<p class="trial-progress-summary">${escapeHtml(compactText(progressSummary, 220))}</p>` : ""}
+      ${liveStatus}
       ${trialHumanResponseHtml(iteration)}
       ${trialHumanTasksHtml(iteration)}
       ${showWaitNotice ? waitNotice : ""}
