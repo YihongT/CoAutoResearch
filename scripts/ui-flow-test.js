@@ -3956,6 +3956,7 @@ function testLatestClosedTrialShowsResumeAutoresearch() {
   assert.equal(html.includes("data-resume-autoresearch"), true, "latest closed non-pass boundary should expose Resume autoresearch for the next trial");
   assert.equal(html.includes("<span>Resume</span>"), true, "latest closed non-pass boundary should use short Resume copy");
   assert.equal(html.includes("trial-action-icon-resume"), true, "latest closed non-pass boundary should render a Resume icon");
+  assert.equal(html.includes("Blocked"), true, "latest closed boundary should not look Done when the gate is blocked");
   assert.equal(html.includes("Needs human input"), true, "latest closed needs_human boundary should show the human-facing prompt");
   assert.equal(html.includes("Should the next trial run the CSEUA pilot now, or explicitly defer it?"), true, "latest closed boundary should show response_to_human");
   assert.equal(html.includes('data-trial-continue="18"'), false, "latest boundary should not use fork-style Continue from this trial");
@@ -4029,6 +4030,46 @@ function testNonActionableHumanResponseIsOmitted() {
   assert.equal(html.includes("data-resume-autoresearch"), true, "latest closed non-pass boundary should still expose Resume");
   assert.equal(html.includes("Needs human input"), false, "non-actionable boundary status should not render as a human input prompt");
   assert.equal(html.includes("already closed and applied intervention stop"), false, "non-actionable boundary status should stay out of the trial panel");
+  assert.equal(html.includes("Autoresearch blocked"), true, "blocked gate should still render a visible fallback notice");
+}
+
+function testBlockedGateWithoutHumanResponseShowsNotice() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000001_restart_intake_and_launch_rebuild",
+      iteration: 1,
+      status: "reported",
+      is_closed: true,
+      report_path: "research_trajectory/trials/000001_restart_intake_and_launch_rebuild/REPORT.md",
+      review_path: "research_trajectory/trials/000001_restart_intake_and_launch_rebuild/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Gate update · STATE.md gate refreshed"
+    }];
+    __setSession({
+      id: "s1",
+      session_id: "sid",
+      status: "completed",
+      mode: "goal",
+      loop_active: false,
+      loop_iteration: 1,
+      loop_stop_reason: "gate_requires_human_input",
+      gate: {
+        status: "blocked",
+        raw_status: "blocked",
+        summary: "- Final gate reviewer: blocked"
+      },
+      trajectory: {
+        latest_active_trial: "000001_restart_intake_and_launch_rebuild",
+        next_trial_number: 2
+      },
+      transcript: []
+    });
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("Autoresearch blocked"), true, "blocked gate without response_to_human should render a visible notice");
+  assert.equal(html.includes("The autoresearch loop paused at a blocked gate."), true, "blocked gate should show a useful fallback message");
+  assert.equal(html.includes("Blocked"), true, "latest closed blocked gate should label the trial as Blocked");
+  assert.equal(html.includes("data-resume-autoresearch"), true, "blocked boundary should keep the resume action available");
 }
 
 function testOldTrialDoesNotShowStaleHumanResponse() {
@@ -7586,6 +7627,7 @@ testReportedTrialShowsContinueFromThisTrial();
 testLatestClosedTrialShowsResumeAutoresearch();
 testLowInformationTrialSummaryIsOmitted();
 testNonActionableHumanResponseIsOmitted();
+testBlockedGateWithoutHumanResponseShowsNotice();
 testOldTrialDoesNotShowStaleHumanResponse();
 testPassedAutoresearchPanelHidesResumeAllowsRestart();
 testStagedTrialContinueActionsRenderInTrialPanel();

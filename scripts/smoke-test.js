@@ -1439,6 +1439,10 @@ Confidence: medium
     !resourceScoutInstructions.includes("Known resource clues:") ||
     !resourceScoutInstructions.includes("Freshness / date sensitivity:") ||
     !resourceScoutInstructions.includes("spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources") ||
+    !resourceScoutInstructions.includes("Resource Scout fallback") ||
+    resourceScoutInstructions.includes("do not silently do the work") ||
+    !resourceScoutInstructions.includes("Do not set the gate to `blocked` or `needs_human` solely because") ||
+    !resourceScoutInstructions.includes("Resource Scout subagent orchestration failed") ||
     !resourceScoutInstructions.includes("research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md") ||
     !resourceScoutInstructions.includes("resources/user_input/RESOURCE_MANIFEST.md") ||
     !resourceScoutInstructions.includes("autoresearch_discovered") ||
@@ -1446,9 +1450,11 @@ Confidence: medium
     !executionInstructions.includes("including the required `Resource Scout Brief`") ||
     !executionInstructions.includes("RESOURCE_SCOUT_REPORT.md") ||
     !executionInstructions.includes("REVIEWER_SPAWN_DECISION.md") ||
-    !executionInstructions.includes("spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks") ||
+    !executionInstructions.includes("inline Reviewer Scope Analyst fallback") ||
     !executionInstructions.includes("not a ninth core reviewer") ||
     !reviewerScopeInstructions.includes("spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks") ||
+    !reviewerScopeInstructions.includes("Reviewer Scope Analyst fallback") ||
+    reviewerScopeInstructions.includes("do not silently do the work") ||
     !reviewerScopeInstructions.includes("research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md") ||
     !reviewerScopeInstructions.includes("Spawn needed: yes | no") ||
     !resourceIntakeInstructions.includes("## Resource Scout Discoveries") ||
@@ -1470,9 +1476,9 @@ Confidence: medium
   if (
     !executionInstructions.includes("Response to human: <one concise user-facing question or decision request>") ||
     !executionInstructions.includes("`Next action` is the system's next step. `Response to human` is the user-facing") ||
-    !reviewTaxonomyInstructions.includes("Response to human: <required only when Decision or Gate impact is needs_human")
+    !reviewTaxonomyInstructions.includes("Response to human: <required when Decision or Gate impact is blocked or needs_human")
   ) {
-    throw new Error("needs_human gates and reviewers must define a human-facing response field");
+    throw new Error("blocked and needs_human gates/reviewers must define a human-facing response field");
   }
   if (
     executionInstructions.includes("Mandatory note triggers") ||
@@ -3115,6 +3121,9 @@ Confidence: medium
       "assert legacy_full['permissionPreset'] == 'bypassPermissions' and legacy_full['permissionMode'] == 'bypassPermissions', legacy_full",
       "official_default = module.settings_to_claude_args(module.normalize_research_settings({'backend': 'claude', 'permissionPreset': 'default'}), False)",
       "assert '--permission-mode' in official_default and 'default' in official_default, official_default",
+      "claude_plan_exec = module.implementation_settings_from_payload({'backend': 'claude', 'permissionPreset': 'plan', 'permissionMode': 'plan'})",
+      "assert claude_plan_exec['permissionPreset'] == 'default' and claude_plan_exec['permissionMode'] == 'default', claude_plan_exec",
+      "assert 'plan' not in module.settings_to_claude_args(claude_plan_exec, False), module.settings_to_claude_args(claude_plan_exec, False)",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000111', 'backend': 'codex', 'settings': codex_settings, 'status': 'completed'})",
       "assert module.should_resume_research_session(codex_settings) is True",
       "assert module.should_resume_research_session(settings) is False",
@@ -3122,7 +3131,15 @@ Confidence: medium
       "assert module.should_resume_research_session(codex_settings) is False",
       "context.session.update({'mode': 'goal', 'status': 'completed'})",
       "assert module.should_resume_research_session(codex_settings) is False",
+      "context.session_state_path.write_text(json.dumps({'session_id': '019f11fa-506f-75d3-a706-bc20958e7823', 'plan_thread_id': '019f11fa-506f-75d3-a706-bc20958e7823', 'plan_turn_id': 'turn-plan', 'backend': 'codex', 'settings': codex_settings, 'status': 'completed', 'mode': 'goal'}), encoding='utf-8')",
+      "reloaded_context = module.ProjectContext(pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']))",
+      "module._CONTEXT.project = reloaded_context",
+      "assert reloaded_context.session['plan_thread_id'] == '019f11fa-506f-75d3-a706-bc20958e7823' and reloaded_context.session['plan_turn_id'] == 'turn-plan', reloaded_context.session",
+      "assert module.should_resume_research_session(codex_settings) is False",
+      "module._CONTEXT.project = context",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000456', 'backend': 'claude', 'settings': settings, 'status': 'completed', 'mode': 'plan', 'plan_thread_id': ''})",
+      "assert module.should_resume_research_session(settings) is False",
+      "context.session.update({'session_id': '00000000-0000-0000-0000-000000000789', 'backend': 'claude', 'settings': {'backend': 'claude', 'permissionPreset': 'plan', 'permissionMode': 'plan'}, 'status': 'completed', 'mode': 'chat', 'plan_thread_id': ''})",
       "assert module.should_resume_research_session(settings) is False",
       "context.session.update({'session_id': '00000000-0000-0000-0000-000000000123', 'backend': 'claude', 'settings': settings, 'status': 'completed', 'mode': 'chat'})",
       "assert not hasattr(module, 'is_claude_goal_command')",
@@ -3507,10 +3524,13 @@ Confidence: medium
       "assert all('RESOURCE_SCOUT_REPORT.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('instructions/RESOURCE_SCOUT.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Resource Scout fallback' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial\\'s review risks' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Reviewer Scope Analyst fallback' in prompt for prompt in prompts.values()), prompts",
       "assert all('REVIEWER_SPAWN_DECISION.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('instructions/REVIEWER_SCOPE_ANALYST.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn or run the Resource Scout' not in prompt for prompt in prompts.values()), prompts",
+      "assert all('do not silently do the work inline' not in prompt for prompt in prompts.values()), prompts",
       "assert all('autoresearch_discovered' in prompt and 'not current truth' in prompt for prompt in prompts.values()), prompts",
       "assert all(all(name in prompt for name in review_files) for prompt in prompts.values()), prompts",
       "assert all('Reference' in prompt and 'Final gate' in prompt for prompt in prompts.values()), prompts",
@@ -3772,6 +3792,12 @@ Confidence: medium
     "assert legacy_human_gate['status'] == 'blocked', legacy_human_gate",
     "assert legacy_human_gate['response_to_human'] == 'The gate cannot choose between a pilot and a deferral. ask the user whether to pilot now or defer.', legacy_human_gate",
     "assert legacy_human_gate['response_to_human_source'] == 'legacy_gate_fields', legacy_human_gate",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: blocked\n\nCurrent gate reason: Required private corpus credentials are unavailable.\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: blocked\n- Evidence reviewer: continue\n- Venue fit reviewer: pass\n- Manuscript reviewer: continue\n- Figure/table reviewer: continue\n- Reference reviewer: pass\n- Final gate reviewer: blocked\n\nNext action: ask the user to provide the corpus credentials or approve an alternative public corpus.\n\"\"\", encoding='utf-8')",
+    "legacy_blocked_gate = module.read_autoresearch_gate()",
+    "assert legacy_blocked_gate['status'] == 'blocked', legacy_blocked_gate",
+    "assert legacy_blocked_gate['raw_status'] == 'blocked', legacy_blocked_gate",
+    "assert legacy_blocked_gate['response_to_human'] == 'Required private corpus credentials are unavailable. ask the user to provide the corpus credentials or approve an alternative public corpus.', legacy_blocked_gate",
+    "assert legacy_blocked_gate['response_to_human_source'] == 'legacy_gate_fields', legacy_blocked_gate",
     "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: pass\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Reference reviewer: pass\n\nNext action: none.\n\"\"\", encoding='utf-8')",
     "missing_final = module.read_autoresearch_gate()",
     "assert missing_final['status'] == 'continue', missing_final",

@@ -44,6 +44,8 @@ Use only these decisions in reviewer outputs:
   qualification, unassessed critical area, or blocking uncertainty remains.
 - `blocked`: progress cannot continue without resolving a non-human blocker
   such as missing files, broken tooling, or inaccessible required resources.
+  Reviewer files using `blocked` must include `Response to human:` with one
+  concise user-facing blocker summary or decision request.
 - `needs_human`: a human decision or clarification is genuinely required.
   Reviewer files using `needs_human` must include `Response to human:` with one
   concise user-facing question or decision request.
@@ -87,7 +89,7 @@ Migration source: <none, legacy REVIEW.md section, backfilled from older reviewe
 
 - <critical areas not checked, or none>
 
-Response to human: <required only when Decision or Gate impact is needs_human; otherwise omit>
+Response to human: <required when Decision or Gate impact is blocked or needs_human; otherwise omit>
 ```
 
 `Gate impact` must be no stronger than `Decision`. If any blocking issue,

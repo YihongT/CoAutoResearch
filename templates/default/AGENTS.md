@@ -96,11 +96,11 @@ Research proceeds as a loop:
 5. create a trial under `research_trajectory/trials/<trial_id>/`;
 6. write `PLAN.md` with a `Resource Scout Brief`;
 7. write `reviews/PLAN_REVIEW.md`;
-8. if required, spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources;
+8. if required, run Resource Scout work with a real subagent when available, otherwise the inline Resource Scout fallback;
 9. build, run, analyze, and evaluate mainly in `workspace/`;
 10. record outputs in or from the trial `artifacts/`;
 11. write `REPORT.md` after execution;
-12. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
+12. run Reviewer Scope Analyst work with a real subagent when available, otherwise the inline Reviewer Scope Analyst fallback;
 13. write any required specialized review, then all eight core files under `reviews/`;
 14. update only the global files whose current state genuinely changed.
 

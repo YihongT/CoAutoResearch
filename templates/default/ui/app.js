@@ -3469,6 +3469,38 @@ function gateHumanResponse() {
   return cleanText(gate.response_to_human, "");
 }
 
+function gateAttentionStatus() {
+  const gate = sessionState().gate || {};
+  const status = String(gate.status || gate.raw_status || "").trim().toLowerCase();
+  const stopReason = String(sessionState().loop_stop_reason || "").trim();
+  if (status === "blocked" || /blocked|needs[_\s-]*human|human|clarification/.test(status)) return "blocked";
+  if (stopReason === "gate_requires_human_input") return "blocked";
+  return "";
+}
+
+function gateHasHumanStatus() {
+  const gate = sessionState().gate || {};
+  const raw = String(gate.raw_status || gate.status || "").trim().toLowerCase();
+  return /needs[_\s-]*human|human|clarification/.test(raw);
+}
+
+function gateAttentionTitle() {
+  const response = gateHumanResponse();
+  return gateHasHumanStatus() && (!response || gateHumanResponseLooksActionable(response))
+    ? "Needs human input"
+    : "Autoresearch blocked";
+}
+
+function gateAttentionMessage() {
+  const response = gateHumanResponse();
+  if (gateHumanResponseLooksActionable(response)) return response;
+  if (!gateAttentionStatus()) return "";
+  const gate = sessionState().gate || {};
+  const summary = compactText(gate.summary || "", 220);
+  if (summary && !/^[-*]\s+.+?\breviewer:/i.test(summary)) return summary;
+  return "The autoresearch loop paused at a blocked gate. Review the latest trial report, then resume when the blocker is addressed.";
+}
+
 function gateHumanResponseLooksActionable(value) {
   const text = cleanText(value, "");
   if (!text) return false;
@@ -3477,22 +3509,20 @@ function gateHumanResponseLooksActionable(value) {
 }
 
 function gateRequiresHumanResponse() {
-  const gate = sessionState().gate || {};
   const response = gateHumanResponse();
-  if (!gateHumanResponseLooksActionable(response)) return false;
-  const status = String(gate.status || "").trim().toLowerCase();
-  const raw = String(gate.raw_status || "").trim().toLowerCase();
-  return status === "blocked" || /\b(needs[_\s-]*human|human|clarification)\b/.test(raw);
+  return gateHumanResponseLooksActionable(response) || Boolean(gateAttentionStatus());
 }
 
 function trialHumanResponseHtml(iteration) {
   const target = Number(iteration || 0);
   if (!target || target !== latestTrajectoryTrialIteration()) return "";
   if (isGoalPassed() || !gateRequiresHumanResponse()) return "";
+  const message = gateAttentionMessage();
+  if (!message) return "";
   return `
-    <div class="trial-human-response" role="note">
-      <strong>Needs human input</strong>
-      <p>${escapeHtml(gateHumanResponse())}</p>
+    <div class="trial-human-response ${gateAttentionStatus() ? "is-blocked" : ""}" role="note">
+      <strong>${escapeHtml(gateAttentionTitle())}</strong>
+      <p>${escapeHtml(message)}</p>
     </div>
   `;
 }
@@ -7917,6 +7947,7 @@ function trialStatusLabel(iteration, trial) {
   const reportStatus = cleanText(trial?.status, "");
   if (isContinuedTrial(iteration, trial)) return "Continued";
   if (reportStatus === "blocked") return "Blocked";
+  if (Number(iteration || trialIterationValue(trial) || 0) === latestTrajectoryTrialIteration() && gateAttentionStatus()) return "Blocked";
   if (isLatestClosedTrial(iteration, trial)) return "Done";
   if (trial?.is_closed === true) return "Reported";
   if (isHistoricalReportedTrial(iteration, trial)) return "Reported";

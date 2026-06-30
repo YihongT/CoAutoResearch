@@ -11728,6 +11728,21 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   line-height: 1.48;
 }
 
+html[data-theme] .trial-human-response.is-blocked {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--warning, #9a7b3a) 34%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning-bg, var(--surface-soft)) 54%, transparent);
+}
+
+html[data-theme] .trial-human-response.is-blocked strong {
+  color: var(--warning-ink, var(--warning));
+}
+
+html[data-theme] .trial-human-response.is-blocked p {
+  color: var(--ink);
+}
+
 .trial-report-actions {
   display: flex;
   flex-wrap: wrap;

@@ -18,9 +18,14 @@ eight core reviewers, the main execution agent must:
 
 `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks`
 
-If the runtime cannot spawn this required subagent, do not silently do the work
-inline. Record the blocker in `REPORT.md`, skip final pass, and set the
-autoresearch gate to `blocked` or `needs_human`.
+Prefer a real Reviewer Scope Analyst subagent when the runtime supports it. If
+subagent orchestration is unavailable, stalls, or fails, complete the same scope
+analysis inline as a clearly labeled `Reviewer Scope Analyst fallback`, write
+the decision file, disclose the fallback in `REPORT.md`, and continue. Do not
+set the gate to `blocked` or `needs_human` solely because Reviewer Scope Analyst
+orchestration failed; reserve human gates for genuinely missing user decisions,
+credentials, inaccessible private resources, or ambiguous user-provided
+materials that cannot be resolved from available context.
 
 ## Required Inputs
 

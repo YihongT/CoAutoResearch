@@ -168,12 +168,12 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 5. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
 6. Write `PLAN.md` before execution, including the required `Resource Scout Brief`.
 7. Create `reviews/` and run the Plan reviewer into `reviews/PLAN_REVIEW.md`; revise `PLAN.md` if the review requires it.
-8. If the plan says `Scout: required`, after `PLAN_REVIEW.md` and before main execution, spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources. Save its report to `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and file small public artifacts under `resources/`.
+8. If the plan says `Scout: required`, after `PLAN_REVIEW.md` and before main execution, run Resource Scout work: use a real Resource Scout subagent when available, otherwise use the inline Resource Scout fallback to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources. Save its report to `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and file small public artifacts under `resources/`.
 9. If the Resource Scout changes assumptions, required resources, risks, or success criteria, revise `PLAN.md` and rerun the Plan reviewer before execution. If the plan says `Scout: skipped`, the skip reason must be concrete.
 10. Execute mainly in `workspace/` or another clearly justified location.
 11. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
 12. Write `REPORT.md` after execution.
-13. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks. Write its decision to `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`.
+13. Run Reviewer Scope Analyst work: use a real subagent when available, otherwise use the inline Reviewer Scope Analyst fallback, to decide whether the eight core reviewers cover the current trial's review risks. Write its decision to `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`.
 14. If the Reviewer Scope Analyst decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, run the specialized review, and write its output under the current trial `reviews/` directory before core reviewer refresh.
 15. Run or refresh all eight core reviewers for this trial and write their canonical files:
     - `reviews/PLAN_REVIEW.md`
@@ -286,9 +286,10 @@ Every active trial must produce all eight core reviewer files. No reviewer gate
 may silently carry forward from an earlier trial. If a reviewer cannot assess
 much in the current trial, it must still write the current trial file with
 `Decision: continue`, `blocked`, or `needs_human` as appropriate and list what
-was unassessed. If a reviewer uses `Decision: needs_human` or
-`Gate impact: needs_human`, it must also include `Response to human:` with one
-concise user-facing question or decision request.
+was unassessed. If a reviewer uses `Decision: blocked`, `Gate impact: blocked`,
+`Decision: needs_human`, or `Gate impact: needs_human`, it must also include
+`Response to human:` with one concise user-facing blocker summary, question, or
+decision request.
 
 The Resource Scout is not a ninth core reviewer. It is a trial preparation
 step checked by existing reviewers: Plan checks the brief and skip reason,
@@ -337,7 +338,7 @@ Use this section to decide whether the autoresearch loop should continue or stop
 - the current trial reviewer file path on each reviewer gate line;
 - the next action when any gate is not `pass`;
 - `Response to human: <one concise user-facing question or decision request>`
-  when `Status: needs_human`.
+  when `Status: blocked` or `Status: needs_human`.
 
 The autoresearch goal is complete only when `Status: pass` and every required
 current-trial reviewer file has `Decision: pass` and `Gate impact: pass`,
@@ -395,7 +396,7 @@ pass-conflicting language remain.
 `Next action` is the system's next step. `Response to human` is the user-facing
 question or decision request the UI should show.
 
-If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a human decision is genuinely required, mark `Status: needs_human` and write the exact question in `Response to human:`.
+If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a non-human blocker remains, mark `Status: blocked` and write a concise user-facing blocker summary in `Response to human:`. If a human decision is genuinely required, mark `Status: needs_human` and write the exact question in `Response to human:`.
 
 ---
 
@@ -405,7 +406,7 @@ Before refreshing core reviewers, follow:
 
 `instructions/REVIEWER_SCOPE_ANALYST.md`
 
-The main execution agent must spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks.
+The main execution agent must run Reviewer Scope Analyst work to decide whether the eight core reviewers cover the current trial's review risks, using a real subagent when available and the inline fallback when subagent orchestration is unavailable, stalled, or failed.
 
 If that decision says a specialized review is needed, follow:
 

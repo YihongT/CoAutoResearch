@@ -60,9 +60,15 @@ If the scout materially changes assumptions, required resources, risks, or
 success criteria, the main execution agent must revise `PLAN.md` and rerun the
 Plan reviewer before execution.
 
-If the runtime cannot spawn this required subagent, do not silently do the work
-inline. Record the blocker in `REPORT.md`, skip final pass, and set the
-autoresearch gate to `blocked` or `needs_human`.
+Prefer a real Resource Scout subagent when the runtime supports it. If subagent
+orchestration is unavailable, stalls, or fails, complete the same scout work
+inline as a clearly labeled `Resource Scout fallback`, write the scout report /
+manifest updates / resource files, disclose the fallback in `REPORT.md`, and
+continue. Do not set the gate to `blocked` or `needs_human` solely because
+Resource Scout subagent orchestration failed; reserve human gates for genuinely
+missing user decisions, credentials, inaccessible private resources, or
+ambiguous user-provided materials that cannot be resolved from available
+context.
 
 ## Required Inputs
 

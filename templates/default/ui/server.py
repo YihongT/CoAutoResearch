@@ -699,7 +699,7 @@ def gate_response_to_human(section: str, raw_status: str) -> tuple[str, str]:
     explicit = markdown_field_line(section, "Response to human")
     if explicit:
         return explicit, "response_to_human"
-    if not re.search(r"\b(needs[_\s-]*human|human|clarification)\b", raw_status.strip().lower()):
+    if not re.search(r"\b(blocked|needs[_\s-]*human|human|clarification)\b", raw_status.strip().lower()):
         return "", ""
     reason = markdown_field_line(section, "Current gate reason")
     next_action = markdown_field_line(section, "Next action")
@@ -1301,6 +1301,9 @@ class ProjectContext:
                 "last_event_at",
                 "last_event_summary",
                 "agent_notice",
+                "plan_id",
+                "plan_thread_id",
+                "plan_turn_id",
             ):
                 if key in payload:
                     self.session[key] = payload[key]
@@ -10628,7 +10631,8 @@ Resource Scout requirement for every substantive trial:
 - write `research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and save small public artifacts under the appropriate `resources/` folder;
 - record scout-discovered materials as `autoresearch_discovered`; they are raw inputs, not current truth, until promoted by the main execution agent into REPORT.md, STATE.md, CURRENT_FINDINGS.md, PROJECT.md, or manuscript files;
 - if scout outputs change assumptions, resources, risks, or success criteria, revise PLAN.md and rerun PLAN_REVIEW.md before execution;
-- if the runtime cannot spawn this required subagent, record a blocker and set the gate to `blocked` or `needs_human`; do not silently run it inline;
+- prefer a real Resource Scout subagent when the runtime supports it; if subagent orchestration is unavailable, stalls, or fails, complete the same scout work inline as a clearly labeled `Resource Scout fallback`, write the scout report / manifest updates / resource files, disclose the fallback in REPORT.md, and continue;
+- do not set the gate to `blocked` or `needs_human` solely because Resource Scout subagent orchestration failed; reserve human gates for genuinely missing user decisions, credentials, inaccessible private resources, or ambiguous user-provided materials that cannot be resolved from available context;
 - the Resource Scout is not a ninth reviewer; keep the eight reviewer files exactly as Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, and Final gate."""
 
 
@@ -10639,12 +10643,13 @@ Reviewer Scope Analyst requirement for every substantive trial:
 - after REPORT.md and before refreshing the eight core reviewers, `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks`;
 - write `research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`;
 - if the decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, then run the specialized review before the eight core reviewers and write it under the current trial `reviews/` directory;
-- if the runtime cannot spawn this required subagent, record a blocker and set the gate to `blocked` or `needs_human`; do not silently run it inline;
+- prefer a real Reviewer Scope Analyst subagent when the runtime supports it; if subagent orchestration is unavailable, stalls, or fails, complete the same scope analysis inline as a clearly labeled `Reviewer Scope Analyst fallback`, write the decision file, disclose the fallback in REPORT.md, and continue;
+- do not set the gate to `blocked` or `needs_human` solely because Reviewer Scope Analyst orchestration failed; reserve human gates for genuinely missing user decisions, credentials, inaccessible private resources, or ambiguous user-provided materials that cannot be resolved from available context;
 - the Reviewer Scope Analyst and any specialized reviewer are not core reviewers and must not add a ninth Autoresearch Goal Gate line."""
 
 
 def gate_response_to_human_requirement() -> str:
-    return "if `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`; `Next action` remains the system's next step."
+    return "if `Status: blocked` or `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`; `Next action` remains the system's next step."
 
 
 def continue_autoresearch_loop_prompt(
@@ -10693,10 +10698,10 @@ Otherwise, run exactly the next coherent autoresearch iteration needed to move t
 1. create or complete Trial {expected} under research_trajectory/trials/;
 2. write PLAN.md before execution, including `## Resource Scout Brief`;
 3. create `reviews/` and write PLAN_REVIEW.md before execution;
-4. spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
+4. run Resource Scout work if required: use a real subagent when available, otherwise use the inline Resource Scout fallback, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
 5. execute mainly in workspace/;
 6. write REPORT.md;
-7. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
+7. run Reviewer Scope Analyst work: use a real subagent when available, otherwise use the inline Reviewer Scope Analyst fallback, to decide whether the eight core reviewers cover the current trial's review risks;
 8. if the reviewer spawn decision says `Spawn needed: yes`, run the specialized reviewer before core reviewers;
 9. refresh all eight current-trial reviewer files after REPORT.md and reviewer-scope analysis: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md;
 10. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, and notes only when genuinely changed;
@@ -10735,7 +10740,7 @@ Before creating or continuing any trial:
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
 
-Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawning the Resource Scout subagent if required, REPORT.md, spawning the Reviewer Scope Analyst subagent, any required specialized review, all eight reviewer files (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and the updated `Autoresearch Goal Gate` section. If the gate is `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
+Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, Resource Scout work via subagent or inline fallback if required, REPORT.md, Reviewer Scope Analyst work via subagent or inline fallback, any required specialized review, all eight reviewer files (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and the updated `Autoresearch Goal Gate` section. If the gate is `Status: blocked` or `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
 
 
 def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
@@ -10941,10 +10946,15 @@ def should_resume_research_session(settings_payload: Any | None = None) -> bool:
         return False
     if session_id == str(RESEARCH_SESSION.get("plan_thread_id") or "").strip():
         return False
+    session_settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
+    current_backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or session_settings.get("backend"))
+    if current_backend == "claude":
+        session_permission = infer_claude_permission_preset(session_settings)
+        session_mode = str(session_settings.get("permissionMode") or "").strip()
+        if session_permission == "plan" or session_mode == "plan":
+            return False
     if settings_payload is not None:
-        target_backend = normalize_agent_backend(normalize_research_settings(settings_payload).get("backend"))
-        session_settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
-        current_backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or session_settings.get("backend"))
+        target_backend = normalize_agent_backend(implementation_settings_from_payload(settings_payload).get("backend"))
         if current_backend and target_backend != current_backend:
             return False
     return True
@@ -10964,7 +10974,7 @@ def start_research_run(
     if not prompt:
         raise ValueError("Prompt is required.")
     reconcile_research_process_state()
-    settings = normalize_research_settings(settings_payload)
+    settings = implementation_settings_from_payload(settings_payload)
     backend = normalize_agent_backend(settings.get("backend"))
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
@@ -11743,10 +11753,10 @@ Run exactly the next autoresearch iteration and maintain the reviewer gate:
 2. create the next trial under research_trajectory/trials/;
 3. write PLAN.md before execution, including `## Resource Scout Brief`;
 4. create `reviews/` and write PLAN_REVIEW.md before execution;
-5. spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources if required, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
+5. run Resource Scout work if required: use a real subagent when available, otherwise use the inline Resource Scout fallback, then revise PLAN.md and rerun PLAN_REVIEW.md if scout outputs change planning assumptions;
 6. execute primarily in workspace/;
 7. write REPORT.md after execution;
-8. spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks;
+8. run Reviewer Scope Analyst work: use a real subagent when available, otherwise use the inline Reviewer Scope Analyst fallback, to decide whether the eight core reviewers cover the current trial's review risks;
 9. if the reviewer spawn decision says `Spawn needed: yes`, run the specialized reviewer before core reviewers;
 10. refresh all eight current-trial reviewer files after REPORT.md and reviewer-scope analysis: PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md;
 11. update STATE.md, CURRENT_FINDINGS.md, manuscript-facing files, or notes only when their current state genuinely changes;
@@ -11755,7 +11765,7 @@ Run exactly the next autoresearch iteration and maintain the reviewer gate:
    - one line for each required reviewer gate: Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, Final gate;
    - the current trial reviewer file path on each reviewer gate line;
    - the next action if any gate is not pass;
-   - if `Status: needs_human`, `Response to human: <one concise user-facing question or decision request>`.
+   - if `Status: blocked` or `Status: needs_human`, `Response to human: <one concise user-facing question or decision request>`.
 
 This invocation is complete after the current trial boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation.
 
@@ -12083,14 +12093,14 @@ User instruction:
 
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the response or next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough.
 
-For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
+For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
 
 If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
     return f"""Continue the next coherent CoAutoResearch iteration in this same agent session.
 
 {response_language_prompt_section()}
 
-Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` after PLAN_REVIEW.md and before main execution, the review phase uses `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks` after REPORT.md and before core reviewers, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 
 
 def resume_from_trial_prompt(
@@ -12156,7 +12166,7 @@ Read:
 
 Continue autoresearch from the selected base trial boundary. The next active trial is Trial {next_iteration}; create it under `research_trajectory/trials/` using the next active trajectory number after the base trial, even if archived/superseded trials previously had higher numbers. Do not treat archived later trials as active truth. You may consult archived later trials only as superseded context and must say when you do.
 
-Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. If the gate is `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. This invocation is complete after the Trial {next_iteration} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
+Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, Resource Scout work via subagent or inline fallback if required, REPORT.md, Reviewer Scope Analyst work via subagent or inline fallback, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. If the gate is `Status: blocked` or `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. This invocation is complete after the Trial {next_iteration} boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_resume_from_trial(payload: dict[str, Any], message: str, attachments: dict[str, Any]) -> dict[str, Any]:
@@ -12419,7 +12429,7 @@ Read:
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
 
-Create Trial 1 under `research_trajectory/trials/`. Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, spawn the Resource Scout subagent if required, REPORT.md, spawn the Reviewer Scope Analyst subagent, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. If the gate is `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. This invocation is complete after the Trial 1 boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
+Create Trial 1 under `research_trajectory/trials/`. Write PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, Resource Scout work via subagent or inline fallback if required, REPORT.md, Reviewer Scope Analyst work via subagent or inline fallback, run any required specialized review, write all eight reviewer files under the current trial `reviews/` directory (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and update the autoresearch gate with those paths. If the gate is `Status: blocked` or `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. This invocation is complete after the Trial 1 boundary is closed and the gate is updated, even if the gate remains `continue`, `blocked`, or `needs_human`. Do not start a later trial in this invocation."""
 
 
 def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
