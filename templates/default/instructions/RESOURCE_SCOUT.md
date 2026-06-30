@@ -65,10 +65,14 @@ orchestration is unavailable, stalls, or fails, complete the same scout work
 inline as a clearly labeled `Resource Scout fallback`, write the scout report /
 manifest updates / resource files, disclose the fallback in `REPORT.md`, and
 continue. Do not set the gate to `blocked` or `needs_human` solely because
-Resource Scout subagent orchestration failed; reserve human gates for genuinely
-missing user decisions, credentials, inaccessible private resources, or
-ambiguous user-provided materials that cannot be resolved from available
-context.
+Resource Scout subagent orchestration failed. `blocked` and `needs_human` are
+whole-loop hard stops, not scout-local outcomes.
+
+If human input would help but the main agent can still continue with metadata,
+alternate public sources, a follow-up retrieval trial, manuscript cleanup, or
+evidence/state work, include a `Human Task Candidates` entry in the scout report
+for the main execution agent to merge. Do not edit
+`research_trajectory/HUMAN_TASKS.md` directly.
 
 ## Required Inputs
 
@@ -226,6 +230,9 @@ exhausted and recorded. If useful work can continue with metadata, alternate
 sources, or a follow-up retrieval trial, set `Status: continue`; use
 `needs_human` only when the remaining blocker is genuinely user-provided access,
 credentials, a private file, or a network environment the agent cannot change.
+If any useful non-human work can continue, include the request under
+`Human Task Candidates` in the scout report and keep the gate
+`Status: continue`.
 
 ## Required Outputs
 
@@ -238,6 +245,9 @@ Update:
 `resources/user_input/RESOURCE_MANIFEST.md`
 
 Save downloaded or copied artifacts under the appropriate `resources/` folder.
+
+Report any non-blocking user request under `Human Task Candidates` for the main
+execution agent to merge into `research_trajectory/HUMAN_TASKS.md`.
 
 ## Scout Report Format
 
@@ -282,6 +292,9 @@ Use this structure:
 ## Download Integrity / Access Failures
 | Resource | Attempts | Verification result | Fallbacks tried | Final status | Next step |
 |---|---|---|---|---|---|
+
+## Human Task Candidates
+- <none, or Priority; Blocks; Question/request; Why needed; Continue meanwhile; Source>
 ```
 
 Candidate implications are leads for the main execution agent. They are not
@@ -295,6 +308,7 @@ The scout must not:
 - mark claims as accepted, tentative, or rejected;
 - write any core reviewer file;
 - decide the final gate;
+- edit `research_trajectory/HUMAN_TASKS.md` directly;
 - start unrelated broad literature review beyond the trial scope;
 - download large/restricted assets without an explicit trial need.
 

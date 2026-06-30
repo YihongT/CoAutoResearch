@@ -42,11 +42,13 @@ Use only these decisions in reviewer outputs:
 - `pass`: strict pass for the declared scope.
 - `continue`: useful progress, but at least one required action, unresolved
   qualification, unassessed critical area, or blocking uncertainty remains.
-- `blocked`: progress cannot continue without resolving a non-human blocker
-  such as missing files, broken tooling, or inaccessible required resources.
-  Reviewer files using `blocked` must include `Response to human:` with one
-  concise user-facing blocker summary or decision request.
-- `needs_human`: a human decision or clarification is genuinely required.
+- `blocked`: the whole autoresearch loop cannot continue without resolving a
+  non-human blocker such as missing files, broken tooling, or inaccessible
+  required resources. This is a hard stop, not a reviewer-local "I cannot
+  decide" state. Reviewer files using `blocked` must include `Response to
+  human:` with one concise user-facing blocker summary or decision request.
+- `needs_human`: a human decision or clarification is genuinely required and no
+  meaningful non-human work remains anywhere in the whole autoresearch loop.
   Reviewer files using `needs_human` must include `Response to human:` with one
   concise user-facing question or decision request.
 
@@ -89,6 +91,10 @@ Migration source: <none, legacy REVIEW.md section, backfilled from older reviewe
 
 - <critical areas not checked, or none>
 
+## Human Task Candidates
+
+- <none, or Priority; Blocks; Question/request; Why needed; Continue meanwhile; Source>
+
 Response to human: <required when Decision or Gate impact is blocked or needs_human; otherwise omit>
 ```
 
@@ -96,6 +102,15 @@ Response to human: <required when Decision or Gate impact is blocked or needs_hu
 required action, unresolved qualification, or critical unassessed area remains,
 `Decision` and `Gate impact` must be `continue`, `blocked`, or `needs_human`,
 not `pass`.
+
+Do not use `blocked` or `needs_human` for ordinary preferences, final
+confirmation, optional human review, reviewer-local uncertainty, or a
+file/upload/request that can wait while useful work continues. Keep
+`Decision: continue` and either list the required action or report a
+`Human Task Candidates` entry for the main execution agent to merge into
+`research_trajectory/HUMAN_TASKS.md`. Reviewers must not edit
+`HUMAN_TASKS.md` directly. Only hard stop when no meaningful non-human work
+remains in the whole autoresearch loop.
 
 Every active trial must have all eight core reviewer files under
 `research_trajectory/trials/<trial_id>/reviews/`. A reviewer file can only

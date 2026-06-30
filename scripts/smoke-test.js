@@ -1418,8 +1418,12 @@ Confidence: medium
   const reviewTaxonomyInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "REVIEW_TAXONOMY.md"), "utf8");
   const notesEntrypointTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "NOTES.md"), "utf8");
   const notesIndexTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "notes", "index.md"), "utf8");
+  const humanTasksTemplate = await fsp.readFile(path.join(root, "templates", "default", "research_trajectory", "HUMAN_TASKS.md"), "utf8");
   const resourceManifestTemplate = await fsp.readFile(path.join(root, "templates", "default", "resources", "user_input", "RESOURCE_MANIFEST.md"), "utf8");
   const literatureReadme = await fsp.readFile(path.join(root, "templates", "default", "resources", "literature", "README.md"), "utf8");
+  const stylesCss = await fsp.readFile(path.join(root, "templates", "default", "ui", "styles.css"), "utf8");
+  const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
+  const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
   if (
     !resourceIntakeInstructions.includes("## Embedded Resource Scan") ||
     !resourceIntakeInstructions.includes("A general bibliography embedded in an ongoing manuscript is not automatically a target-venue seed-paper set") ||
@@ -1485,6 +1489,51 @@ Confidence: medium
     !reviewTaxonomyInstructions.includes("Response to human: <required when Decision or Gate impact is blocked or needs_human")
   ) {
     throw new Error("blocked and needs_human gates/reviewers must define a human-facing response field");
+  }
+  if (
+    !humanTasksTemplate.includes("# Human Tasks") ||
+    !humanTasksTemplate.includes("Keep at most three open tasks") ||
+    !executionInstructions.includes("research_trajectory/HUMAN_TASKS.md") ||
+    !executionInstructions.includes("only hard stop when no meaningful non-human work remains") ||
+    !executionInstructions.includes("The `Status:` value must be exactly one bare token") ||
+    !executionInstructions.includes("main execution agent is the only") ||
+    !executionInstructions.includes("Human task candidates") ||
+    !reviewTaxonomyInstructions.includes("whole autoresearch loop") ||
+    !reviewTaxonomyInstructions.includes("Human Task Candidates") ||
+    !reviewTaxonomyInstructions.includes("Reviewers must not edit") ||
+    !resourceScoutInstructions.includes("Human Task Candidates") ||
+    !resourceScoutInstructions.includes("Do not edit") ||
+    !resourceScoutInstructions.includes("HUMAN_TASKS.md` directly") ||
+    resourceScoutInstructions.includes("record the request in `research_trajectory/HUMAN_TASKS.md`") ||
+    !reviewerScopeInstructions.includes("Human Task Candidates") ||
+    !reviewerScopeInstructions.includes("Do not edit `research_trajectory/HUMAN_TASKS.md` directly") ||
+    reviewerScopeInstructions.includes("record the request in `research_trajectory/HUMAN_TASKS.md`") ||
+    !serverPy.includes("def read_human_tasks") ||
+    !serverPy.includes('"human_tasks": read_human_tasks()') ||
+    !appJs.includes("function trialHumanTasksHtml") ||
+    !appJs.includes("function humanTasksListHtml") ||
+    !appJs.includes("humanTasksListHtml(payload.human_tasks") ||
+    !stylesCss.includes(".trial-human-tasks") ||
+    !stylesCss.includes(".status-human-tasks")
+  ) {
+    throw new Error("non-blocking human tasks must have a template, parser, prompt rules, payloads, and distinct UI rendering");
+  }
+  if (
+    !executionInstructions.includes("Subagent update: <Resource Scout | Reviewer Scope Analyst | Specialized reviewer>") ||
+    !serverPy.includes("Subagent update: Resource Scout") ||
+    !serverPy.includes("Subagent update: Reviewer Scope Analyst") ||
+    !serverPy.includes("Subagent update: Specialized reviewer") ||
+    !serverPy.includes("First try useful non-human work") ||
+    serverPy.includes("If PROJECT.md is insufficient or contradictory, ask for clarification in the final message, set `Status: needs_human`") ||
+    !appJs.includes("function parseSubagentUpdateLine") ||
+    !appJs.includes("function subagentActivityHtml") ||
+    !appJs.includes("trial-subagent-activity") ||
+    !appJs.includes("The top-level agent may be waiting on a subagent") ||
+    !stylesCss.includes(".trial-subagent-activity") ||
+    appJs.includes("trial-subagent-activity is-blocked") ||
+    stylesCss.includes(".trial-subagent-activity.is-blocked")
+  ) {
+    throw new Error("subagent visibility and whole-loop hard-stop prompts must be wired without blocked-gate styling");
   }
   if (
     executionInstructions.includes("Mandatory note triggers") ||
@@ -1647,7 +1696,6 @@ Confidence: medium
   if (!/<nav class="rail-nav"[^>]*hidden/.test(indexHtml)) {
     throw new Error("current project navigation must be hidden before a project is active");
   }
-  const stylesCss = await fsp.readFile(path.join(root, "templates", "default", "ui", "styles.css"), "utf8");
   if (!stylesCss.includes(".rail-nav[hidden]")) {
     throw new Error("rail navigation hidden state must not be overridden by display styles");
   }
@@ -1688,8 +1736,6 @@ Confidence: medium
   ) {
     throw new Error("content typography must use the same reader font as the composer");
   }
-  const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
-  const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
   const projectFramingInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "PROJECT_FRAMING.md"), "utf8");
   const projectFramingInstructionsText = projectFramingInstructions.replace(/\r\n/g, "\n");
   const interventionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "INTERVENTION_PROTOCOL.md"), "utf8");
@@ -2823,7 +2869,7 @@ Confidence: medium
     ...python.args,
     "-c",
     [
-      "import importlib.util, os, pathlib",
+      "import importlib.util, json, os, pathlib",
       "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
       "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
       "module = importlib.util.module_from_spec(spec)",
@@ -3499,7 +3545,7 @@ Confidence: medium
     ...python.args,
     "-c",
     [
-      "import importlib.util, os, pathlib",
+      "import importlib.util, json, os, pathlib",
       "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
       "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
       "module = importlib.util.module_from_spec(spec)",
@@ -3508,6 +3554,8 @@ Confidence: medium
       "custom = module.autoresearch_goal_prompt('Prioritize source-level evidence.')",
       "continue_prompt = module.continue_autoresearch_loop_prompt({'status': 'continue', 'summary': 'still open'}, 2)",
       "intervention_prompt = module.intervention_goal_prompt('research_trajectory/human_interventions/pending/I0001.md', 'change scope')",
+      "manual_continue_prompt = module.continue_research_prompt()",
+      "manual_instruction_prompt = module.continue_research_prompt('Continue the research work.')",
       "assert not base.lstrip().startswith('/goal'), base.splitlines()[0]",
       "assert base.startswith('Start the CoAutoResearch autoresearch process from PROJECT.md.'), base.splitlines()[0]",
       "assert not custom.lstrip().startswith('/goal'), custom.splitlines()[0]",
@@ -3522,6 +3570,7 @@ Confidence: medium
       "assert not restart.lstrip().startswith('/goal'), restart.splitlines()[0]",
       "assert restart.startswith('Restart the CoAutoResearch autoresearch process from a clean active trajectory.'), restart.splitlines()[0]",
       "prompts = {'base': base, 'custom': custom, 'continue': continue_prompt, 'intervention': intervention_prompt, 'resume': resume, 'restart': restart}",
+      "manual_prompts = {'manual_continue': manual_continue_prompt, 'manual_instruction': manual_instruction_prompt}",
       "review_files = ['PLAN_REVIEW.md', 'PROCESS_REVIEW.md', 'EVIDENCE_REVIEW.md', 'VENUE_FIT_REVIEW.md', 'MANUSCRIPT_REVIEW.md', 'FIGURE_TABLE_REVIEW.md', 'REFERENCE_REVIEW.md', 'FINAL_GATE_REVIEW.md']",
       "assert all('## Resource Scout Brief' in prompt for prompt in prompts.values()), prompts",
       "assert all('Scout: required | skipped' in prompt for prompt in prompts.values()), prompts",
@@ -3533,10 +3582,15 @@ Confidence: medium
       "assert all('instructions/RESOURCE_SCOUT.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources' in prompt for prompt in prompts.values()), prompts",
       "assert all('Resource Scout fallback' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Subagent update: Resource Scout' in prompt for prompt in prompts.values()), prompts",
       "assert all('Download Integrity And Fallback Ladder' in prompt for prompt in prompts.values()), prompts",
       "assert all('quarantine HTML/error-page downloads' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial\\'s review risks' in prompt for prompt in prompts.values()), prompts",
       "assert all('Reviewer Scope Analyst fallback' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Subagent update: Reviewer Scope Analyst' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Subagent update: Specialized reviewer' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Human Task Candidates' in prompt for prompt in prompts.values()), prompts",
+      "assert all('only hard stop when no meaningful non-human work remains in the whole autoresearch loop' in prompt for prompt in prompts.values()), prompts",
       "assert all('REVIEWER_SPAWN_DECISION.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('instructions/REVIEWER_SCOPE_ANALYST.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn or run the Resource Scout' not in prompt for prompt in prompts.values()), prompts",
@@ -3545,6 +3599,23 @@ Confidence: medium
       "assert all(all(name in prompt for name in review_files) for prompt in prompts.values()), prompts",
       "assert all('Reference' in prompt and 'Final gate' in prompt for prompt in prompts.values()), prompts",
       "assert all('Response to human' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Subagent update: Resource Scout' in prompt for prompt in manual_prompts.values()), manual_prompts",
+      "assert all('Subagent update: Reviewer Scope Analyst' in prompt for prompt in manual_prompts.values()), manual_prompts",
+      "assert all('Subagent update: Specialized reviewer' in prompt for prompt in manual_prompts.values()), manual_prompts",
+      "assert all('Human Task Candidates' in prompt and 'research_trajectory/HUMAN_TASKS.md' in prompt for prompt in manual_prompts.values()), manual_prompts",
+      "subagent_line = 'Subagent update: Resource Scout | status: starting | task: Find source files | output: none'",
+      "codex_final = json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'content': subagent_line}})",
+      "codex_parsed = module.transcript_from_agent_line(codex_final, 'codex')",
+      "assert codex_parsed and codex_parsed['role'] == 'assistant' and subagent_line in codex_parsed['content'], codex_parsed",
+      "codex_delta = json.dumps({'method': 'item.agentMessage.delta', 'params': {'item': {'id': 'msg1', 'type': 'agent_message'}, 'delta': subagent_line}})",
+      "codex_stream = module.streaming_update_from_agent_line(codex_delta, 'codex')",
+      "assert codex_stream and codex_stream['role'] == 'assistant' and subagent_line in codex_stream['text'], codex_stream",
+      "claude_delta = json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': subagent_line}})",
+      "claude_stream = module.streaming_update_from_agent_line(claude_delta, 'claude')",
+      "assert claude_stream and claude_stream['role'] == 'assistant' and subagent_line in claude_stream['text'], claude_stream",
+      "claude_final = json.dumps({'type': 'assistant', 'message': {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': subagent_line}]}})",
+      "claude_parsed = module.transcript_from_agent_line(claude_final, 'claude')",
+      "assert claude_parsed and claude_parsed['role'] == 'assistant' and subagent_line in claude_parsed['content'], claude_parsed",
       "assert module.infer_trial_status('Resource intake is no longer blocked by stale clues.', '', '# Report\\n\\nReplaced scaffold placeholders.') == 'reported'",
       "assert module.infer_trial_status('Status: blocked', '', '') == 'blocked'",
       "print('launch-prompt-ok')",
@@ -3783,6 +3854,21 @@ Confidence: medium
     "assert module.normalize_gate_status('pass - architecture coherent; targeted revision required') == 'continue'",
     "assert module.normalize_gate_status('pass - all completed trials have approved plans and reports.') == 'pass'",
     "assert module.normalize_gate_status('pass - no blockers remain') == 'pass'",
+    "tasks_path = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'research_trajectory' / 'HUMAN_TASKS.md'",
+    "tasks_path.unlink(missing_ok=True)",
+    "empty_tasks = module.read_human_tasks()",
+    "assert empty_tasks['open'] == [] and empty_tasks['open_count'] == 0 and empty_tasks['path'] == 'research_trajectory/HUMAN_TASKS.md', empty_tasks",
+    "empty_overview = module.build_overview()",
+    "empty_session = module.research_session_snapshot()",
+    "empty_status = module.build_status_payload()",
+    "assert empty_overview['human_tasks']['open'] == [] and empty_overview['human_tasks']['open_count'] == 0, empty_overview['human_tasks']",
+    "assert empty_session['human_tasks']['open'] == [] and empty_session['human_tasks']['open_count'] == 0, empty_session['human_tasks']",
+    "assert empty_status['human_tasks']['open'] == [] and empty_status['human_tasks']['open_count'] == 0, empty_status['human_tasks']",
+    "tasks_path.write_text(\"\"\"# Human Tasks\n\n## Open Tasks\n\n### HT0004: Low priority\nStatus: open\nPriority: low\nBlocks: none\nQuestion: Later low priority question?\nWhy needed: Optional preference.\nContinue meanwhile: Continue evidence cleanup.\nSource: research_trajectory/STATE.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\n### HT0002: High priority\nStatus: open\nPriority: high\nBlocks: final_pass\nQuestion: Confirm final venue?\nWhy needed: Venue affects final pass.\nContinue meanwhile: Continue source audit.\nSource: research_trajectory/trials/000001_final_smoke/REPORT.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\n### HT0003: Medium priority\nStatus: open\nPriority: medium\nBlocks: future_trial\nQuestion: Upload private appendix later?\nWhy needed: Appendix may improve a future trial.\nContinue meanwhile: Continue public-source synthesis.\nSource: research_trajectory/STATE.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\n### HT0001: Closed task\nStatus: closed\nPriority: high\nBlocks: none\nQuestion: Already answered?\nWhy needed: Historical.\nContinue meanwhile: none\nSource: research_trajectory/STATE.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\n### HT0005: Extra high\nStatus: open\nPriority: high\nBlocks: none\nQuestion: Extra visible count?\nWhy needed: Count should include hidden tasks.\nContinue meanwhile: Continue local cleanup.\nSource: research_trajectory/STATE.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\"\"\", encoding='utf-8')",
+    "tasks = module.read_human_tasks()",
+    "assert tasks['open_count'] == 4 and len(tasks['open']) == 3, tasks",
+    "assert [item['id'] for item in tasks['open']] == ['HT0002', 'HT0005', 'HT0003'], tasks",
+    "assert tasks['closed'][0]['id'] == 'HT0001', tasks",
     "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: pass\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: pass\n- Evidence reviewer: continue - missing source audit\n- Venue fit reviewer: pass\n- Manuscript reviewer: pass\n- Figure/table reviewer: pass\n- Reference reviewer: pass\n- Final gate reviewer: pass\n\nNext action: finish evidence audit.\n\"\"\", encoding='utf-8')",
     "gate = module.read_autoresearch_gate()",
     "assert gate['overall_status'] == 'pass', gate",
@@ -3883,7 +3969,19 @@ Confidence: medium
     "assert context.session['loop_stop_reason'] == 'all_reviewer_gates_passed', context.session",
     "state.write_text(continue_gate, encoding='utf-8')",
     "context.session.update({'loop_active': False, 'mode': 'goal', 'loop_iteration': 100, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': 'review_checkpoint_reached', 'settings': {'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000000', 'logs': [], 'raw_logs': [], 'transcript': []})",
-    "module.start_research_run = lambda prompt, mode, resume, settings_payload=None, loop_active=None, **kwargs: {'ok': True, 'mode': mode, 'resume': resume, 'loop_active': loop_active, 'kwargs': kwargs, 'prompt': prompt}",
+    "calls = []",
+    "module.start_research_run = lambda prompt, mode, resume, settings_payload=None, loop_active=None, **kwargs: calls.append({'ok': True, 'mode': mode, 'resume': resume, 'loop_active': loop_active, 'kwargs': kwargs, 'prompt': prompt}) or calls[-1]",
+    "tasks_path = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'research_trajectory' / 'HUMAN_TASKS.md'",
+    "tasks_path.write_text('# Human Tasks\\n\\n### HT0001: Confirm later\\nStatus: open\\nPriority: high\\nBlocks: final_pass\\nQuestion: Confirm final venue later?\\nWhy needed: Final venue may affect final pass.\\nContinue meanwhile: Continue evidence audit.\\nSource: research_trajectory/STATE.md\\nCreated: 2026-06-30T00:00:00Z\\nUpdated: 2026-06-30T00:00:00Z\\n', encoding='utf-8')",
+    "context.session.update({'loop_active': True, 'mode': 'goal', 'loop_iteration': 2, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': '', 'settings': {'backend': 'codex', 'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000000', 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "module.maybe_continue_autoresearch_loop(0)",
+    "assert calls and calls[-1]['mode'] == 'goal' and context.session.get('loop_stop_reason') != 'gate_requires_human_input', (calls, context.session)",
+    "state.write_text(\"\"\"# Research State\n\n## Autoresearch Goal Gate\n\nStatus: needs_human\n\nRequired reviewer gates:\n- Plan reviewer: pass\n- Process reviewer: needs_human\n- Evidence reviewer: continue\n- Venue fit reviewer: pass\n- Manuscript reviewer: continue\n- Figure/table reviewer: continue\n- Reference reviewer: pass\n- Final gate reviewer: needs_human\n\nNext action: wait for the user's decision.\nResponse to human: Choose the target venue before any useful work can continue?\n\"\"\", encoding='utf-8')",
+    "context.session.update({'loop_active': True, 'mode': 'goal', 'loop_iteration': 2, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': '', 'settings': {'backend': 'codex', 'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000000', 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "module.maybe_continue_autoresearch_loop(0)",
+    "assert context.session['loop_active'] is False and context.session['loop_stop_reason'] == 'gate_requires_human_input', context.session",
+    "state.write_text(continue_gate, encoding='utf-8')",
+    "context.session.update({'loop_active': False, 'mode': 'goal', 'loop_iteration': 100, 'loop_review_checkpoint_iteration': 100, 'loop_stop_reason': 'review_checkpoint_reached', 'settings': {'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000000', 'logs': [], 'raw_logs': [], 'transcript': []})",
     "legacy = module.handle_local_slash_command('/goal resume', '/goal resume', {'backend': 'codex', 'reviewCheckpointInterval': 25})",
     "assert legacy and legacy.get('local') is True, legacy",
     "assert context.session['loop_active'] is False, context.session",
@@ -4194,11 +4292,14 @@ Confidence: medium
     "(root / 'research_trajectory' / 'CURRENT_FINDINGS.md').write_text('# Findings at checkpoint\\n', encoding='utf-8')",
     "(root / 'manuscript' / 'BLUEPRINT.md').write_text('# Manuscript at checkpoint\\n', encoding='utf-8')",
     "(root / 'resources' / 'user_input' / 'RESOURCE_MANIFEST.md').write_text('# Manifest at checkpoint\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'HUMAN_TASKS.md').write_text(\"\"\"# Human Tasks\n\n### HT0001: Checkpoint task\nStatus: open\nPriority: high\nBlocks: final_pass\nQuestion: Restore this task?\nWhy needed: Checkpoint smoke.\nContinue meanwhile: Keep testing.\nSource: research_trajectory/STATE.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\"\"\", encoding='utf-8')",
     "base_trial = module.active_reported_trials()[0]",
     "checkpoint = module.write_trial_checkpoint(base_trial)",
     "assert checkpoint['created'] is True, checkpoint",
     "checkpoint_blueprint = root / checkpoint['path'] / 'manuscript' / 'BLUEPRINT.md'",
     "assert checkpoint_blueprint.read_text(encoding='utf-8') == '# Manuscript at checkpoint\\n'",
+    "checkpoint_tasks = root / checkpoint['path'] / 'research_trajectory' / 'HUMAN_TASKS.md'",
+    "assert 'Restore this task?' in checkpoint_tasks.read_text(encoding='utf-8'), checkpoint_tasks",
     "collected_base = next(item for item in module.collect_trials() if item['id'] == '000001_base_boundary')",
     "assert collected_base['manuscript_snapshot_path'] == checkpoint['path'] + '/manuscript/BLUEPRINT.md', collected_base",
     "assert collected_base['manuscript_snapshot_exists'] is True, collected_base",
@@ -4217,6 +4318,7 @@ Confidence: medium
     "    return {'ok': True, 'kwargs': kwargs}",
     "module.start_research_run = fake_start",
     "context.session.update({'process': None, 'loop_active': False, 'mode': 'goal', 'loop_iteration': 0, 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "(root / 'research_trajectory' / 'HUMAN_TASKS.md').write_text(\"\"\"# Human Tasks\n\n### HT9999: Stale task\nStatus: open\nPriority: low\nBlocks: none\nQuestion: stale?\nWhy needed: stale.\nContinue meanwhile: stale.\nSource: research_trajectory/STATE.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\"\"\", encoding='utf-8')",
     "result = module.start_resume_from_trial({'resumeFromTrial': {'id': '000001_base_boundary', 'path': 'research_trajectory/trials/000001_base_boundary'}, 'settings': {'reviewCheckpointInterval': 5}}, 'resume from checkpoint', {'saved_files': [], 'resource_links': [], 'resource_clues': [], 'metadata_files': []})",
     "fork = result['files']['resume_fork']",
     "assert fork['fork_sequence'] == 1, fork",
@@ -4227,6 +4329,8 @@ Confidence: medium
     "assert not later.exists(), 'later checkpoint trial should be archived'",
     "assert fork['archived_trials'] and fork['archived_trials'][0]['from'].endswith('000002_later_superseded'), fork",
     "assert '# Checkpoint project' in (root / 'PROJECT.md').read_text(encoding='utf-8')",
+    "restored_tasks = (root / 'research_trajectory' / 'HUMAN_TASKS.md').read_text(encoding='utf-8')",
+    "assert 'Restore this task?' in restored_tasks and 'stale?' not in restored_tasks, restored_tasks",
     "assert calls and calls[0]['kwargs']['resume'] is False, calls",
     "assert 'archived' in calls[0]['prompt'].lower(), calls[0]['prompt']",
     "assert 'The next active trial is Trial 2' in calls[0]['prompt'], calls[0]['prompt']",
@@ -4250,6 +4354,7 @@ Confidence: medium
     "assert not best_later.exists(), 'later best-effort trial should be archived'",
     "assert '# Best effort current project' in (root / 'PROJECT.md').read_text(encoding='utf-8')",
     "assert 'best-effort fork' in calls[0]['prompt'].lower(), calls[0]['prompt']",
+    "assert 'HUMAN_TASKS.md' in calls[0]['prompt'], calls[0]['prompt']",
     "index_text = pathlib.Path(root / best_fork['fork_index']).read_text(encoding='utf-8')",
     "assert '## F0001' in index_text and '## F0002' in index_text, index_text",
     "assert 'resume from checkpoint' in index_text and 'resume without checkpoint' in index_text, index_text",
@@ -4319,6 +4424,7 @@ Confidence: medium
     "unknown_resource.write_text('unknown\\n', encoding='utf-8')",
     "generated_resource.write_text('generated\\n', encoding='utf-8')",
     "(root / 'research_trajectory' / 'CURRENT_FINDINGS.md').write_text('# Old findings\\n', encoding='utf-8')",
+    "(root / 'research_trajectory' / 'HUMAN_TASKS.md').write_text(\"\"\"# Human Tasks\n\n### HT0001: Old task\nStatus: open\nPriority: high\nBlocks: final_pass\nQuestion: Old question?\nWhy needed: Restart smoke.\nContinue meanwhile: Old work.\nSource: research_trajectory/STATE.md\nCreated: 2026-06-30T00:00:00Z\nUpdated: 2026-06-30T00:00:00Z\n\"\"\", encoding='utf-8')",
     "(root / 'resources' / 'user_input' / 'RESOURCE_MANIFEST.md').write_text(\"\"\"# Old manifest\n\n## Attached Resources\n\n- upload copied: `resources/user_input/attachments/user_note.md`\n  - Provenance: `user_explicit`\n- discovered seed: `resources/target_venue/unknown_seed.md`\n  - Provenance: `unknown`\n- generated source: `resources/literature/generated_source.md`\n  - Provenance: `autoresearch_generated`\n\"\"\", encoding='utf-8')",
     "calls = []",
     "def fake_start(prompt, *args, **kwargs):",
@@ -4346,6 +4452,10 @@ Confidence: medium
     "trajectory = json.loads((root / 'research_trajectory' / 'TRAJECTORY.json').read_text(encoding='utf-8'))",
     "assert trajectory['next_trial_number'] == 1 and trajectory['restart_id'] == restart['restart_id'], trajectory",
     "assert 'Restart Resource Policy' in (root / 'resources' / 'user_input' / 'RESOURCE_MANIFEST.md').read_text(encoding='utf-8')",
+    "active_tasks = (root / 'research_trajectory' / 'HUMAN_TASKS.md').read_text(encoding='utf-8')",
+    "assert '# Human Tasks' in active_tasks and 'Old question?' not in active_tasks and '- none' in active_tasks, active_tasks",
+    "assert any(item.endswith('research_trajectory/HUMAN_TASKS.md') for item in restart['snapshot_files']), restart",
+    "assert 'research_trajectory/HUMAN_TASKS.md' in restart['reset_files'], restart",
     "assert calls and calls[0]['kwargs']['loop_iteration_override'] == 1, calls",
     "assert 'Start a new active trajectory at Trial 1' in calls[0]['prompt'], calls[0]['prompt']",
     "print(json.dumps({'restart_id': restart['restart_id'], 'moved': len(restart['moved_paths']), 'next': trajectory['next_trial_number']}))"

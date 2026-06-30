@@ -6997,6 +6997,116 @@ body.is-resizing-settings-dialog .settings-content {
   line-height: 1.45;
 }
 
+.status-human-tasks {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(32, 31, 27, 0.08);
+}
+
+.status-human-tasks > strong,
+.trial-human-tasks > strong,
+.trial-subagent-activity > strong {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.status-human-tasks ul,
+.trial-human-tasks ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-human-tasks li,
+.trial-human-tasks li {
+  display: grid;
+  gap: 3px;
+}
+
+.status-human-tasks li span,
+.trial-human-tasks li span {
+  color: rgba(32, 31, 27, 0.52);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-human-tasks li strong,
+.trial-human-tasks li strong {
+  color: rgba(32, 31, 27, 0.78);
+  font-size: 13px;
+  line-height: 1.42;
+}
+
+.status-human-tasks li em,
+.trial-human-tasks li em,
+.status-human-tasks p,
+.trial-human-tasks p {
+  margin: 0;
+  color: rgba(32, 31, 27, 0.56);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.42;
+}
+
+.trial-subagent-activity ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trial-subagent-activity li {
+  display: grid;
+  gap: 4px;
+}
+
+.trial-subagent-activity li div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.trial-subagent-activity li strong {
+  color: rgba(32, 31, 27, 0.78);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.trial-subagent-activity li span {
+  padding: 2px 6px;
+  border: 1px solid rgba(32, 31, 27, 0.1);
+  border-radius: 999px;
+  color: rgba(32, 31, 27, 0.58);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.trial-subagent-activity li em,
+.trial-subagent-activity li code {
+  color: rgba(32, 31, 27, 0.56);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.38;
+}
+
+.trial-subagent-activity li code {
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+}
+
 .agent-status-note {
   display: grid;
   gap: 8px;
@@ -11741,6 +11851,29 @@ html[data-theme] .trial-human-response.is-blocked strong {
 
 html[data-theme] .trial-human-response.is-blocked p {
   color: var(--ink);
+}
+
+.trial-human-tasks {
+  display: grid;
+  gap: 8px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(32, 31, 27, 0.08);
+  border-bottom: 1px solid rgba(32, 31, 27, 0.08);
+}
+
+.trial-subagent-activity {
+  display: grid;
+  gap: 8px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(32, 31, 27, 0.08);
+}
+
+.trial-report-card .trial-human-tasks p {
+  margin: 0;
+  color: rgba(32, 31, 27, 0.56);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.42;
 }
 
 .trial-report-actions {

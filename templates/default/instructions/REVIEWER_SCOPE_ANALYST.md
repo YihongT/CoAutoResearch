@@ -23,9 +23,15 @@ subagent orchestration is unavailable, stalls, or fails, complete the same scope
 analysis inline as a clearly labeled `Reviewer Scope Analyst fallback`, write
 the decision file, disclose the fallback in `REPORT.md`, and continue. Do not
 set the gate to `blocked` or `needs_human` solely because Reviewer Scope Analyst
-orchestration failed; reserve human gates for genuinely missing user decisions,
-credentials, inaccessible private resources, or ambiguous user-provided
-materials that cannot be resolved from available context.
+orchestration failed. `blocked` and `needs_human` are whole-loop hard stops, not
+reviewer-scope-local outcomes.
+
+If a human answer would help reviewer coverage but useful review or execution
+work can continue, report it as a `Human Task Candidates` entry in the decision
+artifact for the main execution agent to merge, and keep the gate
+`Status: continue`. Do not edit `research_trajectory/HUMAN_TASKS.md` directly.
+Only hard stop when no meaningful non-human work remains in the whole
+autoresearch loop.
 
 ## Required Inputs
 
@@ -62,6 +68,9 @@ Existing reviewer reused: <path or none>
 New reviewer instruction path: <path or none>
 Specialized review output path: <path or none>
 Core reviewers that must read this decision: <list>
+
+## Human Task Candidates
+- <none, or Priority; Blocks; Question/request; Why needed; Continue meanwhile; Source>
 ```
 
 ## Decision Rules
@@ -107,6 +116,7 @@ The Reviewer Scope Analyst must not:
 - add a ninth Autoresearch Goal Gate line;
 - silently waive a needed specialized review;
 - mark the final gate pass;
+- edit `research_trajectory/HUMAN_TASKS.md` directly;
 - create broad generic reviewer instructions without a current-trial risk.
 
 Process, Evidence, Reference, and Final Gate reviewers must read the decision

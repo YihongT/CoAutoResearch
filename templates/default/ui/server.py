@@ -62,6 +62,7 @@ RESUME_SNAPSHOT_PATHS = [
     "PROJECT.md",
     "research_trajectory/STATE.md",
     "research_trajectory/CURRENT_FINDINGS.md",
+    "research_trajectory/HUMAN_TASKS.md",
     "manuscript",
     "resources/user_input/RESOURCE_MANIFEST.md",
 ]
@@ -69,6 +70,7 @@ RESTART_SNAPSHOT_PATHS = [
     "PROJECT.md",
     "research_trajectory/STATE.md",
     "research_trajectory/CURRENT_FINDINGS.md",
+    "research_trajectory/HUMAN_TASKS.md",
     "research_trajectory/TRAJECTORY.json",
     "research_trajectory/NEXT_TRIAL.json",
     "research_trajectory/trials",
@@ -4683,6 +4685,83 @@ def safe_read(path: Path, limit: int = MAX_TEXT_BYTES) -> str:
     return raw[:limit].decode("utf-8", errors="replace")
 
 
+HUMAN_TASK_STATUS_VALUES = {"open", "answered", "closed", "deferred"}
+HUMAN_TASK_PRIORITY_VALUES = {"high", "medium", "low"}
+HUMAN_TASK_BLOCK_VALUES = {"none", "final_pass", "future_trial"}
+HUMAN_TASK_OPEN_LIMIT = 3
+
+
+def human_tasks_path() -> Path:
+    return REPO_ROOT / "research_trajectory" / "HUMAN_TASKS.md"
+
+
+def normalize_human_task_entry(entry: dict[str, str]) -> dict[str, str] | None:
+    task_id = str(entry.get("id") or "").strip()
+    if not re.fullmatch(r"HT\d{4,}", task_id):
+        return None
+    title = compact_single_line(entry.get("title") or task_id, 120)
+    question = compact_single_line(entry.get("question") or "", 320)
+    if not question:
+        return None
+    status = str(entry.get("status") or "open").strip().lower().replace("-", "_")
+    if status not in HUMAN_TASK_STATUS_VALUES:
+        status = "open"
+    priority = str(entry.get("priority") or "medium").strip().lower()
+    if priority not in HUMAN_TASK_PRIORITY_VALUES:
+        priority = "medium"
+    blocks = str(entry.get("blocks") or "none").strip().lower().replace("-", "_")
+    if blocks not in HUMAN_TASK_BLOCK_VALUES:
+        blocks = "none"
+    return {
+        "id": task_id,
+        "title": title,
+        "status": status,
+        "priority": priority,
+        "blocks": blocks,
+        "question": question,
+        "why_needed": compact_single_line(entry.get("why_needed") or "", 320),
+        "continue_meanwhile": compact_single_line(entry.get("continue_meanwhile") or "", 320),
+        "source": compact_single_line(entry.get("source") or "", 240),
+        "created": compact_single_line(entry.get("created") or "", 80),
+        "updated": compact_single_line(entry.get("updated") or "", 80),
+    }
+
+
+def read_human_tasks() -> dict[str, Any]:
+    path = human_tasks_path()
+    text = safe_read(path, 80_000) if path.exists() else ""
+    entries: list[dict[str, str]] = []
+    for match in re.finditer(r"^###\s+(HT\d{4,})\s*:\s*(.+?)\s*$([\s\S]*?)(?=^###\s+HT\d{4,}\s*:|\Z)", text, re.MULTILINE):
+        block = match.group(3)
+        item = normalize_human_task_entry(
+            {
+                "id": match.group(1).strip(),
+                "title": match.group(2).strip(),
+                "status": markdown_field_line(block, "Status"),
+                "priority": markdown_field_line(block, "Priority"),
+                "blocks": markdown_field_line(block, "Blocks"),
+                "question": markdown_field_line(block, "Question"),
+                "why_needed": markdown_field_line(block, "Why needed"),
+                "continue_meanwhile": markdown_field_line(block, "Continue meanwhile"),
+                "source": markdown_field_line(block, "Source"),
+                "created": markdown_field_line(block, "Created"),
+                "updated": markdown_field_line(block, "Updated"),
+            }
+        )
+        if item:
+            entries.append(item)
+    priority_rank = {"high": 0, "medium": 1, "low": 2}
+    entries.sort(key=lambda item: (priority_rank.get(item["priority"], 1), item["id"]))
+    open_tasks = [item for item in entries if item["status"] == "open"]
+    closed_tasks = [item for item in entries if item["status"] != "open"]
+    return {
+        "path": "research_trajectory/HUMAN_TASKS.md",
+        "open": open_tasks[:HUMAN_TASK_OPEN_LIMIT],
+        "closed": closed_tasks,
+        "open_count": len(open_tasks),
+    }
+
+
 def record_ui_file_edit(relative_path: str) -> None:
     append_transcript(
         "user",
@@ -8110,6 +8189,7 @@ def build_overview() -> dict[str, Any]:
         "blueprint_blocker_count": len(blueprint_blockers),
     }
     trials = collect_trials()
+    human_tasks = read_human_tasks()
     return {
         "active_project_id": context.id,
         "project": context.summary(),
@@ -8138,6 +8218,7 @@ def build_overview() -> dict[str, Any]:
             "target_venue": current_target_venue(project_text, blueprint_text, project_overview, manuscript_overview),
         },
         "trials": trials,
+        "human_tasks": human_tasks,
         "trajectory_graph": collect_trajectory_graph(trials, trajectory),
         "reviews": collect_reviews(),
         "interventions": collect_interventions(),
@@ -10482,6 +10563,7 @@ def research_session_snapshot() -> dict[str, Any]:
             "review_checkpoint_interval": review_checkpoint_interval,
             "loop_stop_reason": loop_stop_reason,
             "gate": gate,
+            "human_tasks": read_human_tasks(),
             "trajectory": trajectory,
             "expected_trial": expected_trial,
             "active_run": active_run,
@@ -10620,6 +10702,21 @@ Additional user instruction for this resume:
 Apply this resume instruction when choosing and executing the next trial objective, but do not let it weaken reviewer standards, provenance requirements, or final-pass requirements."""
 
 
+def human_tasks_prompt_section() -> str:
+    return """
+Human task queue:
+- read `research_trajectory/HUMAN_TASKS.md` before choosing the next objective;
+- the main execution agent is the only canonical writer for `research_trajectory/HUMAN_TASKS.md`;
+- Resource Scout, Reviewer Scope Analyst, core reviewers, and specialized reviewers must report `Human task candidates` in their own artifacts or reviews; merge and deduplicate those candidates before writing the canonical queue;
+- maintain `research_trajectory/HUMAN_TASKS.md` as the non-blocking human task queue;
+- keep at most three `Status: open` tasks, merge duplicate topics before adding a new task, and close stale tasks when resolved or no longer needed;
+- use task ids `HT0001`, `HT0002`, etc. with fields `Status`, `Priority`, `Blocks`, `Question`, `Why needed`, `Continue meanwhile`, `Source`, `Created`, and `Updated`;
+- keep `Blocks` to `none`, `final_pass`, or `future_trial`; it must not express a hard stop;
+- if useful autoresearch work can continue, keep the Autoresearch Goal Gate `Status: continue` and record the human request in `HUMAN_TASKS.md`;
+- only hard stop when no meaningful non-human work remains in the whole autoresearch loop: use top-level gate `Status: blocked` only when a non-human blocker cannot be repaired or routed around, and use `Status: needs_human` only when the human decision, clarification, credential, private resource, or network/access change is on the critical path and no available resources, public alternatives, metadata-only work, follow-up retrieval trial, manuscript/evidence cleanup, or state repair can still move the project forward;
+- gate `Status:` lines must be exactly one bare token: `pass`, `continue`, `blocked`, or `needs_human`; do not write `continue - needs human later` or any other decorated status."""
+
+
 def resource_scout_prompt_section() -> str:
     return """
 Resource Scout requirement for every substantive trial:
@@ -10631,9 +10728,11 @@ Resource Scout requirement for every substantive trial:
 - record scout-discovered materials as `autoresearch_discovered`; they are raw inputs, not current truth, until promoted by the main execution agent into REPORT.md, STATE.md, CURRENT_FINDINGS.md, PROJECT.md, or manuscript files;
 - if scout outputs change assumptions, resources, risks, or success criteria, revise PLAN.md and rerun PLAN_REVIEW.md before execution;
 - prefer a real Resource Scout subagent when the runtime supports it; if subagent orchestration is unavailable, stalls, or fails, complete the same scout work inline as a clearly labeled `Resource Scout fallback`, write the scout report / manifest updates / resource files, disclose the fallback in REPORT.md, and continue;
+- emit visible status lines while handling scout work: `Subagent update: Resource Scout | status: starting | task: <short task> | output: none` before starting, `Subagent update: Resource Scout | status: waiting | task: <short task> | output: none` before waiting on a subagent, `Subagent update: Resource Scout | status: completed | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md` after completion, or `Subagent update: Resource Scout | status: fallback | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md` after inline fallback;
 - when a public file body is required, follow the Download Integrity And Fallback Ladder in `instructions/RESOURCE_SCOUT.md`: verify HTTP status, content type, size, magic bytes/archive listing/header rows/checksum when available; quarantine HTML/error-page downloads; retry safe downloader variants, user agent, configured proxy/direct profiles, official alternate links, and verified local caches; record attempts before asking for user help;
-- do not set the gate to `blocked` or `needs_human` solely because Resource Scout subagent orchestration failed; reserve human gates for genuinely missing user decisions, credentials, inaccessible private resources, or ambiguous user-provided materials that cannot be resolved from available context;
+- do not set the gate to `blocked` or `needs_human` solely because Resource Scout subagent orchestration failed; these are whole-loop hard stops;
 - do not set the gate to `blocked` or `needs_human` solely because a public download failed until the download fallback ladder is exhausted and recorded; if useful work can continue through metadata, alternate public resources, or a follow-up retrieval trial, use `Status: continue`;
+- record non-blocking human resource, credential, or preference requests as `Human Task Candidates` in the scout report for the main execution agent to merge into `research_trajectory/HUMAN_TASKS.md`;
 - the Resource Scout is not a ninth reviewer; keep the eight reviewer files exactly as Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, and Final gate."""
 
 
@@ -10645,7 +10744,10 @@ Reviewer Scope Analyst requirement for every substantive trial:
 - write `research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`;
 - if the decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, then run the specialized review before the eight core reviewers and write it under the current trial `reviews/` directory;
 - prefer a real Reviewer Scope Analyst subagent when the runtime supports it; if subagent orchestration is unavailable, stalls, or fails, complete the same scope analysis inline as a clearly labeled `Reviewer Scope Analyst fallback`, write the decision file, disclose the fallback in REPORT.md, and continue;
-- do not set the gate to `blocked` or `needs_human` solely because Reviewer Scope Analyst orchestration failed; reserve human gates for genuinely missing user decisions, credentials, inaccessible private resources, or ambiguous user-provided materials that cannot be resolved from available context;
+- emit visible status lines while handling reviewer-scope work: `Subagent update: Reviewer Scope Analyst | status: starting | task: <short task> | output: none` before starting, `Subagent update: Reviewer Scope Analyst | status: waiting | task: <short task> | output: none` before waiting on a subagent, `Subagent update: Reviewer Scope Analyst | status: completed | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` after completion, or `Subagent update: Reviewer Scope Analyst | status: fallback | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` after inline fallback;
+- when `Spawn needed: yes`, also emit `Subagent update: Specialized reviewer | status: starting | task: <short task> | output: none`, `waiting` if waiting on a spawned reviewer, and `completed` or `fallback` with the specialized review path when finished;
+- do not set the gate to `blocked` or `needs_human` solely because Reviewer Scope Analyst orchestration failed; these are whole-loop hard stops;
+- record non-blocking human reviewer-coverage questions as `Human Task Candidates` in the decision artifact for the main execution agent to merge into `research_trajectory/HUMAN_TASKS.md`;
 - the Reviewer Scope Analyst and any specialized reviewer are not core reviewers and must not add a ninth Autoresearch Goal Gate line."""
 
 
@@ -10668,6 +10770,7 @@ This is one bounded agent invocation. The CoAutoResearch server owns the outer l
 {fast_mode_prompt_section(fast_mode)}
 {goal_instruction_prompt_section(goal_instruction)}
 {pending_intervention_prompt_section()}
+{human_tasks_prompt_section()}
 
 Current autoresearch gate status: {status}
 
@@ -10719,6 +10822,7 @@ def intervention_goal_prompt(intervention_path: str, message: str, fast_mode: bo
 
 A formal human intervention was recorded from UI chat.
 {fast_mode_prompt_section(fast_mode)}
+{human_tasks_prompt_section()}
 
 Intervention file:
 - `{intervention_path}`
@@ -11731,6 +11835,7 @@ This is one bounded agent invocation. The CoAutoResearch server owns the outer l
 {instruction_section}
 {fast_mode_prompt_section(fast_mode)}
 {pending_intervention_prompt_section()}
+{human_tasks_prompt_section()}
 
 Use the repository instructions:
 - read AGENTS.md
@@ -11792,7 +11897,7 @@ placement/caption/content/source/provenance/venue rationale, if reviewer
 instructions are outdated, or if stale language such as "tentative until
 source-level evidence checks are completed" remains, keep `Status: continue`.
 
-Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, ask for clarification in the final message, set `Status: needs_human`, and write `Response to human:` in the gate instead of silently inventing a different project."""
+Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, do not silently invent a different project, but also do not stop by default. First try useful non-human work: resource intake, state repair, safe framing cleanup, evidence audit, manuscript cleanup, or a narrow trial that preserves the ambiguity without making unsupported claims. Keep `Status: continue` when any coherent next objective remains. Set `Status: needs_human` and write `Response to human:` only when no coherent next objective can be chosen and no meaningful non-human work remains."""
 
 
 def compact_chat_history_items(items: Any, limit: int = CHAT_HISTORY_MAX_MESSAGES) -> list[dict[str, Any]]:
@@ -12094,6 +12199,11 @@ User instruction:
 
 Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the response or next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough.
 
+{human_tasks_prompt_section()}
+
+{resource_scout_prompt_section()}
+{reviewer_scope_analyst_prompt_section()}
+
 For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
 
 If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
@@ -12101,7 +12211,14 @@ If the user is asking a question, asking for an explanation, or asking what the 
 
 {response_language_prompt_section()}
 
-Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough. For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instruction or RESOURCE_MANIFEST.md contains new resource clues, follow instructions/RESOURCE_INTAKE.md before treating those materials as attached. If the next work depends on user-provided resource content, complete the Content Inspection Gate first; path-level intake from the manifest, symlink, filename, or short user description is not enough.
+
+{human_tasks_prompt_section()}
+
+{resource_scout_prompt_section()}
+{reviewer_scope_analyst_prompt_section()}
+
+For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
 
 
 def resume_from_trial_prompt(
@@ -12121,6 +12238,7 @@ def resume_from_trial_prompt(
 This selected trial did not have a saved checkpoint. Treat this as a best-effort fork:
 - the later active trials have been archived and are no longer current trajectory truth;
 - verify STATE.md, CURRENT_FINDINGS.md, manuscript files, and resources before relying on them;
+- verify `research_trajectory/HUMAN_TASKS.md` and close or rewrite stale tasks before relying on them;
 - if the restored state is inconsistent, repair the project state before creating substantive new claims.
 """
     return f"""Resume the CoAutoResearch autoresearch process from the selected trial boundary. Complete exactly the next coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
@@ -12147,6 +12265,7 @@ User instruction for the resumed trajectory:
 
 {best_effort_note}
 {pending_intervention_prompt_section()}
+{human_tasks_prompt_section()}
 Read:
 - AGENTS.md
 - instructions/EXECUTION_AGENT.md
@@ -12407,6 +12526,7 @@ Restart id: `{restart_id}`
 User restart instruction:
 {reason.strip() or "Restart autoresearch from a clean active trajectory."}
 {pending_intervention_prompt_section()}
+{human_tasks_prompt_section()}
 
 Semantics:
 - Treat archived trials, prior runtime state, prior working manuscript revisions, and prior current findings as superseded context.
@@ -12453,6 +12573,7 @@ def start_restart_autoresearch(payload: dict[str, Any]) -> dict[str, Any]:
         expected_trial_marker_path().unlink()
     reset_files = [
         reset_text_file_from_template("research_trajectory/CURRENT_FINDINGS.md", "# Current Findings\n\nRestarted. No current findings have been promoted in the new active trajectory yet.\n"),
+        reset_text_file_from_template("research_trajectory/HUMAN_TASKS.md", "# Human Tasks\n\n## Open Tasks\n\n- none\n\n## Closed Tasks\n\n- none\n"),
         reset_text_file_from_template("manuscript/BLUEPRINT.md", "# Manuscript Blueprint\n\nRestarted. The next autoresearch run must rebuild a self-contained target-venue blueprint.\n"),
     ]
     write_initial_autoresearch_gate()
@@ -13612,6 +13733,7 @@ def build_status_payload() -> dict[str, Any]:
         "gate": gate.get("raw_status") or gate.get("status") or "missing",
         "gate_summary": gate.get("summary") or "",
         "gate_response_to_human": gate.get("response_to_human") or "",
+        "human_tasks": session.get("human_tasks") if isinstance(session.get("human_tasks"), dict) else read_human_tasks(),
         "stop_reason": stop_reason,
         "started_at": session.get("started_at") or "",
         "ended_at": session.get("ended_at") or "",

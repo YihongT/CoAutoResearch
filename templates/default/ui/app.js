@@ -3513,6 +3513,59 @@ function gateRequiresHumanResponse() {
   return gateHumanResponseLooksActionable(response) || Boolean(gateAttentionStatus());
 }
 
+function humanTasksState(source = null) {
+  const tasks = source || sessionState().human_tasks || appState?.human_tasks || {};
+  return tasks && typeof tasks === "object" ? tasks : {};
+}
+
+function openHumanTasks(source = null) {
+  const tasks = humanTasksState(source);
+  return Array.isArray(tasks.open) ? tasks.open.filter((task) => cleanText(task?.question, "")) : [];
+}
+
+function humanTaskCount(source = null) {
+  const tasks = humanTasksState(source);
+  const count = Number(tasks.open_count);
+  return Number.isFinite(count) && count > 0 ? count : openHumanTasks(tasks).length;
+}
+
+function humanTaskItemHtml(task) {
+  const id = cleanText(task?.id, "");
+  const priority = cleanText(task?.priority, "");
+  const blocks = cleanText(task?.blocks, "");
+  const meta = [id, priority, blocks && blocks !== "none" ? `blocks ${blocks.replaceAll("_", " ")}` : ""].filter(Boolean).join(" · ");
+  const question = cleanText(task?.question, "");
+  const meanwhile = cleanText(task?.continue_meanwhile, "");
+  return `
+    <li>
+      ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+      <strong>${escapeHtml(question)}</strong>
+      ${meanwhile ? `<em>${escapeHtml(meanwhile)}</em>` : ""}
+    </li>
+  `;
+}
+
+function humanTasksListHtml(source = null, className = "human-tasks-list") {
+  const tasks = openHumanTasks(source);
+  if (!tasks.length) return "";
+  const count = humanTaskCount(source);
+  const extra = count > tasks.length ? `<p>${escapeHtml(`${count - tasks.length} more open human task${count - tasks.length === 1 ? "" : "s"} recorded in HUMAN_TASKS.md.`)}</p>` : "";
+  return `
+    <div class="${escapeHtml(className)}" role="note">
+      <strong>Human tasks</strong>
+      <ul>${tasks.map((task) => humanTaskItemHtml(task)).join("")}</ul>
+      ${extra}
+    </div>
+  `;
+}
+
+function trialHumanTasksHtml(iteration) {
+  const target = Number(iteration || 0);
+  if (!target || target !== latestTrajectoryTrialIteration()) return "";
+  if (isGoalPassed()) return "";
+  return humanTasksListHtml(null, "trial-human-tasks");
+}
+
 function trialHumanResponseHtml(iteration) {
   const target = Number(iteration || 0);
   if (!target || target !== latestTrajectoryTrialIteration()) return "";
@@ -3592,7 +3645,7 @@ function agentWaitStateText(waitState = activeRunWaitState()) {
     return `Rate limit reported${ageText ? ` · last event ${ageText} ago` : ""}`;
   }
   if (kind === "idle") {
-    const base = `No agent events${ageText ? ` for ${ageText}` : ""}; process is still running.`;
+    const base = `No agent events${ageText ? ` for ${ageText}` : ""}; process is still running. The top-level agent may be waiting on a subagent; check Activity for details.`;
     if (sessionBackend() === "claude") {
       return `${base} Check Claude provider auth, gateway URL, model name, first-run API key approval, or shell alias configuration.`;
     }
@@ -5488,6 +5541,7 @@ function isVisibleProcessUpdateEntry(entry) {
   if (rawType.startsWith("turn.") || rawType.startsWith("session.")) return false;
   const content = framingProgressContent(entry);
   if (!content) return false;
+  if (parseSubagentUpdateLine(content)) return false;
   if (/^(turn|session|run|response)\.[a-z_.-]+$/i.test(content.trim())) return false;
   return true;
 }
@@ -5518,6 +5572,81 @@ function currentRunProcessUpdatesHtml(entries = currentProgressEntries(), option
       ${updates
         .map((entry) => `<p>${escapeHtml(compactText(visibleProcessUpdateText(entry), options.maxLength || 360))}</p>`)
         .join("")}
+    </div>
+  `;
+}
+
+const SUBAGENT_UPDATE_STATUSES = new Set(["starting", "waiting", "completed", "fallback"]);
+
+function parseSubagentUpdateLine(line) {
+  const match = String(line || "").trim().match(/^Subagent update:\s*(.+)$/i);
+  if (!match) return null;
+  const parts = match[1].split("|").map((part) => part.trim()).filter(Boolean);
+  const agent = cleanText(parts.shift() || "", "");
+  const fields = {};
+  parts.forEach((part) => {
+    const fieldMatch = part.match(/^([a-z][a-z\s_-]*):\s*(.*)$/i);
+    if (!fieldMatch) return;
+    const key = fieldMatch[1].trim().toLowerCase().replace(/[\s-]+/g, "_");
+    fields[key] = fieldMatch[2].trim();
+  });
+  const status = cleanText(fields.status, "").toLowerCase();
+  if (!agent || !status) return null;
+  return {
+    agent,
+    status: SUBAGENT_UPDATE_STATUSES.has(status) ? status : status.replace(/_/g, " "),
+    task: cleanText(fields.task, ""),
+    output: cleanText(fields.output, ""),
+  };
+}
+
+function subagentUpdatesFromEntries(entries = currentProgressEntries()) {
+  const updates = [];
+  (entries || []).forEach((entry) => {
+    const texts = [String(entry?.content || "").trim(), framingProgressContent(entry)]
+      .filter(Boolean)
+      .filter((text, index, list) => list.indexOf(text) === index);
+    texts.forEach((text) => {
+      text.split(/\r?\n/).forEach((line) => {
+        const update = parseSubagentUpdateLine(line);
+        if (update) updates.push(update);
+      });
+    });
+  });
+  return updates;
+}
+
+function latestSubagentUpdates(entries = currentProgressEntries(), limit = 3) {
+  const byAgent = new Map();
+  subagentUpdatesFromEntries(entries).forEach((update, index) => {
+    const key = update.agent.toLowerCase();
+    if (byAgent.has(key)) byAgent.delete(key);
+    byAgent.set(key, { ...update, index });
+  });
+  return Array.from(byAgent.values()).slice(-limit).reverse();
+}
+
+function subagentActivityHtml(entries = currentProgressEntries()) {
+  const updates = latestSubagentUpdates(entries, 3);
+  if (!updates.length) return "";
+  return `
+    <div class="trial-subagent-activity" role="note" aria-label="Subagent activity">
+      <strong>Subagent activity</strong>
+      <ul>
+        ${updates.map((update) => {
+          const output = update.output && update.output.toLowerCase() !== "none" ? update.output : "";
+          return `
+            <li>
+              <div>
+                <strong>${escapeHtml(update.agent)}</strong>
+                <span>${escapeHtml(update.status)}</span>
+              </div>
+              ${update.task ? `<em>${escapeHtml(compactText(update.task, 140))}</em>` : ""}
+              ${output ? `<code>${escapeHtml(compactText(output, 180))}</code>` : ""}
+            </li>
+          `;
+        }).join("")}
+      </ul>
     </div>
   `;
 }
@@ -7323,6 +7452,7 @@ function statusCardHtml(payload, entry) {
             <span>${escapeHtml(payload.gate_response_to_human)}</span>
           </p>
         ` : payload.gate_summary ? `<p class="status-note">${escapeHtml(payload.gate_summary)}</p>` : ""}
+        ${humanTasksListHtml(payload.human_tasks, "status-human-tasks")}
         <section>
           <h4>${escapeHtml(provider)} settings</h4>
           ${statusSettingsHtml(payload.settings || {})}
@@ -7752,6 +7882,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
       ${trialProgressStepperHtml(progress)}
       ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
       ${trialHumanResponseHtml(iteration)}
+      ${trialHumanTasksHtml(iteration)}
       ${summary && !summaryDuplicatesProgress ? `<p>${escapeHtml(summary)}</p>` : ""}
       <div class="trial-report-actions">
         ${openActions ? `<div class="trial-report-open-actions">${openActions}</div>` : ""}
@@ -7860,6 +7991,7 @@ function runningTrialStatusHtml(trial) {
   const progressSummary = trialProgressSummaryText(progress, "");
   const progressDetail = trialProgressDetailText(progress);
   const processUpdates = currentRunProcessUpdatesHtml(liveEntries, { className: "trial-live-updates", label: `${agentLabel(sessionBackend())} trial updates`, limit: 1, maxLength: 260 });
+  const subagentActivity = subagentActivityHtml(liveEntries);
   const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice);
@@ -7878,7 +8010,9 @@ function runningTrialStatusHtml(trial) {
       ${runClarity}
       ${!processUpdates && progressSummary ? `<p class="trial-progress-summary">${escapeHtml(compactText(progressSummary, 220))}</p>` : ""}
       ${processUpdates}
+      ${subagentActivity}
       ${trialHumanResponseHtml(iteration)}
+      ${trialHumanTasksHtml(iteration)}
       ${showWaitNotice ? waitNotice : ""}
       <div class="trial-report-actions">
         <div class="trial-report-control-actions">${runControlButtonsHtml()}</div>

@@ -64,6 +64,7 @@ Use this contract whenever deciding where to read, write, move, or summarize inf
 | `workspace/` | Live workbench for concrete implementation, execution, analysis, and evaluation artifacts | when building, running, debugging, prototyping, analyzing, evaluating, or inspecting concrete work products | when adding or modifying models, methods, frameworks, system designs, prototypes, code, notebooks, scripts, pipelines, simulations, configs, prompts, schemas, evaluation harnesses, working/derived data, generated outputs, logs, checkpoints, weights, or caches | authoritative claims, accepted conclusions, or current method status without trial/report traceability |
 | `research_trajectory/STATE.md` | Current control state | before every trial and after human intervention | when objective, plan, method status, constraints, blockers, active resources, or next step changes | raw logs, full artifacts, literature dumps |
 | `research_trajectory/CURRENT_FINDINGS.md` | Latest global synthesis of findings/results/claims/evidence | before interpreting results or updating manuscript | when accepted/tentative/rejected findings, active claims, limitations, or evidence map changes | raw outputs, command logs, full notebooks |
+| `research_trajectory/HUMAN_TASKS.md` | Non-blocking human task queue | before choosing each next objective | when a human answer would help but useful autoresearch can continue | hard-stop blockers, formal interventions, or more than three open tasks |
 | `research_trajectory/trials/` | Audit trail of planned work packages | before continuing, reviewing, or synthesizing recent work | for every substantive planned work package | global-only summaries without a concrete work package |
 | `research_trajectory/notes/` | Sparse, topic-based knowledge notes | when looking for reusable resource, method, process, or human-preference lessons | when a trial or review creates reusable knowledge that does not belong in a canonical state file; update `index.md` whenever adding or retiring a topic note | routine trial summaries, execution logs, or duplicates of `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, reports, or resource manifests |
 | `research_trajectory/human_interventions/` | Formal human control inputs | before major steps and when resolving contradictions | only when a user message changes direction, constraints, methods, claims, resources, venue, or priority | progress questions, ordinary pauses, log requests |
@@ -340,6 +341,11 @@ Use this section to decide whether the autoresearch loop should continue or stop
 - `Response to human: <one concise user-facing question or decision request>`
   when `Status: blocked` or `Status: needs_human`.
 
+The `Status:` value must be exactly one bare token: `pass`, `continue`,
+`blocked`, or `needs_human`. Do not write decorated status text such as
+`continue - needs human later`; put explanatory text in `Next action`,
+`Response to human`, reviewer files, reports, or `HUMAN_TASKS.md`.
+
 The autoresearch goal is complete only when `Status: pass` and every required
 current-trial reviewer file has `Decision: pass` and `Gate impact: pass`,
 including the Final gate reviewer.
@@ -396,7 +402,7 @@ pass-conflicting language remain.
 `Next action` is the system's next step. `Response to human` is the user-facing
 question or decision request the UI should show.
 
-If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a non-human blocker remains, mark `Status: blocked` and write a concise user-facing blocker summary in `Response to human:`. If a human decision is genuinely required, mark `Status: needs_human` and write the exact question in `Response to human:`.
+If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. `Status: blocked` and `Status: needs_human` are both hard stops. Use either one only when the whole autoresearch loop has no meaningful non-human work remaining. Use `blocked` for non-human blockers that cannot be repaired or routed around by another useful trial. Use `needs_human` only when a human decision, clarification, credential, private resource, or access change is genuinely on the critical path. In both hard-stop cases, write the exact user-facing blocker or question in `Response to human:`.
 
 External file access failures are not automatically human blockers. When a
 trial needs a public file body such as a ZIP, CSV, PDF, dataset, or code
@@ -409,6 +415,78 @@ caches; record all attempts. Only after that ladder is exhausted may the gate
 ask the user for a file or network change. If useful work can continue through
 metadata, alternate public resources, or a follow-up retrieval trial, use
 `Status: continue` rather than `needs_human`.
+
+### Non-Blocking Human Tasks
+
+Maintain `research_trajectory/HUMAN_TASKS.md` for human questions, requests,
+uploads, approvals, or preference checks that would improve the project but do
+not stop useful autoresearch work. The main execution agent is the only
+canonical writer for this file. Resource Scout, Reviewer Scope Analyst, core
+reviewers, and specialized reviewers must report `Human task candidates` in
+their own artifacts or reviews; after reading those artifacts, the main
+execution agent merges, deduplicates, closes stale entries, and writes the
+canonical queue.
+
+Use this exact task block format:
+
+```markdown
+### HT0001: <short title>
+Status: open | answered | closed | deferred
+Priority: high | medium | low
+Blocks: none | final_pass | future_trial
+Question: <one concrete human question/request>
+Why needed: <why the agent cannot resolve it alone>
+Continue meanwhile: <specific non-human work that can continue>
+Source: <trial/report/state path>
+Created: <ISO timestamp>
+Updated: <ISO timestamp>
+```
+
+Rules:
+
+- keep at most three `Status: open` tasks;
+- merge duplicate topics before adding a new task;
+- close stale tasks when answered, superseded, or no longer needed;
+- `Blocks` may only be `none`, `final_pass`, or `future_trial`; it is not a
+  hard-stop field;
+- do not set `Status: needs_human` merely because a human answer would be
+  useful;
+- if useful autoresearch work can continue, keep the gate `Status: continue`
+  and merge any relevant human request into `HUMAN_TASKS.md`;
+- absorb `Human task candidates` from Resource Scout reports, Reviewer Scope
+  Analyst decisions, and reviewer files instead of letting those agents write
+  the canonical queue directly;
+- only hard stop when no meaningful non-human work remains in the whole
+  autoresearch loop: use `Status: blocked` only when a non-human blocker cannot
+  be repaired or routed around, and use `Status: needs_human` only when the
+  human decision, clarification, credential, private resource, or network/access
+  change is on the critical path and no available resources, public
+  alternatives, metadata-only work, follow-up retrieval trial, manuscript
+  cleanup, evidence audit, or state repair can still move the project forward.
+
+### Subagent Progress Visibility
+
+When starting, waiting on, completing, or falling back from trial-local
+subagent work, the main execution agent must emit this exact single-line status
+format in its visible update stream:
+
+```text
+Subagent update: <Resource Scout | Reviewer Scope Analyst | Specialized reviewer> | status: <starting | waiting | completed | fallback> | task: <short task> | output: <path or none>
+```
+
+Rules:
+
+- emit `Subagent update: Resource Scout ...` before running or waiting on
+  Resource Scout work, and emit `completed` or `fallback` after its report path
+  is known;
+- emit `Subagent update: Reviewer Scope Analyst ...` before running or waiting
+  on reviewer-scope work, and emit `completed` or `fallback` after its decision
+  path is known;
+- emit `Subagent update: Specialized reviewer ...` only when the reviewer scope
+  decision says `Spawn needed: yes`, then update it when that review completes
+  or falls back;
+- this line is for UI visibility only. It must not affect gate status, reviewer
+  decisions, pass/fail logic, or the outer autoresearch loop.
 
 ---
 
