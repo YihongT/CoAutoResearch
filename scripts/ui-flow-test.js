@@ -3664,7 +3664,7 @@ function testAutoresearchLiveStripZeroEventActivity() {
   assert.equal(dock.dockClass.includes("is-running"), true, "floating dock should expose the running state class");
 }
 
-function testAutoresearchTrajectoryGraphRendersBranchesAndInterventions() {
+function testAutoresearchTrajectoryGraphIsNotRenderedInDock() {
   const app = loadAppContext();
   app.run(`
     activityPanelSources.clear();
@@ -3690,99 +3690,7 @@ function testAutoresearchTrajectoryGraphRendersBranchesAndInterventions() {
         report_summary: "Source integration complete."
       }
     ];
-    appState.trajectory_graph = {
-      schema_version: 1,
-      active: {
-        fork_id: "F0008_20260624_211521_455665_from_000016_reference_and_submission_source_repair",
-        base_trial: "000016_reference_and_submission_source_repair",
-        latest_active_trial: "000021_source_integration",
-        next_trial_number: 22,
-        expected_trial_iteration: 22
-      },
-      trials: [
-        {
-          id: "000016_reference_and_submission_source_repair",
-          iteration: 16,
-          title: "Repair reference and source handling.",
-          path: "research_trajectory/trials/000016_reference_and_submission_source_repair",
-          status: "reported",
-          is_active_base: true,
-          is_latest_active: false,
-          is_next_expected: false,
-          is_closed: true
-        },
-        {
-          id: "000021_source_integration",
-          iteration: 21,
-          title: "Integrate public safety sources.",
-          path: "research_trajectory/trials/000021_source_integration",
-          status: "reported",
-          is_active_base: false,
-          is_latest_active: true,
-          is_next_expected: false,
-          is_closed: true
-        },
-        {
-          id: "expected_trial_22",
-          iteration: 22,
-          title: "Next trial",
-          path: "",
-          status: "pending",
-          is_active_base: false,
-          is_latest_active: false,
-          is_next_expected: true,
-          is_closed: false
-        }
-      ],
-      forks: [
-        {
-          fork_id: "F0008_20260624_211521_455665_from_000016_reference_and_submission_source_repair",
-          fork_number: "F0008",
-          created_at: "2026-06-24T21:15:21-04:00",
-          base_trial: "000016_reference_and_submission_source_repair",
-          base_trial_iteration: 16,
-          base_trial_path: "research_trajectory/trials/000016_reference_and_submission_source_repair",
-          restore_mode: "checkpoint",
-          manifest_path: "archive/resume_forks/F0008/MANIFEST.md",
-          intervention_id: "I0007",
-          intervention_path: "research_trajectory/human_interventions/I0007_resume.md",
-          archived_trials: [{ id: "000017_superseded", from: "research_trajectory/trials/000017_superseded", to: "archive/resume_forks/F0008/superseded_trials/000017_superseded" }],
-          user_instruction_summary: "Continue from Trial 16 and repair the result table."
-        }
-      ],
-      interventions: [
-        {
-          id: "I0014",
-          path: "research_trajectory/human_interventions/I0014_main_result_table_not_good_enough.md",
-          created_at: "2026-06-29T16:20:00-04:00",
-          status: "pending",
-          summary: "Main result table is not strong enough.",
-          applied_in_trial: "",
-          superseded_by: "",
-          target_iteration: 22
-        },
-        {
-          id: "I0013",
-          path: "research_trajectory/human_interventions/I0013_title.md",
-          created_at: "2026-06-27T15:40:33-04:00",
-          status: "applied",
-          summary: "Title framing was applied.",
-          applied_in_trial: "000021_source_integration",
-          superseded_by: "",
-          target_iteration: 21
-        },
-        {
-          id: "I0010",
-          path: "research_trajectory/human_interventions/I0010_old.md",
-          created_at: "2026-06-25T00:53:06-04:00",
-          status: "superseded",
-          summary: "Older method note.",
-          applied_in_trial: "",
-          superseded_by: "I0012",
-          target_iteration: 22
-        }
-      ]
-    };
+    appState.trajectory_graph = { trials: [{ iteration: 22, title: "Hidden graph payload" }] };
     __setSession({
       id: "s21",
       session_id: "sid",
@@ -3790,28 +3698,16 @@ function testAutoresearchTrajectoryGraphRendersBranchesAndInterventions() {
       mode: "goal",
       loop_active: false,
       loop_iteration: 21,
-      trajectory: appState.trajectory_graph.active,
+      trajectory: { next_trial_number: 22 },
       transcript: []
     });
   `);
   const expanded = app.run("__sessionTimelineProbe()");
-  assert.equal(expanded.includes("research-trajectory-graph"), true, "expanded dock should render the trajectory graph");
-  assert.equal(expanded.includes("trajectory-lane"), true, "trajectory graph should render a horizontal lane");
-  assert.equal(expanded.includes("Trial 16"), true, "trajectory graph should render the base trial");
-  assert.equal(expanded.includes("Trial 22"), true, "trajectory graph should render the next expected trial");
-  assert.equal(expanded.includes("F0008"), true, "trajectory graph should render the current continue fork");
-  assert.equal(expanded.includes("I0014"), true, "trajectory graph should render pending intervention badges");
-  assert.equal(expanded.includes("1 superseded"), true, "trajectory graph should collapse superseded interventions into a count");
-  assert.equal(expanded.includes('data-trial-select="16"'), true, "real trial nodes should reuse trial selection hooks");
-  const keys = app.run("[...activityPanelSources.keys()]");
-  const forkKey = keys.find((key) => key.includes(":fork:F0008_"));
-  const interventionKey = keys.find((key) => key.includes(":intervention:I0014"));
-  assert.equal(Boolean(forkKey), true, "fork branch should register an Activity source");
-  assert.equal(Boolean(interventionKey), true, "intervention badge should register an Activity source");
-  const forkPanel = app.run(`__activityPanelProbe(${JSON.stringify(forkKey)})`);
-  assert.equal(forkPanel.html.includes("Archived trials"), true, "fork Activity panel should include archived trial details");
-  const interventionPanel = app.run(`__activityPanelProbe(${JSON.stringify(interventionKey)})`);
-  assert.equal(interventionPanel.html.includes("Main result table is not strong enough."), true, "intervention Activity panel should include the intervention summary");
+  assert.equal(expanded.includes("research-trajectory-graph"), false, "expanded dock should not render the trajectory graph");
+  assert.equal(expanded.includes("trajectory-lane"), false, "expanded dock should not render trajectory lanes");
+  assert.equal(expanded.includes("Hidden graph payload"), false, "trajectory payload should not leak into the dock");
+  assert.equal(expanded.includes("trial-live-strip"), true, "expanded dock should keep the live strip");
+  assert.equal(expanded.includes("trial-strip"), true, "expanded dock should keep the trial strip");
   const collapsed = app.run("__toggleAutoresearchPanelCollapse()");
   assert.equal(collapsed.html.includes("research-trajectory-graph"), false, "collapsed dock should not render the trajectory graph");
   assert.equal(collapsed.html.includes("trial-live-strip"), true, "collapsed dock should keep the live strip");
@@ -7682,7 +7578,7 @@ testTrialOpenButtonsFallBackToLatestManuscript();
 testManualTrialSelectionOverridesRunningPanel();
 testAutoresearchPanelCollapsePersists();
 testAutoresearchLiveStripZeroEventActivity();
-testAutoresearchTrajectoryGraphRendersBranchesAndInterventions();
+testAutoresearchTrajectoryGraphIsNotRenderedInDock();
 testAutoresearchPanelRendersInFloatingDock();
 testPausedAutoresearchActionsRenderInTrialPanel();
 testAutoresearchPanelPersistsAfterFramingReply();

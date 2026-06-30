@@ -7818,204 +7818,6 @@ function trialHistoryActivityButtonHtml(iteration, entries = [], options = {}) {
   });
 }
 
-function trajectoryActivityEntry(id, content, createdAt = "") {
-  return {
-    id,
-    role: "assistant",
-    kind: "update",
-    raw_type: "trajectory.update",
-    content,
-    created_at: createdAt,
-  };
-}
-
-function trajectoryRegisterActivity(keyParts, source) {
-  const key = ["trajectory", activeProjectId || appState?.active_project_id || "", ...keyParts].join(":");
-  registerActivityPanelSource(key, {
-    title: source.title || "Research trajectory",
-    subtitle: source.subtitle || "",
-    eventLabel: source.eventLabel || "details",
-    entries: source.entries || [],
-    options: {
-      label: source.label || "Research trajectory detail",
-      emptyText: "No trajectory detail is available.",
-      includeUser: true,
-    },
-  });
-  return key;
-}
-
-function trajectoryInterventionActivityButtonHtml(intervention) {
-  const id = cleanText(intervention?.id, "");
-  if (!id) return "";
-  const status = cleanText(intervention?.status, "pending").toLowerCase();
-  const path = cleanText(intervention?.path, "");
-  const summary = cleanText(intervention?.summary, "");
-  const lines = [
-    `Intervention ${id}`,
-    "",
-    `Status: ${status}`,
-    path ? `Path: ${path}` : "",
-    summary ? `Summary: ${summary}` : "",
-    cleanText(intervention?.applied_in_trial, "") ? `Applied in: ${intervention.applied_in_trial}` : "",
-    cleanText(intervention?.superseded_by, "") ? `Superseded by: ${intervention.superseded_by}` : "",
-  ].filter(Boolean);
-  const key = trajectoryRegisterActivity(["intervention", id], {
-    title: "Intervention",
-    subtitle: `${id} · ${status}`,
-    eventLabel: status,
-    entries: [trajectoryActivityEntry(`trajectory-intervention-${id}`, lines.join("\n"), intervention?.created_at || "")],
-    label: `${id} trajectory intervention`,
-  });
-  return `
-    <button class="trajectory-intervention-badge is-${escapeHtml(status)}" type="button" data-activity-open data-activity-key="${escapeHtml(key)}" title="${escapeHtml(summary || `${id} ${status}`)}">
-      <span>${escapeHtml(id)}</span>
-      <em>${escapeHtml(status)}</em>
-    </button>
-  `;
-}
-
-function trajectoryInterventionBadgesHtml(interventions) {
-  const items = Array.isArray(interventions) ? interventions : [];
-  if (!items.length) return "";
-  const visible = items.filter((item) => cleanText(item?.status, "") !== "superseded");
-  const superseded = items.filter((item) => cleanText(item?.status, "") === "superseded");
-  return `
-    <div class="trajectory-interventions" aria-label="Interventions">
-      ${visible.map((item) => trajectoryInterventionActivityButtonHtml(item)).join("")}
-      ${superseded.length ? `<span class="trajectory-intervention-badge is-superseded-count">${escapeHtml(superseded.length)} superseded</span>` : ""}
-    </div>
-  `;
-}
-
-function trajectoryStatusLabel(trial) {
-  if (trial?.is_next_expected) return "Pending";
-  if (trial?.is_latest_active) return "Latest";
-  if (trial?.is_active_base) return "Base";
-  if (trial?.is_closed) return "Reported";
-  return cleanText(trial?.status, "Active");
-}
-
-function trajectoryTrialNodeHtml(trial, interventions) {
-  const iteration = Number(trial?.iteration || 0);
-  if (!iteration) return "";
-  const title = cleanText(trial?.title, `Trial ${iteration}`);
-  const status = trajectoryStatusLabel(trial);
-  const classes = [
-    "trajectory-node",
-    trial?.is_active_base ? "is-base" : "",
-    trial?.is_latest_active ? "is-latest" : "",
-    trial?.is_next_expected ? "is-next" : "",
-  ].filter(Boolean).join(" ");
-  const buttonHtml = trial?.is_next_expected
-    ? `
-      <button class="trajectory-trial-button" type="button" aria-disabled="true" title="${escapeHtml(title)}">
-        <span class="trajectory-trial-index">Trial ${escapeHtml(iteration)}</span>
-        <strong>${escapeHtml(compactText(title, 76))}</strong>
-        <em>${escapeHtml(status)}</em>
-      </button>
-    `
-    : `
-      <button class="trajectory-trial-button" type="button" data-trial-select="${escapeHtml(iteration)}" title="${escapeHtml(title)}">
-        <span class="trajectory-trial-index">Trial ${escapeHtml(iteration)}</span>
-        <strong>${escapeHtml(compactText(title, 76))}</strong>
-        <em>${escapeHtml(status)}</em>
-      </button>
-    `;
-  return `
-    <div class="${escapeHtml(classes)}">
-      ${buttonHtml}
-      ${trajectoryInterventionBadgesHtml(interventions)}
-    </div>
-  `;
-}
-
-function trajectoryForkActivityButtonHtml(fork, index, trialColumn, side) {
-  const forkId = cleanText(fork?.fork_id, "");
-  if (!forkId) return "";
-  const forkNumber = cleanText(fork?.fork_number, forkId);
-  const baseTrial = cleanText(fork?.base_trial, "");
-  const archived = Array.isArray(fork?.archived_trials) ? fork.archived_trials : [];
-  const intervention = cleanText(fork?.intervention_id, "");
-  const summary = cleanText(fork?.user_instruction_summary, "Continue from the selected trial boundary.");
-  const archivedLines = archived.length
-    ? archived.map((item) => `- ${cleanText(item?.id, "trial")}: ${cleanText(item?.to, "") || cleanText(item?.from, "")}`).join("\n")
-    : "- No later active trials were archived.";
-  const content = [
-    `${forkNumber} continue branch`,
-    "",
-    `Base trial: ${baseTrial || "unknown"}`,
-    `Restore mode: ${cleanText(fork?.restore_mode, "unknown")}`,
-    intervention ? `Intervention: ${intervention}` : "",
-    cleanText(fork?.manifest_path, "") ? `Manifest: ${fork.manifest_path}` : "",
-    "",
-    "User instruction:",
-    summary,
-    "",
-    "Archived trials:",
-    archivedLines,
-  ].filter(Boolean).join("\n");
-  const key = trajectoryRegisterActivity(["fork", forkId], {
-    title: "Continue branch",
-    subtitle: `${forkNumber}${baseTrial ? ` · ${baseTrial}` : ""}`,
-    eventLabel: archived.length ? `${archived.length} archived` : "manifest",
-    entries: [trajectoryActivityEntry(`trajectory-fork-${forkId}`, content, fork?.created_at || "")],
-    label: `${forkNumber} continue branch`,
-  });
-  const span = Math.max(1, Math.min(2, Number(fork?.archived_trials?.length || 0) + 1));
-  return `
-    <button class="trajectory-branch is-${escapeHtml(side)}" type="button" data-activity-open data-activity-key="${escapeHtml(key)}" style="grid-column: ${escapeHtml(trialColumn)} / span ${escapeHtml(span)};" title="${escapeHtml(summary)}">
-      <span class="trajectory-branch-kicker">${escapeHtml(forkNumber)} · Continue</span>
-      <strong>From Trial ${escapeHtml(fork?.base_trial_iteration || trialIterationValue({ id: baseTrial }) || "")}</strong>
-      <em>${escapeHtml(archived.length ? `Archived branch · ${archived.length} trials` : "No archived trials")}</em>
-    </button>
-  `;
-}
-
-function researchTrajectoryGraphHtml(graph) {
-  if (!graph || typeof graph !== "object") return "";
-  const trials = Array.isArray(graph.trials) ? graph.trials.filter((trial) => Number(trial?.iteration || 0) > 0) : [];
-  if (!trials.length) return "";
-  const interventions = Array.isArray(graph.interventions) ? graph.interventions : [];
-  const byIteration = new Map();
-  interventions.forEach((item) => {
-    const iteration = Number(item?.target_iteration || 0);
-    if (!iteration) return;
-    byIteration.set(iteration, [...(byIteration.get(iteration) || []), item]);
-  });
-  const columnByIteration = new Map(trials.map((trial, index) => [Number(trial.iteration || 0), index + 1]));
-  const forks = Array.isArray(graph.forks) ? graph.forks : [];
-  const branchRows = { above: [], below: [] };
-  forks.forEach((fork, index) => {
-    const baseIteration = Number(fork?.base_trial_iteration || trialIterationValue({ id: fork?.base_trial }) || 0);
-    const column = columnByIteration.get(baseIteration) || 1;
-    const side = index % 2 ? "above" : "below";
-    branchRows[side].push(trajectoryForkActivityButtonHtml(fork, index, column, side));
-  });
-  const pendingCount = interventions.filter((item) => cleanText(item?.status, "") === "pending").length;
-  const activeFork = cleanText(graph?.active?.fork_id, "");
-  return `
-    <section class="research-trajectory-graph" aria-label="Research trajectory">
-      <header class="research-trajectory-head">
-        <div>
-          <span>Research trajectory</span>
-          <strong>${escapeHtml(activeFork ? `Active fork ${activeFork.split("_")[0]}` : "Active path")}</strong>
-        </div>
-        <p>${escapeHtml(pendingCount ? `${pendingCount} pending intervention${pendingCount === 1 ? "" : "s"}` : "No pending interventions")}</p>
-      </header>
-      <div class="trajectory-scroll" tabindex="0">
-        <div class="trajectory-canvas" style="--trajectory-count: ${escapeHtml(trials.length)};">
-          <div class="trajectory-branch-row is-above">${branchRows.above.join("")}</div>
-          <div class="trajectory-lane">
-            ${trials.map((trial) => trajectoryTrialNodeHtml(trial, byIteration.get(Number(trial.iteration || 0)) || [])).join("")}
-          </div>
-          <div class="trajectory-branch-row is-below">${branchRows.below.join("")}</div>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
 function runningTrialStatusHtml(trial) {
   const iteration = Number(trial?.iteration || activeRunTrialIteration() || 0);
   if (!iteration || !isTrialLive(iteration)) return "";
@@ -8389,6 +8191,9 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
     <section class="trial-history-card ${model.collapsed ? "is-collapsed" : "is-expanded"} ${model.running ? "is-running" : ""}" aria-label="Autoresearch trials" data-autoresearch-panel-collapsed="${model.collapsed ? "true" : "false"}">
       <header class="trial-history-head">
         <div class="trial-live-strip">
+          <button class="trial-live-chevron" type="button" data-autoresearch-panel-toggle aria-expanded="${model.collapsed ? "false" : "true"}" aria-label="${model.collapsed ? "Expand autoresearch" : "Collapse autoresearch"}">
+            ${trialHistoryChevronIconHtml()}
+          </button>
           <button class="trial-history-toggle trial-live-main" type="button" data-autoresearch-panel-toggle aria-expanded="${model.collapsed ? "false" : "true"}">
             <span class="trial-history-kicker trial-live-brand" aria-label="Autoresearch">
               ${
@@ -8414,14 +8219,10 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
           <div class="trial-live-actions">
             ${model.activityButton}
             ${model.collapsedCompleteBadge}
-            <button class="trial-live-chevron" type="button" data-autoresearch-panel-toggle aria-expanded="${model.collapsed ? "false" : "true"}" aria-label="${model.collapsed ? "Expand autoresearch" : "Collapse autoresearch"}">
-              ${trialHistoryChevronIconHtml()}
-            </button>
           </div>
         </div>
       </header>
       <div class="trial-history-body">
-        ${model.collapsed ? "" : researchTrajectoryGraphHtml(appState?.trajectory_graph)}
         ${iterationNavHtml(trials, activeTrial)}
         ${runningTrialData ? runningTrialStatusHtml(runningTrialData) : ""}
         ${shouldShowActiveTrialReport ? trialReportSummaryHtml(activeTrialData.iteration, activeTrialData.entries, activeTrialData.report) : ""}

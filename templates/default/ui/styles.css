@@ -14216,14 +14216,16 @@ html[data-theme] .autoresearch-dock {
 html[data-theme] .autoresearch-dock.is-collapsed {
   max-height: none;
   padding: 8px 12px;
-  border-color: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-color: color-mix(in srgb, var(--warning, #9a7b3a) 28%, var(--panel-border, transparent));
   box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--warning, #9a7b3a) 42%, transparent),
     0 1px 2px color-mix(in srgb, var(--rail) 4%, transparent),
     0 10px 24px -18px color-mix(in srgb, var(--rail) 18%, transparent);
   overflow: visible;
 }
 
 html[data-theme] .autoresearch-dock.is-expanded {
+  padding: 8px 12px;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -17132,15 +17134,15 @@ html[data-theme] .trial-history-head .trial-chip-status {
   line-height: 1;
 }
 html[data-theme] .trial-history-body {
-  padding: 10px 0 0 !important;
-  gap: 16px;
+  padding: 8px 0 !important;
+  gap: 14px;
 }
 
 html[data-theme] .trial-live-strip {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
 }
@@ -17156,7 +17158,10 @@ html[data-theme] .trial-live-main.trial-history-toggle {
 }
 
 html[data-theme] .trial-history-card.is-expanded .trial-live-main.trial-history-toggle {
-  min-height: 50px;
+  align-content: center;
+  align-items: center;
+  min-height: 42px;
+  padding: 0;
 }
 
 html[data-theme] .trial-live-brand.trial-history-kicker {
@@ -17164,6 +17169,26 @@ html[data-theme] .trial-live-brand.trial-history-kicker {
   margin: 0;
   gap: 9px;
   color: color-mix(in srgb, var(--soft) 82%, var(--ink));
+}
+
+html[data-theme] .trial-history-card.is-collapsed .trial-live-brand.trial-history-kicker,
+html[data-theme] .trial-history-card.is-collapsed .trial-live-brand .trial-history-kicker-icon,
+html[data-theme] .trial-history-card.is-collapsed .trial-live-brand .trial-history-micro-spinner,
+html[data-theme] .trial-history-card.is-collapsed .trial-live-brand > span:last-child {
+  color: var(--warning, #9a7b3a);
+}
+
+html[data-theme] .trial-history-card.is-collapsed .trial-live-brand.trial-history-kicker {
+  min-height: 26px;
+  padding: 0 9px 0 7px;
+  border: 1px solid color-mix(in srgb, var(--warning, #9a7b3a) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning-bg, var(--surface-soft)) 46%, transparent);
+}
+
+html[data-theme] .trial-history-card.is-collapsed .trial-live-brand > span:last-child {
+  font-weight: 680;
+  letter-spacing: 0.16em;
 }
 
 html[data-theme] .trial-live-primary.trial-history-kicker-status {
@@ -17250,13 +17275,13 @@ html[data-theme] .trial-history-head .trial-history-activity-button strong {
 html[data-theme] .trial-live-chevron {
   display: inline-grid;
   place-items: center;
-  flex: 0 0 30px;
-  width: 30px;
-  height: 30px;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel-bg-strong) 86%, var(--ink) 2%);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: color-mix(in srgb, var(--soft) 82%, var(--ink));
   cursor: pointer;
   box-shadow: none;
@@ -17264,8 +17289,7 @@ html[data-theme] .trial-live-chevron {
 
 html[data-theme] .trial-live-chevron:hover,
 html[data-theme] .trial-live-chevron:focus-visible {
-  border-color: color-mix(in srgb, var(--ink) 16%, transparent);
-  background: color-mix(in srgb, var(--panel-bg-strong) 82%, var(--ink) 4%);
+  background: transparent;
   color: var(--ink);
   transform: none;
 }
@@ -17299,291 +17323,15 @@ html[data-theme] .trial-history-card.is-collapsed .trial-history-head {
   padding: 0 !important;
 }
 
+html[data-theme] .trial-history-card.is-expanded .trial-history-head {
+  padding: 0 !important;
+}
+
 html[data-theme] .trial-history-card.is-collapsed .trial-live-main.trial-history-toggle {
   align-content: center;
   align-items: center;
   min-height: 42px;
   padding: 0;
-}
-
-html[data-theme] .research-trajectory-graph {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  padding: 0 2px;
-}
-
-html[data-theme] .research-trajectory-head {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 14px;
-  min-width: 0;
-  color: var(--panel-muted);
-}
-
-html[data-theme] .research-trajectory-head div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-html[data-theme] .research-trajectory-head span,
-html[data-theme] .research-trajectory-head p {
-  margin: 0;
-  color: color-mix(in srgb, var(--soft) 86%, var(--ink));
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 560;
-  letter-spacing: 0.14em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-html[data-theme] .research-trajectory-head strong {
-  min-width: 0;
-  overflow: hidden;
-  color: color-mix(in srgb, var(--ink) 78%, var(--soft));
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 560;
-  letter-spacing: 0.08em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-html[data-theme] .trajectory-scroll {
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 2px 0 6px;
-  overscroll-behavior-x: contain;
-  scrollbar-width: thin;
-}
-
-html[data-theme] .trajectory-canvas {
-  --trajectory-node-width: 148px;
-  display: grid;
-  grid-template-rows: minmax(0, auto) auto minmax(0, auto);
-  gap: 8px;
-  min-width: max(100%, calc(var(--trajectory-count, 1) * var(--trajectory-node-width)));
-}
-
-html[data-theme] .trajectory-lane,
-html[data-theme] .trajectory-branch-row {
-  display: grid;
-  grid-template-columns: repeat(var(--trajectory-count, 1), minmax(var(--trajectory-node-width), 1fr));
-  gap: 10px;
-  min-width: 0;
-}
-
-html[data-theme] .trajectory-lane {
-  position: relative;
-  align-items: stretch;
-}
-
-html[data-theme] .trajectory-lane::before {
-  content: "";
-  position: absolute;
-  top: 18px;
-  left: calc(var(--trajectory-node-width) / 2);
-  right: calc(var(--trajectory-node-width) / 2);
-  height: 1px;
-  background: color-mix(in srgb, var(--ink) 13%, transparent);
-  pointer-events: none;
-}
-
-html[data-theme] .trajectory-node {
-  position: relative;
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-html[data-theme] .trajectory-node::before {
-  content: "";
-  position: absolute;
-  z-index: 1;
-  top: 13px;
-  left: 14px;
-  width: 10px;
-  height: 10px;
-  border: 1px solid color-mix(in srgb, var(--ink) 20%, var(--panel-bg));
-  border-radius: 999px;
-  background: var(--panel-bg);
-  box-shadow: 0 0 0 4px var(--panel-bg);
-  pointer-events: none;
-}
-
-html[data-theme] .trajectory-node.is-base::before {
-  background: color-mix(in srgb, var(--warning, #b89255) 54%, var(--panel-bg));
-}
-
-html[data-theme] .trajectory-node.is-latest::before {
-  background: color-mix(in srgb, var(--success, #6f7f52) 62%, var(--panel-bg));
-  box-shadow: 0 0 0 4px var(--panel-bg), 0 0 0 7px color-mix(in srgb, var(--success, #6f7f52) 16%, transparent);
-}
-
-html[data-theme] .trajectory-node.is-next::before {
-  background: var(--panel-bg);
-  border-style: dashed;
-}
-
-html[data-theme] .trajectory-trial-button,
-html[data-theme] .trajectory-branch {
-  min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--panel-bg-strong) 88%, var(--panel-bg));
-  color: var(--ink);
-  text-align: left;
-  box-shadow: none;
-  cursor: pointer;
-}
-
-html[data-theme] .trajectory-trial-button {
-  display: grid;
-  gap: 3px;
-  min-height: 78px;
-  padding: 26px 10px 10px;
-}
-
-html[data-theme] .trajectory-trial-button[aria-disabled="true"] {
-  cursor: default;
-}
-
-html[data-theme] .trajectory-trial-button:hover,
-html[data-theme] .trajectory-trial-button:focus-visible,
-html[data-theme] .trajectory-branch:hover,
-html[data-theme] .trajectory-branch:focus-visible,
-html[data-theme] .trajectory-intervention-badge:hover,
-html[data-theme] .trajectory-intervention-badge:focus-visible {
-  border-color: color-mix(in srgb, var(--ink) 20%, transparent);
-  background: color-mix(in srgb, var(--panel-bg-strong) 82%, var(--ink) 3%);
-  color: var(--ink);
-}
-
-html[data-theme] .trajectory-trial-index,
-html[data-theme] .trajectory-branch-kicker {
-  color: color-mix(in srgb, var(--soft) 86%, var(--ink));
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 560;
-  letter-spacing: 0.12em;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
-
-html[data-theme] .trajectory-trial-button strong,
-html[data-theme] .trajectory-branch strong {
-  min-width: 0;
-  overflow: hidden;
-  color: color-mix(in srgb, var(--ink) 84%, var(--soft));
-  font-size: 14px;
-  font-weight: 560;
-  line-height: 1.22;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-html[data-theme] .trajectory-trial-button em,
-html[data-theme] .trajectory-branch em {
-  color: color-mix(in srgb, var(--soft) 92%, var(--ink));
-  font-family: var(--mono);
-  font-size: 10px;
-  font-style: normal;
-  letter-spacing: 0.08em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-html[data-theme] .trajectory-interventions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  min-width: 0;
-}
-
-html[data-theme] .trajectory-intervention-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 22px;
-  max-width: 100%;
-  padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel-bg-strong) 78%, transparent);
-  color: color-mix(in srgb, var(--soft) 88%, var(--ink));
-  font-family: var(--mono);
-  font-size: 9px;
-  font-weight: 560;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-html[data-theme] .trajectory-intervention-badge span {
-  color: color-mix(in srgb, var(--ink) 78%, var(--soft));
-}
-
-html[data-theme] .trajectory-intervention-badge em {
-  overflow: hidden;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-html[data-theme] .trajectory-intervention-badge.is-pending {
-  border-color: color-mix(in srgb, var(--warning, #b89255) 28%, transparent);
-  color: color-mix(in srgb, var(--warning, #b89255) 74%, var(--ink));
-}
-
-html[data-theme] .trajectory-intervention-badge.is-applied {
-  border-color: color-mix(in srgb, var(--success, #6f7f52) 24%, transparent);
-}
-
-html[data-theme] .trajectory-intervention-badge.is-superseded-count {
-  opacity: 0.72;
-}
-
-html[data-theme] .trajectory-branch-row {
-  min-height: 0;
-}
-
-html[data-theme] .trajectory-branch-row:empty {
-  display: none;
-}
-
-html[data-theme] .trajectory-branch {
-  position: relative;
-  display: grid;
-  gap: 3px;
-  min-height: 62px;
-  padding: 9px 10px;
-  border-style: dashed;
-}
-
-html[data-theme] .trajectory-branch::before {
-  content: "";
-  position: absolute;
-  left: 18px;
-  width: 1px;
-  height: 10px;
-  background: color-mix(in srgb, var(--ink) 14%, transparent);
-}
-
-html[data-theme] .trajectory-branch.is-above::before {
-  bottom: -10px;
-}
-
-html[data-theme] .trajectory-branch.is-below::before {
-  top: -10px;
-}
-
-html[data-theme] .trial-history-card.is-collapsed .research-trajectory-graph {
-  display: none;
 }
 
 html[data-theme] .trial-artifact-button {
@@ -18225,12 +17973,12 @@ html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
     padding: 14px 16px;
   }
 
-  html[data-theme] .autoresearch-dock.is-collapsed {
+  html[data-theme] .autoresearch-dock:is(.is-collapsed, .is-expanded) {
     padding: 8px 10px;
   }
 
   html[data-theme] .trial-live-strip {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
   }
 
@@ -18241,25 +17989,6 @@ html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
       "update update";
     gap: 5px 10px;
     min-height: 44px;
-  }
-
-  html[data-theme] .research-trajectory-head {
-    align-items: start;
-    flex-direction: column;
-    gap: 5px;
-  }
-
-  html[data-theme] .trajectory-canvas {
-    --trajectory-node-width: 136px;
-  }
-
-  html[data-theme] .trajectory-scroll {
-    scroll-snap-type: x proximity;
-  }
-
-  html[data-theme] .trajectory-node,
-  html[data-theme] .trajectory-branch {
-    scroll-snap-align: start;
   }
 
   html[data-theme] .trial-live-brand {
@@ -18292,9 +18021,9 @@ html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
   }
 
   html[data-theme] .trial-live-chevron {
-    width: 28px;
-    height: 28px;
-    flex-basis: 28px;
+    width: 22px;
+    height: 22px;
+    flex-basis: 22px;
   }
 }
 
