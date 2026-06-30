@@ -5407,7 +5407,7 @@ def trial_progress_summary(trial_dir: Path, plan: str = "", report: str = "", ar
     if gate_updated and RESEARCH_STATE_PATH.exists():
         touched_paths.append(RESEARCH_STATE_PATH)
 
-    if not plan_exists:
+    if not plan_exists and not report_exists:
         stage_index = 1
         summary = "Planning · waiting for PLAN.md"
         detail = "No trial plan has been written yet."
@@ -5421,8 +5421,8 @@ def trial_progress_summary(trial_dir: Path, plan: str = "", report: str = "", ar
         detail = "Artifacts exist; REPORT.md is not available yet."
     elif report_exists and reviewer_count <= 0:
         stage_index = 4
-        summary = "Reporting · REPORT.md ready"
-        detail = trial_report_summary(report)
+        summary = "Reported · reviewer files missing"
+        detail = f"{trial_report_summary(report)} - Reviewer gate files have not been recorded yet."
     elif reviewer_count < reviewer_total:
         stage_index = 5
         summary = f"Reviewing · {reviewer_count}/{reviewer_total} reviewer files"
@@ -5447,6 +5447,7 @@ def trial_progress_summary(trial_dir: Path, plan: str = "", report: str = "", ar
         "artifacts_count": artifacts_count,
         "plan_exists": plan_exists,
         "report_exists": report_exists,
+        "reported_only": bool(report_exists and reviewer_count < reviewer_total),
         "gate_updated": gate_updated,
         "updated_at": latest_mtime_iso(touched_paths) or path_mtime_iso(trial_dir),
         "stages": TRIAL_PROGRESS_STAGES,
@@ -8103,6 +8104,11 @@ def build_overview() -> dict[str, Any]:
     figure_text = figure_specs.get("text", "")
     project_overview = project_summary(project_text)
     manuscript_overview = manuscript_summary(blueprint_text, figure_text)
+    blueprint_blockers = final_blueprint_consistency_blockers() if blueprint_text.strip() else []
+    manuscript_overview["readiness"] = {
+        "blueprint_blockers": blueprint_blockers[:12],
+        "blueprint_blocker_count": len(blueprint_blockers),
+    }
     trials = collect_trials()
     return {
         "active_project_id": context.id,

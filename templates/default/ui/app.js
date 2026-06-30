@@ -10548,12 +10548,19 @@ function manuscriptReadinessStripHtml(manuscript) {
   const tables = artifacts.filter((block) => String(block.kind || "").toLowerCase() === "table");
   const references = (manuscript.references || []).filter((ref) => hasRealText(ref?.reference) || hasRealText(ref?.key));
   const missingEvidence = (manuscript.missing_evidence || []).filter((item) => !looksPlaceholder(item));
+  const readiness = manuscript.readiness && typeof manuscript.readiness === "object" ? manuscript.readiness : {};
+  const blueprintBlockers = Array.isArray(readiness.blueprint_blockers)
+    ? readiness.blueprint_blockers.filter((item) => hasRealText(item))
+    : [];
+  const blueprintBlockerCount = Number(readiness.blueprint_blocker_count || blueprintBlockers.length);
   const latestTrial = latestTrajectoryTrialIteration();
-  const label = !sections.length
-    ? "Not draftable yet"
-    : missingEvidence.length
-      ? "Draftable with evidence gaps"
-      : "Paper package ready";
+  const label = blueprintBlockers.length
+    ? "Paper map needs completion"
+    : !sections.length
+      ? "Not draftable yet"
+      : missingEvidence.length
+        ? "Draftable with evidence gaps"
+        : "Paper package ready";
   const facts = [
     `${sections.length} section${sections.length === 1 ? "" : "s"}`,
     `${figures.length} figure${figures.length === 1 ? "" : "s"}`,
@@ -10561,11 +10568,13 @@ function manuscriptReadinessStripHtml(manuscript) {
     `${references.length} reference${references.length === 1 ? "" : "s"}`,
     latestTrial ? `Last updated from Trial ${latestTrial}` : "",
   ].filter(Boolean);
-  const action = missingEvidence.length
-    ? `${missingEvidence.length} evidence gap${missingEvidence.length === 1 ? "" : "s"} recorded`
-    : sections.length
-      ? "Ready for human-machine drafting"
-      : "Run autoresearch until manuscript sections exist";
+  const action = blueprintBlockers.length
+    ? `${blueprintBlockerCount} manuscript-map issue${blueprintBlockerCount === 1 ? "" : "s"} before paper-writing handoff`
+    : missingEvidence.length
+      ? `${missingEvidence.length} evidence gap${missingEvidence.length === 1 ? "" : "s"} recorded`
+      : sections.length
+        ? "Ready for human-machine drafting"
+        : "Run autoresearch until manuscript sections exist";
   return `
     <section class="manuscript-readiness-strip" aria-label="Manuscript readiness">
       <div>
