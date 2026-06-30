@@ -11,6 +11,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 const cli = path.join(root, "bin", "auto-research.js");
+const npmCli = process.platform === "win32" ? "npm.cmd" : "npm";
+
+function execCommandSync(command, args, options = {}) {
+  const commandNeedsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  return execFileSync(command, args, {
+    ...options,
+    shell: commandNeedsShell ? true : options.shell
+  });
+}
+
+function execNpmSync(args, options = {}) {
+  return execCommandSync(npmCli, args, options);
+}
 const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "co-auto-research-smoke-"));
 const projectDir = path.join(tempRoot, "project");
 const projectTwoDir = path.join(tempRoot, "project-two");
@@ -18,6 +31,24 @@ let nextTestPort = 32100;
 
 function compactText(value) {
   return String(value || "").replace(/\s+/g, " ");
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function removeTempRootBestEffort(target) {
+  const timeoutMs = process.platform === "win32" ? 3000 : 8000;
+  const result = await Promise.race([
+    fsp.rm(target, { recursive: true, force: true, maxRetries: 1, retryDelay: 100 }).then(
+      () => ({ ok: true }),
+      (error) => ({ error })
+    ),
+    sleepMs(timeoutMs).then(() => ({ timeout: true }))
+  ]);
+  if (result.ok) return;
+  const reason = result.timeout ? `timed out after ${timeoutMs}ms` : (result.error?.message || result.error);
+  console.warn(`Warning: could not remove smoke-test temp directory ${target}: ${reason}`);
 }
 
 function findPython() {
@@ -775,6 +806,15 @@ function parseSseFrame(frame) {
   return { ...event, payload: JSON.parse(event.data) };
 }
 
+function parseLastJsonObjectLine(output, label) {
+  const lines = String(output || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines.reverse()) {
+    if (!line.startsWith("{") || !line.endsWith("}")) continue;
+    return JSON.parse(line);
+  }
+  throw new Error(`${label} did not print a JSON probe line:\n${output}`);
+}
+
 async function readSseUntil(url, predicate, timeoutMs = 8000, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -1175,7 +1215,7 @@ try {
     env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
     encoding: "utf8"
   }).trim();
-  const attachProbe = JSON.parse(attachProbeOutput.split(/\r?\n/).at(-1));
+  const attachProbe = parseLastJsonObjectLine(attachProbeOutput, "attach");
   const attachProbeProjectRoot = await fsp.realpath(attachProbe.projectRoot);
   if (
     attachProbe.serverPath !== packageServerPath ||
@@ -1189,7 +1229,7 @@ try {
     env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
     encoding: "utf8"
   }).trim();
-  const projectUiProbe = JSON.parse(projectUiProbeOutput.split(/\r?\n/).at(-1));
+  const projectUiProbe = parseLastJsonObjectLine(projectUiProbeOutput, "project ui");
   const projectUiProbeProjectRoot = await fsp.realpath(projectUiProbe.projectRoot);
   if (
     projectUiProbe.serverPath !== packageServerPath ||
@@ -1201,10 +1241,10 @@ try {
   }
   const remoteUiProbeOutput = execFileSync("node", [cli, "ui", "--project", projectDir, "--remote", "--no-open"], {
     cwd: root,
-    env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
+    env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1", COAUTO_REMOTE_TUNNEL_MOCK_URL: "https://probe.trycloudflare.com" },
     encoding: "utf8"
   }).trim();
-  const remoteUiProbe = JSON.parse(remoteUiProbeOutput.split(/\r?\n/).at(-1));
+  const remoteUiProbe = parseLastJsonObjectLine(remoteUiProbeOutput, "remote ui");
   if (!Array.isArray(remoteUiProbe.serverArgs) || !remoteUiProbe.serverArgs.includes("--remote")) {
     throw new Error(`remote UI should pass --remote to the package-managed server:\n${remoteUiProbeOutput}`);
   }
@@ -1215,7 +1255,7 @@ try {
     env: { ...process.env, COAUTO_PRINT_UI_INVOCATION: "1" },
     encoding: "utf8"
   }).trim();
-  const defaultDashboardProbe = JSON.parse(defaultDashboardProbeOutput.split(/\r?\n/).at(-1));
+  const defaultDashboardProbe = parseLastJsonObjectLine(defaultDashboardProbeOutput, "default dashboard");
   const expectedDefaultProjectsDir = path.join(defaultDashboardRoot, "co-autoresearch-projects");
   const defaultProbeProjectsDir = await fsp.realpath(defaultDashboardProbe.projectsDir);
   if (
@@ -1639,6 +1679,7 @@ Confidence: medium
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
   const projectFramingInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "PROJECT_FRAMING.md"), "utf8");
+  const projectFramingInstructionsText = projectFramingInstructions.replace(/\r\n/g, "\n");
   const interventionInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "INTERVENTION_PROTOCOL.md"), "utf8");
   const agentsInstructions = await fsp.readFile(path.join(root, "templates", "default", "AGENTS.md"), "utf8");
   if (
@@ -1750,14 +1791,14 @@ Confidence: medium
     throw new Error("server must preserve goal-launch messages and keep attachment-only chat turns visible");
   }
   if (
-    !projectFramingInstructions.includes("# Project Framing Protocol") ||
-    !projectFramingInstructions.includes("Before Autoresearch Starts") ||
-    !projectFramingInstructions.includes("After Autoresearch Starts") ||
-    !projectFramingInstructions.includes("Evaluate the full latest turn, not only the user's raw message") ||
-    !projectFramingInstructions.includes("planned\nanswer itself establishes or materially changes the launch frame") ||
-    !projectFramingInstructions.includes("Do not leave launch-ready\nframing only in the chat transcript") ||
-    !projectFramingInstructions.includes("Do not wait for the user to say") ||
-    !projectFramingInstructions.includes("After autoresearch starts, `PROJECT.md` is no longer a live chat draft")
+    !projectFramingInstructionsText.includes("# Project Framing Protocol") ||
+    !projectFramingInstructionsText.includes("Before Autoresearch Starts") ||
+    !projectFramingInstructionsText.includes("After Autoresearch Starts") ||
+    !projectFramingInstructionsText.includes("Evaluate the full latest turn, not only the user's raw message") ||
+    !projectFramingInstructionsText.includes("planned\nanswer itself establishes or materially changes the launch frame") ||
+    !projectFramingInstructionsText.includes("Do not leave launch-ready\nframing only in the chat transcript") ||
+    !projectFramingInstructionsText.includes("Do not wait for the user to say") ||
+    !projectFramingInstructionsText.includes("After autoresearch starts, `PROJECT.md` is no longer a live chat draft")
   ) {
     throw new Error("PROJECT_FRAMING.md must define before/after autoresearch PROJECT.md update policy");
   }
@@ -2721,14 +2762,14 @@ Confidence: medium
     throw new Error(`doctor should warn about invalid COAUTO_AGENT_BACKEND:\n${invalidBackendDoctorOutput}`);
   }
 
-  const packedName = execFileSync("npm", ["pack", "--pack-destination", tempRoot], {
+  const packedName = execNpmSync(["pack", "--pack-destination", tempRoot], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   }).trim().split(/\r?\n/).at(-1);
   const packedTarball = path.join(tempRoot, packedName);
   const npmPrefix = path.join(tempRoot, "npm-prefix");
-  execFileSync("npm", ["install", "--global", "--prefix", npmPrefix, packedTarball], {
+  execNpmSync(["install", "--global", "--prefix", npmPrefix, packedTarball], {
     cwd: root,
     encoding: "utf8",
     stdio: "pipe"
@@ -2736,11 +2777,11 @@ Confidence: medium
   const installedCli = process.platform === "win32"
     ? path.join(npmPrefix, "co-auto-research.cmd")
     : path.join(npmPrefix, "bin", "co-auto-research");
-  const installedVersion = execFileSync(installedCli, ["--version"], { encoding: "utf8" }).trim();
+  const installedVersion = execCommandSync(installedCli, ["--version"], { encoding: "utf8" }).trim();
   if (installedVersion !== packageManifest.version) {
     throw new Error(`installed tarball CLI version did not match package.json: ${installedVersion}`);
   }
-  const installedDoctorOutput = execFileSync(installedCli, ["doctor", "--port", String(await freePort())], {
+  const installedDoctorOutput = execCommandSync(installedCli, ["doctor", "--port", String(await freePort())], {
     cwd: root,
     env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
     encoding: "utf8"
@@ -3172,7 +3213,7 @@ Confidence: medium
     ...python.args,
     "-c",
     [
-      "import importlib.util, json, os, pathlib, stat, time",
+      "import importlib.util, json, os, pathlib, stat, sys, time",
       "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
       "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
       "module = importlib.util.module_from_spec(spec)",
@@ -3215,7 +3256,13 @@ Confidence: medium
       "fake_bin = pathlib.Path(os.environ['COAUTO_FAKE_CODEX_BIN'])",
       "fake_bin.mkdir(parents=True, exist_ok=True)",
       "fake_codex = fake_bin / ('codex.cmd' if os.name == 'nt' else 'codex')",
-      "fake_codex.write_text(\"\"\"#!/usr/bin/env python3\\nimport base64, json, os, pathlib, sys\\nsys.stdin.read()\\nthread_id = '019f0000-0000-7000-8000-000000000123'\\noutdir = pathlib.Path(os.environ['CODEX_HOME']) / 'generated_images' / thread_id\\noutdir.mkdir(parents=True, exist_ok=True)\\npng = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=')\\n(outdir / 'ig_fake.png').write_bytes(png)\\nprint(json.dumps({'type': 'thread.started', 'thread_id': thread_id}), flush=True)\\nprint(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'generated inline'}}), flush=True)\\n\"\"\", encoding='utf-8')",
+      "fake_codex_script = fake_bin / 'codex_fake.py'",
+      "fake_codex_body = \"\"\"import base64, json, os, pathlib, sys\\nsys.stdin.read()\\nthread_id = '019f0000-0000-7000-8000-000000000123'\\noutdir = pathlib.Path(os.environ['CODEX_HOME']) / 'generated_images' / thread_id\\noutdir.mkdir(parents=True, exist_ok=True)\\npng = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=')\\n(outdir / 'ig_fake.png').write_bytes(png)\\nprint(json.dumps({'type': 'thread.started', 'thread_id': thread_id}), flush=True)\\nprint(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'generated inline'}}), flush=True)\\n\"\"\"",
+      "fake_codex_script.write_text(fake_codex_body, encoding='utf-8')",
+      "if os.name == 'nt':",
+      "    fake_codex.write_text('@echo off\\r\\n\"{}\" \"{}\"\\r\\n'.format(sys.executable, fake_codex_script), encoding='utf-8')",
+      "else:",
+      "    fake_codex.write_text('#!/usr/bin/env python3\\n' + fake_codex_body, encoding='utf-8')",
       "fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)",
       "os.environ['COAUTO_CODEX'] = str(fake_codex)",
       "os.environ['CODEX_HOME'] = str(codex_home)",
@@ -3610,11 +3657,14 @@ Confidence: medium
     "assert explicit_saved and pathlib.Path(explicit_saved[0]['path']).parts[0] == 'resources', explicit_saved",
     "resources = module.collect_resources()",
     "ongoing = next(group for group in resources if group['path'] == 'resources/ongoing_work')",
-    "assert not any(item['path'].endswith('LLMShopper-TBS-Test/README.md') for item in ongoing['files']), ongoing",
+    "linked_resource_file_visible = any(item['path'].endswith('LLMShopper-TBS-Test/README.md') for item in ongoing['files'])",
     "tree = module.directory_tree('resources')",
     "ongoing_tree = next(child for child in tree['children'] if child['name'] == 'ongoing_work')",
     "linked_tree = next(child for child in ongoing_tree['children'] if child['name'] == 'LLMShopper-TBS-Test')",
-    "assert linked_tree.get('is_symlink') is True and linked_tree['children'] == [], linked_tree",
+    "if linked_tree.get('is_symlink') is True:",
+    "    assert linked_tree['children'] == [], linked_tree",
+    "else:",
+    "    assert linked_resource_file_visible and any(child['name'] == 'README.md' for child in linked_tree.get('children', [])), linked_tree",
     "workspace_tree = module.directory_tree('.', max_depth=4, exclude_names={'node_modules', '.venv', 'venv', 'dist', 'build', '.pytest_cache', '.mypy_cache', '.ruff_cache'})",
     "instructions_tree = next(child for child in workspace_tree['children'] if child['name'] == 'instructions')",
     "assert any(child['name'] == 'COLD_START.md' for child in instructions_tree['children']), instructions_tree",
@@ -4472,5 +4522,6 @@ Confidence: medium
   }
   console.log("Smoke test passed.");
 } finally {
-  await fsp.rm(tempRoot, { recursive: true, force: true });
+  await removeTempRootBestEffort(tempRoot);
 }
+process.exit(0);

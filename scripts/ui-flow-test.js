@@ -6480,10 +6480,10 @@ async function testExportBundleFlow() {
   assert.equal(panel.includes('data-export-kind="final_project"'), true);
   assert.equal(panel.includes("Best for GPT/Claude drafting"), true);
   assert.equal(panel.includes("Best for project handoff"), true);
-  assert.equal(panel.includes('class="secondary-button small-button" type="button" data-export-kind="blueprint"'), true);
+  assert.equal(panel.includes('class="primary-button small-button" type="button" data-export-kind="blueprint"'), true);
   assert.equal(panel.includes('class="secondary-button small-button" type="button" data-export-kind="final_project"'), true);
   assert.equal(panel.includes("Open BLUEPRINT.md"), false);
-  assert.equal(panel.includes("Paper-writing handoff"), false);
+  assert.equal(panel.includes("Paper-writing handoff"), true);
   assert.equal(panel.includes("Download blueprint pack"), false);
   assert.equal(panel.includes("Download final project pack"), false);
 
@@ -6970,11 +6970,12 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes('href="#table-t000001-evidence-matrix"'), true, "outline should link to table artifacts");
   assert.equal(html.includes('href="#manuscript-blueprint-section"'), true, "outline should link to the current manuscript file");
   assert.equal(html.includes("manuscript-export-bar"), true);
-  assert.equal(html.includes("Paper-writing handoff"), false);
+  assert.equal(html.includes("Paper-writing handoff"), true);
   assert.equal(html.includes("Download paper-writing pack"), true);
   assert.equal(html.includes("Download clean project package"), true);
   assert.equal(html.includes("Best for GPT/Claude drafting"), true);
   assert.equal(html.includes("Best for project handoff"), true);
+  assert.equal(html.includes("Paper package ready"), true);
   assert.equal(html.includes("Open BLUEPRINT.md"), false);
   assert.equal(html.includes("Download BLUEPRINT.md"), true);
   assert.equal(html.includes('data-inline-fullscreen="manuscript/BLUEPRINT.md"'), false);
