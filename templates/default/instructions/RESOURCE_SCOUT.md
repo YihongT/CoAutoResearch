@@ -185,6 +185,48 @@ license, terms, robots, and privacy constraints.
 
 Large or restricted resources may be link-only entries in the manifest.
 
+## Download Integrity And Fallback Ladder
+
+When a trial needs the actual body of an external file, do not treat a completed
+HTTP request as a completed download. After every download attempt, verify the
+artifact before using it or marking it downloaded:
+
+- record URL, tool, proxy/profile used, HTTP status, content type, byte size,
+  and sha256 when available;
+- reject HTML/XML/text error pages saved with a data extension;
+- for ZIP files, verify magic bytes and run an archive listing/test before
+  extracting;
+- for CSV/TSV/text files, inspect the header and first rows;
+- compare expected size, checksum, filename, or documented row/file counts when
+  the source provides them.
+
+If verification fails for a public resource, run this fallback ladder before
+asking the user for help:
+
+1. retry with safe downloader variants such as `curl`, `wget`, and Python
+   stdlib, following redirects and using a normal browser-like user agent;
+2. try available network profiles already configured for the environment
+   (for example sourced proxy setup scripts, proxy env vars, and direct mode);
+3. inspect response headers/body snippets to distinguish 403/404/rate-limit
+   pages from real data;
+4. try official alternate links from the same source, parent directory, catalog
+   page, or documented mirror;
+5. search the project tree, `resources/`, trial artifacts, workspace caches,
+   and obvious local download/cache locations for an existing copy, then verify
+   it with the same checks;
+6. if the file is large, restricted, or still inaccessible, save a link-only
+   manifest entry plus an access-failure report instead of pretending it was
+   downloaded.
+
+Quarantine bad downloads under the trial artifacts with a clear suffix such as
+`.bad-download.html` or `.bad-download.txt`; never leave a verified-false HTML
+error page at the final `.zip`, `.csv`, `.pdf`, or dataset path. Do not set the
+gate to `blocked` or `needs_human` for a public download until this ladder is
+exhausted and recorded. If useful work can continue with metadata, alternate
+sources, or a follow-up retrieval trial, set `Status: continue`; use
+`needs_human` only when the remaining blocker is genuinely user-provided access,
+credentials, a private file, or a network environment the agent cannot change.
+
 ## Required Outputs
 
 Write a scout report at:
@@ -236,6 +278,10 @@ Use this structure:
 - Criteria from PLAN:
 - Met:
 - Residual gaps:
+
+## Download Integrity / Access Failures
+| Resource | Attempts | Verification result | Fallbacks tried | Final status | Next step |
+|---|---|---|---|---|---|
 ```
 
 Candidate implications are leads for the main execution agent. They are not

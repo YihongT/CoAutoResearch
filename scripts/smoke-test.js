@@ -1439,6 +1439,10 @@ Confidence: medium
     !resourceScoutInstructions.includes("Known resource clues:") ||
     !resourceScoutInstructions.includes("Freshness / date sensitivity:") ||
     !resourceScoutInstructions.includes("spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources") ||
+    !resourceScoutInstructions.includes("Download Integrity And Fallback Ladder") ||
+    !resourceScoutInstructions.includes("Quarantine bad downloads") ||
+    !resourceScoutInstructions.includes("verify magic bytes") ||
+    !resourceScoutInstructions.includes("try available network profiles already configured for the environment") ||
     !resourceScoutInstructions.includes("Resource Scout fallback") ||
     resourceScoutInstructions.includes("do not silently do the work") ||
     !resourceScoutInstructions.includes("Do not set the gate to `blocked` or `needs_human` solely because") ||
@@ -1449,6 +1453,8 @@ Confidence: medium
     resourceScoutInstructions.includes("spawn or run the Resource Scout") ||
     !executionInstructions.includes("including the required `Resource Scout Brief`") ||
     !executionInstructions.includes("RESOURCE_SCOUT_REPORT.md") ||
+    !executionInstructions.includes("Download Integrity And Fallback Ladder") ||
+    !executionInstructions.includes("External file access failures are not automatically human blockers") ||
     !executionInstructions.includes("REVIEWER_SPAWN_DECISION.md") ||
     !executionInstructions.includes("inline Reviewer Scope Analyst fallback") ||
     !executionInstructions.includes("not a ninth core reviewer") ||
@@ -2156,7 +2162,9 @@ Confidence: medium
       )
     ) ||
     appJs.includes("const activeTrial = selectedTrial(reports)") ||
-    !(appJs.includes('reportStatus === "reported" ? "Reported"') || appJs.includes('if (trial?.is_closed === true) return "Reported"')) ||
+    !appJs.includes("function isTrialClosingDuringLiveHandoff") ||
+    !appJs.includes('if (trial?.is_closed === true) return "Done"') ||
+    appJs.includes('if (trial?.is_closed === true) return "Reported"') ||
     !(appJs.includes("Report pending") || appJs.includes("is-pending")) ||
     !appJs.includes("Report is not available yet. Agent activity for this trial is shown below.") ||
     !appJs.includes("function isGoalPassed()") ||
@@ -3525,6 +3533,8 @@ Confidence: medium
       "assert all('instructions/RESOURCE_SCOUT.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources' in prompt for prompt in prompts.values()), prompts",
       "assert all('Resource Scout fallback' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Download Integrity And Fallback Ladder' in prompt for prompt in prompts.values()), prompts",
+      "assert all('quarantine HTML/error-page downloads' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial\\'s review risks' in prompt for prompt in prompts.values()), prompts",
       "assert all('Reviewer Scope Analyst fallback' in prompt for prompt in prompts.values()), prompts",
       "assert all('REVIEWER_SPAWN_DECISION.md' in prompt for prompt in prompts.values()), prompts",
@@ -3979,6 +3989,60 @@ Confidence: medium
     throw new Error(`active trial marker smoke test returned unexpected output: ${activeTrialMarkerOutput}`);
   }
 
+  const trajectoryClosedBoundaryScript = [
+    "import importlib.util, json, os, pathlib, tempfile",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server_trajectory_boundary', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "root = pathlib.Path(tempfile.mkdtemp(prefix='coauto-trajectory-boundary-'))",
+    "(root / 'PROJECT.md').write_text('# Trajectory Boundary Smoke\\n', encoding='utf-8')",
+    "trials_root = root / 'research_trajectory' / 'trials'",
+    "def make_trial(number, slug, closed):",
+    "    trial = trials_root / f'{number:06d}_{slug}'",
+    "    (trial / 'reviews').mkdir(parents=True, exist_ok=True)",
+    "    (trial / 'PLAN.md').write_text('# Plan\\n', encoding='utf-8')",
+    "    (trial / 'REPORT.md').write_text('# Report\\n', encoding='utf-8')",
+    "    review_names = module.REQUIRED_REVIEWER_FILES if closed else ['PLAN_REVIEW.md']",
+    "    for name in review_names:",
+    "        (trial / 'reviews' / name).write_text('Decision: pass\\nGate impact: pass\\n', encoding='utf-8')",
+    "    return trial",
+    "trial1 = make_trial(1, 'closed_boundary', True)",
+    "trial2 = make_trial(2, 'closed_boundary', True)",
+    "trial3 = make_trial(3, 'reported_not_closed', False)",
+    "trajectory_path = root / 'research_trajectory' / 'TRAJECTORY.json'",
+    "trajectory_path.write_text(json.dumps({'schema_version': module.TRAJECTORY_SCHEMA_VERSION, 'latest_active_trial': trial3.name, 'next_trial_number': 4, 'archived_trial_ids': [], 'last_sync_reason': 'stale_overview'}, indent=2), encoding='utf-8')",
+    "(root / 'research_trajectory' / 'STATE.md').write_text('# State\\n', encoding='utf-8')",
+    "context = module.ProjectContext(root)",
+    "module._CONTEXT.project = context",
+    "synced = module.sync_trajectory_state('overview')",
+    "assert synced['latest_active_trial'] == trial2.name, synced",
+    "assert synced['next_trial_number'] == 3, synced",
+    "assert module.latest_active_trial_iteration() == 2, module.latest_active_trial_iteration()",
+    "assert module.next_active_trial_iteration() == 3, module.next_active_trial_iteration()",
+    "trials = {item['iteration']: item for item in module.collect_trials()}",
+    "assert trials[3]['status'] == 'reported' and trials[3]['is_closed'] is False, trials[3]",
+    "print(json.dumps({'latest': synced['latest_active_trial'], 'next': synced['next_trial_number'], 'trial3_closed': trials[3]['is_closed']}))"
+  ].join("\n");
+  const trajectoryClosedBoundaryOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    trajectoryClosedBoundaryScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (
+    !trajectoryClosedBoundaryOutput.includes('"next": 3') ||
+    !trajectoryClosedBoundaryOutput.includes('"trial3_closed": false')
+  ) {
+    throw new Error(`trajectory closed-boundary smoke test returned unexpected output: ${trajectoryClosedBoundaryOutput}`);
+  }
+
   const specializedReviewOutputPathScript = [
     "import importlib.util, json, os, pathlib, tempfile",
     "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
@@ -4047,8 +4111,9 @@ Confidence: medium
     "    (trial / 'PLAN.md').write_text('# Plan\\n', encoding='utf-8')",
     "    (trial / 'REPORT.md').write_text('# Report\\n', encoding='utf-8')",
     "    (trial / 'reviews').mkdir(exist_ok=True)",
-    "    (trial / 'reviews' / 'PLAN_REVIEW.md').write_text('Decision: pass\\nGate impact: pass\\n', encoding='utf-8')",
-    "    (trial / 'artifacts' / 'reviewer_spawn' / 'REVIEWER_SPAWN_DECISION.md').write_text('Spawn needed: yes\\nSpecialized reviewer output: reviews/SPECIALIZED_REVIEW.md\\n', encoding='utf-8')",
+    "    for review_name in module.REQUIRED_REVIEWER_FILES:",
+    "        (trial / 'reviews' / review_name).write_text('Decision: pass\\nGate impact: pass\\n', encoding='utf-8')",
+    "    (trial / 'artifacts' / 'reviewer_spawn' / 'REVIEWER_SPAWN_DECISION.md').write_text('Spawn needed: no\\n', encoding='utf-8')",
     "partial = trials / '000021_partial_plan_only'",
     "(partial).mkdir(parents=True, exist_ok=True)",
     "(partial / 'PLAN.md').write_text('# Partial plan\\n', encoding='utf-8')",

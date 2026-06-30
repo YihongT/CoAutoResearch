@@ -4072,6 +4072,73 @@ function testBlockedGateWithoutHumanResponseShowsNotice() {
   assert.equal(html.includes("data-resume-autoresearch"), true, "blocked boundary should keep the resume action available");
 }
 
+function testUnclosedPreviousTrialShowsClosingDuringNextLiveRun() {
+  const app = loadAppContext();
+  app.run(`
+    appState.trials = [{
+      id: "000001_restart_intake_and_launch_rebuild",
+      iteration: 1,
+      status: "reported",
+      is_closed: false,
+      report_path: "research_trajectory/trials/000001_restart_intake_and_launch_rebuild/REPORT.md",
+      review_path: "research_trajectory/trials/000001_restart_intake_and_launch_rebuild/reviews/FINAL_GATE_REVIEW.md",
+      report_summary: "Reviewing · 4/8 reviewer files",
+      progress: {
+        stage_label: "Reviewing",
+        stage_index: 5,
+        total_stages: 6,
+        summary: "Reviewing · 4/8 reviewer files",
+        detail: "0/8 reviewer gates are pass.",
+        report_exists: true,
+        reviewer_count: 4,
+        reviewer_total: 8,
+        stages: TRIAL_PROGRESS_STAGES
+      }
+    }];
+    __setSession({
+      id: "s2",
+      session_id: "sid",
+      status: "running",
+      mode: "goal",
+      loop_active: true,
+      loop_iteration: 2,
+      active_run: {
+        running: true,
+        mode: "goal",
+        trial_iteration: 2,
+        trial_label: "Trial 2",
+        status_label: "Codex is working on Trial 2",
+        progress: {
+          stage_label: "Planning",
+          stage_index: 1,
+          total_stages: 6,
+          summary: "Planning · waiting for trial files",
+          detail: "Trial 2 has started, but its trial directory is not visible yet.",
+          stages: TRIAL_PROGRESS_STAGES
+        }
+      },
+      trajectory: {
+        latest_active_trial: "000001_restart_intake_and_launch_rebuild",
+        next_trial_number: 2
+      },
+      transcript: []
+    });
+    selectedTrialIndex = 1;
+    trialStripScrollState = {
+      mode: "manual",
+      selectedIteration: 1,
+      liveIteration: 2,
+      touchedAt: Date.now(),
+      left: 0
+    };
+  `);
+  const html = app.run("__sessionTimelineProbe()");
+  assert.equal(html.includes("Closing"), true, "previous unclosed trial should be labeled as closing during the next live run");
+  assert.equal(html.includes("Incomplete"), false, "previous unclosed trial should not look like a failed/incomplete boundary during live handoff");
+  assert.equal(html.includes('data-trial-continue="1"'), false, "previous trial should not expose continue controls while autoresearch is still running");
+  assert.equal(html.includes("data-restart-autoresearch"), false, "old trial panel should not expose restart while a live run is active");
+}
+
 function testOldTrialDoesNotShowStaleHumanResponse() {
   const app = loadAppContext();
   app.run(`
@@ -4358,7 +4425,7 @@ function testContinuedBaseTrialStatusLabel() {
   assert.equal(html.includes("<span class=\"trial-chip-status\">Done</span>"), true, "latest closed trial should remain Done");
 }
 
-function testOnlyLatestClosedTrialUsesDoneStatus() {
+function testClosedTrialsUseDoneStatus() {
   const app = loadAppContext();
   app.run(`
     appState.trials = [16, 17, 18].map((iteration) => {
@@ -4390,7 +4457,7 @@ function testOnlyLatestClosedTrialUsesDoneStatus() {
   const html = app.run("__sessionTimelineProbe()");
   const trialStrip = html.match(/<div class="trial-strip-scroll">([\s\S]*?)<\/div>/)?.[1] || "";
   const chipStatuses = [...trialStrip.matchAll(/<span class="trial-chip-status">([^<]+)<\/span>/g)].map((match) => match[1]);
-  assert.deepEqual(chipStatuses, ["Continued", "Reported", "Done"], "only explicit continue base and latest closed trial should get special labels");
+  assert.deepEqual(chipStatuses, ["Continued", "Done", "Done"], "closed historical trials should use the same Done label as the latest closed trial");
 }
 
 function testHistoricalReportedTrialsDoNotUseIncompleteChipStyle() {
@@ -4424,7 +4491,7 @@ function testHistoricalReportedTrialsDoNotUseIncompleteChipStyle() {
   const html = app.run("__sessionTimelineProbe()");
   const chipMatches = [...html.matchAll(/<button class="trial-chip([^"]*)"[^>]*>\s*<strong class="trial-chip-index">([^<]+)<\/strong>\s*<span class="trial-chip-status">([^<]+)<\/span>/g)];
   const chips = chipMatches.map((match) => ({ classes: match[1], iteration: match[2], status: match[3] }));
-  assert.deepEqual(chips.map((chip) => `${chip.iteration}:${chip.status}`), ["13:Reported", "14:Reported", "15:Reported", "17:Reported", "18:Done"], "historical reported trials should keep Reported labels");
+  assert.deepEqual(chips.map((chip) => `${chip.iteration}:${chip.status}`), ["13:Done", "14:Done", "15:Done", "17:Done", "18:Done"], "historical reported trials should not expose the internal Reported label in the strip");
   assert.deepEqual(chips.filter((chip) => chip.classes.includes("is-incomplete")).map((chip) => chip.iteration), [], "historical reported trials must not use incomplete chip styling");
   assert.equal(html.includes("15 incomplete"), false, "historical reported trials should not inflate the incomplete count");
 }
@@ -7628,6 +7695,7 @@ testLatestClosedTrialShowsResumeAutoresearch();
 testLowInformationTrialSummaryIsOmitted();
 testNonActionableHumanResponseIsOmitted();
 testBlockedGateWithoutHumanResponseShowsNotice();
+testUnclosedPreviousTrialShowsClosingDuringNextLiveRun();
 testOldTrialDoesNotShowStaleHumanResponse();
 testPassedAutoresearchPanelHidesResumeAllowsRestart();
 testStagedTrialContinueActionsRenderInTrialPanel();
@@ -7635,7 +7703,7 @@ await testResumeAutoresearchActionUsesResumeEndpoint();
 testRunningTrialIgnoresPreviousRunUpdate();
 testPassedGoalDoesNotShowStaleRunningTrial();
 testContinuedBaseTrialStatusLabel();
-testOnlyLatestClosedTrialUsesDoneStatus();
+testClosedTrialsUseDoneStatus();
 testHistoricalReportedTrialsDoNotUseIncompleteChipStyle();
 testChatRunThinkingUsesLiveStatus();
 testChatRunCommandOnlyKeepsRawCommandFolded();

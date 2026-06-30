@@ -7631,7 +7631,7 @@ function trialActionIconHtml(kind) {
 }
 
 function trialLifecycleActionButtonsHtml(iteration, report, running) {
-  if (running || !hasAutoresearchTrajectory()) return "";
+  if (running || isLiveGoalSession() || !hasAutoresearchTrajectory()) return "";
   const actions = [];
   const resumeFromTrial = selectedResumeTrialPayload();
   if (resumeFromTrial) {
@@ -7938,8 +7938,17 @@ function isHistoricalReportedTrial(iteration, trial) {
 
 function isDisplayIncompleteTrial(iteration, trial, running = false) {
   if (!trial || running || trial?.is_closed === true) return false;
+  if (isTrialClosingDuringLiveHandoff(iteration, trial)) return false;
   if (isHistoricalReportedTrial(iteration, trial)) return false;
   return true;
+}
+
+function isTrialClosingDuringLiveHandoff(iteration, trial) {
+  if (!isLiveGoalSession() || trial?.is_closed === true) return false;
+  const target = Number(iteration || trialIterationValue(trial) || 0);
+  const live = activeRunTrialIteration();
+  if (!target || !live || live <= target) return false;
+  return Boolean(String(trial?.report_path || "").trim() || trialProgressForIteration(target, trial)?.report_exists);
 }
 
 function trialStatusLabel(iteration, trial) {
@@ -7947,10 +7956,10 @@ function trialStatusLabel(iteration, trial) {
   const reportStatus = cleanText(trial?.status, "");
   if (isContinuedTrial(iteration, trial)) return "Continued";
   if (reportStatus === "blocked") return "Blocked";
+  if (isTrialClosingDuringLiveHandoff(iteration, trial)) return "Closing";
   if (Number(iteration || trialIterationValue(trial) || 0) === latestTrajectoryTrialIteration() && gateAttentionStatus()) return "Blocked";
-  if (isLatestClosedTrial(iteration, trial)) return "Done";
-  if (trial?.is_closed === true) return "Reported";
-  if (isHistoricalReportedTrial(iteration, trial)) return "Reported";
+  if (trial?.is_closed === true) return "Done";
+  if (isHistoricalReportedTrial(iteration, trial)) return "Done";
   if (String(trial?.report_path || "").trim()) return "Incomplete";
   if (trial) return "Incomplete";
   return "Active";
@@ -7959,7 +7968,7 @@ function trialStatusLabel(iteration, trial) {
 function trialHeaderStatusLabel(iteration, trial) {
   const target = Number(iteration || trialIterationValue(trial) || 0);
   const lifecycleLabel = trialStatusLabel(target, trial);
-  if (["Blocked", "Continued", "Done", "Reported"].includes(lifecycleLabel)) {
+  if (["Blocked", "Closing", "Continued", "Done", "Reported"].includes(lifecycleLabel)) {
     return lifecycleLabel;
   }
   const progress = target ? trialProgressForIteration(target, trial) : {};

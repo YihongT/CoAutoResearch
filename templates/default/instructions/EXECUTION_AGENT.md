@@ -398,6 +398,18 @@ question or decision request the UI should show.
 
 If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. If a non-human blocker remains, mark `Status: blocked` and write a concise user-facing blocker summary in `Response to human:`. If a human decision is genuinely required, mark `Status: needs_human` and write the exact question in `Response to human:`.
 
+External file access failures are not automatically human blockers. When a
+trial needs a public file body such as a ZIP, CSV, PDF, dataset, or code
+artifact, follow the Download Integrity And Fallback Ladder in
+`instructions/RESOURCE_SCOUT.md`: verify HTTP status, content type, size,
+magic bytes/archive listing/header rows/checksum when available; quarantine
+HTML or error-page downloads; retry with safe downloader variants, user agent,
+configured proxy/direct profiles, official alternate links, and verified local
+caches; record all attempts. Only after that ladder is exhausted may the gate
+ask the user for a file or network change. If useful work can continue through
+metadata, alternate public resources, or a follow-up retrieval trial, use
+`Status: continue` rather than `needs_human`.
+
 ---
 
 ## Reviewer Spawning

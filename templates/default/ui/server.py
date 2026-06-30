@@ -5828,10 +5828,11 @@ def interrupted_tail_trial_dirs() -> list[Path]:
 
 
 def latest_active_trial_iteration() -> int:
-    return max(
-        [trial_iteration_from_id(path.name) for path in reported_trial_dirs_any_order()],
-        default=trajectory_boundary_iteration(),
-    )
+    closed_iterations = [trial_iteration_from_id(path.name) for path in closed_active_trial_dirs()]
+    if closed_iterations:
+        return max(closed_iterations)
+    active_dirs = active_trial_dirs()
+    return 0 if active_dirs else trajectory_boundary_iteration()
 
 
 def latest_trial_dir_iteration() -> int:
@@ -5848,20 +5849,12 @@ def next_active_trial_iteration() -> int:
 
 def sync_trajectory_state(reason: str = "") -> dict[str, Any]:
     state = read_trajectory_state()
-    active = reported_trial_dirs_any_order()
-    latest_by_iteration = {
-        trial_iteration_from_id(path.name): path.name
-        for path in active
-        if trial_iteration_from_id(path.name) > 0
-    }
-    latest = active[-1].name if active else ""
-    boundary_iteration = trajectory_boundary_iteration()
-    latest_iteration = max(trial_iteration_from_id(latest), boundary_iteration)
-    if latest_iteration:
-        latest = latest_by_iteration.get(
-            latest_iteration,
-            str(state.get("latest_active_trial") or state.get("base_trial") or latest),
-        )
+    closed = closed_active_trial_dirs()
+    latest = closed[-1].name if closed else ""
+    latest_iteration = trial_iteration_from_id(latest)
+    if not latest and not active_trial_dirs():
+        latest = str(state.get("latest_active_trial") or state.get("base_trial") or "")
+        latest_iteration = trial_iteration_from_id(latest)
     next_number = latest_iteration + 1 if latest_iteration else 1
     if (
         state.get("latest_active_trial") != latest
@@ -10632,7 +10625,9 @@ Resource Scout requirement for every substantive trial:
 - record scout-discovered materials as `autoresearch_discovered`; they are raw inputs, not current truth, until promoted by the main execution agent into REPORT.md, STATE.md, CURRENT_FINDINGS.md, PROJECT.md, or manuscript files;
 - if scout outputs change assumptions, resources, risks, or success criteria, revise PLAN.md and rerun PLAN_REVIEW.md before execution;
 - prefer a real Resource Scout subagent when the runtime supports it; if subagent orchestration is unavailable, stalls, or fails, complete the same scout work inline as a clearly labeled `Resource Scout fallback`, write the scout report / manifest updates / resource files, disclose the fallback in REPORT.md, and continue;
+- when a public file body is required, follow the Download Integrity And Fallback Ladder in `instructions/RESOURCE_SCOUT.md`: verify HTTP status, content type, size, magic bytes/archive listing/header rows/checksum when available; quarantine HTML/error-page downloads; retry safe downloader variants, user agent, configured proxy/direct profiles, official alternate links, and verified local caches; record attempts before asking for user help;
 - do not set the gate to `blocked` or `needs_human` solely because Resource Scout subagent orchestration failed; reserve human gates for genuinely missing user decisions, credentials, inaccessible private resources, or ambiguous user-provided materials that cannot be resolved from available context;
+- do not set the gate to `blocked` or `needs_human` solely because a public download failed until the download fallback ladder is exhausted and recorded; if useful work can continue through metadata, alternate public resources, or a follow-up retrieval trial, use `Status: continue`;
 - the Resource Scout is not a ninth reviewer; keep the eight reviewer files exactly as Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, and Final gate."""
 
 
