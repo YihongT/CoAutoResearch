@@ -71,6 +71,11 @@ paper-map prose: what this unit argues, what evidence/results/displays it uses,
 and why it appears here. Do not write expected-work or future-plan language.
 For each display/method/result block, `Reader takeaway` should state what a
 reader should understand from the object at this manuscript location.
+Do not use section-planning fields inside `Result`, `Dataset`, `Benchmark`,
+`Metric`, or `RSLT...` blocks. Those headings are artifact blocks. If a result
+is only planned or pending, mark it as `Inclusion status: candidate` or
+`deferred` with a precise `Remaining blocker`; do not present it as an active
+result.
 
 ### Section 1: <target-venue section title>
 
@@ -211,6 +216,8 @@ Remaining blocker: <none, or exact blocker>
 ##### Result RSLT000000: <name>
 
 Placement:
+
+Inclusion status: <active / candidate / supplement / deprecated / deferred>
 
 Metric or result summary:
 

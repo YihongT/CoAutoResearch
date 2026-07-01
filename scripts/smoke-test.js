@@ -1280,11 +1280,12 @@ try {
   }
   const reviewerMetadataPath = path.join(projectDir, "instructions", ".co-auto-research-instructions.json");
   const reviewerMetadata = JSON.parse(await fsp.readFile(reviewerMetadataPath, "utf8"));
-  if (reviewerMetadata.reviewerBaselineVersion !== "2026-06-publication-ready-tables") {
+  if (reviewerMetadata.reviewerBaselineVersion !== "2026-07-result-block-schema") {
     throw new Error("new projects should record the reviewer baseline");
   }
   if (
     !reviewerMetadata.coreReviewerFiles?.["REFERENCE_REVIEWER.md"] ||
+    !reviewerMetadata.coreProtocolFiles?.["MANUSCRIPT.md"] ||
     !reviewerMetadata.coreProtocolFiles?.["PROJECT_FRAMING.md"] ||
     !reviewerMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
     !reviewerMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
@@ -1362,15 +1363,16 @@ Confidence: medium
     throw new Error(`upgrade-project --dry-run should report planned reviewer sync:\n${dryRunUpgrade}`);
   }
   const reviewerUpgradeOutput = execFileSync("node", [cli, "upgrade-project", staleReviewerProject], { cwd: root, encoding: "utf8" });
-  if (!reviewerUpgradeOutput.includes("synced 10 core reviewers") || !reviewerUpgradeOutput.includes("synced 5 core protocol instructions")) {
+  if (!reviewerUpgradeOutput.includes("synced 10 core reviewers") || !reviewerUpgradeOutput.includes("synced 6 core protocol instructions")) {
     throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
   }
   const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
-  if (upgradedMetadata.reviewerBaselineVersion !== "2026-06-publication-ready-tables" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
+  if (upgradedMetadata.reviewerBaselineVersion !== "2026-07-result-block-schema" || upgradedMetadata.reviewStorageVersion !== "per-reviewer-files-v1") {
     throw new Error("upgrade-project should write reviewer baseline metadata");
   }
   if (
     !upgradedMetadata.coreReviewerFiles?.["REFERENCE_REVIEWER.md"] ||
+    !upgradedMetadata.coreProtocolFiles?.["MANUSCRIPT.md"] ||
     !upgradedMetadata.coreProtocolFiles?.["PROJECT_FRAMING.md"] ||
     !upgradedMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
     !upgradedMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
@@ -1774,6 +1776,7 @@ Confidence: medium
   const blueprintTemplate = await fsp.readFile(path.join(root, "templates", "default", "manuscript", "BLUEPRINT.md"), "utf8");
   const manuscriptInstructions = await fsp.readFile(path.join(root, "templates", "default", "instructions", "MANUSCRIPT.md"), "utf8");
   const figureTableReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FIGURE_TABLE_REVIEWER.md"), "utf8");
+  const manuscriptReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "MANUSCRIPT_REVIEWER.md"), "utf8");
   const finalGateReviewer = await fsp.readFile(path.join(root, "templates", "default", "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
   const themeOptionValues = [...indexHtml.matchAll(/name="themeMode"\s+value="([^"]+)"/g)].map((match) => match[1]);
   const explicitThemeBlocks = [...stylesCss.matchAll(/html\[data-theme="([^"]+)"\]/g)].map((match) => match[1]);
@@ -2681,11 +2684,21 @@ Confidence: medium
   if (
     !blueprintTemplate.includes("Section brief:") ||
     !blueprintTemplate.includes("Reader takeaway:") ||
+    !blueprintTemplate.includes("Do not use section-planning fields inside `Result`, `Dataset`, `Benchmark`") ||
+    !blueprintTemplate.includes("Inclusion status: <active / candidate / supplement / deprecated / deferred>") ||
     !manuscriptInstructions.includes("Section brief") ||
+    !manuscriptInstructions.includes("Do not promote planned work into a reader-facing result") ||
+    !manuscriptInstructions.includes("Active result blocks must be readable by a human") ||
     !compactText(manuscriptInstructions).includes("Reader takeaway") ||
     !compactText(manuscriptInstructions).includes("finished-results paper map") ||
+    !compactText(manuscriptReviewer).includes("Artifact headings are not section headings") ||
     !compactText(finalGateReviewer).includes("reader-facing section briefs") ||
-    !compactText(finalGateReviewer).includes("reader takeaways")
+    !compactText(finalGateReviewer).includes("reader takeaways") ||
+    !compactText(finalGateReviewer).includes("artifact/section boundary integrity") ||
+    !serverPy.includes("planned_placeholder_value") ||
+    !serverPy.includes("appears to use section-planning fields") ||
+    !appJs.includes("function malformedResultBlockWarningHtml") ||
+    !stylesCss.includes(".artifact-schema-warning")
   ) {
     throw new Error("blueprint contract must require readable section briefs and artifact reader takeaways");
   }
@@ -2920,6 +2933,40 @@ Confidence: medium
   }).trim();
   if (resolverOutput !== "codex.cmd|claude.cmd|True|space-ok") {
     throw new Error(`Python agent resolver returned ${resolverOutput}`);
+  }
+
+  const malformedBlueprintOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    [
+      "import importlib.util, json, os, pathlib",
+      "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+      "spec = importlib.util.spec_from_file_location('coauto_server', server_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "project_root = pathlib.Path(os.environ['COAUTO_MALFORMED_PROJECT'])",
+      "(project_root / 'manuscript').mkdir(parents=True, exist_ok=True)",
+      "blueprint = project_root / 'manuscript' / 'BLUEPRINT.md'",
+      "blueprint.write_text('''# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\nVenue: Test venue.\n\n## Target-Venue Organization Rationale\nReader-facing organization.\n\n## Core Story\nA readable story.\n\n## Architecture Overview / Table of Contents\n- Result 2.\n\n## Manuscript Architecture\n\n### Result 2: Adult-kin source enrichment\nTarget-venue role: source-role distribution result.\nSection brief: This should compare source-resident shares with roster availability.\nReader question answered: Which resident roles generate household labels beyond the core?\nLocal thesis / purpose: Role enrichment matters only if denominatorized.\nLocal claims in plain language: planned only.\nLocal evidence, results, or artifacts: pending source-role and null-check trial.\nPlaced displays / methods / results: Figure F2, planned.\nLocal qualifications: No mechanism interpretation.\nTransition job: Leads to household structure.\n\n## Reference / Literature Grounding Plan\nCurrent references are scoped.\n\n## References\n1. Test Source. Test paper. Test venue, 2026. https://example.com/test\n\n## Appendix / Supplement Plan\nNo active tables; comparison is carried in text for this fixture.\n\n## Blocking Missing Evidence\n\n## Required Qualifications / Claim Constraints\nNone.\n\n## Provenance / Audit Index\nFixture provenance.\n\n## Deprecated Or Superseded Ideas\nNone.\n\n## Submission-Readiness Summary\nNot ready.\n''', encoding='utf-8')",
+      "context = module.ProjectContext(project_root)",
+      "module._CONTEXT.project = context",
+      "blockers = module.final_blueprint_consistency_blockers()",
+      "joined = '\\n'.join(blockers)",
+      "assert 'appears to use section-planning fields' in joined, joined",
+      "assert 'Metric or result summary' in joined and 'Reader takeaway' in joined, joined",
+      "print(json.dumps({'blockers': len(blockers), 'malformed': True}))"
+    ].join("\n")
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+      COAUTO_MALFORMED_PROJECT: path.join(tempRoot, "malformed-result-project")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (!malformedBlueprintOutput.includes('"malformed": true')) {
+    throw new Error(`Malformed result blueprint smoke test returned ${malformedBlueprintOutput}`);
   }
 
   const codexAuthFailBin = path.join(tempRoot, "fake-codex-auth-fail");

@@ -69,6 +69,14 @@ image-source figures, references, appendix/supplement posture, blocking missing
 evidence, required qualifications, provenance/audit index, and
 submission-readiness must all be explicit and mutually consistent.
 
+Artifact headings are not section headings. If a block titled `Result`,
+`Dataset`, `Benchmark`, `Metric`, or `RSLT...` uses section-planning fields such
+as `Section brief`, `Local thesis / purpose`, `Local claims in plain language`,
+or `Transition job`, require `Decision: continue`. Active result blocks must
+state the actual metric/result summary and reader takeaway in plain language;
+`planned only`, `pending trial`, `TBD`, or similar future-work placeholders are
+not acceptable active result content.
+
 Each active titled unit must specify the target-venue role, a section brief
 that reads as finished-results paper-map prose, reader question answered, local
 thesis or purpose, local claims in plain language, local evidence/results/

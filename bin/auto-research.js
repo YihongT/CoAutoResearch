@@ -20,7 +20,7 @@ const DEFAULT_PORT = "8765";
 const DEFAULT_PROJECTS_DIR = "co-autoresearch-projects";
 const LEGACY_PROJECTS_DIR = "local-projects";
 const DEFAULT_GRAFTCP_VERSION = "v0.8.1";
-const REVIEWER_BASELINE_VERSION = "2026-06-publication-ready-tables";
+const REVIEWER_BASELINE_VERSION = "2026-07-result-block-schema";
 const CORE_REVIEWER_FILES = [
   "REVIEW_TAXONOMY.md",
   "FINAL_GATE_REVIEWER.md",
@@ -35,6 +35,7 @@ const CORE_REVIEWER_FILES = [
 ];
 const CORE_PROTOCOL_FILES = [
   "EXECUTION_AGENT.md",
+  "MANUSCRIPT.md",
   "PROJECT_FRAMING.md",
   "RESOURCE_INTAKE.md",
   "RESOURCE_SCOUT.md",

@@ -121,6 +121,12 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - inline figure block completeness;
 - inline publication-ready table block or no-table rationale completeness;
 - inline algorithm/method/dataset/benchmark/result block completeness;
+- artifact/section boundary integrity: `Result`, `Dataset`, `Benchmark`,
+  `Metric`, and `RSLT...` headings use artifact fields, not section-planning
+  fields;
+- active result readability: no active result block is merely `planned`,
+  `pending`, `TBD`, or waiting on a future trial instead of stating an actual
+  reader-facing result summary and takeaway;
 - reference/literature grounding completeness;
 - Resource Scout status: required and completed, skipped with valid reason, or
   blocking because missing/undocumented/inconsistent;

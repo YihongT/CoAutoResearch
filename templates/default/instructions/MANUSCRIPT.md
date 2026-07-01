@@ -22,6 +22,16 @@ what the final paper will say, what result or evidence supports it, what
 figure/table/method/result object is shown there, and why the section appears
 at that point in the target-venue reading order.
 
+Do not promote planned work into a reader-facing result. A heading named
+`Result`, `Dataset`, `Benchmark`, `Metric`, or `RSLT...` creates an artifact
+block, not a manuscript section. It must use the dataset/benchmark/result block
+schema below. Do not put section-planning fields such as `Section brief`, `Local
+thesis / purpose`, `Local claims in plain language`, `Placed displays / methods
+/ results`, or `Transition job` inside a result block. If the result is not yet
+available, either keep it as a section writing obligation, or mark the artifact
+`Inclusion status: candidate` / `deferred` with a precise `Remaining blocker`;
+do not label it as an active result.
+
 For a final or gate-passing manuscript-facing deliverable, the blueprint must be
 target-venue-ready and readable as a paper map. Cross-references may support
 audit and provenance, but they must not replace local explanation.
@@ -280,6 +290,7 @@ Every active algorithm or method block must include:
 Every active dataset, benchmark, or result block must include:
 
 - placement;
+- inclusion status;
 - metric or result summary;
 - reader takeaway;
 - source artifact path;
@@ -287,6 +298,14 @@ Every active dataset, benchmark, or result block must include:
 - limitations and uncertainty;
 - manuscript claim supported in plain language;
 - remaining blocker, or `none`.
+
+Active result blocks must be readable by a human without opening trial logs. The
+`Metric or result summary` and `Reader takeaway` fields must state the actual
+result in plain language. Phrases such as `planned only`, `pending trial`,
+`pending source-role check`, `TBD`, `to be filled`, or `Figure planned` are not
+valid active result content. If those phrases are still true, the block is not
+active yet and must carry `Inclusion status: candidate` or `deferred` plus the
+exact remaining blocker.
 
 ---
 

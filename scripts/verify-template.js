@@ -82,7 +82,7 @@ if (!stateTemplate.includes("Final gate reviewer")) {
 }
 
 const manifest = JSON.parse(await fsp.readFile(path.join(template, ".co-auto-research-template", "manifest.json"), "utf8"));
-if (manifest.reviewerBaselineVersion !== "2026-06-publication-ready-tables") {
+if (manifest.reviewerBaselineVersion !== "2026-07-result-block-schema") {
   failures.push(".co-auto-research-template/manifest.json: missing reviewer baseline version");
 }
 const coreReviewerFiles = Array.isArray(manifest.coreReviewerFiles) ? manifest.coreReviewerFiles : [];
@@ -105,6 +105,7 @@ for (const name of [
 const coreProtocolFiles = Array.isArray(manifest.coreProtocolFiles) ? manifest.coreProtocolFiles : [];
 for (const name of [
   "EXECUTION_AGENT.md",
+  "MANUSCRIPT.md",
   "PROJECT_FRAMING.md",
   "RESOURCE_INTAKE.md",
   "RESOURCE_SCOUT.md",

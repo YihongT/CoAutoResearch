@@ -3152,6 +3152,17 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
   font-weight: 650;
 }
 
+.artifact-schema-warning {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--line) 70%);
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--ink) 72%, var(--warning) 28%);
+  background: color-mix(in srgb, var(--surface) 84%, var(--warning-bg) 16%);
+  font-size: 13px;
+  line-height: 1.42;
+}
+
 .manuscript-artifact-card.artifact-algorithm,
 .manuscript-artifact-card.artifact-method,
 .manuscript-artifact-card.artifact-dataset,

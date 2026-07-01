@@ -165,7 +165,7 @@ PREVIEWABLE_SUFFIXES = TEXT_PREVIEW_SUFFIXES | IMAGE_PREVIEW_SUFFIXES | PDF_PREV
 COLD_START_EDIT_FILES = [
     "resources/user_input/INITIAL_BRIEF.md",
 ]
-REVIEWER_BASELINE_VERSION = "2026-06-publication-ready-tables"
+REVIEWER_BASELINE_VERSION = "2026-07-result-block-schema"
 CORE_REVIEWER_FILES = [
     "REVIEW_TAXONOMY.md",
     "FINAL_GATE_REVIEWER.md",
@@ -180,6 +180,7 @@ CORE_REVIEWER_FILES = [
 ]
 CORE_PROTOCOL_FILES = [
     "EXECUTION_AGENT.md",
+    "MANUSCRIPT.md",
     "PROJECT_FRAMING.md",
     "RESOURCE_INTAKE.md",
     "RESOURCE_SCOUT.md",
@@ -10139,6 +10140,19 @@ def final_blueprint_consistency_blockers() -> list[str]:
     def active_block(body: str) -> bool:
         return bool(re.search(r"Inclusion status:\s*active\b", body, re.IGNORECASE)) or not re.search(r"Inclusion status:\s*(candidate|deprecated|deferred|supplement)\b", body, re.IGNORECASE)
 
+    def block_has_label(body: str, label: str) -> bool:
+        return bool(re.search(rf"^\s*{re.escape(label.rstrip(':'))}\s*:", body, re.IGNORECASE | re.MULTILINE))
+
+    def planned_placeholder_value(value: str) -> bool:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return False
+        return bool(re.search(
+            r"\b(planned only|pending(?:\s+[\w/-]+){0,4}\s+(?:trial|check|audit|analysis|run)|figure\s+\w*\s*planned|tbd|to be filled|not yet available|future trial)\b",
+            normalized,
+            re.IGNORECASE,
+        ))
+
     figure_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(figure|fig\.?|f\d{3,})\b", lower, re.IGNORECASE)]
     table_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(table|tbl\.?|t\d{3,})\b", lower, re.IGNORECASE)]
     algorithm_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:))\b", lower, re.IGNORECASE)]
@@ -10202,9 +10216,24 @@ def final_blueprint_consistency_blockers() -> list[str]:
     for title, body in result_blocks:
         if not active_block(body):
             continue
+        section_plan_labels = (
+            "Target-venue role:",
+            "Section brief:",
+            "Reader question answered:",
+            "Local thesis / purpose:",
+            "Local claims in plain language:",
+            "Local evidence, results, or artifacts:",
+            "Placed displays / methods / results:",
+            "Transition job:",
+            "Paragraph plan:",
+        )
+        if any(block_has_label(body, label) for label in section_plan_labels):
+            blockers.append(f"Inline dataset/benchmark/result `{title}` appears to use section-planning fields; result blocks must use the dataset/benchmark/result schema with reader-facing result content.")
         for label in (
             "Placement:",
+            "Inclusion status:",
             "Metric or result summary:",
+            "Reader takeaway:",
             "Source artifact path:",
             "Limitations and uncertainty:",
             "Manuscript claim supported in plain language:",
@@ -10212,6 +10241,14 @@ def final_blueprint_consistency_blockers() -> list[str]:
         ):
             if label not in body:
                 blockers.append(f"Inline dataset/benchmark/result `{title}` is missing `{label}`.")
+        for label in (
+            "Metric or result summary",
+            "Reader takeaway",
+            "Source artifact path",
+            "Manuscript claim supported in plain language",
+        ):
+            if planned_placeholder_value(value_after_label(body, label)):
+                blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; active result blocks must state the actual reader-facing result or be marked candidate/deferred.")
 
     legacy_figure_plan = markdown_section(text, "Figure Plan")
     legacy_table_plan = markdown_section(text, "Table Plan")

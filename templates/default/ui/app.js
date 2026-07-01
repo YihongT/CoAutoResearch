@@ -10141,6 +10141,38 @@ function nonEmptyDisplayText(value) {
   return text;
 }
 
+function manuscriptBodyHasLabel(body, label) {
+  const normalized = String(label || "").replace(/:\s*$/, "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return normalized ? new RegExp(`^\\s*${normalized}\\s*:`, "im").test(String(body || "")) : false;
+}
+
+function malformedResultBlockWarningHtml(block) {
+  const kind = String(block?.kind || "").toLowerCase();
+  if (!["dataset", "benchmark", "result"].includes(kind)) return "";
+  const hasArtifactContent = [
+    "Metric or result summary",
+    "Reader takeaway",
+    "Source artifact path",
+    "Manuscript claim supported in plain language",
+  ].some((label) => hasRealText(markdownFieldValue(block?.body, label)));
+  const hasSectionFields = [
+    "Target-venue role",
+    "Section brief",
+    "Reader question answered",
+    "Local thesis / purpose",
+    "Local claims in plain language",
+    "Placed displays / methods / results",
+    "Transition job",
+    "Paragraph plan",
+  ].some((label) => manuscriptBodyHasLabel(block?.body, label));
+  if (!hasSectionFields || hasArtifactContent) return "";
+  return `
+    <p class="artifact-schema-warning">
+      This result block is using section-planning fields instead of result fields. It needs a reader-facing metric/result summary, takeaway, source artifact path, and supported claim.
+    </p>
+  `;
+}
+
 function artifactTakeawayHtml(block) {
   const kind = artifactKindLabel(block.kind);
   const kindSlug = escapeHtml(normalizeManuscriptKey(block.kind) || "artifact");
@@ -10185,6 +10217,7 @@ function artifactTakeawayHtml(block) {
           : "",
         sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
       ])}
+      ${malformedResultBlockWarningHtml(block)}
       ${storyPointHtml("Reader takeaway", takeaway, "is-takeaway")}
       ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
       ${!isTable ? figureSourceImageHtml(sourcePath, title) : ""}
@@ -10475,6 +10508,7 @@ function manuscriptArtifactCardHtml(block) {
         isFigure ? copyButton(description, "Copy description", "Figure description copied.") : "",
         sourcePath ? inlineOpenButton(sourcePath, "Open source") : "",
       ])}
+      ${malformedResultBlockWarningHtml(block)}
       ${caption ? `<blockquote class="figure-caption">${inlineMarkup(figureSpecExcerpt(caption, 520))}</blockquote>` : ""}
       ${isFigure ? figureSourceImageHtml(sourcePath, block.title) : ""}
       ${isFigure ? figureImageStatusHtml(block.title) : ""}

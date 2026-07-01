@@ -4964,8 +4964,8 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
   const app = loadAppContext();
   const storageOnly = app.run(`projectReviewerInstructionsOutdated({
     reviewer_status: {
-      baseline_version: "2026-06-publication-ready-tables",
-      latest_baseline_version: "2026-06-publication-ready-tables",
+      baseline_version: "2026-07-result-block-schema",
+      latest_baseline_version: "2026-07-result-block-schema",
       missing: [],
       changed: [],
       metadata_missing: [],
@@ -4976,7 +4976,7 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
   const changedTemplate = app.run(`projectReviewerInstructionsOutdated({
     reviewer_status: {
       baseline_version: "old",
-      latest_baseline_version: "2026-06-publication-ready-tables",
+      latest_baseline_version: "2026-07-result-block-schema",
       missing: [],
       changed: ["EVIDENCE_REVIEWER.md"],
       metadata_missing: []
@@ -4985,8 +4985,8 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
   assert.equal(changedTemplate, true, "actual reviewer template drift should still be detected for the project menu maintenance action");
   const missingProtocol = app.run(`projectReviewerInstructionsOutdated({
     reviewer_status: {
-      baseline_version: "2026-06-publication-ready-tables",
-      latest_baseline_version: "2026-06-publication-ready-tables",
+      baseline_version: "2026-07-result-block-schema",
+      latest_baseline_version: "2026-07-result-block-schema",
       missing: [],
       changed: [],
       metadata_missing: [],
@@ -5006,7 +5006,7 @@ function testReviewStorageOutdatedDoesNotShowProjectWarning() {
       session_id: "019ee62",
       reviewer_status: {
         baseline_version: "old",
-        latest_baseline_version: "2026-06-publication-ready-tables",
+        latest_baseline_version: "2026-07-result-block-schema",
         missing: [],
         changed: ["EVIDENCE_REVIEWER.md"],
         metadata_missing: []
@@ -7475,6 +7475,28 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   })})`);
   assert.equal(missingTableHtml.includes("table-missing-warning"), true);
   assert.equal(missingTableHtml.includes("Missing publication-ready table body"), true);
+
+  const malformedResultHtml = app.run(`__renderManuscriptPanelProbe(${JSON.stringify({
+    architecture: [{
+      title: "Result 2: Adult-kin source enrichment",
+      level: 4,
+      kind: "result",
+      is_artifact: true,
+      body: [
+        "Target-venue role: source-role distribution result.",
+        "Section brief: This should compare source-resident shares with roster availability.",
+        "Local claims in plain language: planned only.",
+        "Local evidence, results, or artifacts: pending source-role and null-check trial.",
+        "Placed displays / methods / results: Figure F2, planned.",
+        "Transition job: Leads to household structure."
+      ].join("\\n")
+    }],
+    toc: "",
+    figure_specs: [],
+    table_plans: []
+  })})`);
+  assert.equal(malformedResultHtml.includes("artifact-schema-warning"), true);
+  assert.equal(malformedResultHtml.includes("using section-planning fields instead of result fields"), true);
 }
 
 function testNavigationStatePersistsPanelAndScroll() {
