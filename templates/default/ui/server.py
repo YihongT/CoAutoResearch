@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse
 
+from aux_sessions import AuxSessionManager
+
 
 UI_DIR = Path(__file__).resolve().parent
 DEFAULT_PROJECT_ROOT = UI_DIR.parent
@@ -1260,6 +1262,7 @@ class ProjectContext:
         self.research_event_id = 0
         self.research_event_condition = threading.Condition(threading.RLock())
         self.deleted = False
+        self.aux_manager = AuxSessionManager(self, sys.modules[__name__])
         self.refresh_metadata()
         self.load_runtime()
 
@@ -10875,6 +10878,236 @@ def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str
     return agent_command_for_prompt(resume, codex_settings)
 
 
+# ---------------------------------------------------------------------------
+# Auxiliary (multi-)session engine helpers
+#
+# These are called by aux_sessions.AuxSessionManager to build isolated
+# monitor/idea sessions that never touch the evolution loop's global session.
+# ---------------------------------------------------------------------------
+
+def aux_agent_command(session: Any, resume: bool) -> list[str]:
+    settings = session.settings if isinstance(session.settings, dict) else {}
+    backend = normalize_agent_backend(session.backend or settings.get("backend"))
+    executable = resolve_agent_executable(backend, agent_process_env(backend))
+    session_id = str(getattr(session, "cli_session_id", "") or "")
+    if resume and session_id:
+        if backend == "claude":
+            return [executable, *settings_to_claude_args(settings, resume=True), "--resume", session_id]
+        return [executable, "exec", "resume", *settings_to_codex_args(settings, resume=True), "--skip-git-repo-check", "--json", session_id, "-"]
+    if backend == "claude":
+        return [executable, *settings_to_claude_args(settings, resume=False)]
+    return [executable, "exec", *settings_to_codex_args(settings, resume=False), "--skip-git-repo-check", "--json", "-"]
+
+
+def _aux_read(relative: str, limit: int = 6000) -> str:
+    try:
+        source = repo_path(relative)
+        if source.exists() and source.is_file():
+            return safe_read(source, limit)
+    except Exception:
+        pass
+    return ""
+
+
+def _aux_trials_dir() -> Path:
+    return repo_path("research_trajectory/trials")
+
+
+def _aux_explored_ideas(limit: int = 20) -> list[str]:
+    """Extract a short list of explored trial titles from the trials directory."""
+    ideas: list[str] = []
+    trials_dir = _aux_trials_dir()
+    if not trials_dir.exists():
+        return ideas
+    try:
+        entries = sorted([p for p in trials_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
+    except OSError:
+        return ideas
+    for entry in entries[-limit:]:
+        title = entry.name
+        for candidate in ("REPORT.md", "PLAN.md"):
+            report = entry / candidate
+            if report.exists():
+                head = safe_read(report, 400)
+                for line in head.splitlines():
+                    line = line.strip().lstrip("#").strip()
+                    if line:
+                        title = f"{entry.name}: {line[:100]}"
+                        break
+                break
+        ideas.append(title)
+    return ideas
+
+
+def build_monitor_context(session: Any) -> str:
+    """Read-only live progress digest, rebuilt before every monitor message."""
+    trials_dir = _aux_trials_dir()
+    ideas = _aux_explored_ideas()
+    ideas_block = "\n".join(f"- {item}" for item in ideas) or "- (No trials recorded yet.)"
+    state = _aux_read("research_trajectory/STATE.md", 5000)
+    findings = _aux_read("research_trajectory/CURRENT_FINDINGS.md", 5000)
+    project = _aux_read("PROJECT.md", 3000)
+    trajectory = _aux_read("research_trajectory/TRAJECTORY.json", 3000)
+    return f"""# Monitor Session Context
+
+You are a **read-only monitoring assistant** for this CoAutoResearch project.
+Answer the user's questions about overall progress, the current best result,
+how it compares to baseline, which ideas were explored, and which ones worked.
+
+## Experiment log locations
+- Trials directory: `{trials_dir}`
+- State file: `research_trajectory/STATE.md`
+- Findings file: `research_trajectory/CURRENT_FINDINGS.md`
+- Trajectory index: `research_trajectory/TRAJECTORY.json`
+
+## Research background (PROJECT.md)
+{project or "(PROJECT.md is empty or missing.)"}
+
+## Live progress snapshot (auto-refreshed {now_iso()})
+
+### STATE.md
+{state or "(No state recorded yet.)"}
+
+### CURRENT_FINDINGS.md
+{findings or "(No findings recorded yet.)"}
+
+### TRAJECTORY.json
+{trajectory or "(No trajectory recorded yet.)"}
+
+### Explored ideas / trials
+{ideas_block}
+"""
+
+
+def build_idea_context(session: Any) -> str:
+    """Discussion sandbox context: background + baseline + explored ideas."""
+    ideas = _aux_explored_ideas()
+    ideas_block = "\n".join(f"- {item}" for item in ideas) or "- (No trials explored yet.)"
+    project = _aux_read("PROJECT.md", 3000)
+    findings = _aux_read("research_trajectory/CURRENT_FINDINGS.md", 4000)
+    workspace = getattr(session, "workspace_dir", "")
+    return f"""# Idea Session Context
+
+You are a **research discussion & reproduction assistant**. Help the user
+discuss ideas, read papers, clone and inspect git repositories, and reproduce
+baselines so there is a working foundation.
+
+## Your workspace (write freely here)
+`{workspace}`
+
+You may clone repos, download papers, and run baseline code inside this
+workspace directory. Do NOT modify the shared research trajectory, trials,
+manuscript, or PROJECT.md — those belong to the evolution session.
+
+## Research background (PROJECT.md)
+{project or "(PROJECT.md is empty or missing.)"}
+
+## Current findings so far
+{findings or "(No findings recorded yet.)"}
+
+## Baseline / already-explored ideas
+{ideas_block}
+
+## When a promising idea emerges
+If the discussion surfaces a strong idea worth pursuing as a research
+direction, proactively ask the user whether they want to promote it. If yes,
+write a concise summary into `IDEA_NOTES.md` inside your workspace above and
+tell the user its absolute path so they can import it into the evolution
+session.
+"""
+
+
+def build_evolution_context(session: Any) -> str:
+    return """# Evolution Session Context
+
+This is the persistent autoresearch loop. It is driven by the standard
+CoAutoResearch instruction chain (AGENTS.md -> instructions/EXECUTION_AGENT.md
+-> reviewers) and has full access to the research trajectory, trials, and
+manuscript. Use the Start / Pause / Resume controls to drive it.
+"""
+
+
+AUX_MONITOR_BOUNDARY = """
+Hard boundary (monitor session):
+- You are READ-ONLY. Do not create, edit, delete, rename, or move ANY project file.
+- Do not touch research_trajectory/, manuscript/, PROJECT.md, or any resource files.
+- Do not start, resume, or continue the autoresearch loop or any trial.
+- Just answer the user's question from the context document and current project files.
+"""
+
+AUX_IDEA_BOUNDARY = """
+Hard boundary (idea session):
+- You may read any project file and write ONLY inside your own workspace directory.
+- Do not modify research_trajectory/, manuscript/, PROJECT.md, reviewer files, or trials.
+- Do not start, resume, or continue the autoresearch loop or create trial artifacts.
+- Cloning repos, downloading papers, and running baselines inside your workspace is allowed.
+"""
+
+
+def build_aux_prompt(session: Any, message: str) -> str:
+    kind = getattr(session, "kind", "monitor")
+    context_path = getattr(session, "context_path", "")
+    extra = str(message or "").strip()
+    boundary = AUX_MONITOR_BOUNDARY if kind == "monitor" else AUX_IDEA_BOUNDARY
+    role_line = {
+        "monitor": "Respond in CoAutoResearch MONITOR mode (read-only progress Q&A).",
+        "idea": "Respond in CoAutoResearch IDEA mode (discussion & reproduction sandbox).",
+    }.get(kind, "Respond in CoAutoResearch chat mode.")
+    return f"""{role_line}
+
+Read your session context document first:
+`{context_path}`
+
+User message:
+{extra or "(No text.)"}
+
+{response_language_prompt_section()}
+{boundary}
+Answer the user's question directly and substantively. This session's CLI
+context is isolated from the autoresearch loop, so nothing you say here affects
+the evolution process."""
+
+
+def aux_manager() -> AuxSessionManager:
+    return current_project_context().aux_manager
+
+
+def aux_list_sessions() -> dict[str, Any]:
+    return {"sessions": aux_manager().list_sessions()}
+
+
+def aux_create_session(payload: dict[str, Any]) -> dict[str, Any]:
+    kind = str(payload.get("kind") or "monitor").strip()
+    title = str(payload.get("title") or "").strip()
+    session = aux_manager().create(kind, title, payload.get("settings"))
+    return {"session": session.public(), "sessions": aux_manager().list_sessions()}
+
+
+def aux_get_session(session_id: str) -> dict[str, Any]:
+    return {"session": aux_manager().get(session_id).snapshot()}
+
+
+def aux_delete_session(session_id: str) -> dict[str, Any]:
+    result = aux_manager().delete(session_id)
+    return {**result, "sessions": aux_manager().list_sessions()}
+
+
+def aux_refresh_session(session_id: str) -> dict[str, Any]:
+    session = aux_manager().refresh_session(session_id)
+    return {"session": session.snapshot()}
+
+
+def aux_chat_session(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return aux_manager().chat(session_id, payload)
+
+
+def aux_stop_session(session_id: str) -> dict[str, Any]:
+    session = aux_manager().get(session_id)
+    session.stop(force=False)
+    return {"session": session.public()}
+
+
+
 def pre_exec_script_for_settings(settings: dict[str, Any]) -> str:
     return normalize_pre_exec_script(settings.get("preExecScript"))
 
@@ -13912,6 +14145,44 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionError, OSError):
             return
 
+    def serve_aux_session_events(self, parsed: Any, session_id: str) -> None:
+        manager = current_project_context().aux_manager
+        try:
+            session = manager.get(session_id)
+        except ValueError:
+            self.send_json({"ok": False, "error": "Unknown session"}, status=404)
+            return
+        query = parse_qs(parsed.query)
+        since = parse_research_event_since(query.get("since", [""])[0])
+        if since <= 0:
+            since = parse_research_event_since(self.headers.get("Last-Event-ID", ""))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            while True:
+                with session.event_condition:
+                    events = [dict(e) for e in session.events if int(e.get("event_id") or 0) > since]
+                    if not events:
+                        session.event_condition.wait(timeout=RESEARCH_EVENT_HEARTBEAT_SECONDS)
+                        events = [dict(e) for e in session.events if int(e.get("event_id") or 0) > since]
+                    heartbeat = not events
+                if heartbeat:
+                    self.wfile.write(f": heartbeat {now_iso()}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    continue
+                for event in events:
+                    self.wfile.write(format_research_sse_event(event).encode("utf-8"))
+                    self.wfile.flush()
+                    since = max(since, int(event.get("event_id") or 0))
+        except (BrokenPipeError, ConnectionError, OSError):
+            return
+
     def request_project_id(self, parsed: Any, payload: dict[str, Any] | None = None) -> str:
         query = parse_qs(parsed.query)
         project_id = query.get("project", [""])[0]
@@ -14069,6 +14340,17 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                 if parsed.path == "/api/research/session":
                     self.send_json({"session": research_session_snapshot()})
                     return
+                if parsed.path == "/api/sessions":
+                    self.send_json({"ok": True, **aux_list_sessions()})
+                    return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/events"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/events")])
+                    self.serve_aux_session_events(parsed, session_id)
+                    return
+                if parsed.path.startswith("/api/sessions/"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):])
+                    self.send_json({"ok": True, **aux_get_session(session_id)})
+                    return
                 if parsed.path == "/api/research/queue":
                     self.send_json(queue_response_payload())
                     return
@@ -14201,6 +14483,21 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                 if parsed.path == "/api/research/chat":
                     self.send_json({"ok": True, "result": start_research_chat(payload)})
                     return
+                if parsed.path == "/api/sessions":
+                    self.send_json({"ok": True, "result": aux_create_session(payload)}, status=201)
+                    return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/chat"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/chat")])
+                    self.send_json({"ok": True, "result": aux_chat_session(session_id, payload)})
+                    return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/refresh"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/refresh")])
+                    self.send_json({"ok": True, "result": aux_refresh_session(session_id)})
+                    return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/stop"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/stop")])
+                    self.send_json({"ok": True, "result": aux_stop_session(session_id)})
+                    return
                 if parsed.path == "/api/research/queue":
                     self.send_json({"ok": True, "result": enqueue_research_queue_item(payload)})
                     return
@@ -14280,6 +14577,10 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
             with using_project(self.request_project_id(parsed, payload)):
                 if parsed.path == "/api/research/queue":
                     self.send_json({"ok": True, "result": delete_research_queue_item(payload), **queued_chat_summary()})
+                    return
+                if parsed.path.startswith("/api/sessions/"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):])
+                    self.send_json({"ok": True, "result": aux_delete_session(session_id)})
                     return
             self.send_json({"error": "Unknown API route"}, status=404)
         except Exception as exc:
