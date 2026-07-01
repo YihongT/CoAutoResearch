@@ -52,11 +52,22 @@ rendering your research into prose — not inventing it.
 ## Generating figures
 
 Figures follow the same split. The blueprint gives a **description/spec for each
-figure** rather than a rendered image. To produce the actual figure, copy the
-figure's description and give it to an image model (for example, GPT image
-generation), then drop the result back into your manuscript. You get the visual
-you want while the blueprint stays the source of truth for what the figure must
-show.
+figure** rather than treating a generated image as the source of truth. The
+figure block should say what the display must do, where it belongs in the paper,
+which evidence or concept it carries, what caption it needs, and what still
+blocks it from being final.
+
+If you are using the Codex backend and image generation is available,
+CoAutoResearch can create candidate figure previews from active inline figure
+specs. Generated previews are saved under `manuscript/figures/generated/`, and
+the matching `manuscript/BLUEPRINT.md` figure block records the source path and
+Markdown `Preview image`. Claude Code does not start Codex figure-image jobs.
+
+You can also work manually: copy the figure description into an image model,
+save the result under `manuscript/figures/`, and update the figure block with
+its source path and preview image. Either way, the blueprint remains the
+auditable source for what the figure must show; the image is a candidate display
+until you accept it as part of the manuscript.
 
 ## Staying in the loop
 
