@@ -1426,6 +1426,21 @@ Confidence: medium
   const stylesCss = await fsp.readFile(path.join(root, "templates", "default", "ui", "styles.css"), "utf8");
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
+  const pendingExpectedBlock = serverPy.match(/def pending_expected_trial_iteration\(\)[\s\S]*?\n\n/)?.[0] || "";
+  const validateExpectedBlock = serverPy.match(/def validate_expected_trial_marker\(\)[\s\S]*?\n\n/)?.[0] || "";
+  const finalGateConsistencyBlock = serverPy.match(/def final_gate_consistency_blockers\(\)[\s\S]*?\n\n/)?.[0] || "";
+  if (
+    !serverPy.includes("def trial_dir_satisfies_loop_boundary") ||
+    !serverPy.includes("def trial_dir_satisfies_protocol_boundary") ||
+    !serverPy.includes("def fulfill_expected_trial_marker_if_loop_closed") ||
+    pendingExpectedBlock.includes("trial_dir_satisfies_current_boundary") ||
+    pendingExpectedBlock.includes("trial_dir_satisfies_protocol_boundary") ||
+    validateExpectedBlock.includes("trial_dir_satisfies_current_boundary") ||
+    validateExpectedBlock.includes("trial_dir_satisfies_protocol_boundary") ||
+    !finalGateConsistencyBlock.includes("current_trial_protocol_file_blockers()")
+  ) {
+    throw new Error("expected trial markers must use the closed loop boundary while final consistency keeps protocol blockers");
+  }
   if (
     !resourceIntakeInstructions.includes("## Embedded Resource Scan") ||
     !resourceIntakeInstructions.includes("A general bibliography embedded in an ongoing manuscript is not automatically a target-venue seed-paper set") ||
@@ -4264,6 +4279,77 @@ Confidence: medium
     throw new Error(`specialized review output path smoke test returned unexpected output: ${specializedReviewOutputPathOutput}`);
   }
 
+  const staleProtocolBoundaryMarkerScript = [
+    "import importlib.util, json, os, pathlib, tempfile",
+    "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
+    "spec = importlib.util.spec_from_file_location('coauto_server_stale_protocol_boundary', server_path)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "root = pathlib.Path(tempfile.mkdtemp(prefix='coauto-stale-protocol-boundary-'))",
+    "(root / 'PROJECT.md').write_text('# Stale Protocol Boundary Smoke\\n', encoding='utf-8')",
+    "(root / 'manuscript').mkdir(parents=True, exist_ok=True)",
+    "(root / 'manuscript' / 'BLUEPRINT.md').write_text('# Blueprint\\n', encoding='utf-8')",
+    "state = root / 'research_trajectory' / 'STATE.md'",
+    "state.parent.mkdir(parents=True, exist_ok=True)",
+    "state.write_text('# Research State\\n\\n## Autoresearch Goal Gate\\n\\nStatus: continue\\n\\nRequired reviewer gates:\\n- Plan reviewer: continue\\n- Process reviewer: continue\\n- Evidence reviewer: continue\\n- Venue fit reviewer: continue\\n- Manuscript reviewer: continue\\n- Figure/table reviewer: continue\\n- Reference reviewer: continue\\n- Final gate reviewer: continue\\n\\nNext action: continue.\\n', encoding='utf-8')",
+    "trial = root / 'research_trajectory' / 'trials' / '000025_citation_readiness_audit'",
+    "(trial / 'reviews').mkdir(parents=True, exist_ok=True)",
+    "(trial / 'artifacts' / 'reviewer_spawn').mkdir(parents=True, exist_ok=True)",
+    "plan = \"\"\"# Plan\n\n## Resource Scout Brief\n\nScout: skipped\nDecision reason: citation audit uses existing local bibliography\nSearch scope: none\nResource types: none\nDisciplines/domains: local citation audit\nKnown resource clues: manuscript/references.bib\nFreshness / date sensitivity: none\nDownload policy: none\nExpected destinations: none\nStop criteria: local audit complete\nSkip reason: no external resource retrieval needed\n\"\"\"",
+    "(trial / 'PLAN.md').write_text(plan, encoding='utf-8')",
+    "(trial / 'REPORT.md').write_text('# Report\\n\\nClosed Trial 25 fixture.\\n', encoding='utf-8')",
+    "(trial / 'artifacts' / 'reviewer_spawn' / 'REVIEWER_SPAWN_DECISION.md').write_text('Spawn needed: no\\n', encoding='utf-8')",
+    "for config in module.REQUIRED_REVIEWER_OUTPUTS.values():",
+    "    (trial / 'reviews' / config['file']).write_text(f\"Reviewer: {config['label']}\\nDecision: continue\\nGate impact: continue\\n\", encoding='utf-8')",
+    "(root / 'research_trajectory' / 'TRAJECTORY.json').write_text(json.dumps({'schema_version': module.TRAJECTORY_SCHEMA_VERSION, 'latest_active_trial': trial.name, 'next_trial_number': 26, 'archived_trial_ids': [], 'last_sync_reason': 'fixture'}, indent=2), encoding='utf-8')",
+    "(root / 'research_trajectory' / 'NEXT_TRIAL.json').write_text(json.dumps({'schema_version': 1, 'status': 'pending', 'expected_iteration': 25}, indent=2), encoding='utf-8')",
+    "context = module.ProjectContext(root)",
+    "module._CONTEXT.project = context",
+    "assert module.trial_dir_is_closed(trial), module.trial_dir_is_closed(trial)",
+    "protocol_blockers = module.trial_protocol_file_blockers(trial)",
+    "assert any('RESOURCE_SCOUT_REPORT.md' in blocker for blocker in protocol_blockers), protocol_blockers",
+    "assert module.pending_expected_trial_iteration() == 0, module.pending_expected_trial_iteration()",
+    "module.validate_expected_trial_marker()",
+    "marker = json.loads((root / 'research_trajectory' / 'NEXT_TRIAL.json').read_text(encoding='utf-8'))",
+    "assert marker['status'] == 'fulfilled', marker",
+    "assert module.next_active_trial_iteration() == 26, module.next_active_trial_iteration()",
+    "final_blockers = module.final_gate_consistency_blockers()",
+    "assert any('RESOURCE_SCOUT_REPORT.md' in blocker for blocker in final_blockers), final_blockers",
+    "(root / 'research_trajectory' / 'NEXT_TRIAL.json').write_text(json.dumps({'schema_version': 1, 'status': 'pending', 'expected_iteration': 25}, indent=2), encoding='utf-8')",
+    "calls = []",
+    "def fake_start(prompt, mode, **kwargs):",
+    "    calls.append({'prompt': prompt, 'mode': mode, 'kwargs': kwargs})",
+    "    return {'ok': True}",
+    "module.start_research_run = fake_start",
+    "context.session.update({'loop_active': True, 'mode': 'goal', 'loop_iteration': 25, 'loop_review_checkpoint_iteration': 125, 'loop_stop_reason': '', 'settings': {'backend': 'codex', 'reviewCheckpointInterval': 100}, 'session_id': '00000000-0000-0000-0000-000000000025', 'logs': [], 'raw_logs': [], 'transcript': []})",
+    "module.maybe_continue_autoresearch_loop(0)",
+    "assert calls, context.session",
+    "assert calls[-1]['kwargs']['loop_iteration_override'] == 26, calls[-1]",
+    "assert calls[-1]['kwargs']['display_prompt'] == 'Continue autoresearch loop (Trial 26).', calls[-1]",
+    "assert 'Next active trial must be Trial 26.' in calls[-1]['prompt'], calls[-1]['prompt']",
+    "print(json.dumps({'marker': marker['status'], 'next': module.next_active_trial_iteration(), 'loop_iteration': calls[-1]['kwargs']['loop_iteration_override'], 'protocol_blocker': any('RESOURCE_SCOUT_REPORT.md' in blocker for blocker in final_blockers)}))"
+  ].join("\n");
+  const staleProtocolBoundaryMarkerOutput = execFileSync(python.command, [
+    ...python.args,
+    "-c",
+    staleProtocolBoundaryMarkerScript
+  ], {
+    cwd: root,
+    env: {
+      ...process.env,
+      COAUTO_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py")
+    },
+    encoding: "utf8"
+  }).trim();
+  if (
+    !staleProtocolBoundaryMarkerOutput.includes('"marker": "fulfilled"') ||
+    !staleProtocolBoundaryMarkerOutput.includes('"next": 26') ||
+    !staleProtocolBoundaryMarkerOutput.includes('"loop_iteration": 26') ||
+    !staleProtocolBoundaryMarkerOutput.includes('"protocol_blocker": true')
+  ) {
+    throw new Error(`stale protocol boundary marker smoke test returned unexpected output: ${staleProtocolBoundaryMarkerOutput}`);
+  }
+
   const legacyBoundaryScript = [
     "import importlib.util, json, os, pathlib, tempfile",
     "server_path = pathlib.Path(os.environ['COAUTO_SERVER_PY'])",
@@ -4299,8 +4385,8 @@ Confidence: medium
     "(root / 'research_trajectory' / 'NEXT_TRIAL.json').write_text(json.dumps({'schema_version': 1, 'status': 'pending', 'expected_iteration': 20}, indent=2), encoding='utf-8')",
     "module.validate_expected_trial_marker()",
     "marker = json.loads((root / 'research_trajectory' / 'NEXT_TRIAL.json').read_text(encoding='utf-8'))",
-    "assert marker['status'] == 'pending', marker",
-    "assert module.pending_expected_trial_iteration() == 20, module.pending_expected_trial_iteration()",
+    "assert marker['status'] == 'fulfilled', marker",
+    "assert module.pending_expected_trial_iteration() == 0, module.pending_expected_trial_iteration()",
     "cleanup = module.archive_interrupted_trial_tail('legacy_boundary_smoke')",
     "archived_ids = [item['id'] for item in cleanup['archived']]",
     "assert archived_ids == ['000021_partial_plan_only'], cleanup",
@@ -4326,8 +4412,8 @@ Confidence: medium
     !legacyBoundaryOutput.includes('"latest": "000020_legacy_reported"') ||
     !legacyBoundaryOutput.includes('"next": 21') ||
     !legacyBoundaryOutput.includes('"000021_partial_plan_only"') ||
-    !legacyBoundaryOutput.includes('"marker": "pending"') ||
-    !legacyBoundaryOutput.includes('"pending": 20')
+    !legacyBoundaryOutput.includes('"marker": "fulfilled"') ||
+    !legacyBoundaryOutput.includes('"pending": 0')
   ) {
     throw new Error(`legacy boundary smoke test returned unexpected output: ${legacyBoundaryOutput}`);
   }

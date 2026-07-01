@@ -6033,6 +6033,26 @@ def update_expected_trial_marker(payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def expected_trial_loop_boundary_dir(expected: int) -> Path | None:
+    trial_dir = active_trial_dir_for_iteration(expected) if expected > 0 else None
+    if trial_dir is None or not trial_dir_satisfies_loop_boundary(trial_dir):
+        return None
+    return trial_dir
+
+
+def fulfill_expected_trial_marker_if_loop_closed(marker: dict[str, Any], reason: str) -> bool:
+    expected = active_expected_trial_iteration(marker)
+    trial_dir = expected_trial_loop_boundary_dir(expected)
+    if trial_dir is None:
+        return False
+    mark_pending_interventions_applied(marker, trial_dir.name, rel_path(trial_dir), reason)
+    marker.pop("completion_blocked_reason", None)
+    marker["status"] = "fulfilled"
+    update_expected_trial_marker(marker)
+    sync_trajectory_state(reason)
+    return True
+
+
 def complete_expected_trial_marker(reason: str) -> None:
     marker = read_expected_trial_marker()
     if active_expected_trial_iteration(marker) <= 0:
@@ -6046,7 +6066,7 @@ def complete_expected_trial_marker(reason: str) -> None:
             update_expected_trial_marker(marker)
             append_research_log(f"Expected trial marker not completed: {blocker}")
         return
-    if not trial_dir_satisfies_current_boundary(trial_dir):
+    if not trial_dir_satisfies_loop_boundary(trial_dir):
         blocker = f"Expected Trial {expected} does not satisfy the current closed-boundary requirements."
         if marker.get("completion_blocked_reason") != blocker:
             marker["completion_blocked_reason"] = blocker
@@ -6067,18 +6087,13 @@ def validate_expected_trial_marker() -> None:
     expected = int(marker.get("expected_iteration") or 0)
     if expected <= 0:
         return
-    current_boundary_iterations = [
+    loop_boundary_iterations = [
         trial_iteration_from_id(path.name)
         for path in active_trial_dirs()
-        if trial_dir_satisfies_current_boundary(path)
+        if trial_dir_satisfies_loop_boundary(path)
     ]
-    if expected in current_boundary_iterations:
-        trial_dir = active_trial_dir_for_iteration(expected)
-        if trial_dir is not None:
-            mark_pending_interventions_applied(marker, trial_dir.name, rel_path(trial_dir), "expected_trial_fulfilled")
-        marker["status"] = "fulfilled"
-        update_expected_trial_marker(marker)
-        sync_trajectory_state("expected_trial_fulfilled")
+    if expected in loop_boundary_iterations:
+        fulfill_expected_trial_marker_if_loop_closed(marker, "expected_trial_fulfilled")
         return
     reported_iterations = [trial_iteration_from_id(path.name) for path in reported_trial_dirs_any_order()]
     higher = [value for value in reported_iterations if value > expected]
@@ -6098,7 +6113,7 @@ def pending_expected_trial_iteration() -> int:
     if expected <= 0:
         return 0
     trial_dir = active_trial_dir_for_iteration(expected)
-    if trial_dir is None or not trial_dir_satisfies_current_boundary(trial_dir):
+    if trial_dir is None or not trial_dir_satisfies_loop_boundary(trial_dir):
         return expected
     return 0
 
@@ -6618,8 +6633,11 @@ def pending_human_interventions() -> list[dict[str, Any]]:
 
 
 def sync_expected_trial_pending_interventions(reason: str = "pending_interventions_updated") -> dict[str, Any]:
-    pending = pending_human_interventions()
     marker = read_expected_trial_marker()
+    if active_expected_trial_iteration(marker) > 0:
+        fulfill_expected_trial_marker_if_loop_closed(marker, "expected_trial_loop_boundary_fulfilled")
+        marker = read_expected_trial_marker()
+    pending = pending_human_interventions()
     expected = active_expected_trial_iteration(marker)
     if expected <= 0 and has_autoresearch_context():
         if not pending:
@@ -10080,8 +10098,16 @@ def current_trial_protocol_file_blockers() -> list[str]:
     return trial_protocol_file_blockers(trials[-1])
 
 
-def trial_dir_satisfies_current_boundary(trial_dir: Path) -> bool:
+def trial_dir_satisfies_loop_boundary(trial_dir: Path) -> bool:
+    return trial_dir_is_closed(trial_dir)
+
+
+def trial_dir_satisfies_protocol_boundary(trial_dir: Path) -> bool:
     return trial_dir_is_closed(trial_dir) and not trial_protocol_file_blockers(trial_dir)
+
+
+def trial_dir_satisfies_current_boundary(trial_dir: Path) -> bool:
+    return trial_dir_satisfies_protocol_boundary(trial_dir)
 
 
 def final_blueprint_consistency_blockers() -> list[str]:
