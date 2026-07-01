@@ -10146,9 +10146,9 @@ function manuscriptBodyHasLabel(body, label) {
   return normalized ? new RegExp(`^\\s*${normalized}\\s*:`, "im").test(String(body || "")) : false;
 }
 
-function malformedResultBlockWarningHtml(block) {
+function isMalformedResultBlock(block) {
   const kind = String(block?.kind || "").toLowerCase();
-  if (!["dataset", "benchmark", "result"].includes(kind)) return "";
+  if (!["dataset", "benchmark", "result"].includes(kind)) return false;
   const hasArtifactContent = [
     "Metric or result summary",
     "Reader takeaway",
@@ -10165,7 +10165,11 @@ function malformedResultBlockWarningHtml(block) {
     "Transition job",
     "Paragraph plan",
   ].some((label) => manuscriptBodyHasLabel(block?.body, label));
-  if (!hasSectionFields || hasArtifactContent) return "";
+  return hasSectionFields && !hasArtifactContent;
+}
+
+function malformedResultBlockWarningHtml(block) {
+  if (!isMalformedResultBlock(block)) return "";
   return `
     <p class="artifact-schema-warning">
       This result block is using section-planning fields instead of result fields. It needs a reader-facing metric/result summary, takeaway, source artifact path, and supported claim.
@@ -10173,8 +10177,21 @@ function malformedResultBlockWarningHtml(block) {
   `;
 }
 
+function artifactEyebrowLabel(block) {
+  return isMalformedResultBlock(block) ? "Result schema issue" : `${artifactKindLabel(block?.kind)} block`;
+}
+
+function artifactFullBlockHtml(block, className = "figure-spec-full") {
+  if (isMalformedResultBlock(block)) return "";
+  return `
+    <details class="${escapeHtml(className)}">
+      <summary>Source markdown</summary>
+      <div class="markdown-preview">${markdownToHtml(block?.body || "")}</div>
+    </details>
+  `;
+}
+
 function artifactTakeawayHtml(block) {
-  const kind = artifactKindLabel(block.kind);
   const kindSlug = escapeHtml(normalizeManuscriptKey(block.kind) || "artifact");
   const isTable = String(block.kind || "").toLowerCase() === "table";
   const status = manuscriptFieldValue(block, ["Inclusion status", "Status"]);
@@ -10202,7 +10219,7 @@ function artifactTakeawayHtml(block) {
     <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card story-artifact-card ${isTable ? "manuscript-table-card " : ""}artifact-${kindSlug}">
       <header class="figure-spec-head story-artifact-head">
         <div>
-          <p>${escapeHtml(kind)} block</p>
+          <p>${escapeHtml(artifactEyebrowLabel(block))}</p>
           <h5>${escapeHtml(title)}</h5>
         </div>
         ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
@@ -10225,10 +10242,7 @@ function artifactTakeawayHtml(block) {
       ${isTable ? (tableBody ? `<div class="publication-table-preview markdown-preview">${markdownToHtml(tableBody)}</div>` : `<p class="table-missing-warning">Missing publication-ready table body. Active tables must include a Markdown table in this block.</p>`) : ""}
       ${hasRealText(notes) ? `<div class="table-notes markdown-preview"><strong>Notes.</strong> ${markdownToHtml(notes)}</div>` : ""}
       ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
-      <details class="story-details artifact-full-block">
-        <summary>Full block</summary>
-        <div class="markdown-preview">${markdownToHtml(block.body)}</div>
-      </details>
+      ${artifactFullBlockHtml(block, "story-details artifact-full-block")}
     </article>
   `;
 }
@@ -10465,17 +10479,13 @@ function manuscriptTableCardHtml(block) {
         </dl>
       ` : ""}
       ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
-      <details class="figure-spec-full">
-        <summary>Full block</summary>
-        <div class="markdown-preview">${markdownToHtml(block.body)}</div>
-      </details>
+      ${artifactFullBlockHtml(block)}
     </article>
   `;
 }
 
 function manuscriptArtifactCardHtml(block) {
   if (String(block.kind || "").toLowerCase() === "table") return manuscriptTableCardHtml(block);
-  const kind = artifactKindLabel(block.kind);
   const status = manuscriptFieldValue(block, ["Inclusion status", "Status"]);
   const placement = manuscriptFieldValue(block, ["Placement"]);
   const role = manuscriptFieldValue(block, ["Purpose or result role", "Argument or result role", "Purpose"]);
@@ -10486,6 +10496,7 @@ function manuscriptArtifactCardHtml(block) {
     block.body,
   ].filter(Boolean).join("\n"));
   const description = isFigure ? figureDescriptionPayload(block) : "";
+  const malformed = isMalformedResultBlock(block);
   const details = [
     ["Placement", placement],
     ["Purpose / role", role],
@@ -10499,7 +10510,7 @@ function manuscriptArtifactCardHtml(block) {
     <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card artifact-${escapeHtml(String(block.kind || "artifact"))} depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
       <header class="figure-spec-head">
         <div>
-          <p>${escapeHtml(kind)} block</p>
+          <p>${escapeHtml(artifactEyebrowLabel(block))}</p>
           <h4>${escapeHtml(cleanText(block.title, "Untitled artifact"))}</h4>
         </div>
         ${status ? `<span class="figure-status ${figureSpecStatusClass(status)}">${escapeHtml(figureSpecExcerpt(status, 90))}</span>` : ""}
@@ -10523,12 +10534,9 @@ function manuscriptArtifactCardHtml(block) {
             `)
             .join("")}
         </dl>
-      ` : `<div class="markdown-preview">${markdownToHtml(block.body)}</div>`}
+      ` : (malformed ? "" : `<div class="markdown-preview">${markdownToHtml(block.body)}</div>`)}
       ${sourcePath ? `<p class="figure-source-path">Source: <code>${escapeHtml(sourcePath)}</code></p>` : ""}
-      <details class="figure-spec-full">
-        <summary>Full block</summary>
-        <div class="markdown-preview">${markdownToHtml(block.body)}</div>
-      </details>
+      ${artifactFullBlockHtml(block)}
     </article>
   `;
 }
@@ -10560,7 +10568,7 @@ function renderManuscriptAuditPanel(manuscript) {
   const provenance = cleanText(manuscript.provenance || manuscript.traceability, "");
   const legacy = [
     hasRealText(provenance)
-      ? `<details class="traceability-details" open>
+      ? `<details class="traceability-details">
           <summary>Provenance / audit index</summary>
           ${copyButton(provenance, "Copy provenance", "Provenance copied.")}
           <div class="markdown-preview">${markdownToHtml(provenance)}</div>
@@ -10574,7 +10582,7 @@ function renderManuscriptAuditPanel(manuscript) {
       : "",
     realTablePlans(manuscript).length || hasRealText(manuscript.no_table_rationale)
       ? `<details class="traceability-details">
-          <summary>Legacy table/source notes</summary>
+          <summary>Secondary table/source notes</summary>
           ${renderTablesPanel(manuscript)}
         </details>`
       : "",
@@ -10702,18 +10710,18 @@ function manuscriptOutlineHtml(manuscript) {
     .filter((block) => String(block.kind || "").toLowerCase() === kind)
     .map((block) => ({
       href: `#${blueprintAnchorForTitle(block.title)}`,
-      type: artifactKindLabel(block.kind),
+      type: isMalformedResultBlock(block) ? "Result schema issue" : artifactKindLabel(block.kind),
       label: cleanText(block.title, `Untitled ${kind}`),
-      meta: manuscriptFieldValue(block, ["Inclusion status", "Status"]),
+      meta: isMalformedResultBlock(block) ? "Schema issue" : manuscriptFieldValue(block, ["Inclusion status", "Status"]),
       depth: block.level || 4,
     }));
   const methodItems = artifacts
     .filter((block) => !["figure", "table"].includes(String(block.kind || "").toLowerCase()))
     .map((block) => ({
       href: `#${blueprintAnchorForTitle(block.title)}`,
-      type: artifactKindLabel(block.kind),
+      type: isMalformedResultBlock(block) ? "Result schema issue" : artifactKindLabel(block.kind),
       label: cleanText(block.title, "Untitled result"),
-      meta: manuscriptFieldValue(block, ["Inclusion status", "Status"]),
+      meta: isMalformedResultBlock(block) ? "Schema issue" : manuscriptFieldValue(block, ["Inclusion status", "Status"]),
       depth: block.level || 4,
     }));
   const appendixFiles = (manuscript.appendix_files || []).filter((file) => hasRealText(file?.path) || hasRealText(file?.title));

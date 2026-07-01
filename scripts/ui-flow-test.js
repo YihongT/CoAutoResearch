@@ -7475,6 +7475,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   })})`);
   assert.equal(missingTableHtml.includes("table-missing-warning"), true);
   assert.equal(missingTableHtml.includes("Missing publication-ready table body"), true);
+  assert.equal(missingTableHtml.includes("Source markdown"), true, "valid artifact source details should use a clear source label");
 
   const malformedResultHtml = app.run(`__renderManuscriptPanelProbe(${JSON.stringify({
     architecture: [{
@@ -7497,6 +7498,22 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   })})`);
   assert.equal(malformedResultHtml.includes("artifact-schema-warning"), true);
   assert.equal(malformedResultHtml.includes("using section-planning fields instead of result fields"), true);
+  assert.equal(malformedResultHtml.includes("Result schema issue"), true, "malformed result blocks should be labeled as schema issues");
+  assert.equal(malformedResultHtml.includes("Dataset / benchmark / result block"), false, "malformed result blocks should not be labeled like valid result artifacts");
+  assert.equal(malformedResultHtml.includes("Full block"), false, "malformed result blocks should not expose raw source fields in rendered view");
+  assert.equal(malformedResultHtml.includes("Source markdown"), false, "malformed result blocks should not expose source markdown in rendered view");
+  assert.equal(malformedResultHtml.includes("Target-venue role: source-role distribution result."), false, "malformed result raw planning fields should stay out of rendered view");
+  assert.equal(malformedResultHtml.includes("pending source-role and null-check trial"), false, "malformed result pending-work text should stay out of rendered view");
+
+  const auditHtml = app.run(`__renderManuscriptPanelProbe(${JSON.stringify({
+    architecture: [],
+    toc: "",
+    provenance: "Trial 000001: rebuilt candidate blueprint scaffold.",
+    figure_specs: [],
+    table_plans: []
+  })})`);
+  assert.equal(auditHtml.includes("Provenance / audit index"), true);
+  assert.equal(auditHtml.includes('traceability-details" open'), false, "audit provenance should not be expanded by default in the reader view");
 }
 
 function testNavigationStatePersistsPanelAndScroll() {

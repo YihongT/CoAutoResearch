@@ -2697,7 +2697,15 @@ Confidence: medium
     !compactText(finalGateReviewer).includes("artifact/section boundary integrity") ||
     !serverPy.includes("planned_placeholder_value") ||
     !serverPy.includes("appears to use section-planning fields") ||
+    !appJs.includes("function isMalformedResultBlock") ||
     !appJs.includes("function malformedResultBlockWarningHtml") ||
+    !appJs.includes("function artifactEyebrowLabel") ||
+    !appJs.includes("function artifactFullBlockHtml") ||
+    !appJs.includes("if (isMalformedResultBlock(block)) return \"\";") ||
+    !appJs.includes("Result schema issue") ||
+    !appJs.includes("<summary>Source markdown</summary>") ||
+    appJs.includes("<summary>Full block</summary>") ||
+    appJs.includes('class="traceability-details" open') ||
     !stylesCss.includes(".artifact-schema-warning")
   ) {
     throw new Error("blueprint contract must require readable section briefs and artifact reader takeaways");
