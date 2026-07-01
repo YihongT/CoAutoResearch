@@ -10948,11 +10948,21 @@ def build_monitor_context(session: Any) -> str:
     findings = _aux_read("research_trajectory/CURRENT_FINDINGS.md", 5000)
     project = _aux_read("PROJECT.md", 3000)
     trajectory = _aux_read("research_trajectory/TRAJECTORY.json", 3000)
+    workspace_dir = getattr(session, "workspace_dir", "")
     return f"""# Monitor Session Context
 
 You are a **read-only monitoring assistant** for this CoAutoResearch project.
 Answer the user's questions about overall progress, the current best result,
 how it compares to baseline, which ideas were explored, and which ones worked.
+
+## Saving guidance
+When the user asks you to save notes, guidance, or instructions, write a
+markdown file into your workspace directory (shown below). Use a descriptive
+filename ending in `.md`. After saving, tell the user the file path so they
+can find it in the workspace browser.
+
+## Your workspace (for saving notes/guidance)
+`{workspace_dir}`
 
 ## Experiment log locations
 - Trials directory: `{trials_dir}`
@@ -11029,10 +11039,13 @@ manuscript. Use the Start / Pause / Resume controls to drive it.
 
 AUX_MONITOR_BOUNDARY = """
 Hard boundary (monitor session):
-- You are READ-ONLY. Do not create, edit, delete, rename, or move ANY project file.
-- Do not touch research_trajectory/, manuscript/, PROJECT.md, or any resource files.
+- You are READ-ONLY with respect to project research files. Do not create, edit,
+  delete, rename, or move ANY file in research_trajectory/, manuscript/, or PROJECT.md.
 - Do not start, resume, or continue the autoresearch loop or any trial.
-- Just answer the user's question from the context document and current project files.
+- EXCEPTION: When the user explicitly asks you to save notes, guidance, or
+  instructions, you MAY write markdown (.md) files into your own workspace
+  directory only. This is the only write operation allowed.
+- Answer the user's question from the context document and current project files.
 """
 
 AUX_IDEA_BOUNDARY = """
@@ -11105,6 +11118,97 @@ def aux_stop_session(session_id: str) -> dict[str, Any]:
     session = aux_manager().get(session_id)
     session.stop(force=False)
     return {"session": session.public()}
+
+
+def aux_workspace_list(session_id: str, parsed: Any) -> dict[str, Any]:
+    """List files/dirs in a session's workspace at the given relative path."""
+    session = aux_manager().get(session_id)
+    ws = session.workspace_dir
+    query = parse_qs(parsed.query)
+    rel = unquote(str(query.get("path", [""])[0] or "")).strip()
+    # Safety: prevent path traversal outside workspace
+    target = (ws / rel).resolve() if rel else ws.resolve()
+    try:
+        target.relative_to(ws.resolve())
+    except ValueError:
+        return {"items": []}
+    items: list[dict[str, Any]] = []
+    if target.is_dir():
+        try:
+            for entry in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                if entry.name.startswith(".") and entry.name not in (".", ".."):
+                    continue
+                items.append({
+                    "name": entry.name,
+                    "path": str(entry.relative_to(ws)),
+                    "is_dir": entry.is_dir(),
+                    "size": entry.stat().st_size if entry.is_file() else 0,
+                })
+        except OSError:
+            pass
+    return {"items": items}
+
+
+def serve_aux_workspace_file(self: Any, session_id: str, parsed: Any) -> None:
+    """Serve a file from a session's workspace for preview or download."""
+    session = aux_manager().get(session_id)
+    ws = session.workspace_dir
+    query = parse_qs(parsed.query)
+    rel = unquote(str(query.get("path", [""])[0] or "")).strip()
+    download = str(query.get("download", [""])[0]).strip().lower() in {"1", "true", "yes"}
+    if not rel:
+        self.send_error(400, "Missing path parameter")
+        return
+    target = (ws / rel).resolve()
+    try:
+        target.relative_to(ws.resolve())
+    except ValueError:
+        self.send_error(403)
+        return
+    if not target.exists() or not target.is_file():
+        self.send_error(404)
+        return
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    data = target.read_bytes()
+    if download:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+        return
+    # Preview mode: return JSON with content
+    import base64
+    is_binary = not content_type.startswith("text/") and content_type not in (
+        "application/json", "application/x-yaml", "application/x-sh",
+    ) and not content_type.startswith("image/")
+    if content_type.startswith("image/"):
+        self.send_json({
+            "ok": True,
+            "name": target.name,
+            "content_type": content_type,
+            "content": base64.b64encode(data).decode("ascii"),
+        })
+        return
+    try:
+        text = data.decode("utf-8")
+        # Truncate very large files for preview
+        if len(text) > 100_000:
+            text = text[:100_000] + "\n\n… (truncated, file is larger than 100KB)"
+        self.send_json({
+            "ok": True,
+            "name": target.name,
+            "content_type": content_type,
+            "content": text,
+        })
+    except UnicodeDecodeError:
+        self.send_json({
+            "ok": True,
+            "name": target.name,
+            "content_type": content_type,
+            "content": "(binary file, use download instead)",
+        })
 
 
 
@@ -14346,6 +14450,14 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                 if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/events"):
                     session_id = unquote(parsed.path[len("/api/sessions/"):-len("/events")])
                     self.serve_aux_session_events(parsed, session_id)
+                    return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/workspace"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/workspace")])
+                    self.send_json({"ok": True, **aux_workspace_list(session_id, parsed)})
+                    return
+                if parsed.path.startswith("/api/sessions/") and "/workspace/file" in parsed.path:
+                    session_id = unquote(parsed.path[len("/api/sessions/"):parsed.path.index("/workspace/file")])
+                    serve_aux_workspace_file(self, session_id, parsed)
                     return
                 if parsed.path.startswith("/api/sessions/"):
                     session_id = unquote(parsed.path[len("/api/sessions/"):])

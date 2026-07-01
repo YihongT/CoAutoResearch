@@ -386,11 +386,16 @@ class AuxSession:
         try:
             assert proc.stdout is not None
             assistant_parts: list[str] = []
+            final_text = ""
             for line in proc.stdout:
                 self.append_log(line)
                 text = engine.transcript_from_agent_line(line, self.backend)
-                if isinstance(text, dict) and text.get("role") == "assistant" and text.get("content"):
-                    assistant_parts.append(str(text.get("content")))
+                if isinstance(text, dict) and text.get("content"):
+                    role = str(text.get("role") or "")
+                    if role == "assistant":
+                        assistant_parts.append(str(text.get("content")))
+                    elif role == "final":
+                        final_text = str(text.get("content"))
             returncode = proc.wait()
         except Exception as exc:  # pragma: no cover - defensive
             self.append_log(f"Session error: {exc}")
@@ -406,9 +411,12 @@ class AuxSession:
             self._thread = None
             self.returncode = returncode
             self.status = "completed" if returncode == 0 else "error"
-            if assistant_parts:
+            # Prefer the final result text (Claude "result" event); fall back
+            # to collected assistant messages.
+            reply = final_text or ("\n".join(assistant_parts) if assistant_parts else "")
+            if reply:
                 self.chat_history.append(
-                    {"role": "assistant", "text": "\n".join(assistant_parts), "at": _now_iso()}
+                    {"role": "assistant", "text": reply, "at": _now_iso()}
                 )
                 self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
             self.updated_at = _now_iso()

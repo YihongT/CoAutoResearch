@@ -1,25 +1,26 @@
-/* CoAutoResearch — Multi-session panel (isolated monitor / idea / evolution).
- * Self-contained: mounts its own floating sidebar and talks to /api/sessions/*.
- * Does not depend on app.js internals beyond the global `activeProjectId`. */
+/* CoAutoResearch — Multi-session panel (embedded in rail + main-stage).
+ * Session list lives in the left rail; selecting a session shows its chat
+ * in the #sessions-view alongside the workspace file browser.
+ * Selecting the Evolution session switches back to the main chat-view.
+ */
 (function () {
   "use strict";
 
   var KIND_META = {
-    monitor: { label: "Monitor", icon: "📊", hint: "Ask about progress, best result, vs baseline, which ideas worked." },
-    idea: { label: "Idea", icon: "💡", hint: "Discuss ideas, clone repos, read papers, reproduce baselines." },
-    evolution: { label: "Evolution", icon: "⚙️", hint: "The persistent autoresearch loop." },
+    monitor: { label: "Monitor", icon: "📊", hint: "Ask about progress, best result, vs baseline, which ideas worked. Context auto-refreshes before each message." },
+    idea: { label: "Idea", icon: "💡", hint: "Discuss ideas, clone repos, read papers, reproduce baselines. Files saved in workspace on the right." },
+    evolution: { label: "Evolution", icon: "⚙️", hint: "The persistent autoresearch loop. Use Start / Pause / Resume in the main UI." },
   };
 
   var state = {
     sessions: [],
     activeId: "",
     eventSource: null,
-    open: false,
+    wsPath: "",
+    wsItems: [],
   };
 
-  function projectId() {
-    return window.activeProjectId || "";
-  }
+  function projectId() { return window.activeProjectId || ""; }
 
   function withProject(path) {
     var pid = projectId();
@@ -47,114 +48,315 @@
     return n;
   }
 
-  // ---- rendering --------------------------------------------------------
-  function render() {
-    var root = document.getElementById("cas-panel");
-    if (!root) return;
-    var list = root.querySelector(".cas-list");
-    list.innerHTML = "";
+  // ---- auto-create default sessions -----------------------------------
+  var autoCreateChecked = false;
+
+  async function ensureDefaults() {
+    if (autoCreateChecked) return;
+    autoCreateChecked = true;
+    try {
+      var r = await apiCall("/api/sessions");
+      var existing = r.sessions || [];
+      var hasMonitor = existing.some(function (s) { return s.kind === "monitor"; });
+      var hasEvolution = existing.some(function (s) { return s.kind === "evolution"; });
+      var created = false;
+      if (!hasMonitor) {
+        await apiCall("/api/sessions", { method: "POST", body: JSON.stringify({ kind: "monitor", title: "Monitor" }) });
+        created = true;
+      }
+      if (!hasEvolution) {
+        await apiCall("/api/sessions", { method: "POST", body: JSON.stringify({ kind: "evolution", title: "Evolution Run" }) });
+        created = true;
+      }
+      if (created) {
+        r = await apiCall("/api/sessions");
+        state.sessions = r.sessions || [];
+      } else {
+        state.sessions = existing;
+      }
+      if (!state.activeId && state.sessions.length) {
+        var mon = state.sessions.find(function (s) { return s.kind === "monitor"; });
+        state.activeId = mon ? mon.id : state.sessions[0].id;
+      }
+    } catch (err) { console.warn("[sessions] ensureDefaults failed", err); }
+  }
+
+  // ---- show / hide sessions-view vs chat-view -------------------------
+  function showSessionsView(show) {
+    document.body.classList.toggle("has-sessions-active", show);
+    var sv = document.getElementById("sessions-view");
+    if (sv) sv.classList.toggle("is-active", show);
+    if (show) {
+      document.querySelectorAll(".rail-action").forEach(function (b) { b.classList.remove("is-active"); });
+    } else {
+      var chatBtn = document.querySelector('.rail-action[data-view="chat"]');
+      if (chatBtn) chatBtn.classList.add("is-active");
+    }
+  }
+
+  // ---- rendering: rail session list -----------------------------------
+  function renderRail() {
+    var listEl = document.getElementById("rail-sessions-list");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+    var navEl = document.getElementById("rail-sessions");
+    if (navEl) navEl.hidden = !projectId();
 
     ["monitor", "idea", "evolution"].forEach(function (kind) {
       var group = state.sessions.filter(function (s) { return s.kind === kind; });
-      var header = el("div", "cas-group-head");
-      header.appendChild(el("span", "cas-group-title", KIND_META[kind].icon + " " + KIND_META[kind].label));
-      var addBtn = el("button", "cas-add", "+");
+      var groupWrap = el("div", "rail-sessions-group");
+      var label = el("div", "rail-sessions-group-label");
+      label.appendChild(el("span", null, KIND_META[kind].icon + " " + KIND_META[kind].label));
+      var addBtn = el("button", "rail-sessions-add", "+");
       addBtn.title = "New " + KIND_META[kind].label + " session";
       addBtn.onclick = function () { createSession(kind); };
-      header.appendChild(addBtn);
-      list.appendChild(header);
+      label.appendChild(addBtn);
+      groupWrap.appendChild(label);
 
       if (!group.length) {
-        list.appendChild(el("div", "cas-empty", "No " + KIND_META[kind].label.toLowerCase() + " sessions"));
+        groupWrap.appendChild(el("div", "rail-sessions-empty", "No " + kind + " sessions"));
       }
       group.forEach(function (s) {
-        var card = el("div", "cas-card" + (s.id === state.activeId ? " is-active" : ""));
-        var dot = el("span", "cas-dot " + (s.running ? "running" : (s.status || "idle")));
-        card.appendChild(dot);
-        var main = el("div", "cas-card-main");
-        main.appendChild(el("div", "cas-card-title", s.title || s.id));
-        main.appendChild(el("div", "cas-card-sub", (s.running ? "running" : (s.status || "idle")) + (s.last_event_at ? " · " + s.last_event_at.slice(11, 16) : "")));
-        card.appendChild(main);
-        card.onclick = function () { selectSession(s.id); };
-
-        var actions = el("div", "cas-card-actions");
-        var refreshBtn = el("button", "cas-icon-btn", "⟳");
-        refreshBtn.title = "Refresh (clear context, start fresh)";
+        var item = el("div", "rail-session-item" + (s.id === state.activeId ? " is-active" : "") + (kind === "evolution" ? " is-evolution" : ""));
+        var dot = el("span", "rail-session-dot " + (s.running ? "running" : (s.status || "idle")));
+        item.appendChild(dot);
+        item.appendChild(el("span", "rail-session-name", s.title || s.id));
+        var actions = el("div", "rail-session-actions");
+        var refreshBtn = el("button", "rail-session-act", "⟳");
+        refreshBtn.title = "Clear context";
         refreshBtn.onclick = function (e) { e.stopPropagation(); refreshSession(s.id); };
         actions.appendChild(refreshBtn);
-        var delBtn = el("button", "cas-icon-btn cas-danger", "✕");
+        var delBtn = el("button", "rail-session-act danger", "✕");
         delBtn.title = "Delete session";
         delBtn.onclick = function (e) { e.stopPropagation(); deleteSession(s.id); };
         actions.appendChild(delBtn);
-        card.appendChild(actions);
-        list.appendChild(card);
+        item.appendChild(actions);
+        item.onclick = function () { selectSession(s.id); };
+        groupWrap.appendChild(item);
       });
+      listEl.appendChild(groupWrap);
     });
-
-    renderChat();
   }
 
-  function renderChat() {
-    var pane = document.getElementById("cas-chat");
-    if (!pane) return;
+  // ---- rendering: main-stage session view -----------------------------
+  function renderSessionView() {
     var s = state.sessions.find(function (x) { return x.id === state.activeId; });
     if (!s) {
-      pane.innerHTML = '<div class="cas-chat-empty">Select or create a session to start.</div>';
+      showSessionsView(false);
       return;
     }
-    pane.innerHTML = "";
-    var head = el("div", "cas-chat-head");
-    head.appendChild(el("span", "cas-chat-title", KIND_META[s.kind].icon + " " + (s.title || s.id)));
-    if (s.kind === "idea" && s.workspace) {
-      var ws = el("span", "cas-chat-ws", "workspace: " + s.workspace);
-      ws.title = s.workspace;
-      head.appendChild(ws);
-    }
-    pane.appendChild(head);
-    pane.appendChild(el("div", "cas-chat-hint", KIND_META[s.kind].hint));
 
-    var log = el("div", "cas-chat-log");
-    (s.chat_history || []).forEach(function (m) {
-      var row = el("div", "cas-msg cas-msg-" + (m.role || "user"));
-      row.appendChild(el("div", "cas-msg-role", m.role === "assistant" ? "Agent" : "You"));
-      row.appendChild(el("div", "cas-msg-text", m.text || ""));
-      log.appendChild(row);
-    });
-    if (s.running) {
-      var busy = el("div", "cas-msg cas-msg-assistant");
-      busy.appendChild(el("div", "cas-msg-role", "Agent"));
-      busy.appendChild(el("div", "cas-msg-text cas-busy", "…thinking (" + (s.last_event_summary || "working") + ")"));
-      log.appendChild(busy);
+    // Evolution session → show main chat-view
+    if (s.kind === "evolution") {
+      showSessionsView(false);
+      // Restore the Agents rail-action as active
+      var chatBtn = document.querySelector('.rail-action[data-view="chat"]');
+      if (chatBtn) chatBtn.classList.add("is-active");
+      return;
     }
-    pane.appendChild(log);
-    log.scrollTop = log.scrollHeight;
 
-    var form = el("form", "cas-chat-form");
-    var input = el("textarea", "cas-chat-input");
-    input.placeholder = s.running ? "Session is running…" : "Message this session…";
-    input.disabled = !!s.running;
-    form.appendChild(input);
-    var send = el("button", "cas-send", "Send");
-    send.type = "submit";
-    send.disabled = !!s.running;
-    form.appendChild(send);
-    form.onsubmit = function (e) {
-      e.preventDefault();
-      var text = input.value.trim();
-      if (!text) return;
-      sendMessage(s.id, text);
-      input.value = "";
-    };
-    pane.appendChild(form);
+    // Monitor / Idea → show sessions-view
+    showSessionsView(true);
+
+    // Title
+    var titleEl = document.getElementById("sv-title");
+    if (titleEl) titleEl.textContent = KIND_META[s.kind].icon + " " + (s.title || s.id);
+
+    // Hint
+    var hintEl = document.getElementById("sv-hint");
+    if (hintEl) hintEl.textContent = KIND_META[s.kind].hint;
+
+    // Toolbar
+    var toolsEl = document.getElementById("sv-tools");
+    if (toolsEl) {
+      toolsEl.innerHTML = "";
+      if (s.running) {
+        var stopBtn = el("button", "sv-tool-btn stop", "⏹ Stop");
+        stopBtn.title = "Terminate the current run";
+        stopBtn.onclick = function () { stopSession(s.id); };
+        toolsEl.appendChild(stopBtn);
+      }
+      var clearBtn = el("button", "sv-tool-btn clear", "🗑 Clear Context");
+      clearBtn.title = "Clear conversation context and rebuild from latest project state";
+      clearBtn.onclick = function () { refreshSession(s.id); };
+      toolsEl.appendChild(clearBtn);
+    }
+
+    // Chat log
+    var logEl = document.getElementById("sv-chat-log");
+    if (logEl) {
+      logEl.innerHTML = "";
+      (s.chat_history || []).forEach(function (m) {
+        var row = el("div", "sv-msg sv-msg-" + (m.role || "user"));
+        row.appendChild(el("div", "sv-msg-role", m.role === "assistant" ? "Agent" : "You"));
+        row.appendChild(el("div", "sv-msg-text", m.text || ""));
+        logEl.appendChild(row);
+      });
+      if (s.running) {
+        var busy = el("div", "sv-msg sv-msg-assistant");
+        busy.appendChild(el("div", "sv-msg-role", "Agent"));
+        busy.appendChild(el("div", "sv-msg-text sv-msg-busy", "…thinking (" + (s.last_event_summary || "working") + ")"));
+        logEl.appendChild(busy);
+      }
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // Input form
+    var input = document.getElementById("sv-chat-input");
+    var sendBtn = document.querySelector("#sv-chat-form .sessions-chat-send");
+    if (input) {
+      input.placeholder = s.running ? "Session is running…" : "Message this session…";
+      input.disabled = !!s.running;
+    }
+    if (sendBtn) sendBtn.disabled = !!s.running;
+
+    // Workspace column visibility
+    var wsCol = document.getElementById("sv-ws-col");
+    if (wsCol) wsCol.hidden = false;
+
+    renderWorkspace();
   }
 
-  // ---- actions ----------------------------------------------------------
+  // ---- rendering: workspace file browser ------------------------------
+  function renderWorkspace() {
+    var wsCol = document.getElementById("sv-ws-col");
+    if (!wsCol || wsCol.hidden) return;
+
+    var head = wsCol.querySelector(".sessions-ws-head");
+    // Breadcrumb
+    var bcEl = document.getElementById("sv-ws-breadcrumb");
+    if (bcEl) {
+      bcEl.innerHTML = "";
+      if (state.wsPath) {
+        var parts = state.wsPath.split("/").filter(Boolean);
+        var bc = el("span", null, "/");
+        bc.style.cursor = "pointer";
+        bc.onclick = function () { loadWorkspace(currentSessionId(), ""); };
+        bcEl.appendChild(bc);
+        var acc = "";
+        parts.forEach(function (p, i) {
+          bcEl.appendChild(el("span", null, " / "));
+          acc = acc ? acc + "/" + p : p;
+          (function (path) {
+            var seg = el("span", null, p);
+            seg.style.cursor = "pointer";
+            seg.onclick = function () { loadWorkspace(currentSessionId(), path); };
+            bcEl.appendChild(seg);
+          })(acc);
+        });
+      } else {
+        bcEl.appendChild(el("span", null, "/"));
+      }
+    }
+
+    var listEl = document.getElementById("sv-ws-list");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    if (state.wsPath) {
+      var back = el("div", "sv-ws-back", "⬆ ..");
+      back.onclick = function () {
+        var parts = state.wsPath.split("/").filter(Boolean);
+        parts.pop();
+        loadWorkspace(currentSessionId(), parts.join("/"));
+      };
+      listEl.appendChild(back);
+    }
+
+    if (!state.wsItems.length) {
+      listEl.appendChild(el("div", "sv-ws-empty", state.wsPath ? "(empty folder)" : "(no files yet)"));
+      return;
+    }
+
+    state.wsItems.forEach(function (item) {
+      var row = el("div", "sv-ws-item" + (item.is_dir ? " is-dir" : ""));
+      row.appendChild(el("span", "sv-ws-item-icon", item.is_dir ? "📂" : _fileIcon(item.name)));
+      row.appendChild(el("span", "sv-ws-item-name", item.name));
+      if (!item.is_dir) {
+        var actions = el("div", "sv-ws-item-actions");
+        var viewBtn = el("button", "sv-ws-item-act", "👁");
+        viewBtn.title = "Preview";
+        viewBtn.onclick = function (e) { e.stopPropagation(); previewFile(currentSessionId(), item.path); };
+        actions.appendChild(viewBtn);
+        var dlBtn = el("button", "sv-ws-item-act", "⬇");
+        dlBtn.title = "Download";
+        dlBtn.onclick = function (e) { e.stopPropagation(); downloadFile(currentSessionId(), item.path); };
+        actions.appendChild(dlBtn);
+        row.appendChild(actions);
+      }
+      row.onclick = function () {
+        if (item.is_dir) {
+          var np = state.wsPath ? state.wsPath + "/" + item.name : item.name;
+          loadWorkspace(currentSessionId(), np);
+        } else {
+          previewFile(currentSessionId(), item.path);
+        }
+      };
+      listEl.appendChild(row);
+    });
+  }
+
+  function currentSessionId() {
+    return state.activeId;
+  }
+
+  function _fileIcon(name) {
+    var ext = (name.split(".").pop() || "").toLowerCase();
+    if (["md", "txt"].includes(ext)) return "📄";
+    if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "🖼";
+    if (["json", "yaml", "yml", "toml"].includes(ext)) return "⚙";
+    if (["py", "js", "ts", "sh", "r"].includes(ext)) return "📜";
+    if (["csv", "tsv", "xlsx"].includes(ext)) return "📊";
+    return "📋";
+  }
+
+  // ---- file viewer modal ----------------------------------------------
+  function openViewer(name, content, isImage, imageUrl) {
+    closeViewer();
+    var overlay = el("div", "cas-viewer-overlay");
+    overlay.id = "cas-viewer-overlay";
+    overlay.onclick = closeViewer;
+    document.body.appendChild(overlay);
+
+    var modal = el("div", "cas-viewer");
+    modal.id = "cas-viewer";
+    var head = el("div", "cas-viewer-head");
+    head.appendChild(el("span", null, name));
+    var closeBtn = el("button", "cas-viewer-close", "×");
+    closeBtn.onclick = closeViewer;
+    head.appendChild(closeBtn);
+    modal.appendChild(head);
+
+    var body = el("div", "cas-viewer-body");
+    if (isImage && imageUrl) {
+      var img = el("img");
+      img.src = imageUrl;
+      body.appendChild(img);
+    } else {
+      body.textContent = content;
+    }
+    modal.appendChild(body);
+    document.body.appendChild(modal);
+  }
+
+  function closeViewer() {
+    var overlay = document.getElementById("cas-viewer-overlay");
+    var modal = document.getElementById("cas-viewer");
+    if (overlay) overlay.remove();
+    if (modal) modal.remove();
+  }
+
+  // ---- actions --------------------------------------------------------
   async function loadSessions() {
     try {
+      await ensureDefaults();
       var r = await apiCall("/api/sessions");
       state.sessions = r.sessions || [];
-      if (!state.activeId && state.sessions.length) state.activeId = state.sessions[0].id;
-      render();
+      if (!state.activeId && state.sessions.length) {
+        var mon = state.sessions.find(function (s) { return s.kind === "monitor"; });
+        state.activeId = mon ? mon.id : state.sessions[0].id;
+      }
+      renderAll();
     } catch (err) { console.warn("[sessions] load failed", err); }
   }
 
@@ -165,7 +367,9 @@
       var r = await apiCall("/api/sessions", { method: "POST", body: JSON.stringify({ kind: kind, title: title }) });
       state.sessions = r.result.sessions || state.sessions;
       state.activeId = r.result.session.id;
-      render();
+      state.wsPath = "";
+      renderAll();
+      connectEvents(r.result.session.id);
     } catch (err) { alert("Create failed: " + err.message); }
   }
 
@@ -174,39 +378,93 @@
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" });
       state.sessions = r.result.sessions || [];
-      if (state.activeId === id) state.activeId = state.sessions.length ? state.sessions[0].id : "";
-      render();
+      if (state.activeId === id) {
+        var mon = state.sessions.find(function (s) { return s.kind === "monitor"; });
+        state.activeId = mon ? mon.id : (state.sessions.length ? state.sessions[0].id : "");
+      }
+      renderAll();
     } catch (err) { alert("Delete failed: " + err.message); }
   }
 
   async function refreshSession(id) {
-    if (!confirm("Refresh this session? The conversation context will be cleared (like opening a fresh session).")) return;
+    if (!confirm("Clear conversation context? A fresh context will be rebuilt from the latest project state.")) return;
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/refresh", { method: "POST", body: "{}" });
       updateSession(r.result.session);
-      render();
-    } catch (err) { alert("Refresh failed: " + err.message); }
+      state.wsPath = "";
+      renderAll();
+    } catch (err) { alert("Clear failed: " + err.message); }
+  }
+
+  async function stopSession(id) {
+    try {
+      await apiCall("/api/sessions/" + encodeURIComponent(id) + "/stop", { method: "POST", body: "{}" });
+      var s = state.sessions.find(function (x) { return x.id === id; });
+      if (s) { s.running = false; s.status = "interrupted"; }
+      renderAll();
+    } catch (err) { alert("Stop failed: " + err.message); }
   }
 
   async function selectSession(id) {
     state.activeId = id;
+    state.wsPath = "";
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id));
       updateSession(r.session);
     } catch (err) { /* ignore */ }
-    render();
+    renderAll();
     connectEvents(id);
+    var s = state.sessions.find(function (x) { return x.id === id; });
+    if (s && s.kind !== "evolution") {
+      loadWorkspace(id, "");
+    }
   }
 
   async function sendMessage(id, text) {
     var s = state.sessions.find(function (x) { return x.id === id; });
-    if (s) { (s.chat_history = s.chat_history || []).push({ role: "user", text: text }); s.running = true; renderChat(); }
+    if (s) { (s.chat_history = s.chat_history || []).push({ role: "user", text: text }); s.running = true; renderSessionView(); }
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/chat", { method: "POST", body: JSON.stringify({ message: text }) });
       updateSession(r.result.session);
       connectEvents(id);
-      render();
+      renderAll();
     } catch (err) { alert("Send failed: " + err.message); loadSessions(); }
+  }
+
+  // ---- workspace file browser actions ---------------------------------
+  async function loadWorkspace(id, relPath) {
+    state.wsPath = relPath || "";
+    try {
+      var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/workspace?path=" + encodeURIComponent(relPath || ""));
+      state.wsItems = r.items || [];
+      renderWorkspace();
+    } catch (err) {
+      state.wsItems = [];
+      renderWorkspace();
+      console.warn("[sessions] workspace load failed", err);
+    }
+  }
+
+  async function previewFile(id, relPath) {
+    try {
+      var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/workspace/file?path=" + encodeURIComponent(relPath));
+      var isImage = (r.content_type || "").startsWith("image/");
+      var imageUrl = "";
+      if (isImage) {
+        imageUrl = "data:" + r.content_type + ";base64," + r.content;
+      }
+      openViewer(r.name || relPath, isImage ? "" : (r.content || "(empty)"), isImage, imageUrl);
+    } catch (err) { alert("Preview failed: " + err.message); }
+  }
+
+  function downloadFile(id, relPath) {
+    var url = withProject("/api/sessions/" + encodeURIComponent(id) + "/workspace/file?path=" + encodeURIComponent(relPath) + "&download=1");
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = relPath.split("/").pop() || "download";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   function updateSession(session) {
@@ -216,7 +474,7 @@
     else state.sessions.push(session);
   }
 
-  // ---- per-session SSE --------------------------------------------------
+  // ---- per-session SSE ------------------------------------------------
   function connectEvents(id) {
     if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
     if (!id) return;
@@ -230,45 +488,67 @@
           selectSession(id);
         } else if (data.log || data.transcript_entry) {
           var s = state.sessions.find(function (x) { return x.id === id; });
-          if (s && data.log) { s.last_event_summary = data.log; renderChat(); }
+          if (s && data.log) { s.last_event_summary = data.log; renderSessionView(); }
         }
       } catch (e) { /* ignore */ }
     });
     es.onerror = function () { /* auto-reconnect handled by browser */ };
   }
 
-  // ---- mount ------------------------------------------------------------
-  function mount() {
-    if (document.getElementById("cas-launcher")) return;
-    var launcher = el("button", "cas-launcher", "⚗ Sessions");
-    launcher.id = "cas-launcher";
-    launcher.title = "Isolated research sessions";
-    launcher.onclick = toggle;
-    document.body.appendChild(launcher);
-
-    var panel = el("div", "cas-panel");
-    panel.id = "cas-panel";
-    panel.hidden = true;
-    var head = el("div", "cas-panel-head");
-    head.appendChild(el("strong", null, "Research Sessions"));
-    var close = el("button", "cas-close", "×");
-    close.onclick = toggle;
-    head.appendChild(close);
-    panel.appendChild(head);
-    var body = el("div", "cas-panel-body");
-    body.appendChild(el("div", "cas-list"));
-    body.appendChild(el("div", "cas-chat", null)).id = "cas-chat";
-    panel.appendChild(body);
-    document.body.appendChild(panel);
-    loadSessions();
-    setInterval(function () { if (state.open) loadSessions(); }, 8000);
+  // ---- render all -----------------------------------------------------
+  function renderAll() {
+    renderRail();
+    renderSessionView();
   }
 
-  function toggle() {
-    state.open = !state.open;
-    var panel = document.getElementById("cas-panel");
-    if (panel) panel.hidden = !state.open;
-    if (state.open) loadSessions();
+  // ---- mount ----------------------------------------------------------
+  function mount() {
+    // Wire up the chat form
+    var form = document.getElementById("sv-chat-form");
+    if (form) {
+      form.onsubmit = function (e) {
+        e.preventDefault();
+        var input = document.getElementById("sv-chat-input");
+        if (!input) return;
+        var text = input.value.trim();
+        if (!text) return;
+        sendMessage(state.activeId, text);
+        input.value = "";
+      };
+    }
+
+    // Wire up workspace refresh button
+    var wsRefresh = document.getElementById("sv-ws-refresh");
+    if (wsRefresh) {
+      wsRefresh.onclick = function () { loadWorkspace(currentSessionId(), state.wsPath); };
+    }
+
+    // If project already loaded
+    if (window.activeProjectId) {
+      loadSessions();
+    }
+
+    // Poll for project changes (app.js sets window.activeProjectId directly)
+    var lastPid = window.activeProjectId || "";
+    setInterval(function () {
+      var curPid = window.activeProjectId || "";
+      if (curPid !== lastPid) {
+        lastPid = curPid;
+        if (curPid) {
+          autoCreateChecked = false;
+          state.sessions = [];
+          state.activeId = "";
+          loadSessions();
+        } else {
+          state.sessions = [];
+          state.activeId = "";
+          renderAll();
+        }
+      }
+    }, 500);
+
+    // Periodic refresh
+    setInterval(function () { if (window.activeProjectId) loadSessions(); }, 8000);
   }
 
   if (document.readyState === "loading") {

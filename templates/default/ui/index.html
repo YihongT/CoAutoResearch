@@ -29,7 +29,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png" />
     <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css?v=20260626-stop-preexec" />
-    <link rel="stylesheet" href="/sessions-panel.css?v=20260701-multisession" />
+    <link rel="stylesheet" href="/sessions-panel.css?v=20260701-v3" />
   </head>
   <body class="is-project-loading">
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
@@ -82,6 +82,11 @@
           <button class="rail-action" type="button" data-view="trials"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-trials"/></svg><span>Trials</span></button>
           <button class="rail-action" type="button" data-view="reviews"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-reviews"/></svg><span>Reviews</span></button>
           <button class="rail-action" type="button" data-view="manuscript"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-manuscript"/></svg><span>Manuscript</span></button>
+        </nav>
+
+        <nav class="rail-sessions" id="rail-sessions" aria-label="Research sessions" hidden>
+          <div class="rail-section-label">Sessions</div>
+          <div class="rail-sessions-list" id="rail-sessions-list"></div>
         </nav>
 
         <div class="rail-footer">
@@ -372,6 +377,35 @@
             </div>
           </header>
           <div id="context-content" class="context-content"></div>
+        </section>
+
+        <section class="workspace-view sessions-view" id="sessions-view" aria-label="Session chat">
+          <div class="sessions-view-frame">
+            <header class="sessions-view-header">
+              <div class="sessions-view-title-row">
+                <h1 id="sv-title">Session</h1>
+                <div class="sessions-view-tools" id="sv-tools"></div>
+              </div>
+              <p class="sessions-view-hint" id="sv-hint"></p>
+            </header>
+            <div class="sessions-view-body">
+              <div class="sessions-chat-col">
+                <div class="sessions-chat-log" id="sv-chat-log"></div>
+                <form class="sessions-chat-form" id="sv-chat-form">
+                  <textarea class="sessions-chat-input" id="sv-chat-input" placeholder="Message this session…" rows="2"></textarea>
+                  <button class="sessions-chat-send" type="submit">Send</button>
+                </form>
+              </div>
+              <div class="sessions-ws-col" id="sv-ws-col">
+                <div class="sessions-ws-head">
+                  <span>📁 Workspace</span>
+                  <button class="sessions-ws-refresh" id="sv-ws-refresh" type="button">⟳</button>
+                </div>
+                <div class="sessions-ws-breadcrumb" id="sv-ws-breadcrumb"></div>
+                <div class="sessions-ws-list" id="sv-ws-list"></div>
+              </div>
+            </div>
+          </div>
         </section>
       </main>
     </div>
@@ -1033,6 +1067,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <script src="/app.js?v=20260626-stop-preexec"></script>
-    <script src="/sessions-panel.js?v=20260701-multisession"></script>
+    <script src="/sessions-panel.js?v=20260701-v3"></script>
   </body>
 </html>
