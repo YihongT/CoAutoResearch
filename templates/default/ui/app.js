@@ -46,6 +46,7 @@ function initialComposerMode(projectId) {
 
 let appState = null;
 let activeProjectId = initialUrlParams.get("project") || localStorage.getItem("coAutoResearchActiveProject") || "";
+window.activeProjectId = activeProjectId;
 let composerMode = initialComposerMode(activeProjectId);
 let pendingPlanRevisionId = "";
 const restoredNavigationPanel = initialNavigationPanel(activeProjectId);
@@ -2710,6 +2711,7 @@ async function switchProject(projectId) {
   persistActiveViewScrollPosition();
   persistNavigationState();
   activeProjectId = next;
+  window.activeProjectId = activeProjectId;
   localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
   updateNavigationUrl();
   setProjectLoadPhase("overview");
@@ -2734,12 +2736,14 @@ async function loadProjects(options = {}) {
   const resolvedProjectId = resolveProjectIdAlias(projects, activeProjectId);
   if (resolvedProjectId && resolvedProjectId !== activeProjectId) {
     activeProjectId = resolvedProjectId;
+    window.activeProjectId = activeProjectId;
     localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
     composerMode = initialComposerMode(activeProjectId);
     pendingPlanRevisionId = "";
   }
   if (!activeProjectId || !known.has(activeProjectId)) {
     activeProjectId = String(resolveProjectIdAlias(projects, payload.active_project_id) || projects[0]?.id || "");
+    window.activeProjectId = activeProjectId;
     if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
     else localStorage.removeItem("coAutoResearchActiveProject");
     composerMode = initialComposerMode(activeProjectId);
