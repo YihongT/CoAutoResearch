@@ -106,6 +106,13 @@ The left sidebar opens material views:
 
 Resources and Trials are expandable file-browser views. File contents open inline at the file's own position and provide text-file editing where supported.
 
+The Manuscript view may surface candidate figure previews for active inline
+figure specs when the active backend is Codex and image generation is available.
+Generated images are candidate manuscript assets, not independent research
+results: the blueprint remains the source of truth and must record the source
+path, Markdown preview image, provenance, and remaining blocker for each active
+figure.
+
 ---
 
 ## Visual Direction
@@ -131,5 +138,5 @@ Resources and Trials are expandable file-browser views. File contents open inlin
 - storing hidden state in a database;
 - creating a generic shell runner UI;
 - writing pending intervention files from chat;
-- automatically drawing figures;
+- promoting speculative figure images as final research results;
 - launching arbitrary dangerous commands from browser controls.
