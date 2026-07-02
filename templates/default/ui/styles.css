@@ -18665,3 +18665,43 @@ html[data-theme] .brief-editor-shell.is-framing-dock #cold-file-editor.is-compac
   line-height: 22px !important;
   overflow-y: hidden !important;
 }
+
+/* Sidebar brand uses theme-specific mark art plus live text, avoiding blurry PNG wordmarks. */
+html[data-theme] .brand.brand-image {
+  gap: 9px;
+  min-height: 42px;
+  padding: 2px 6px 12px;
+}
+
+html[data-theme] .brand.brand-image .brand-mark {
+  display: grid;
+  flex: 0 0 42px;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  background: transparent;
+}
+
+html[data-theme] .brand-mark-img {
+  grid-area: 1 / 1;
+  display: block;
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+html[data-theme="atelier-ivory"] .brand-mark-img-nocturne,
+html[data-theme="atelier-nocturne"] .brand-mark-img-ivory {
+  display: none;
+}
+
+html[data-theme] .brand-wordmark {
+  color: var(--rail-ink);
+  font-family: var(--reader);
+  font-size: 17px;
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
