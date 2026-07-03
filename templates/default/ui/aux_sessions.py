@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
-"""Auxiliary (multi-)session isolation layer for CoAutoResearch.
+"""Auxiliary chat-session isolation layer for CoAutoResearch.
 
 This module adds Codex/Box-style multi-session support on top of the existing
 single-session autoresearch engine WITHOUT touching the evolution loop.
 
-Three session kinds are supported:
+Two session kinds are supported:
 
-- ``monitor``   : read-only progress questions ("how is it going, best result,
-                  vs baseline, which ideas worked"). Auto-refreshes a live
-                  progress digest before every message.
-- ``idea``      : discussion / reproduction sandbox with its own workspace
-                  directory (clone repos, drop papers, run baselines). May write
-                  only inside its own workspace, never the shared trajectory.
+- ``chat``      : ordinary isolated project chat with its own workspace. It may
+                  discuss ideas or monitor progress depending on the user's
+                  prompt, but it is not a separate instruction mode.
 - ``evolution`` : the persistent autoresearch loop. There is exactly ONE and it
                   is handled by the legacy engine; this manager only tracks a
                   lightweight pointer to it so the UI can list it uniformly.
 
-Each ``monitor``/``idea`` session owns an independent CLI session id, so their
-context windows are fully isolated from the evolution loop and from each other.
+Each ``chat`` session owns an independent CLI session id, so its context window
+is fully isolated from the evolution loop and from other chats.
 
 The module is intentionally self-contained: it receives an ``engine`` object
 (the host module ``server``) that exposes the small set of helpers it needs, so
@@ -28,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import base64
 import shutil
 import subprocess
 import threading
@@ -36,13 +34,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-AUX_SESSION_KINDS = ("monitor", "idea", "evolution")
+AUX_SESSION_KINDS = ("chat", "evolution")
+AUX_LEGACY_CHAT_KINDS = {"monitor", "idea"}
 AUX_CHAT_HISTORY_MAX = 200
 AUX_LOG_MAX = 2000
 AUX_TRANSCRIPT_MAX = 600
 AUX_EVENT_BUFFER_MAX = 500
 
-# Files that monitor/idea sessions must never mutate. Enforced both by prompt
+# Files that chat sessions must never mutate. Enforced both by prompt
 # hard-boundary and by a snapshot+restore guard around every run.
 AUX_PROTECTED_PATHS = [
     "research_trajectory/STATE.md",
@@ -78,23 +77,47 @@ def _slug(value: str, fallback: str = "session") -> str:
     return cleaned[:48] or fallback
 
 
+def normalize_aux_session_kind(kind: str) -> str:
+    value = str(kind or "").strip().lower()
+    if value in AUX_LEGACY_CHAT_KINDS:
+        return "chat"
+    return value if value in AUX_SESSION_KINDS else "chat"
+
+
+def auto_session_title(message: str) -> str:
+    text = " ".join(str(message or "").strip().split())
+    if not text:
+        return "New session"
+    for marker in ("# ", "## ", "- ", "* ", "> "):
+        text = text.replace(marker, "")
+    text = text.strip("`*_[](){}<>\"'")
+    if not text:
+        return "New session"
+    if len(text) <= 52:
+        return text
+    return text[:49].rstrip(" ,.;:") + "..."
+
+
 class AuxSession:
-    """A single isolated chat/monitor/idea session backed by its own CLI thread."""
+    """A single isolated chat session backed by its own CLI thread."""
 
     def __init__(self, manager: "AuxSessionManager", kind: str, title: str = "") -> None:
         self.manager = manager
-        self.kind = kind if kind in AUX_SESSION_KINDS else "monitor"
+        self.kind = normalize_aux_session_kind(kind)
         self.id = f"{self.kind[:3].upper()}{_now_id()}_{uuid.uuid4().hex[:6]}"
         self.title = str(title or "").strip() or self._default_title()
+        self.title_source = "user" if str(title or "").strip() else "auto"
         self.created_at = _now_iso()
         self.updated_at = self.created_at
         self.cli_session_id = ""
         self.status = "idle"  # idle | running | error | completed
+        self.started_at = ""
         self.settings: dict[str, Any] = {}
         self.backend = "codex"
         self.chat_history: list[dict[str, Any]] = []
         self.logs: list[str] = []
         self.transcript: list[dict[str, Any]] = []
+        self.streaming_transcript: dict[str, dict[str, Any]] = {}
         self.events: list[dict[str, Any]] = []
         self.event_id = 0
         self.last_event_at = ""
@@ -102,6 +125,7 @@ class AuxSession:
         self.returncode: Any = None
         self._process: subprocess.Popen[str] | None = None
         self._thread: threading.Thread | None = None
+        self._cancel_requested = False
         self.lock = threading.RLock()
         self.event_condition = threading.Condition(threading.RLock())
         # per-session directories
@@ -113,10 +137,9 @@ class AuxSession:
     # ---- lifecycle -------------------------------------------------------
     def _default_title(self) -> str:
         return {
-            "monitor": "Monitor",
-            "idea": "Idea discussion",
-            "evolution": "Evolution run",
-        }.get(self.kind, "Session")
+            "chat": "New session",
+            "evolution": "Evolution Run",
+        }.get(self.kind, "New session")
 
     def ensure_dirs(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -128,16 +151,31 @@ class AuxSession:
             proc = self._process
         return bool(proc and proc.poll() is None)
 
+    def is_active(self) -> bool:
+        """True while this session has (or claims to have) a run in flight."""
+        with self.lock:
+            return self.status == "running" or self.is_running()
+
     def meta(self) -> dict[str, Any]:
         with self.lock:
+            if self.kind == "evolution":
+                # The evolution session is only a pointer to the legacy
+                # autoresearch loop (see module docstring) -- it must report
+                # that loop's real status, not its own (unused) run state,
+                # or the sessions rail and the research panel would disagree.
+                status = self.manager.engine.evolution_loop_status(self.manager.context)["status"]
+            else:
+                status = "running" if self.is_active() else self.status
             return {
                 "id": self.id,
                 "kind": self.kind,
                 "title": self.title,
+                "title_source": self.title_source,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
+                "started_at": self.started_at,
                 "cli_session_id": self.cli_session_id,
-                "status": "running" if self.is_running() else self.status,
+                "status": status,
                 "backend": self.backend,
                 "settings": self.settings,
                 "returncode": self.returncode,
@@ -146,11 +184,13 @@ class AuxSession:
     def public(self) -> dict[str, Any]:
         m = self.meta()
         with self.lock:
+            running = (m["status"] == "running") if self.kind == "evolution" else self.is_active()
             m["workspace"] = str(self.workspace_dir)
             m["context_path"] = str(self.context_path)
+            m["event_id"] = self.event_id
             m["last_event_at"] = self.last_event_at
             m["last_event_summary"] = self.last_event_summary
-            m["running"] = self.is_running()
+            m["running"] = running
         return m
 
     def snapshot(self) -> dict[str, Any]:
@@ -159,7 +199,22 @@ class AuxSession:
             m["chat_history"] = list(self.chat_history)[-AUX_CHAT_HISTORY_MAX:]
             m["logs"] = list(self.logs)[-200:]
             m["transcript"] = list(self.transcript)[-120:]
+            m["context_preview"] = self.context_preview()
         return m
+
+    def context_preview(self, limit: int = 12000) -> str:
+        try:
+            text = self.context_path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+        marker = "## Session boundary"
+        idx = text.find(marker)
+        if idx >= 0:
+            text = text[idx:]
+        text = text.strip()
+        if len(text) > limit:
+            text = text[:limit].rstrip() + "\n\n... (truncated)"
+        return text
 
     def persist(self) -> None:
         self.ensure_dirs()
@@ -184,8 +239,10 @@ class AuxSession:
                 data = json.loads(meta_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     self.title = str(data.get("title") or self.title)
+                    self.title_source = str(data.get("title_source") or self.title_source or "auto")
                     self.created_at = str(data.get("created_at") or self.created_at)
                     self.updated_at = str(data.get("updated_at") or self.updated_at)
+                    self.started_at = str(data.get("started_at") or "")
                     self.cli_session_id = str(data.get("cli_session_id") or "")
                     self.backend = str(data.get("backend") or "codex")
                     if isinstance(data.get("settings"), dict):
@@ -223,13 +280,18 @@ class AuxSession:
         backend = self.backend or "codex"
         display = engine.format_agent_event(line, backend)
         transcript = engine.transcript_from_agent_line(line, backend)
+        streaming_update = None if transcript else engine.streaming_update_from_agent_line(line, backend)
+        suppress_summary = engine.should_suppress_agent_event_summary(line, backend)
         event_at = _now_iso()
+        transcript_update: dict[str, Any] | None = None
         with self.lock:
             if line.strip():
                 self.logs.append(line.rstrip("\n"))
                 self.last_event_at = event_at
-            if display:
+            if display and not suppress_summary:
                 self.last_event_summary = engine.compact_single_line(display, 260)
+            elif line.strip() and not suppress_summary:
+                self.last_event_summary = engine.compact_single_line(line, 260)
             # capture CLI session id for resume
             sid = ""
             try:
@@ -239,16 +301,112 @@ class AuxSession:
             if sid:
                 self.cli_session_id = sid
             if transcript and transcript.get("content"):
-                self.transcript.append(transcript)
-                self.transcript = self.transcript[-AUX_TRANSCRIPT_MAX:]
+                transcript_update = self._finalize_streaming_transcript_locked(transcript)
+            elif streaming_update:
+                transcript_update = self._upsert_streaming_transcript_locked(streaming_update)
             self.logs = self.logs[-AUX_LOG_MAX:]
         payload: dict[str, Any] = {}
-        if display:
+        if display and not suppress_summary:
             payload["log"] = display
-        if transcript and transcript.get("content"):
-            payload["transcript_entry"] = transcript
+        if transcript_update and transcript_update.get("content"):
+            payload["transcript_entry"] = transcript_update
         if payload or line.strip():
             self.emit("agent_event", payload)
+
+    def _upsert_transcript_entry_locked(self, entry: dict[str, Any]) -> dict[str, Any]:
+        entry_id = str(entry.get("id") or "").strip()
+        if entry_id:
+            for index, existing in enumerate(self.transcript):
+                if str(existing.get("id") or "") == entry_id:
+                    merged = {**existing, **entry}
+                    if existing.get("created_at"):
+                        merged["created_at"] = existing["created_at"]
+                    if entry.get("streaming") is False:
+                        merged.pop("streaming", None)
+                    self.transcript[index] = merged
+                    self.transcript = self.transcript[-AUX_TRANSCRIPT_MAX:]
+                    return merged
+        self.transcript.append(entry)
+        self.transcript = self.transcript[-AUX_TRANSCRIPT_MAX:]
+        return entry
+
+    def _upsert_streaming_transcript_locked(self, update: dict[str, Any]) -> dict[str, Any] | None:
+        key = str(update.get("key") or "assistant:active")
+        text = str(update.get("text") or "")
+        existing = self.streaming_transcript.get(key) if isinstance(self.streaming_transcript.get(key), dict) else None
+        if not text.strip() and not existing:
+            return None
+        mode = str(update.get("mode") or "append")
+        content = text if mode == "snapshot" else f"{existing.get('content', '') if existing else ''}{text}"
+        content = content[: getattr(self.manager.engine, "STREAMING_TRANSCRIPT_MAX_CHARS", 12000)]
+        if not content.strip():
+            return None
+        entry_id = str(existing.get("id") or "") if existing else f"{self.id}_stream_{len(self.transcript) + 1:04d}"
+        created_at = str(existing.get("created_at") or "") if existing else _now_iso()
+        parsed = {
+            "role": update.get("role") or "assistant",
+            "kind": update.get("kind") or "assistant",
+            "title": update.get("title") or "Assistant",
+            "content": content,
+            "raw_type": update.get("raw_type") or "stream.delta",
+            "editable": False,
+        }
+        entry = self.manager.engine.parsed_transcript_entry(parsed, entry_id=entry_id, streaming=True, created_at=created_at)
+        entry = self._upsert_transcript_entry_locked(entry)
+        self.streaming_transcript[key] = {
+            "id": entry_id,
+            "created_at": created_at,
+            "content": content,
+            "family": str(update.get("family") or update.get("kind") or "assistant"),
+            "role": str(update.get("role") or "assistant"),
+            "kind": str(update.get("kind") or "assistant"),
+        }
+        return entry
+
+    def _finalize_streaming_transcript_locked(self, parsed: dict[str, Any]) -> dict[str, Any] | None:
+        content = str(parsed.get("content") or "").strip()
+        if not content:
+            return None
+        role = str(parsed.get("role") or "").strip().lower()
+        kind = str(parsed.get("kind") or "").strip().lower()
+        families: list[str] = []
+        if role in {"assistant", "final"} or kind in {"assistant", "final"}:
+            families.append("assistant")
+        if role == "tool" or kind in {"tool", "error"}:
+            families.append("tool")
+        if kind == "reasoning":
+            families.append("reasoning")
+        candidate_key = ""
+        for key, item in self.streaming_transcript.items():
+            if str(item.get("family") or "") in families:
+                candidate_key = key
+        if candidate_key:
+            item = self.streaming_transcript.pop(candidate_key)
+            entry = self.manager.engine.parsed_transcript_entry(
+                parsed,
+                entry_id=str(item.get("id") or ""),
+                streaming=False,
+                created_at=str(item.get("created_at") or ""),
+            )
+            entry["streaming"] = False
+            return self._upsert_transcript_entry_locked(entry)
+        entry = self.manager.engine.parsed_transcript_entry(parsed)
+        return self._upsert_transcript_entry_locked(entry)
+
+    def _finalize_active_streaming_transcripts_locked(self) -> list[dict[str, Any]]:
+        if not self.streaming_transcript:
+            self.streaming_transcript = {}
+            return []
+        ids = {str(item.get("id") or "") for item in self.streaming_transcript.values() if isinstance(item, dict)}
+        finalized: list[dict[str, Any]] = []
+        for index, entry in enumerate(self.transcript):
+            if str(entry.get("id") or "") in ids and entry.get("streaming"):
+                next_entry = dict(entry)
+                next_entry.pop("streaming", None)
+                self.transcript[index] = next_entry
+                finalized.append(next_entry)
+        self.streaming_transcript = {}
+        return finalized
 
     # ---- protected-file guard -------------------------------------------
     def _snapshot_protected(self) -> Path | None:
@@ -335,10 +493,15 @@ class AuxSession:
         self.backend = engine.normalize_agent_backend(settings.get("backend"))
         prompt = self.manager.build_prompt(self, message)
         with self.lock:
+            if self.kind == "chat" and self.title_source == "auto" and self.title == self._default_title():
+                self.title = auto_session_title(message)
             self.chat_history.append({"role": "user", "text": message, "at": _now_iso()})
             self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
             self.status = "running"
-            self.updated_at = _now_iso()
+            self.started_at = _now_iso()
+            self.streaming_transcript = {}
+            self.updated_at = self.started_at
+        self.persist()
         self.emit("session", {"status": "running"})
         thread = threading.Thread(
             target=self.manager.engine.run_in_project,
@@ -351,10 +514,22 @@ class AuxSession:
 
     def _run(self, prompt: str, resume: bool) -> None:
         engine = self.manager.engine
+        with self.lock:
+            cancelled = self._cancel_requested
+            if cancelled:
+                self._cancel_requested = False
+                self.status = "interrupted"
+                self.updated_at = _now_iso()
+        if cancelled:
+            # stop() was called before this thread reached Popen -- honor it
+            # instead of silently starting the run anyway.
+            self.persist()
+            self.emit("session", {"status": "interrupted"})
+            return
         snap = self._snapshot_protected()
         command = self.manager.agent_command(self, resume)
         env = engine.agent_process_env(self.backend)
-        cwd = self.workspace_dir if self.kind == "idea" else engine.repo_path(".")
+        cwd = self.workspace_dir if self.kind == "chat" else engine.repo_path(".")
         try:
             popen_command, use_shell, _wrapper = engine.popen_command_for_agent(command, self.settings, env)
             proc = subprocess.Popen(
@@ -380,6 +555,8 @@ class AuxSession:
             with self.lock:
                 self.status = "error"
                 self._process = None
+                self.updated_at = _now_iso()
+            self.persist()
             self.emit("error", {"status": "error"})
             self._restore_protected(snap)
             return
@@ -407,6 +584,7 @@ class AuxSession:
                 "Session guard restored protected autoresearch artifacts: " + ", ".join(restored)
             )
         with self.lock:
+            self._finalize_active_streaming_transcripts_locked()
             self._process = None
             self._thread = None
             self.returncode = returncode
@@ -426,6 +604,13 @@ class AuxSession:
     def stop(self, force: bool = False) -> None:
         with self.lock:
             proc = self._process
+            if self.status == "running" and proc is None:
+                # start_message() has marked this session running but the
+                # background thread hasn't reached Popen yet (still copying
+                # the protected-file snapshot, etc.) -- there is no OS
+                # process to signal yet. Ask _run() to bail out before it
+                # spawns one instead of silently doing nothing.
+                self._cancel_requested = True
         if proc and proc.poll() is None:
             try:
                 self.manager.engine.signal_research_process(proc, force=force)
@@ -433,19 +618,57 @@ class AuxSession:
                 pass
 
     def refresh(self) -> None:
-        """Clear the CLI context: kill process, wipe history + cli session id."""
+        """Reset provider CLI context while preserving visible chat history."""
         self.stop(force=True)
         with self.lock:
-            self.chat_history = []
             self.logs = []
             self.transcript = []
             self.cli_session_id = ""
             self.status = "idle"
+            self.started_at = ""
             self.returncode = None
             self.last_event_summary = ""
+            self.streaming_transcript = {}
             self.updated_at = _now_iso()
         self.persist()
         self.emit("session", {"status": "idle", "refreshed": True})
+
+    def prepare_message_edit(self, index: int) -> dict[str, Any]:
+        if self.kind != "chat":
+            raise ValueError("Only chat messages can be edited.")
+        with self.lock:
+            if self.is_active():
+                raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
+            history = list(self.chat_history)
+            if index < 0 or index >= len(history):
+                raise ValueError("Unknown message to edit.")
+            if str(history[index].get("role") or "").lower() != "user":
+                raise ValueError("Only user messages can be edited.")
+            archived_count = len(history) - index - 1
+            self.chat_history = history[:index]
+            self.cli_session_id = ""
+            self.logs = []
+            self.transcript = []
+            self.streaming_transcript = {}
+            self.returncode = None
+            self.status = "idle"
+            self.started_at = ""
+            if index == 0 and self.title_source == "auto":
+                self.title = self._default_title()
+            self.updated_at = _now_iso()
+        self.persist()
+        return {"archived_count": archived_count}
+
+    def rename(self, title: str) -> None:
+        cleaned = " ".join(str(title or "").strip().split())
+        if not cleaned:
+            raise ValueError("Session title is required.")
+        with self.lock:
+            self.title = cleaned[:80]
+            self.title_source = "user"
+            self.updated_at = _now_iso()
+        self.persist()
+        self.emit("session", {"renamed": True, "title": self.title})
 
 
 class AuxSessionManager:
@@ -478,12 +701,12 @@ class AuxSessionManager:
                 sdir = self.sessions_dir / str(sid)
                 if not sdir.exists():
                     continue
-                kind = "monitor"
+                kind = "chat"
                 meta_path = sdir / "meta.json"
                 if meta_path.exists():
                     try:
                         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                        kind = str(meta.get("kind") or "monitor")
+                        kind = normalize_aux_session_kind(str(meta.get("kind") or "chat"))
                     except (OSError, json.JSONDecodeError):
                         pass
                 session = AuxSession(self, kind)
@@ -493,6 +716,9 @@ class AuxSessionManager:
                 session.workspace_dir = sdir / "workspace"
                 session.context_path = session.context_dir / "CONTEXT.md"
                 session.load_persisted()
+                if session.kind != kind:
+                    session.kind = kind
+                session.persist()
                 self.sessions[session.id] = session
                 self.order.append(session.id)
 
@@ -522,8 +748,14 @@ class AuxSessionManager:
 
     def create(self, kind: str, title: str = "", settings: Any = None) -> AuxSession:
         self.load()
+        kind = normalize_aux_session_kind(kind)
         if kind not in AUX_SESSION_KINDS:
             raise ValueError(f"Unknown session kind: {kind}")
+        if kind == "evolution":
+            with self.lock:
+                existing = next((self.sessions[sid] for sid in self.order if sid in self.sessions and self.sessions[sid].kind == "evolution"), None)
+            if existing:
+                return existing
         session = AuxSession(self, kind, title)
         session.ensure_dirs()
         if isinstance(settings, dict):
@@ -539,8 +771,10 @@ class AuxSessionManager:
 
     def delete(self, session_id: str) -> dict[str, Any]:
         session = self.get(session_id)
+        if session.kind == "evolution":
+            raise ValueError("The evolution session is the persistent autoresearch loop and cannot be deleted.")
         session.stop(force=True)
-        # idea workspace + all session dirs are deleted outright (user choice)
+        # Chat workspace + all session dirs are deleted outright (user choice).
         try:
             if session.dir.exists():
                 shutil.rmtree(session.dir, ignore_errors=True)
@@ -554,6 +788,8 @@ class AuxSessionManager:
 
     def refresh_session(self, session_id: str) -> AuxSession:
         session = self.get(session_id)
+        if session.kind == "evolution":
+            raise ValueError("The evolution session is the persistent autoresearch loop and cannot be reset.")
         session.refresh()
         # Rebuild context document from the latest project state.
         self.write_context(session)
@@ -562,28 +798,94 @@ class AuxSessionManager:
     def chat(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         session = self.get(session_id)
         message = str(payload.get("message") or "").strip()
+        uploads = payload.get("files") if isinstance(payload.get("files"), list) else []
+        edit_index_raw = payload.get("editIndex", payload.get("edit_index"))
+        edit_index: int | None = None
+        if edit_index_raw not in (None, ""):
+            try:
+                edit_index = int(edit_index_raw)
+            except (TypeError, ValueError):
+                raise ValueError("Invalid message edit index.")
+        if not message and not uploads:
+            raise ValueError("Message is required.")
+        if session.is_active():
+            raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
+        if session.kind == "evolution" and self.engine.evolution_loop_status(self.context)["running"]:
+            # The evolution session's subprocess and the legacy autoresearch
+            # loop both have write access to research_trajectory/manuscript;
+            # only one of them may run at a time or their writes could race.
+            raise ValueError(
+                "The evolution run is already active in the main research panel. "
+                "Use that panel to continue it, or stop it there first."
+            )
+        if edit_index is not None:
+            if uploads:
+                raise ValueError("Edited chat messages cannot add new attachments yet.")
+            session.prepare_message_edit(edit_index)
+        saved_uploads = self._save_chat_uploads(session, uploads)
+        if saved_uploads:
+            if not message:
+                message = "Please review the attached file(s)."
+            lines = ["", "", "Attached files in this chat workspace:"]
+            for rel in saved_uploads:
+                lines.append(f"- `{rel}`")
+            message += "\n".join(lines)
         if not message:
             raise ValueError("Message is required.")
-        if session.is_running():
-            raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
         settings = self.engine.normalize_research_settings(payload.get("settings") or session.settings)
-        # Monitor sessions always refresh their live progress digest first.
-        if session.kind == "monitor":
-            self.write_context(session)
-        resume = bool(session.cli_session_id)
+        self.write_context(session)
+        resume = bool(session.cli_session_id) and edit_index is None
         session.start_message(message, settings, resume)
         return {"session": session.public()}
+
+    def _save_chat_uploads(self, session: AuxSession, uploads: list[Any]) -> list[str]:
+        if session.kind != "chat" or not uploads:
+            return []
+        root = session.workspace_dir / "attachments"
+        root.mkdir(parents=True, exist_ok=True)
+        saved: list[str] = []
+        for item in uploads[:12]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "attachment").strip()
+            encoded = str(item.get("contentBase64") or "").strip()
+            if not encoded:
+                continue
+            try:
+                data = base64.b64decode(encoded, validate=True)
+            except Exception:
+                continue
+            stem = _slug(Path(name).stem or "attachment", "attachment")
+            suffix = Path(name).suffix.lower()
+            if not suffix or len(suffix) > 16 or any(ch not in ".abcdefghijklmnopqrstuvwxyz0123456789" for ch in suffix):
+                suffix = ""
+            target = root / f"{stem}{suffix}"
+            counter = 2
+            while target.exists():
+                target = root / f"{stem}-{counter}{suffix}"
+                counter += 1
+            try:
+                target.write_bytes(data)
+                saved.append(str(target.relative_to(session.workspace_dir)))
+            except OSError:
+                continue
+        return saved
+
+    def rename_session(self, session_id: str, title: str) -> AuxSession:
+        session = self.get(session_id)
+        if session.kind == "evolution":
+            raise ValueError("The evolution session is the persistent autoresearch loop and cannot be renamed.")
+        session.rename(title)
+        return session
 
     # ---- context documents ----------------------------------------------
     def write_context(self, session: AuxSession) -> None:
         session.ensure_dirs()
         try:
-            if session.kind == "monitor":
-                text = self.engine.build_monitor_context(session)
-            elif session.kind == "idea":
-                text = self.engine.build_idea_context(session)
-            else:
+            if session.kind == "evolution":
                 text = self.engine.build_evolution_context(session)
+            else:
+                text = self.engine.build_chat_context(session)
             session.context_path.write_text(text, encoding="utf-8")
         except Exception:
             pass

@@ -831,7 +831,7 @@ function markdownCodeHtml(value) {
   const text = String(value || "");
   const linkTarget = text.includes("::") ? text.split("::")[0] : text;
   const path = repoRelativePath(linkTarget.replace(/[.,;:)]+$/, ""));
-  if (/^(?:resources|research_trajectory|manuscript|workspace|archive|instructions|templates|ui)\//.test(path) || /^[A-Z0-9_./-]+\.(?:md|pdf|png|jpg|jpeg|svg|csv|tsv|json|jsonl|txt|tex|bib|py|js|ts|tsx|jsx|html|css)$/i.test(path)) {
+  if (/^(?:resources|research_trajectory|manuscript|workspace|archive|instructions|templates|ui)\//.test(path) || /^[A-Z0-9_./-]+\.(?:md|pdf|png|jpg|jpeg|svg|csv|tsv|json|jsonl|ipynb|txt|tex|bib|py|js|ts|tsx|jsx|html|css|scss|r|rb|php|pl|lua|java|go|rs|c|h|cpp|hpp|m|mm|swift|kt|kts|sh|bash|zsh|sql|toml|ini|cfg|conf)$/i.test(path)) {
     return markdownFileButtonHtml(path, text);
   }
   return `<code>${escapeHtml(text)}</code>`;
@@ -3160,7 +3160,7 @@ function updateWorkingDurations() {
 
 function scheduleWorkingTicker() {
   clearTimeout(workingTickerTimer);
-  if (!isSessionRunning()) return;
+  if (!isSessionRunning() && !document.querySelector("[data-working-started-at]")) return;
   updateWorkingDurations();
   workingTickerTimer = setTimeout(scheduleWorkingTicker, 1000);
 }
@@ -3262,9 +3262,15 @@ function renderRailVisibility() {
     persistNavigationState({ updateUrl: true });
   }
   $$(".rail-action").forEach((button) => {
-    const selected = activeView === "chat" ? button.dataset.view === "chat" : button.dataset.view === activePanel;
+    // No rail-action maps to "chat" anymore -- Sessions/New chat/Search
+    // chats/Autoresearch session are always visible, not a nav destination --
+    // so no button should read as active while viewing any session.
+    const selected = activeView !== "chat" && button.dataset.view === activePanel;
     button.classList.toggle("is-active", selected);
   });
+  if (document.body?.classList?.contains("has-sessions-active")) {
+    $$(".rail-action").forEach((button) => button.classList.remove("is-active"));
+  }
   $("#chat-view").classList.toggle("is-active", activeView === "chat");
   $("#material-view").classList.toggle("is-active", activeView === "materials");
 }
@@ -3342,6 +3348,18 @@ function agentResumeCommand() {
 
 function codexResumeCommand() {
   return agentResumeCommand();
+}
+
+function resumeCommandForSession(session) {
+  const sessionId = String(session?.cli_session_id || "").trim();
+  if (!sessionId) return "";
+  const backend = normalizeAgentBackend(session?.backend || session?.settings?.backend || activeSettingsBackend());
+  const workspace = String(session?.workspace || "").trim();
+  const parts = backend === "claude" ? ["claude", "--resume"] : ["codex", "resume", "--include-non-interactive"];
+  if (workspace && backend === "codex") parts.push("-C", shellQuote(workspace));
+  if (workspace && backend === "claude") parts.push("--add-dir", shellQuote(workspace));
+  parts.push(shellQuote(sessionId));
+  return parts.join(" ");
 }
 
 function renderResumeCommandBar() {
@@ -4351,6 +4369,48 @@ function syncComposerActionButton(button, { stopMode, disabled, sendHtml, sendLa
   button.innerHTML = stopMode ? composerStopIconHtml() : sendHtml;
 }
 
+function createComposerController(config = {}) {
+  const root = typeof config.root === "string" ? document.querySelector(config.root) : config.root || document;
+  const pick = (selector) => {
+    if (!selector) return null;
+    return typeof selector === "string" ? root?.querySelector?.(selector) || document.querySelector(selector) : selector;
+  };
+  const textarea = pick(config.textarea);
+  const sendButton = pick(config.sendButton);
+  const modelSelect = pick(config.modelSelect);
+  const reasoningSelect = pick(config.reasoningSelect);
+  return {
+    textarea,
+    sendButton,
+    modelSelect,
+    reasoningSelect,
+    value() {
+      return String(textarea?.value || "");
+    },
+    setValue(value) {
+      if (textarea) textarea.value = String(value || "");
+    },
+    focus() {
+      textarea?.focus?.({ preventScroll: true });
+    },
+    settings(base = {}) {
+      return {
+        ...(base || {}),
+        ...(modelSelect?.value ? { model: modelSelect.value } : {}),
+        ...(reasoningSelect?.value ? { reasoningEffort: reasoningSelect.value } : {}),
+      };
+    },
+    syncAction(options = {}) {
+      syncComposerActionButton(sendButton, {
+        stopMode: Boolean(options.stopMode),
+        disabled: Boolean(options.disabled),
+        sendHtml: options.sendHtml || composerSendIconHtml(),
+        sendLabel: options.sendLabel || "Send",
+      });
+    },
+  };
+}
+
 function coldComposerHasSendableContent() {
   return Boolean(
     String($("#cold-file-editor")?.value || "").trim() ||
@@ -5252,6 +5312,58 @@ function planCardHtml(message, options = {}) {
   `;
 }
 
+function conversationMessageHtml(message, options = {}) {
+  const role = String(options.role || message?.role || "").toLowerCase() === "user"
+    ? "user"
+    : (String(options.role || message?.role || "").toLowerCase() === "control" ? "control" : "assistant");
+  const id = String(options.id ?? message?.id ?? "");
+  const text = String(options.text ?? message?.text ?? "");
+  const title = String(options.title || (role === "user" ? "You" : (role === "control" ? "Session" : "CoAutoResearch")));
+  const idAttr = String(options.idAttr || "data-framing-id");
+  const editFormAttr = String(options.editFormAttr || "data-framing-edit-form");
+  const editCancelAttr = String(options.editCancelAttr || "data-framing-cancel");
+  const editButtonAttr = String(options.editButtonAttr || "data-framing-edit");
+  const articleExtraAttrs = String(options.articleExtraAttrs || "").trim();
+  const articleAttrs = `${idAttr}="${escapeHtml(id)}"${articleExtraAttrs ? ` ${articleExtraAttrs}` : ""}`;
+  const classExtra = String(options.classExtra || "");
+  const markdown = options.markdown ?? (role === "assistant" || role === "control");
+  if (role === "user" && options.editing) {
+    return `
+      <article class="framing-message ${role} is-editing${escapeHtml(classExtra)}" ${articleAttrs}>
+        <div class="transcript-meta">${escapeHtml(title)}</div>
+        <form class="framing-edit-form" ${editFormAttr}="${escapeHtml(id)}">
+          <textarea name="message" rows="3">${escapeHtml(text)}</textarea>
+          ${String(options.editExtraHtml || "")}
+          <div class="framing-actions">
+            <button class="secondary-button small-button" type="button" ${editCancelAttr}="${escapeHtml(id)}">${escapeHtml(options.cancelLabel || "Cancel")}</button>
+            <button class="primary-button small-button" type="submit">${escapeHtml(options.submitLabel || "Resend")}</button>
+          </div>
+        </form>
+      </article>
+    `;
+  }
+  const copy = options.copy === false || role === "control"
+    ? ""
+    : messageCopyButton(text, role === "user" ? "Copy your message" : "Copy response");
+  const edit = options.canEdit
+    ? `<button class="text-button" type="button" ${editButtonAttr}="${escapeHtml(id)}">Edit</button>`
+    : "";
+  const extraActions = String(options.extraActionsHtml || "");
+  const actionItems = [copy, edit, extraActions].filter(Boolean);
+  const actionClass = `framing-actions message-action-row${String(options.actionClassExtra || "")}`;
+  const actions = actionItems.length ? `<div class="${actionClass}">${actionItems.join("")}</div>` : "";
+  return `
+    <article class="framing-message ${role}${escapeHtml(classExtra)}" ${articleAttrs}>
+      <div class="transcript-meta">${escapeHtml(title)}</div>
+      ${String(options.beforeBodyHtml || "")}
+      ${String(options.attachmentsHtml || "")}
+      <div class="transcript-body">${transcriptContentHtml(text, { markdown })}</div>
+      ${String(options.afterBodyHtml || "")}
+      ${actions}
+    </article>
+  `;
+}
+
 function framingMessageHtml(message, options = {}) {
   if (message.kind === "project" && message.artifact?.text) return projectDraftCardHtml(message, options);
   if (message.kind === "plan" && message.artifact?.id) return planCardHtml(message, options);
@@ -5259,43 +5371,25 @@ function framingMessageHtml(message, options = {}) {
   const role = message.role === "user" ? "user" : "assistant";
   const title = role === "user" ? "You" : "CoAutoResearch";
   const activitySummary = role === "assistant" ? inlineActivitySummaryHtml(options) : "";
-  if (role === "user" && editingFramingId === message.id) {
-    return `
-      <article class="framing-message ${role} is-editing" data-framing-id="${escapeHtml(message.id)}">
-        <div class="transcript-meta">${title}</div>
-        <form class="framing-edit-form" data-framing-edit-form="${escapeHtml(message.id)}">
-          <textarea name="message" rows="3">${escapeHtml(message.text)}</textarea>
-          ${editAttachmentsHtml(message.id)}
-          <div class="framing-actions">
-            <button class="secondary-button small-button" type="button" data-framing-cancel="${escapeHtml(message.id)}">Cancel</button>
-            <button class="primary-button small-button" type="submit">Resend</button>
-          </div>
-        </form>
-      </article>
-    `;
-  }
   const projectAttachmentMessage = role === "assistant" && message.attachedProjectDraft ? message.attachedProjectDraft : null;
   const launchAction = projectAttachmentMessage ? projectDraftLaunchButtonHtml(projectAttachmentMessage) : "";
-  const actionItems = [
-    messageCopyButton(message.text, role === "user" ? "Copy your message" : "Copy response"),
-    role === "user" && !message.resumeFromTrial
-      ? `<button class="text-button" type="button" data-framing-edit="${escapeHtml(message.id)}">Edit</button>`
-      : "",
-    launchAction,
-  ].filter(Boolean);
-  const actionClass = `framing-actions message-action-row${launchAction ? " has-project-launch" : ""}`;
-  const actions = actionItems.length ? `<div class="${actionClass}">${actionItems.join("")}</div>` : "";
   const projectAttachment = projectAttachmentMessage ? projectDraftAttachmentHtml(projectAttachmentMessage) : "";
-  return `
-    <article class="framing-message ${role}" data-framing-id="${escapeHtml(message.id)}">
-      <div class="transcript-meta">${title}</div>
-      ${activitySummary}
-      ${messageAttachmentsHtml(message)}
-      <div class="transcript-body">${transcriptContentHtml(message.text, { markdown: role === "assistant" })}</div>
-      ${projectAttachment}
-      ${actions}
-    </article>
-  `;
+  return conversationMessageHtml(message, {
+    role,
+    title,
+    id: message.id,
+    idAttr: "data-framing-id",
+    articleExtraAttrs: `data-role="${escapeHtml(role)}" data-kind="${escapeHtml(message.kind || "message")}"`,
+    markdown: role === "assistant",
+    editing: role === "user" && editingFramingId === message.id,
+    canEdit: role === "user" && !message.resumeFromTrial,
+    editExtraHtml: editAttachmentsHtml(message.id),
+    beforeBodyHtml: activitySummary,
+    attachmentsHtml: messageAttachmentsHtml(message),
+    afterBodyHtml: projectAttachment,
+    extraActionsHtml: launchAction,
+    actionClassExtra: launchAction ? " has-project-launch" : "",
+  });
 }
 
 function framingThinkingHtml() {
@@ -5333,6 +5427,96 @@ function currentRunLiveStatusHtml() {
           ${placeholder}
           ${showWaitNotice ? waitNotice : ""}
           ${currentRunActivityDetailsHtml(entries)}
+        </section>
+      </div>
+    </article>
+  `;
+}
+
+function progressEntriesFromTranscript(transcript = [], options = {}) {
+  const startedAt = String(options.startedAt || "").trim();
+  const progressStart = startedAt ? Date.parse(startedAt) : 0;
+  const leeway = 1000;
+  return (Array.isArray(transcript) ? transcript : [])
+    .filter((entry) => {
+      const role = transcriptRole(entry);
+      const content = String(entry?.content || "").trim();
+      const rawType = String(entry?.raw_type || "").toLowerCase();
+      if (isNoisyAgentLifecycleEntry(entry)) return false;
+      if (progressStart) {
+        const createdAt = entryTimeValue(entry);
+        if (createdAt && createdAt < progressStart - leeway) return false;
+      }
+      return content && role !== "user" && rawType !== "turn.completed";
+    })
+    .reduceRight((items, entry) => {
+      const key = `${framingProgressTitle(entry)}\n${framingProgressContent(entry)}`;
+      if (!items.seen.has(key)) {
+        items.seen.add(key);
+        items.entries.unshift(entry);
+      }
+      return items;
+    }, { seen: new Set(), entries: [] }).entries
+    .slice(-6);
+}
+
+function sessionRunActivityDetailsHtml(session, entries = []) {
+  const id = String(session?.id || "session").trim() || "session";
+  const backend = session?.backend || session?.settings?.backend || "codex";
+  const started = String(session?.started_at || "").trim();
+  const durationText = session?.running
+    ? workingDurationText(started, { serverClock: Boolean(started) })
+    : activityEntriesDurationText(entries);
+  const eventLabel = currentRunActivityEventLabel(entries.length);
+  const activityKey = `session:${id}:activity`;
+  registerActivityPanelSource(activityKey, {
+    title: "Activity",
+    subtitle: `${agentLabel(backend)} run`,
+    durationText,
+    eventLabel,
+    entries,
+    options: {
+      emptyText: `Waiting for ${agentLabel(backend)} events...`,
+      label: "Run activity timeline",
+    },
+  });
+  return `
+    <div class="run-live-activity-entry">
+      ${activityOpenButtonHtml({
+        key: activityKey,
+        label: "Run activity",
+        eventLabel,
+        className: "run-live-activity-button",
+      })}
+    </div>
+  `;
+}
+
+function sessionRunLiveStatusHtml(session = {}) {
+  const entries = progressEntriesFromTranscript(session.transcript || [], { startedAt: session.started_at || "" });
+  const processUpdates = currentRunProcessUpdatesHtml(entries, { backend: session.backend || session.settings?.backend || "codex" });
+  const hasUpdate = currentRunProcessUpdateEntries(entries, 1).length > 0;
+  const placeholder = !hasUpdate ? `<p class="run-live-placeholder">Preparing response...</p>` : "";
+  const eventLabel = currentRunActivityEventLabel(entries.length);
+  return `
+    <article class="framing-message assistant is-thinking" aria-live="polite">
+      <div class="transcript-meta">CoAutoResearch</div>
+      <div class="transcript-body thinking-bubble">
+        <section class="run-live-status" aria-live="polite" aria-label="Current run status">
+          <div class="run-live-status-head">
+            <div class="thinking-status-row run-live-status-title">
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              ${workingDurationHtml(session.started_at || "")}
+            </div>
+            <div class="run-live-status-actions">
+              <span>${escapeHtml(eventLabel)}</span>
+            </div>
+          </div>
+          ${processUpdates}
+          ${placeholder}
+          ${sessionRunActivityDetailsHtml(session, entries)}
         </section>
       </div>
     </article>
@@ -5573,7 +5757,7 @@ function currentRunProcessUpdatesHtml(entries = currentProgressEntries(), option
   if (!updates.length) return "";
   const className = options.className || "run-live-updates";
   return `
-    <div class="${escapeHtml(className)}" aria-label="${escapeHtml(options.label || `${agentLabel(sessionBackend())} updates`)}">
+    <div class="${escapeHtml(className)}" aria-label="${escapeHtml(options.label || `${agentLabel(options.backend || sessionBackend())} updates`)}">
       ${updates
         .map((entry) => `<p>${escapeHtml(compactText(visibleProcessUpdateText(entry), options.maxLength || 360))}</p>`)
         .join("")}
@@ -5924,7 +6108,13 @@ function projectDraftCardHtml(message, options = {}) {
 function renderFramingConversation() {
   const thread = $("#framing-thread");
   if (!thread) return;
-  activityPanelSources.clear();
+  const sessionsSurfaceActive = document.body?.classList?.contains("has-sessions-active");
+  // activityPanelSources is shared with sessions-panel.js's "session:*" run-
+  // activity entries. This function only ever repopulates its own legacy
+  // "framing:*" entries below, so clearing/refreshing it while a sessions
+  // chat surface is active would wipe/close that session's activity panel
+  // on the next background poll even though nothing about it changed.
+  if (!sessionsSurfaceActive) activityPanelSources.clear();
   reconcileFramingPending(localMessages);
   const wasNearBottom = isPageNearBottom();
   const visibleMessages = visibleFramingMessagesForRender(localMessages);
@@ -5978,11 +6168,12 @@ function renderFramingConversation() {
   $("#framing-project-panel")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog")?.toggleAttribute("hidden", true);
   $("#open-launch-dialog-inline")?.toggleAttribute("hidden", true);
-  syncBriefComposerDock(activeView === "chat" && hasThreadContent);
-  renderAutoresearchDock(autoresearchDockHtml, activeView === "chat" && hasThreadContent);
+  const legacyDockActive = !sessionsSurfaceActive && activeView === "chat" && hasThreadContent;
+  syncBriefComposerDock(legacyDockActive);
+  renderAutoresearchDock(autoresearchDockHtml, legacyDockActive);
   renderComposerSuggestions();
   updateFramingScrollButton();
-  refreshActivityPanel();
+  if (!sessionsSurfaceActive) refreshActivityPanel();
 }
 
 function ensureAutoresearchDock() {
@@ -6289,6 +6480,10 @@ function resyncAllModelSelects() {
       backend: normalizeAgentBackend(sessionForm?.elements?.backend?.value || activeSettingsBackend()),
     },
     {
+      select: document.getElementById("sv-composer-model"),
+      backend: normalizeAgentBackend(sessionForm?.elements?.backend?.value || activeSettingsBackend()),
+    },
+    {
       select: settingsForm?.elements?.settingsModel || null,
       backend: normalizeAgentBackend(settingsForm?.elements?.settingsBackend?.value || activeSettingsBackend()),
     },
@@ -6299,6 +6494,8 @@ function resyncAllModelSelects() {
     syncModelSelectOptions(select, backend, select.value || "");
   }
   fitComposerSelectWidths();
+  fitComposerSelectWidth(document.getElementById("sv-composer-model"));
+  fitComposerSelectWidth(document.getElementById("sv-composer-reasoning"));
 }
 
 let composerSelectMeasureContext = null;
@@ -6458,6 +6655,7 @@ function syncComposerSettings(settings) {
   syncModelSelectOptions(model, backend, merged.model);
   syncReasoningSelectOptions(reasoning, backend, merged.model, merged.reasoningEffort);
   fitComposerSelectWidths();
+  document.dispatchEvent(new CustomEvent("coauto-composer-settings-synced", { detail: merged }));
 }
 
 function updateSessionSettingsFromComposer() {
@@ -8951,6 +9149,29 @@ function empty(text) {
   return `<div class="empty">${escapeHtml(text)}</div>`;
 }
 
+function emptyWelcomeHtml(options = {}) {
+  const eyebrow = String(options.eyebrow || "Chat");
+  const title = String(options.title || "New chat");
+  const body = String(options.body || "Ask anything about this project.");
+  const actions = String(options.actions || "");
+  return `
+    <section class="cold-start-workspace sessions-empty-start" aria-label="${escapeHtml(title)}">
+      <section class="stage-panel is-active" data-stage-panel="1">
+        <section class="assistant-card cold-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+              <h2>${escapeHtml(title)}</h2>
+              <p class="setup-copy">${escapeHtml(body)}</p>
+            </div>
+          </div>
+          ${actions}
+        </section>
+      </section>
+    </section>
+  `;
+}
+
 function countTreeFiles(node) {
   if (!node) return 0;
   if (node.type === "file") return 1;
@@ -8999,6 +9220,29 @@ function messageCopyButton(text, label = "Copy message", message = "Message copi
     </button>
   `;
 }
+
+window.CoAutoChatUi = {
+  escapeHtml,
+  transcriptContentHtml,
+  messageCopyButton,
+  conversationMessageHtml,
+  emptyWelcomeHtml,
+  composerSendIconHtml,
+  composerStopIconHtml,
+  createComposerController,
+  fitComposerSelectWidth,
+  syncModelSelectOptions,
+  syncReasoningSelectOptions,
+  normalizeAgentBackend,
+  copyTextToClipboard,
+  resumeCommandForSession,
+  sessionRunLiveStatusHtml,
+  updateWorkingDurations,
+  scheduleWorkingTicker,
+  shellQuote,
+  settingsFromForm,
+  showToast,
+};
 
 function inlineOpenButton(path, label = "Open source") {
   const raw = String(path || "");
@@ -12467,7 +12711,7 @@ async function jumpLocalBrowserInput() {
 function defaultInlineMode(payload) {
   const kind = payload.kind || (extension(payload.path) === ".md" ? "markdown" : "text");
   if (kind === "markdown") return "rendered";
-  if (["json", "jsonl", "yaml", "xml"].includes(kind)) return "preview";
+  if (["json", "jsonl", "yaml", "xml", "html", "docx", "xlsx", "pptx"].includes(kind)) return "preview";
   if (kind === "image" || kind === "pdf") return "preview";
   return "source";
 }
@@ -12480,7 +12724,7 @@ function inlineViewModes(payload) {
       ["source", "Source"],
     ];
   }
-  if (["json", "jsonl", "yaml", "xml"].includes(kind)) {
+  if (["json", "jsonl", "yaml", "xml", "html"].includes(kind)) {
     return [
       ["preview", "Preview"],
       ["source", "Source"],
@@ -12558,10 +12802,13 @@ function inlineFileBodyHtml(payload, mode) {
   if (kind === "pdf") {
     return `<iframe class="file-pdf-preview" src="${escapeHtml(url)}" title="${escapeHtml(path)}"></iframe>`;
   }
+  if (kind === "html" && mode === "preview") {
+    return `<iframe class="file-html-preview" sandbox="" src="${escapeHtml(url)}" title="${escapeHtml(path)}"></iframe>`;
+  }
   if (kind === "markdown" && mode === "rendered") {
     return `<div class="markdown-preview inline-preview">${markdownToHtml(text, { basePath: path })}</div>`;
   }
-  if (["json", "jsonl", "yaml", "xml"].includes(kind) && mode === "preview") {
+  if (["json", "jsonl", "yaml", "xml", "docx", "xlsx", "pptx"].includes(kind) && mode === "preview") {
     return `<pre class="file-code-preview"><code>${escapeHtml(structuredText(text, kind))}</code></pre>`;
   }
   if (payload.editable) {
@@ -14489,7 +14736,10 @@ function hasNoChatFormContent(message) {
 
 function bindEvents() {
   $$(".rail-action").forEach((button) => {
-    button.addEventListener("click", () => setPanel(button.dataset.view));
+    button.addEventListener("click", () => {
+      window.CoAutoSessions?.leave?.();
+      setPanel(button.dataset.view);
+    });
   });
   $("#open-project-create")?.addEventListener("click", openProjectCreateDialog);
   $("#project-list")?.addEventListener("click", (event) => {
@@ -14848,7 +15098,7 @@ function bindEvents() {
         .catch((error) => showToast(error.message, true));
       return;
     }
-    if (openProjectMenuId && !event.target.closest(".project-menu-popover")) {
+    if (openProjectMenuId && !event.target.closest("[data-project-menu-panel]")) {
       openProjectMenuId = "";
       renderProjectList();
     }

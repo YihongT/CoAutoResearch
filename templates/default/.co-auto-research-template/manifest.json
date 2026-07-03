@@ -22,7 +22,10 @@
     "PROJECT_FRAMING.md",
     "RESOURCE_INTAKE.md",
     "RESOURCE_SCOUT.md",
-    "REVIEWER_SCOPE_ANALYST.md"
+    "REVIEWER_SCOPE_ANALYST.md",
+    "sessions/evolution/ENTRY.md",
+    "sessions/evolution/general/AUTORESEARCH.md",
+    "sessions/chat/prompts/MONITOR_PROGRESS.md"
   ],
   "managedPaths": [
     "AGENTS.md",

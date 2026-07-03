@@ -447,6 +447,12 @@ function loadAppContext() {
         this.type = type;
       }
     },
+    CustomEvent: class CustomEvent {
+      constructor(type, options = {}) {
+        this.type = type;
+        this.detail = options.detail;
+      }
+    },
     FileReader: class FileReader {
       readAsDataURL(file) {
         this.result = `data:${file?.type || "application/octet-stream"};base64,${file?.contentBase64 || ""}`;
@@ -513,6 +519,7 @@ function loadAppContext() {
         return true;
       },
       addEventListener() {},
+      dispatchEvent() {},
     },
     localStorage: {
       getItem(key) { return storage.has(key) ? storage.get(key) : null; },
@@ -1539,9 +1546,17 @@ function directlyHandledButtonIds(appJs) {
 
 function testButtonInventoryHasHandlers() {
   const appJs = sourceText("templates/default/ui/app.js");
+  const sessionsPanelJs = sourceText("templates/default/ui/sessions-panel.js");
+  const sessionsPanelCss = sourceText("templates/default/ui/sessions-panel.css");
+  const serverPy = sourceText("templates/default/ui/server.py");
+  const auxSessionsPy = sourceText("templates/default/ui/aux_sessions.py");
+  const monitorPrompt = sourceText("templates/default/instructions/sessions/chat/prompts/MONITOR_PROGRESS.md");
+  const evolutionEntry = sourceText("templates/default/instructions/sessions/evolution/ENTRY.md");
+  const autoresearchInstruction = sourceText("templates/default/instructions/sessions/evolution/general/AUTORESEARCH.md");
+  const uiJs = `${appJs}\n${sessionsPanelJs}`;
   const indexHtml = sourceText("templates/default/ui/index.html");
-  const handledData = handledButtonDataAttrs(appJs);
-  const handledIds = directlyHandledButtonIds(appJs);
+  const handledData = handledButtonDataAttrs(uiJs);
+  const handledIds = directlyHandledButtonIds(uiJs);
   const handledClasses = new Set(["rail-action", "settings-nav-button", "stage-pill"]);
   const passiveDataAttrs = new Set(["inline-path"]);
   const issues = [];
@@ -1554,6 +1569,7 @@ function testButtonInventoryHasHandlers() {
   for (const { tag, source } of buttons) {
     if (/\bdisabled\b/i.test(tag)) continue;
     if (tag.includes("${action}") && tag.includes("composer-suggestion-chip")) continue;
+    if (tag.includes("${editCancelAttr}") || tag.includes("${editButtonAttr}")) continue;
     const type = extractType(tag).toLowerCase();
     if (type === "submit" || /\bformmethod=(["'])dialog\1/i.test(tag)) continue;
     const id = extractId(tag);
@@ -1572,9 +1588,72 @@ function testButtonInventoryHasHandlers() {
   assert.equal(appJs.includes('const card = cardPreview.closest(".context-card, .review-card")'), true, "Preview buttons must search both manuscript/context and review cards");
   assert.equal(appJs.includes('String(action || "").includes("data-card-preview")'), true, "context card previews must allocate an inline target slot");
   assert.equal(appJs.includes("[data-copy-text]"), true, "copy controls must have a delegated handler");
+  assert.equal(appJs.includes("copyTextToClipboard,"), true, "shared chat UI should export the existing clipboard helper");
+  assert.equal(sessionsPanelJs.includes("ui().copyTextToClipboard"), true, "session resume copy should reuse the existing clipboard helper");
+  assert.equal(appJs.includes("function emptyWelcomeHtml") && appJs.includes("emptyWelcomeHtml,"), true, "shared chat UI should export the existing cold-start welcome helper");
+  assert.equal(appJs.includes('class="cold-start-workspace sessions-empty-start"') && appJs.includes('class="stage-panel is-active" data-stage-panel="1"'), true, "empty chat welcome should copy the autoresearch start-page wrapper so existing start-page CSS applies");
   assert.equal(appJs.includes("function checkIconSvg()"), true, "message copy controls should render a check icon after copying");
   assert.equal(appJs.includes("markCopyButtonCopied(copyText)"), true, "message copy controls should switch to copied state after successful copy");
+  assert.equal(appJs.includes('editFormAttr = String(options.editFormAttr || "data-framing-edit-form")'), true, "shared message helper should default to handled framing edit form attrs");
+  assert.equal(appJs.includes('editCancelAttr = String(options.editCancelAttr || "data-framing-cancel")'), true, "shared message helper should default to handled framing cancel attrs");
+  assert.equal(appJs.includes('editButtonAttr = String(options.editButtonAttr || "data-framing-edit")'), true, "shared message helper should default to handled framing edit attrs");
+  assert.equal(sessionsPanelJs.includes('editFormAttr: "data-session-edit-form"'), true, "session messages should reuse shared message helper with session edit form attrs");
+  assert.equal(sessionsPanelJs.includes('editCancelAttr: "data-session-message-edit-cancel"'), true, "session messages should reuse shared message helper with handled cancel attrs");
+  assert.equal(sessionsPanelJs.includes('editButtonAttr: "data-session-message-edit"'), true, "session messages should reuse shared message helper with handled edit attrs");
+  assert.equal(sessionsPanelJs.includes("controller.syncAction"), true, "session composer should reuse the shared composer action synchronizer");
+  assert.equal(sessionsPanelJs.includes("ui().fitComposerSelectWidth"), true, "session composer selects should reuse the shared dynamic select width helper");
+  assert.equal(sessionsPanelJs.includes("ui().emptyWelcomeHtml"), true, "empty chat sessions should reuse the shared autoresearch-style welcome layout");
+  assert.equal(sessionsPanelCss.includes(".sessions-empty-start .stage-panel[data-stage-panel=\"1\"]"), true, "sessions empty state should adapt the copied autoresearch start-page wrapper inside the chat log");
+  assert.equal(sessionsPanelJs.includes("sv-empty-session"), false, "empty chat sessions should not use a separate sessions-only empty-state card");
+  assert.equal(sessionsPanelCss.includes(".sv-empty-session"), false, "sessions CSS should not keep the old separate empty-state card");
+  assert.equal(indexHtml.includes("Reset agent context") && !indexHtml.includes(">Clear context<"), true, "chat context action should use reset-agent-context wording");
+  assert.equal(auxSessionsPy.includes("self.chat_history = []"), false, "resetting agent context must preserve visible chat history");
+  assert.equal(auxSessionsPy.includes("Reset provider CLI context while preserving visible chat history"), true, "aux session reset should document the preserved-history behavior");
+  assert.equal(auxSessionsPy.indexOf("prompt = self.manager.build_prompt(self, message)") < auxSessionsPy.indexOf('self.chat_history.append({"role": "user", "text": message'), true, "chat prompt should be built before appending the current user message to avoid replay duplication");
+  assert.equal(appJs.includes("syncModelSelectOptions,") && appJs.includes("syncReasoningSelectOptions,"), true, "shared chat UI should export the existing model/reasoning option filters");
+  assert.equal(sessionsPanelJs.includes("ui().syncModelSelectOptions(model, backend, modelValue)"), true, "session composer model options should follow the active backend instead of showing every model");
+  assert.equal(sessionsPanelJs.includes("ui().syncReasoningSelectOptions(reasoning, backend, model?.value || modelValue, reasoningValue)"), true, "session composer reasoning options should follow the active backend/model");
+  assert.equal(sessionsPanelJs.includes("sessionSettings"), false, "session composer should not let stale per-chat settings override the global agent settings");
+  assert.equal(sessionsPanelJs.includes('var backend = normalizeSessionBackend(base.backend || "codex");'), true, "session composer backend should come from the shared global settings source");
+  assert.equal(sessionsPanelJs.includes("function sessionComposerHydrationKey"), true, "session composer hydration should track global backend, model, and reasoning together");
+  assert.equal(sessionsPanelJs.includes('var settings = typeof ui().settingsFromForm === "function" ? ui().settingsFromForm() : {};'), true, "chat send payload should start from the same settings form as autoresearch");
+  assert.equal(sessionsPanelJs.includes("document.getElementById(\"session-settings-form\")?.addEventListener(\"change\", rerenderActiveSessionComposer)"), true, "session composer should resync when global agent settings change");
+  assert.equal(sessionsPanelJs.includes("function scrollSessionMessageIntoView"), true, "session edit/resend should keep the edited message in view instead of jumping to the bottom");
+  assert.equal(sessionsPanelJs.includes("renderSessionView(isEdit ? { focusIndex: editIndex, scrollToBottom: false }"), true, "session edit/resend optimistic render should focus the edited message");
+  assert.equal(sessionsPanelCss.includes("top: -36px"), false, "session composer quick actions must stay in layout flow and not overlap chat bubbles");
+  assert.equal(auxSessionsPy.includes('return self.status == "running" or self.is_running()'), true, "aux sessions should report running immediately after launch, before the subprocess handle is visible");
+  assert.equal(auxSessionsPy.includes("def is_active(self)") && auxSessionsPy.includes("self.is_active()"), true, "aux session reentrancy guards (chat/edit/stop) should share the same running-or-status check, not just OS process liveness");
+  assert.equal(auxSessionsPy.includes('m["running"] = running'), true, "aux session public snapshots should expose the canonical running flag");
   assert.equal(appJs.includes("[data-inline-fullscreen]"), true, "open controls must use the inline fullscreen handler");
+  assert.equal(appJs.includes("window.CoAutoSessions?.leave?.()"), true, "legacy rail navigation must leave the sessions surface before switching panels");
+  assert.equal(sessionsPanelJs.includes("clearLegacyDocks()"), true, "sessions surface must clear legacy body-level docks before showing Chat");
+  assert.equal(sessionsPanelJs.includes("eventLastIds"), true, "aux session SSE should track last event ids to avoid replay loops");
+  assert.equal(sessionsPanelJs.includes("rememberSessionEventId(session)"), true, "aux session snapshots should seed last event ids before opening SSE");
+  assert.equal(sessionsPanelJs.includes("?since="), true, "aux session SSE should reconnect with a since cursor");
+  assert.equal(sessionsPanelJs.includes("refreshSessionSnapshot(id, { workspace: true })"), true, "terminal aux session events should refresh once without reselecting and reconnecting");
+  assert.equal(sessionsPanelJs.includes('kind === "evolution"') && sessionsPanelJs.includes("state.eventSource.close()"), true, "selecting Evolution should close aux session SSE instead of opening an unused stream");
+  assert.equal(sessionsPanelJs.includes("if (state.activeId !== id) return;"), true, "workspace responses should not overwrite the newly selected session");
+  assert.equal(sessionsPanelJs.indexOf('renderAll();\n    connectEvents(id);\n    loadWorkspace(id, "");') < sessionsPanelJs.indexOf('var r = await apiCall("/api/sessions/" + encodeURIComponent(id))'), true, "chat session switching should render immediately before waiting on the session detail request");
+  assert.equal(sessionsPanelCss.includes(".rail-session-row .project-menu-button::before") && sessionsPanelCss.includes("pointer-events: none;"), true, "session menu hit area must not intercept neighboring chat row clicks");
+  assert.equal(sessionsPanelJs.includes("function sessionStatusClass"), true, "session rail dots should use explicit status mapping");
+  assert.equal(sessionsPanelCss.includes(".rail-session-dot"), false, "session rail should not use the old ambiguous dot styling");
+  assert.equal(sessionsPanelCss.includes(".rail-session-row .project-switch"), true, "session rail should reuse compact project-row styling");
+  assert.equal(indexHtml.includes('<div class="rail-section-label">Sessions</div>'), false, "sessions rail should not repeat the Sessions label above New chat");
+  assert.equal(sessionsPanelJs.includes("rail-chat-history-scroll"), true, "chat history rows should live in a dedicated scroll container");
+  assert.equal(sessionsPanelJs.includes("Autoresearch session"), true, "fixed evolution session should display as the Autoresearch session");
+  assert.equal(sessionsPanelCss.includes(".rail-chat-history-scroll"), true, "many chats should scroll inside the chat history area only");
+  assert.equal(sessionsPanelCss.includes("flex: 1 1 auto"), true, "sessions rail should expand into the available sidebar height");
+  assert.equal(sessionsPanelCss.includes("flex: 0 0 clamp(176px, 24vh, 240px)"), false, "sessions rail must not be capped to a small fixed viewport height");
+  assert.equal(sessionsPanelCss.includes(".rail-sessions:not([hidden]) + .rail-footer") && sessionsPanelCss.includes("margin-top: 0"), true, "settings footer should not steal the Sessions rail's available height");
+  assert.equal(sessionsPanelCss.includes(".rail-session-row.has-no-status"), true, "idle rows (chat or evolution) should hide the meaningless gray status dot");
+  assert.equal(sessionsPanelJs.includes('var showDot = statusClass !== "idle";'), true, "evolution rows should use the exact same status-dot rule as chat rows, with no special-cased icon");
+  assert.equal(serverPy.includes('SESSION_INSTRUCTION_DIR = "instructions/sessions"'), true, "aux session instructions should live under instructions/sessions");
+  assert.equal(serverPy.includes('AUX_MONITOR_BOUNDARY'), false, "monitor boundary should not be hardcoded in server.py");
+  assert.equal(serverPy.includes('"sessions/chat/prompts/MONITOR_PROGRESS.md"'), true, "monitor progress prompt should be part of protocol sync");
+  assert.equal(sessionsPanelJs.includes("monitor-progress-prompt"), true, "chat sessions should expose the monitor progress prompt action");
+  assert.equal(monitorPrompt.includes("Monitor the current CoAutoResearch project progress") && monitorPrompt.includes("Do not modify project files"), true, "monitor prompt template should define read-only progress monitoring");
+  assert.equal(evolutionEntry.includes("# Evolution Session Entry") && evolutionEntry.includes("instructions/sessions/evolution/general/AUTORESEARCH.md"), true, "evolution entry should route to its canonical autoresearch context");
+  assert.equal(autoresearchInstruction.includes("# Autoresearch Session Context") && autoresearchInstruction.includes("instructions/EXECUTION_AGENT.md"), true, "autoresearch session template should point at the main instruction chain");
 }
 
 async function testImmediateUserMessage() {
@@ -4626,6 +4705,31 @@ function testChatRunThinkingUsesLiveStatus() {
   assert.equal(panel.html.includes("notLoaded inProgress"), false, "Activity panel should hide Codex turn ACK payloads");
   assert.equal(panel.html.includes("Plan only. Do not implement"), false, "Activity panel should hide Codex hidden prompt lifecycle items");
   assert.equal(panel.html.includes("turn/completed"), false, "Activity panel should hide Codex turn completion lifecycle events");
+}
+
+function testSessionChatRunUsesSharedLiveStatus() {
+  const app = loadAppContext();
+  assert.equal(app.run('typeof window.CoAutoChatUi.sessionRunLiveStatusHtml'), "function", "chat sessions should reuse the shared live-status renderer");
+  const html = app.run(`
+    window.CoAutoChatUi.sessionRunLiveStatusHtml({
+      id: "CHAT1",
+      kind: "chat",
+      running: true,
+      status: "running",
+      backend: "claude",
+      started_at: "2026-06-17T10:00:00.000Z",
+      transcript: [
+        { id: "r1", role: "assistant", kind: "reasoning", raw_type: "content_block_delta", content: "Reading the current project state.", created_at: "2026-06-17T10:00:01.000Z" },
+        { id: "t1", role: "tool", kind: "tool", raw_type: "content_block_delta", content: "{\\"command\\":\\"pwd\\"}", created_at: "2026-06-17T10:00:02.000Z" }
+      ]
+    })
+  `);
+  assert.equal(html.includes("run-live-status"), true, "session chat running UI should use the same live-status surface");
+  assert.equal(html.includes("Working for"), true, "session chat live status should show elapsed working time");
+  assert.equal(html.includes("Reading the current project state."), true, "session chat live status should surface reasoning updates");
+  assert.equal(html.includes("Run activity"), true, "session chat live status should keep raw activity behind the activity affordance");
+  assert.equal(html.includes("CoAutoResearch is working"), false, "session chat should not use the old fake thinking message");
+  assert.equal(html.includes("stream_event"), false, "session chat live status should not show raw stream-event text");
 }
 
 function testChatRunCommandOnlyKeepsRawCommandFolded() {
@@ -7746,6 +7850,7 @@ testContinuedBaseTrialStatusLabel();
 testClosedTrialsUseDoneStatus();
 testHistoricalReportedTrialsDoNotUseIncompleteChipStyle();
 testChatRunThinkingUsesLiveStatus();
+testSessionChatRunUsesSharedLiveStatus();
 testChatRunCommandOnlyKeepsRawCommandFolded();
 testLocalPendingDoesNotFlashPreviousRunUpdates();
 testRunningProgressIgnoresLateLocalPendingTimestamp();

@@ -21,6 +21,16 @@ The repository structure is only a mechanism for supporting research quality. Do
 
 ## First Files to Read
 
+Use the active session type to choose the instruction route:
+
+- `Evolution Run`: read `instructions/sessions/evolution/ENTRY.md`, then follow
+  the standard files below.
+- Ordinary `Chat`: no file-backed session instruction is required. Use the
+  user's message plus the runtime session boundary.
+- `Monitor progress` in Chat: use
+  `instructions/sessions/chat/prompts/MONITOR_PROGRESS.md` as the editable
+  prompt template.
+
 Before substantive work, read these in order:
 
 1. `instructions/EXECUTION_AGENT.md`

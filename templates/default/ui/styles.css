@@ -167,7 +167,7 @@ h3 {
 .rail {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 26px;
   min-height: 100vh;
   padding: 18px 13px;
   border-right: 1px solid var(--line);
@@ -12511,7 +12511,8 @@ html[data-theme] .trial-human-response.is-blocked p {
   max-height: none;
 }
 
-.file-viewer-body .file-pdf-preview {
+.file-viewer-body .file-pdf-preview,
+.file-viewer-body .file-html-preview {
   min-height: calc(100vh - 210px);
 }
 
@@ -12902,7 +12903,8 @@ body.is-resizing-file-viewer .file-viewer-body {
   font-size: 12px;
 }
 
-.file-pdf-preview {
+.file-pdf-preview,
+.file-html-preview {
   display: block;
   width: 100%;
   min-height: min(76vh, 820px);
@@ -12985,17 +12987,23 @@ body.is-resizing-file-viewer .file-viewer-body {
 
 .project-switch {
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
+  /* 18px to match .rail-action's icon column (sessions-panel.css) -- the
+     status dot is only 8px, so it needs justify-self:center (below) to sit
+     in the middle of this column instead of flush against its left edge. */
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
   min-height: 48px;
-  padding: 8px 9px;
+  padding: 8px 10px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: rgba(245, 239, 227, 0.75);
   text-align: left;
+}
+.project-switch .project-status-dot {
+  justify-self: center;
 }
 
 .project-switch:hover,
@@ -13079,6 +13087,25 @@ body.is-resizing-file-viewer .file-viewer-body {
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+html[data-theme] .project-menu-popover {
+  border-color: var(--line);
+  background: var(--panel-bg-strong, var(--surface));
+  color: var(--panel-ink, var(--ink));
+  box-shadow: var(--shadow);
+}
+
+html[data-theme] .project-menu-popover button {
+  color: var(--panel-ink, var(--ink));
+}
+
+html[data-theme] .project-menu-popover button:hover {
+  background: var(--control-bg-hover, var(--accent-soft));
+}
+
+html[data-theme] .project-menu-popover button.is-danger {
+  color: var(--danger);
 }
 
 .project-switch strong,
@@ -15660,6 +15687,8 @@ html[data-theme="dark-glass"] .scroll-bottom-button:hover {
   background: var(--accent);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
 }
+.project-status-dot.error { background: var(--danger); }
+.project-status-dot.interrupted { background: var(--warning); }
 .sync-dot { background: var(--success); }
 .thinking-dot { background: var(--muted); }
 
@@ -16483,19 +16512,23 @@ html[data-theme] #cold-start-workspace:not(.has-framing-thread) .brief-editor-sh
    =================================================================== */
 /* nav rows: soft ink-2 Newsreader, line-icons at low opacity (v9 .nav a) */
 html[data-theme] .rail-action {
-  color: var(--muted);
+  /* Match .project-switch strong exactly (font-size/weight/color below) so
+     the current-project nav rows read as the same typographic family as
+     the project names in the Projects list above them, instead of
+     rendering visibly larger and lighter-weight. */
+  color: var(--rail-ink);
   font-family: var(--reader);
-  font-weight: 480;
-  font-size: 16px;
+  font-weight: 560;
+  font-size: 14px;
   border-radius: 11px;
   border-color: transparent;
   background: transparent;
 }
 .rail-action .rail-ic { opacity: 0.6; stroke-width: 1.5; }
-html[data-theme] .rail-action:hover { color: var(--ink); background: var(--accent-soft); }
+html[data-theme] .rail-action:hover { background: var(--accent-soft); }
 .rail-action:hover .rail-ic { opacity: 0.85; }
 html[data-theme] .rail-action.is-active {
-  color: var(--ink);
+  color: var(--rail-ink);
   background: var(--accent-soft);
   font-weight: 560;
   border-color: transparent;

@@ -109,7 +109,10 @@ for (const name of [
   "PROJECT_FRAMING.md",
   "RESOURCE_INTAKE.md",
   "RESOURCE_SCOUT.md",
-  "REVIEWER_SCOPE_ANALYST.md"
+  "REVIEWER_SCOPE_ANALYST.md",
+  "sessions/evolution/ENTRY.md",
+  "sessions/evolution/general/AUTORESEARCH.md",
+  "sessions/chat/prompts/MONITOR_PROGRESS.md"
 ]) {
   if (!coreProtocolFiles.includes(name)) {
     failures.push(`.co-auto-research-template/manifest.json: missing core protocol ${name}`);

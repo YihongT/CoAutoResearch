@@ -29,11 +29,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse
+import xml.etree.ElementTree as ET
 
+UI_DIR = Path(__file__).resolve().parent
+if str(UI_DIR) not in sys.path:
+    sys.path.insert(0, str(UI_DIR))
 from aux_sessions import AuxSessionManager
 
 
-UI_DIR = Path(__file__).resolve().parent
 DEFAULT_PROJECT_ROOT = UI_DIR.parent
 PACKAGE_TEMPLATE_ROOT = Path(os.path.expanduser(os.environ.get("COAUTO_TEMPLATE_ROOT", ""))).resolve() if os.environ.get("COAUTO_TEMPLATE_ROOT") else None
 DEFAULT_REVIEW_CHECKPOINT_INTERVAL = 100
@@ -85,6 +88,14 @@ RESTART_SNAPSHOT_PATHS = [
 CLIENT_DISCONNECT_ERRNOS = {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED}
 
 
+class _ModuleGlobalsProxy:
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return globals()[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
 def is_client_disconnect_error(exc: BaseException) -> bool:
     if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
         return True
@@ -134,6 +145,7 @@ TEXT_PREVIEW_SUFFIXES = {
     ".text",
     ".json",
     ".jsonl",
+    ".ipynb",
     ".yaml",
     ".yml",
     ".xml",
@@ -156,14 +168,32 @@ TEXT_PREVIEW_SUFFIXES = {
     ".sh",
     ".bash",
     ".zsh",
+    ".r",
+    ".rb",
+    ".php",
+    ".pl",
+    ".lua",
+    ".java",
+    ".go",
+    ".rs",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".m",
+    ".mm",
+    ".swift",
+    ".kt",
+    ".kts",
     ".sql",
     ".bib",
     ".tex",
 }
 EDITABLE_SUFFIXES = set(TEXT_PREVIEW_SUFFIXES)
-IMAGE_PREVIEW_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+IMAGE_PREVIEW_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
 PDF_PREVIEW_SUFFIXES = {".pdf"}
-PREVIEWABLE_SUFFIXES = TEXT_PREVIEW_SUFFIXES | IMAGE_PREVIEW_SUFFIXES | PDF_PREVIEW_SUFFIXES
+OFFICE_PREVIEW_SUFFIXES = {".docx", ".xlsx", ".pptx"}
+PREVIEWABLE_SUFFIXES = TEXT_PREVIEW_SUFFIXES | IMAGE_PREVIEW_SUFFIXES | PDF_PREVIEW_SUFFIXES | OFFICE_PREVIEW_SUFFIXES
 COLD_START_EDIT_FILES = [
     "resources/user_input/INITIAL_BRIEF.md",
 ]
@@ -187,6 +217,9 @@ CORE_PROTOCOL_FILES = [
     "RESOURCE_INTAKE.md",
     "RESOURCE_SCOUT.md",
     "REVIEWER_SCOPE_ANALYST.md",
+    "sessions/evolution/ENTRY.md",
+    "sessions/evolution/general/AUTORESEARCH.md",
+    "sessions/chat/prompts/MONITOR_PROGRESS.md",
 ]
 REVIEWER_BASELINE_RELATIVE_PATH = "instructions/.co-auto-research-instructions.json"
 REVIEW_STORAGE_VERSION = "per-reviewer-files-v1"
@@ -1064,9 +1097,11 @@ def sync_project_reviewers(project_root: Path) -> dict[str, Any]:
             raise ValueError(f"Package instruction file is missing: {name}")
         target = instruction_dir / name
         if target.exists() and target.is_file():
-            protocol_backup_root.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target, protocol_backup_root / name)
+            backup_target = protocol_backup_root / name
+            backup_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, backup_target)
             protocol_backed_up.append(name)
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         protocol_copied.append(name)
     metadata = write_reviewer_baseline_metadata(project_root, clean_template_root())
@@ -1265,7 +1300,7 @@ class ProjectContext:
         self.research_event_id = 0
         self.research_event_condition = threading.Condition(threading.RLock())
         self.deleted = False
-        self.aux_manager = AuxSessionManager(self, sys.modules[__name__])
+        self.aux_manager = AuxSessionManager(self, sys.modules.get(__name__) or _ModuleGlobalsProxy())
         self.refresh_metadata()
         self.load_runtime()
 
@@ -3667,6 +3702,9 @@ def claude_event_label(event: Any) -> tuple[str, str, str, str]:
 def is_ignored_claude_lifecycle_event(event: Any) -> bool:
     if not isinstance(event, dict):
         return False
+    nested = event.get("event") if isinstance(event.get("event"), dict) else event.get("raw_event") if isinstance(event.get("raw_event"), dict) else None
+    if nested is not None and nested is not event:
+        return is_ignored_claude_lifecycle_event(nested)
     event_type, subtype, _label, label_lower = claude_event_label(event)
     event_family = event_type.split(".", 1)[0].lower()
     if event_family == "system" and subtype == "init":
@@ -4556,7 +4594,9 @@ def file_kind(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in {".md", ".markdown"}:
         return "markdown"
-    if suffix in {".json"}:
+    if suffix in {".html", ".htm"}:
+        return "html"
+    if suffix in {".json", ".ipynb"}:
         return "json"
     if suffix in {".jsonl"}:
         return "jsonl"
@@ -4568,6 +4608,8 @@ def file_kind(path: Path) -> str:
         return "image"
     if suffix in PDF_PREVIEW_SUFFIXES:
         return "pdf"
+    if suffix in OFFICE_PREVIEW_SUFFIXES:
+        return suffix.lstrip(".")
     if suffix in TEXT_PREVIEW_SUFFIXES:
         return "text"
     return "binary"
@@ -4591,6 +4633,87 @@ def file_mime(path: Path) -> str:
 
 def file_raw_url(relative_path: str) -> str:
     return f"/api/file/raw?project={quote(current_project_context().id)}&path={quote(relative_path)}"
+
+
+def _xml_local_name(tag: str) -> str:
+    return str(tag).rsplit("}", 1)[-1]
+
+
+def _paragraph_texts(xml_bytes: bytes) -> list[str]:
+    root = ET.fromstring(xml_bytes)
+    paragraphs: list[str] = []
+    for para in root.iter():
+        if _xml_local_name(para.tag) != "p":
+            continue
+        parts: list[str] = []
+        for node in para.iter():
+            name = _xml_local_name(node.tag)
+            if name in {"t", "instrText"} and node.text:
+                parts.append(node.text)
+            elif name == "tab":
+                parts.append("\t")
+            elif name == "br":
+                parts.append("\n")
+        text = "".join(parts).strip()
+        if text:
+            paragraphs.append(text)
+    return paragraphs
+
+
+def office_text_preview(path: Path, limit: int = MAX_TEXT_BYTES) -> tuple[str, bool]:
+    suffix = path.suffix.lower()
+    try:
+        with zipfile.ZipFile(path) as archive:
+            if suffix == ".docx":
+                text = "\n".join(_paragraph_texts(archive.read("word/document.xml")))
+            elif suffix == ".pptx":
+                slide_names = sorted(name for name in archive.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", name))
+                blocks = []
+                for index, name in enumerate(slide_names, start=1):
+                    slide_text = "\n".join(_paragraph_texts(archive.read(name))).strip()
+                    if slide_text:
+                        blocks.append(f"Slide {index}\n{slide_text}")
+                text = "\n\n".join(blocks)
+            elif suffix == ".xlsx":
+                shared: list[str] = []
+                if "xl/sharedStrings.xml" in archive.namelist():
+                    root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+                    for item in root.iter():
+                        if _xml_local_name(item.tag) != "si":
+                            continue
+                        value = "".join(node.text or "" for node in item.iter() if _xml_local_name(node.tag) == "t").strip()
+                        shared.append(value)
+                rows: list[str] = []
+                sheet_names = sorted(name for name in archive.namelist() if re.match(r"xl/worksheets/sheet\d+\.xml$", name))
+                for sheet_index, name in enumerate(sheet_names, start=1):
+                    root = ET.fromstring(archive.read(name))
+                    sheet_rows: list[str] = []
+                    for row in root.iter():
+                        if _xml_local_name(row.tag) != "row":
+                            continue
+                        values: list[str] = []
+                        for cell in row:
+                            if _xml_local_name(cell.tag) != "c":
+                                continue
+                            value_node = next((child for child in cell if _xml_local_name(child.tag) == "v"), None)
+                            raw_value = value_node.text if value_node is not None and value_node.text is not None else ""
+                            if cell.attrib.get("t") == "s" and raw_value.isdigit() and int(raw_value) < len(shared):
+                                raw_value = shared[int(raw_value)]
+                            values.append(raw_value)
+                        if any(value.strip() for value in values):
+                            sheet_rows.append("\t".join(values))
+                    if sheet_rows:
+                        rows.append(f"Sheet {sheet_index}\n" + "\n".join(sheet_rows))
+                text = "\n\n".join(rows)
+            else:
+                text = ""
+    except Exception as exc:
+        text = f"Office preview unavailable: {exc}"
+    text = text.strip() or "No extractable text found in this Office file."
+    truncated = len(text) > limit
+    if truncated:
+        text = text[:limit] + "\n\n… (truncated)"
+    return text, truncated
 
 
 def is_checkpoint_manuscript_path(relative_path: str) -> bool:
@@ -4629,6 +4752,24 @@ def read_text_file(relative_path: str, limit: int = MAX_TEXT_BYTES) -> dict[str,
                 "is_dir": False,
                 "text": "",
                 "truncated": False,
+                "mtime": stat.st_mtime,
+                "mtime_display": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+                "size": stat.st_size,
+                "kind": kind,
+                "mime": file_mime(path),
+                "editable": False,
+                "previewable": previewable,
+                "url": file_raw_url(relative),
+            }
+
+        if kind in {"docx", "xlsx", "pptx"}:
+            text, truncated = office_text_preview(path, limit)
+            return {
+                "path": relative,
+                "exists": True,
+                "is_dir": False,
+                "text": text,
+                "truncated": truncated,
                 "mtime": stat.st_mtime,
                 "mtime_display": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
                 "size": stat.st_size,
@@ -4864,6 +5005,8 @@ def file_card(path: Path, display_path: str = "") -> dict[str, Any]:
     previewable = suffix in PREVIEWABLE_SUFFIXES
     if suffix in TEXT_PREVIEW_SUFFIXES:
         text_preview = safe_read(path, 900)
+    elif suffix in OFFICE_PREVIEW_SUFFIXES:
+        text_preview, _truncated = office_text_preview(path, 900)
     return {
         "name": path.name,
         "path": display_path or rel_path(path),
@@ -9758,29 +9901,14 @@ def settings_to_claude_args(settings: dict[str, Any], resume: bool) -> list[str]
     return args
 
 
-def find_uuid(value: Any) -> str:
-    pattern = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
-    if isinstance(value, str):
-        match = pattern.search(value)
-        return match.group(0) if match else ""
-    if isinstance(value, dict):
-        for key in ("session_id", "conversation_id", "thread_id", "id"):
-            found = find_uuid(value.get(key))
-            if found:
-                return found
-        for item in value.values():
-            found = find_uuid(item)
-            if found:
-                return found
-    if isinstance(value, list):
-        for item in value:
-            found = find_uuid(item)
-            if found:
-                return found
-    return ""
-
-
 def find_session_identifier(value: Any) -> str:
+    """Locate a provider session/thread id by key name only.
+
+    Deliberately does NOT fall back to scanning arbitrary string content for
+    UUID-shaped substrings: agent events routinely embed unrelated UUIDs
+    (temp/workspace paths, tool command text, tool output), and matching
+    those would silently corrupt ``cli_session_id`` and break `--resume`.
+    """
     if isinstance(value, dict):
         for key in ("session_id", "conversation_id", "thread_id"):
             candidate = str(value.get(key) or "").strip()
@@ -9795,7 +9923,7 @@ def find_session_identifier(value: Any) -> str:
             found = find_session_identifier(item)
             if found:
                 return found
-    return find_uuid(value)
+    return ""
 
 
 def compact_event_text(value: Any) -> str:
@@ -11055,8 +11183,22 @@ def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str
 # Auxiliary (multi-)session engine helpers
 #
 # These are called by aux_sessions.AuxSessionManager to build isolated
-# monitor/idea sessions that never touch the evolution loop's global session.
+# Ordinary chat sessions never touch the evolution loop's global session.
 # ---------------------------------------------------------------------------
+
+def evolution_loop_status(context: "ProjectContext") -> dict[str, Any]:
+    """Live status of the legacy autoresearch loop for the given project.
+
+    The 'evolution' AuxSession is only a lightweight pointer to this
+    pre-existing loop (see aux_sessions.py module docstring) -- it must never
+    track its own independent running/idle state, or the sessions rail and
+    the legacy research panel would disagree about whether the loop is
+    active.
+    """
+    summary = context.summary()
+    status = str(summary.get("status") or "idle")
+    return {"status": status, "running": status == "running"}
+
 
 def aux_agent_command(session: Any, resume: bool) -> list[str]:
     settings = session.settings if isinstance(session.settings, dict) else {}
@@ -11112,143 +11254,123 @@ def _aux_explored_ideas(limit: int = 20) -> list[str]:
     return ideas
 
 
-def build_monitor_context(session: Any) -> str:
-    """Read-only live progress digest, rebuilt before every monitor message."""
-    trials_dir = _aux_trials_dir()
-    ideas = _aux_explored_ideas()
-    ideas_block = "\n".join(f"- {item}" for item in ideas) or "- (No trials recorded yet.)"
-    state = _aux_read("research_trajectory/STATE.md", 5000)
-    findings = _aux_read("research_trajectory/CURRENT_FINDINGS.md", 5000)
-    project = _aux_read("PROJECT.md", 3000)
-    trajectory = _aux_read("research_trajectory/TRAJECTORY.json", 3000)
-    workspace_dir = getattr(session, "workspace_dir", "")
-    return f"""# Monitor Session Context
+SESSION_INSTRUCTION_DIR = "instructions/sessions"
 
-You are a **read-only monitoring assistant** for this CoAutoResearch project.
-Answer the user's questions about overall progress, the current best result,
-how it compares to baseline, which ideas were explored, and which ones worked.
+CHAT_CONTEXT_FALLBACK = """# Chat Session Context
 
-## Saving guidance
-When the user asks you to save notes, guidance, or instructions, write a
-markdown file into your workspace directory (shown below). Use a descriptive
-filename ending in `.md`. After saving, tell the user the file path so they
-can find it in the workspace browser.
+This is an ordinary isolated CoAutoResearch chat session.
 
-## Your workspace (for saving notes/guidance)
-`{workspace_dir}`
+## Session boundary
+- Work from this session's private workspace by default:
+  `{workspace}`
+- You may read project files when the user asks questions about the project.
+- Do not create, edit, delete, rename, or move files under
+  `research_trajectory/`, `manuscript/`, or `PROJECT.md`.
+- Do not start, resume, or continue the Evolution Run unless the user explicitly
+  asks to switch to that run's controls.
 
-## Experiment log locations
-- Trials directory: `{trials_dir}`
-- State file: `research_trajectory/STATE.md`
-- Findings file: `research_trajectory/CURRENT_FINDINGS.md`
-- Trajectory index: `research_trajectory/TRAJECTORY.json`
+## Project root
+`{project_root}`
+"""
 
-## Research background (PROJECT.md)
-{project or "(PROJECT.md is empty or missing.)"}
+AUTORESEARCH_CONTEXT_FALLBACK = """# Evolution Session Context
 
-## Live progress snapshot (auto-refreshed {now_iso()})
+This is the persistent autoresearch loop. Follow `AGENTS.md`,
+`instructions/EXECUTION_AGENT.md`, and `instructions/reviewers/`.
+"""
 
-### STATE.md
-{state or "(No state recorded yet.)"}
+MONITOR_PROGRESS_PROMPT_FALLBACK = """Monitor the current CoAutoResearch project progress.
 
-### CURRENT_FINDINGS.md
-{findings or "(No findings recorded yet.)"}
+Read the project state before answering. Use these files/directories if they
+exist:
 
-### TRAJECTORY.json
-{trajectory or "(No trajectory recorded yet.)"}
+- `{project_root}/PROJECT.md`
+- `{project_root}/research_trajectory/STATE.md`
+- `{project_root}/research_trajectory/CURRENT_FINDINGS.md`
+- `{project_root}/research_trajectory/TRAJECTORY.json`
+- `{project_root}/research_trajectory/trials/`
+- `{project_root}/research_trajectory/human_interventions/`
+- `{project_root}/manuscript/reviews/`
 
-### Explored ideas / trials
-{ideas_block}
+Do not modify project files or start/continue any trial. Answer concisely:
+current objective, active/latest trial, best result versus baseline, blockers,
+reviewer/human-intervention status, and the next useful human action.
 """
 
 
-def build_idea_context(session: Any) -> str:
-    """Discussion sandbox context: background + baseline + explored ideas."""
-    ideas = _aux_explored_ideas()
-    ideas_block = "\n".join(f"- {item}" for item in ideas) or "- (No trials explored yet.)"
-    project = _aux_read("PROJECT.md", 3000)
-    findings = _aux_read("research_trajectory/CURRENT_FINDINGS.md", 4000)
-    workspace = getattr(session, "workspace_dir", "")
-    return f"""# Idea Session Context
+class _SessionInstructionValues(dict):
+    def __missing__(self, key: str) -> str:
+        return ""
 
-You are a **research discussion & reproduction assistant**. Help the user
-discuss ideas, read papers, clone and inspect git repositories, and reproduce
-baselines so there is a working foundation.
 
-## Your workspace (write freely here)
-`{workspace}`
+def _session_instruction_text(filename: str, fallback: str, **values: Any) -> str:
+    text = ""
+    sources: list[Path] = []
+    try:
+        sources.append(repo_path(f"{SESSION_INSTRUCTION_DIR}/{filename}"))
+    except Exception:
+        pass
+    try:
+        sources.append(instruction_template_dir() / "sessions" / filename)
+    except Exception:
+        pass
+    seen: set[str] = set()
+    for source in sources:
+        key = source.as_posix()
+        if key in seen:
+            continue
+        seen.add(key)
+        if source.exists() and source.is_file():
+            text = safe_read(source, 50_000)
+            break
+    values_map = _SessionInstructionValues(values)
+    try:
+        return (text or fallback).format_map(values_map)
+    except Exception:
+        return fallback.format_map(values_map)
 
-You may clone repos, download papers, and run baseline code inside this
-workspace directory. Do NOT modify the shared research trajectory, trials,
-manuscript, or PROJECT.md — those belong to the evolution session.
 
-## Research background (PROJECT.md)
-{project or "(PROJECT.md is empty or missing.)"}
-
-## Current findings so far
-{findings or "(No findings recorded yet.)"}
-
-## Baseline / already-explored ideas
-{ideas_block}
-
-## When a promising idea emerges
-If the discussion surfaces a strong idea worth pursuing as a research
-direction, proactively ask the user whether they want to promote it. If yes,
-write a concise summary into `IDEA_NOTES.md` inside your workspace above and
-tell the user its absolute path so they can import it into the evolution
-session.
-"""
+def build_chat_context(session: Any) -> str:
+    return CHAT_CONTEXT_FALLBACK.format_map(_SessionInstructionValues({
+        "workspace": getattr(session, "workspace_dir", ""),
+        "project_root": repo_path("."),
+    }))
 
 
 def build_evolution_context(session: Any) -> str:
-    return """# Evolution Session Context
-
-This is the persistent autoresearch loop. It is driven by the standard
-CoAutoResearch instruction chain (AGENTS.md -> instructions/EXECUTION_AGENT.md
--> reviewers) and has full access to the research trajectory, trials, and
-manuscript. Use the Start / Pause / Resume controls to drive it.
-"""
+    return _session_instruction_text("evolution/ENTRY.md", AUTORESEARCH_CONTEXT_FALLBACK)
 
 
-AUX_MONITOR_BOUNDARY = """
-Hard boundary (monitor session):
-- You are READ-ONLY with respect to project research files. Do not create, edit,
-  delete, rename, or move ANY file in research_trajectory/, manuscript/, or PROJECT.md.
-- Do not start, resume, or continue the autoresearch loop or any trial.
-- EXCEPTION: When the user explicitly asks you to save notes, guidance, or
-  instructions, you MAY write markdown (.md) files into your own workspace
-  directory only. This is the only write operation allowed.
-- Answer the user's question from the context document and current project files.
-"""
-
-AUX_IDEA_BOUNDARY = """
-Hard boundary (idea session):
-- You may read any project file and write ONLY inside your own workspace directory.
-- Do not modify research_trajectory/, manuscript/, PROJECT.md, reviewer files, or trials.
-- Do not start, resume, or continue the autoresearch loop or create trial artifacts.
-- Cloning repos, downloading papers, and running baselines inside your workspace is allowed.
-"""
+def build_monitor_progress_prompt(session: Any) -> str:
+    return _session_instruction_text(
+        "chat/prompts/MONITOR_PROGRESS.md",
+        MONITOR_PROGRESS_PROMPT_FALLBACK,
+        project_root=repo_path("."),
+        workspace=getattr(session, "workspace_dir", ""),
+        generated_at=now_iso(),
+    )
 
 
 def build_aux_prompt(session: Any, message: str) -> str:
-    kind = getattr(session, "kind", "monitor")
+    kind = getattr(session, "kind", "chat")
     context_path = getattr(session, "context_path", "")
     extra = str(message or "").strip()
-    boundary = AUX_MONITOR_BOUNDARY if kind == "monitor" else AUX_IDEA_BOUNDARY
+    history = getattr(session, "chat_history", []) if kind == "chat" else []
+    history_section = chat_history_prompt_section(history)
     role_line = {
-        "monitor": "Respond in CoAutoResearch MONITOR mode (read-only progress Q&A).",
-        "idea": "Respond in CoAutoResearch IDEA mode (discussion & reproduction sandbox).",
-    }.get(kind, "Respond in CoAutoResearch chat mode.")
+        "evolution": "Respond in CoAutoResearch EVOLUTION mode.",
+    }.get(kind, "Respond in CoAutoResearch Chat mode.")
     return f"""{role_line}
 
 Read your session context document first:
 `{context_path}`
+{history_section}
 
 User message:
 {extra or "(No text.)"}
 
 {response_language_prompt_section()}
-{boundary}
+Follow the boundary and workspace rules in that context document.
 Answer the user's question directly and substantively. This session's CLI
 context is isolated from the autoresearch loop, so nothing you say here affects
 the evolution process."""
@@ -11263,14 +11385,29 @@ def aux_list_sessions() -> dict[str, Any]:
 
 
 def aux_create_session(payload: dict[str, Any]) -> dict[str, Any]:
-    kind = str(payload.get("kind") or "monitor").strip()
+    kind = str(payload.get("kind") or "chat").strip()
     title = str(payload.get("title") or "").strip()
     session = aux_manager().create(kind, title, payload.get("settings"))
     return {"session": session.public(), "sessions": aux_manager().list_sessions()}
 
 
 def aux_get_session(session_id: str) -> dict[str, Any]:
-    return {"session": aux_manager().get(session_id).snapshot()}
+    manager = aux_manager()
+    session = manager.get(session_id)
+    return {"session": session.snapshot()}
+
+
+def aux_rename_session(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    title = str(payload.get("title") or payload.get("name") or "").strip()
+    session = aux_manager().rename_session(session_id, title)
+    return {"session": session.snapshot(), "sessions": aux_manager().list_sessions()}
+
+
+def aux_monitor_progress_prompt(session_id: str) -> dict[str, Any]:
+    session = aux_manager().get(session_id)
+    if getattr(session, "kind", "") == "evolution":
+        raise ValueError("Monitor progress prompts are for chat sessions.")
+    return {"prompt": build_monitor_progress_prompt(session)}
 
 
 def aux_delete_session(session_id: str) -> dict[str, Any]:
@@ -11329,39 +11466,51 @@ def serve_aux_workspace_file(self: Any, session_id: str, parsed: Any) -> None:
     query = parse_qs(parsed.query)
     rel = unquote(str(query.get("path", [""])[0] or "")).strip()
     download = str(query.get("download", [""])[0]).strip().lower() in {"1", "true", "yes"}
+    raw_inline = str(query.get("raw", [""])[0]).strip().lower() in {"1", "true", "yes"}
     if not rel:
-        self.send_error(400, "Missing path parameter")
+        self.send_json({"ok": False, "error": "Missing path parameter"}, status=400)
         return
     target = (ws / rel).resolve()
     try:
         target.relative_to(ws.resolve())
     except ValueError:
-        self.send_error(403)
+        self.send_json({"ok": False, "error": "Forbidden"}, status=403)
         return
     if not target.exists() or not target.is_file():
-        self.send_error(404)
+        self.send_json({"ok": False, "error": "File not found"}, status=404)
         return
-    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    content_type = file_mime(target)
+    kind = file_kind(target)
     data = target.read_bytes()
-    if download:
+    if download or raw_inline:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
+        disposition = "attachment" if download else "inline"
+        self.send_header("Content-Disposition", f'{disposition}; filename="{target.name}"; filename*=UTF-8\'\'{quote(target.name)}')
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
         return
-    # Preview mode: return JSON with content
-    import base64
-    is_binary = not content_type.startswith("text/") and content_type not in (
-        "application/json", "application/x-yaml", "application/x-sh",
-    ) and not content_type.startswith("image/")
-    if content_type.startswith("image/"):
+
+    if kind in {"image", "pdf", "html"}:
         self.send_json({
             "ok": True,
             "name": target.name,
+            "kind": kind,
             "content_type": content_type,
-            "content": base64.b64encode(data).decode("ascii"),
+            "content": base64.b64encode(data).decode("ascii") if kind == "image" else "",
+        })
+        return
+    if kind in {"docx", "xlsx", "pptx"}:
+        text, truncated = office_text_preview(target, 100_000)
+        self.send_json({
+            "ok": True,
+            "name": target.name,
+            "kind": kind,
+            "content_type": content_type,
+            "content": text,
+            "truncated": truncated,
         })
         return
     try:
@@ -11372,6 +11521,7 @@ def serve_aux_workspace_file(self: Any, session_id: str, parsed: Any) -> None:
         self.send_json({
             "ok": True,
             "name": target.name,
+            "kind": kind,
             "content_type": content_type,
             "content": text,
         })
@@ -11379,6 +11529,7 @@ def serve_aux_workspace_file(self: Any, session_id: str, parsed: Any) -> None:
         self.send_json({
             "ok": True,
             "name": target.name,
+            "kind": kind,
             "content_type": content_type,
             "content": "(binary file, use download instead)",
         })
@@ -14642,6 +14793,10 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     session_id = unquote(parsed.path[len("/api/sessions/"):-len("/events")])
                     self.serve_aux_session_events(parsed, session_id)
                     return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/monitor-progress-prompt"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/monitor-progress-prompt")])
+                    self.send_json({"ok": True, **aux_monitor_progress_prompt(session_id)})
+                    return
                 if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/workspace"):
                     session_id = unquote(parsed.path[len("/api/sessions/"):-len("/workspace")])
                     self.send_json({"ok": True, **aux_workspace_list(session_id, parsed)})
@@ -14861,6 +15016,10 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
             with using_project(self.request_project_id(parsed, payload)):
                 if parsed.path == "/api/research/queue":
                     self.send_json({"ok": True, "result": update_research_queue_item(payload), **queued_chat_summary()})
+                    return
+                if parsed.path.startswith("/api/sessions/"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):])
+                    self.send_json({"ok": True, "result": aux_rename_session(session_id, payload)})
                     return
             self.send_json({"error": "Unknown API route"}, status=404)
         except Exception as exc:

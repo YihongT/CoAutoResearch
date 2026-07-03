@@ -39,7 +39,10 @@ const CORE_PROTOCOL_FILES = [
   "PROJECT_FRAMING.md",
   "RESOURCE_INTAKE.md",
   "RESOURCE_SCOUT.md",
-  "REVIEWER_SCOPE_ANALYST.md"
+  "REVIEWER_SCOPE_ANALYST.md",
+  "sessions/evolution/ENTRY.md",
+  "sessions/evolution/general/AUTORESEARCH.md",
+  "sessions/chat/prompts/MONITOR_PROGRESS.md"
 ];
 const REVIEWER_BASELINE_PATH = path.join("instructions", ".co-auto-research-instructions.json");
 const REVIEW_STORAGE_VERSION = "per-reviewer-files-v1";
@@ -726,10 +729,12 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
     if (!fs.existsSync(source)) throw new Error(`Package instruction file is missing: ${name}`);
     const target = path.join(instructionDir, name);
     if (fs.existsSync(target)) {
-      fs.mkdirSync(protocolBackupRoot, { recursive: true });
-      fs.copyFileSync(target, path.join(protocolBackupRoot, name));
+      const backupTarget = path.join(protocolBackupRoot, name);
+      fs.mkdirSync(path.dirname(backupTarget), { recursive: true });
+      fs.copyFileSync(target, backupTarget);
       protocolBackedUp.push(name);
     }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
     protocolCopied.push(name);
   }

@@ -1194,6 +1194,79 @@ try {
   ) {
     throw new Error(`project list output was not useful:\n${projectListOutput}`);
   }
+  {
+    // Regression coverage for the aux_sessions.py multi-session engine.
+    // Exercises the module directly (no HTTP server, no real agent CLI) so it
+    // stays fast and deterministic while still calling the real production
+    // code paths -- string-matching source text would not have caught either
+    // of the two bugs these checks pin down.
+    const auxPython = findPython();
+    execFileSync(auxPython.command, [
+      ...auxPython.args,
+      "-c",
+      [
+        "import importlib.util, json, os, pathlib",
+        "server_path = pathlib.Path(os.environ['COAUTO_AUX_SERVER_PY'])",
+        "spec = importlib.util.spec_from_file_location('coauto_server_aux_regress', server_path)",
+        "module = importlib.util.module_from_spec(spec)",
+        "spec.loader.exec_module(module)",
+        "project_dir = pathlib.Path(os.environ['COAUTO_AUX_PROJECT_ROOT'])",
+        "context = module.ProjectContext(project_dir)",
+        "manager = context.aux_manager",
+        "",
+        "# Regression: find_session_identifier() must only match real identifier",
+        "# keys, never scan arbitrary string content for UUID-shaped substrings --",
+        "# agent tool events routinely embed unrelated UUIDs (workspace paths,",
+        "# shell command text) that previously corrupted cli_session_id and broke",
+        "# `--resume` when they were picked up in place of the real thread id.",
+        "real_id = '11111111-1111-1111-1111-111111111111'",
+        "decoy_id = '22222222-2222-2222-2222-222222222222'",
+        "assert module.find_session_identifier({'type': 'thread.started', 'thread_id': real_id}) == real_id",
+        "decoy_event = {'type': 'item.completed', 'item': {'id': 'item_1', 'type': 'command_execution', 'command': 'cat /tmp/' + decoy_id + '/CONTEXT.md'}}",
+        "decoy_found = module.find_session_identifier(decoy_event)",
+        "assert decoy_found == '', ('find_session_identifier picked up an unrelated UUID from tool output: ' + repr(decoy_found))",
+        "",
+        "# Regression: start_message() must persist status='running' to disk",
+        "# synchronously (before spawning the agent thread), or a persisted",
+        "# 'running' status -- and therefore the crash-recovery relabeling to",
+        "# 'interrupted' in load_persisted() -- can never occur.",
+        "run_calls = []",
+        "def fake_run_in_project(ctx, callback, *args):",
+        "    run_calls.append((ctx, callback, args))",
+        "module.run_in_project = fake_run_in_project",
+        "chat_session = manager.create('chat')",
+        "manager.chat(chat_session.id, {'message': 'regression probe'})",
+        "assert len(run_calls) == 1, 'start_message did not hand off to run_in_project'",
+        "persisted = json.loads((chat_session.dir / 'meta.json').read_text(encoding='utf-8'))",
+        "assert persisted['status'] == 'running', ('expected persisted status running, got ' + repr(persisted.get('status')))",
+        "",
+        "# Basic aux session lifecycle sanity (kept close to the regressions above",
+        "# since none of this was previously covered by any test either).",
+        "evolution_a = manager.create('evolution')",
+        "evolution_b = manager.create('evolution')",
+        "assert evolution_a.id == evolution_b.id, 'creating an evolution session twice must be idempotent'",
+        "try:",
+        "    manager.delete(evolution_a.id)",
+        "    raise AssertionError('deleting the evolution session must be blocked')",
+        "except ValueError:",
+        "    pass",
+        "try:",
+        "    manager.rename_session(evolution_a.id, 'hacked title')",
+        "    raise AssertionError('renaming the evolution session must be blocked')",
+        "except ValueError:",
+        "    pass",
+        "print('aux_sessions regression checks passed')"
+      ].join("\n")
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        COAUTO_AUX_SERVER_PY: path.join(root, "templates", "default", "ui", "server.py"),
+        COAUTO_AUX_PROJECT_ROOT: projectDir
+      }
+    });
+  }
   let ambiguousAttachOutput = "";
   let ambiguousAttachFailed = false;
   try {
@@ -1288,7 +1361,10 @@ try {
     !reviewerMetadata.coreProtocolFiles?.["MANUSCRIPT.md"] ||
     !reviewerMetadata.coreProtocolFiles?.["PROJECT_FRAMING.md"] ||
     !reviewerMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
-    !reviewerMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
+    !reviewerMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"] ||
+    !reviewerMetadata.coreProtocolFiles?.["sessions/evolution/ENTRY.md"] ||
+    !reviewerMetadata.coreProtocolFiles?.["sessions/evolution/general/AUTORESEARCH.md"] ||
+    !reviewerMetadata.coreProtocolFiles?.["sessions/chat/prompts/MONITOR_PROGRESS.md"]
   ) {
     throw new Error("new projects should record reference reviewer and core protocol baselines");
   }
@@ -1363,7 +1439,7 @@ Confidence: medium
     throw new Error(`upgrade-project --dry-run should report planned reviewer sync:\n${dryRunUpgrade}`);
   }
   const reviewerUpgradeOutput = execFileSync("node", [cli, "upgrade-project", staleReviewerProject], { cwd: root, encoding: "utf8" });
-  if (!reviewerUpgradeOutput.includes("synced 10 core reviewers") || !reviewerUpgradeOutput.includes("synced 6 core protocol instructions")) {
+  if (!reviewerUpgradeOutput.includes("synced 10 core reviewers") || !reviewerUpgradeOutput.includes("synced 9 core protocol instructions")) {
     throw new Error(`upgrade-project should sync core reviewers:\n${reviewerUpgradeOutput}`);
   }
   const upgradedMetadata = JSON.parse(await fsp.readFile(path.join(staleReviewerProject, "instructions", ".co-auto-research-instructions.json"), "utf8"));
@@ -1375,7 +1451,10 @@ Confidence: medium
     !upgradedMetadata.coreProtocolFiles?.["MANUSCRIPT.md"] ||
     !upgradedMetadata.coreProtocolFiles?.["PROJECT_FRAMING.md"] ||
     !upgradedMetadata.coreProtocolFiles?.["RESOURCE_SCOUT.md"] ||
-    !upgradedMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"]
+    !upgradedMetadata.coreProtocolFiles?.["REVIEWER_SCOPE_ANALYST.md"] ||
+    !upgradedMetadata.coreProtocolFiles?.["sessions/evolution/ENTRY.md"] ||
+    !upgradedMetadata.coreProtocolFiles?.["sessions/evolution/general/AUTORESEARCH.md"] ||
+    !upgradedMetadata.coreProtocolFiles?.["sessions/chat/prompts/MONITOR_PROGRESS.md"]
   ) {
     throw new Error("upgrade-project should write core reviewer and protocol baseline hashes");
   }
@@ -1389,6 +1468,9 @@ Confidence: medium
     await fsp.access(path.join(staleReviewerProject, "instructions", "reviewers", "REFERENCE_REVIEWER.md"));
     await fsp.access(path.join(staleReviewerProject, "instructions", "RESOURCE_SCOUT.md"));
     await fsp.access(path.join(staleReviewerProject, "instructions", "REVIEWER_SCOPE_ANALYST.md"));
+    await fsp.access(path.join(staleReviewerProject, "instructions", "sessions", "evolution", "ENTRY.md"));
+    await fsp.access(path.join(staleReviewerProject, "instructions", "sessions", "evolution", "general", "AUTORESEARCH.md"));
+    await fsp.access(path.join(staleReviewerProject, "instructions", "sessions", "chat", "prompts", "MONITOR_PROGRESS.md"));
   } catch {
     throw new Error("upgrade-project should install reference reviewer and core protocol files");
   }
@@ -1425,6 +1507,9 @@ Confidence: medium
   const literatureReadme = await fsp.readFile(path.join(root, "templates", "default", "resources", "literature", "README.md"), "utf8");
   const stylesCss = await fsp.readFile(path.join(root, "templates", "default", "ui", "styles.css"), "utf8");
   const appJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "app.js"), "utf8");
+  const sessionsPanelCss = await fsp.readFile(path.join(root, "templates", "default", "ui", "sessions-panel.css"), "utf8");
+  const sessionsPanelJs = await fsp.readFile(path.join(root, "templates", "default", "ui", "sessions-panel.js"), "utf8");
+  const auxSessionsPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "aux_sessions.py"), "utf8");
   const serverPy = await fsp.readFile(path.join(root, "templates", "default", "ui", "server.py"), "utf8");
   const pendingExpectedBlock = serverPy.match(/def pending_expected_trial_iteration\(\)[\s\S]*?\n\n/)?.[0] || "";
   const validateExpectedBlock = serverPy.match(/def validate_expected_trial_marker\(\)[\s\S]*?\n\n/)?.[0] || "";
@@ -2002,8 +2087,8 @@ Confidence: medium
     !indexHtml.includes('id="composer-attach-button"') ||
     !indexHtml.includes('id="composer-file-input"') ||
     !indexHtml.includes('type="file" multiple hidden') ||
-    !indexHtml.includes('/styles.css?v=20260626-stop-preexec') ||
-    !indexHtml.includes('/app.js?v=20260626-stop-preexec') ||
+    !indexHtml.includes(`/styles.css?v=${stylesVersion}`) ||
+    !indexHtml.includes(`/app.js?v=${appVersion}`) ||
     indexHtml.includes("Claude Fable") ||
     !indexHtml.includes('id="attachment-menu"') ||
     !indexHtml.includes('data-attachment-action="upload-files"') ||
@@ -2210,7 +2295,9 @@ Confidence: medium
   }
   if (
     !appJs.includes("markdownLinkHtml") ||
-    !appJs.includes('transcriptContentHtml(message.text, { markdown: role === "assistant" })') ||
+    !appJs.includes("function conversationMessageHtml") ||
+    !appJs.includes("transcriptContentHtml(text, { markdown })") ||
+    !appJs.includes("return conversationMessageHtml(message, {") ||
     !stylesCss.includes(".markdown-file-link") ||
     !appVersion
   ) {
@@ -2407,7 +2494,7 @@ Confidence: medium
     !appJs.includes("agentWaitStateHtml(waitState, { suppressIdle: true })") ||
     !appJs.includes('class="trial-live-status-block"') ||
     !appJs.includes('`Waiting for ${agentLabel(sessionBackend())} events...`') ||
-    !appJs.includes('`${agentLabel(sessionBackend())} updates`') ||
+    !appJs.includes('`${agentLabel(options.backend || sessionBackend())} updates`') ||
     appJs.includes("Waiting for Codex events") ||
     appJs.includes('"Codex updates"') ||
     appJs.includes('"Codex trial updates"') ||
@@ -2556,10 +2643,96 @@ Confidence: medium
     !appJs.includes('data-file-details="${escapeHtml(filePath)}"') ||
     !appJs.includes('data-inline-file="${escapeHtml(filePath)}"') ||
     !appJs.includes('return `<iframe class="file-pdf-preview"') ||
-    !stylesCss.includes(".file-pdf-preview")
+    !appJs.includes('kind === "html" && mode === "preview"') ||
+    !appJs.includes('class="file-html-preview"') ||
+    !stylesCss.includes(".file-pdf-preview") ||
+    !stylesCss.includes(".file-html-preview") ||
+    !serverPy.includes('OFFICE_PREVIEW_SUFFIXES = {".docx", ".xlsx", ".pptx"}') ||
+    !serverPy.includes("def office_text_preview") ||
+    !sessionsPanelJs.includes('options.kind === "pdf"') ||
+    !sessionsPanelJs.includes('options.kind === "html"') ||
+    !sessionsPanelCss.includes(".cas-viewer-frame")
   ) {
-    throw new Error("Project files and resources must keep clean expandable rows while rendering PDF previews through the inline viewer");
+    throw new Error("Project files, resources, and session workspaces must render common previews including PDF, HTML, images, and Office text extracts");
   }
+  if (
+    !auxSessionsPy.includes('self.sessions_dir = context.runtime_dir / "sessions"') ||
+    sessionsPanelJs.includes("sessionSettings") ||
+    !sessionsPanelJs.includes('var settings = typeof ui().settingsFromForm === "function" ? ui().settingsFromForm() : {};') ||
+    !sessionsPanelJs.includes('var backend = normalizeSessionBackend(base.backend || "codex");') ||
+    !sessionsPanelJs.includes('return normalizeSessionBackend(base.backend || "codex");') ||
+	    !sessionsPanelJs.includes("function sessionComposerHydrationKey") ||
+	    !appJs.includes("function conversationMessageHtml") ||
+	    !appJs.includes("conversationMessageHtml,") ||
+	    !appJs.includes("function emptyWelcomeHtml") ||
+	    !appJs.includes("emptyWelcomeHtml,") ||
+	    !appJs.includes('class="cold-start-workspace sessions-empty-start"') ||
+	    !appJs.includes('class="stage-panel is-active" data-stage-panel="1"') ||
+	    !appJs.includes("copyTextToClipboard,") ||
+	    !appJs.includes("syncModelSelectOptions,") ||
+	    !appJs.includes("syncReasoningSelectOptions,") ||
+	    !sessionsPanelJs.includes("ui().conversationMessageHtml") ||
+	    !sessionsPanelJs.includes("ui().emptyWelcomeHtml") ||
+	    !sessionsPanelCss.includes('.sessions-empty-start .stage-panel[data-stage-panel="1"]') ||
+	    sessionsPanelJs.includes("sv-empty-session") ||
+	    !sessionsPanelJs.includes("ui().copyTextToClipboard") ||
+    !sessionsPanelJs.includes("controller.syncAction") ||
+    !sessionsPanelJs.includes("ui().fitComposerSelectWidth") ||
+    !sessionsPanelJs.includes("ui().syncModelSelectOptions(model, backend, modelValue)") ||
+    !sessionsPanelJs.includes("ui().syncReasoningSelectOptions(reasoning, backend, model?.value || modelValue, reasoningValue)") ||
+    !sessionsPanelJs.includes('document.getElementById("session-settings-form")?.addEventListener("change", rerenderActiveSessionComposer)') ||
+    sessionsPanelJs.includes('<article class="framing-message') ||
+    !sessionsPanelJs.includes("data-session-edit-form") ||
+    !sessionsPanelJs.includes("body.editIndex = editIndex") ||
+    !sessionsPanelJs.includes("function scrollSessionMessageIntoView") ||
+    !sessionsPanelJs.includes("renderSessionView(isEdit ? { focusIndex: editIndex, scrollToBottom: false }") ||
+    !sessionsPanelJs.includes("renderSessionMessages(session, { focusIndex: index, scrollToBottom: false })") ||
+    !sessionsPanelCss.includes(".sessions-composer-actions") ||
+    sessionsPanelCss.includes("top: -36px") ||
+    !sessionsPanelCss.includes("position: static") ||
+	    !auxSessionsPy.includes("def prepare_message_edit") ||
+	    auxSessionsPy.includes("self.chat_history = []") ||
+	    !auxSessionsPy.includes("Reset provider CLI context while preserving visible chat history") ||
+	    !auxSessionsPy.includes('return self.status == "running" or self.is_running()') ||
+	    !auxSessionsPy.includes("def is_active(self)") ||
+	    !auxSessionsPy.includes('m["running"] = running') ||
+	    !auxSessionsPy.includes("resume = bool(session.cli_session_id) and edit_index is None") ||
+	    !serverPy.includes("history_section = chat_history_prompt_section(history)") ||
+	    !indexHtml.includes("Reset agent context") ||
+	    indexHtml.includes(">Clear context<") ||
+	    sessionsPanelCss.includes(".sv-empty-session")
+	  ) {
+	    throw new Error("Chat sessions must stay project-scoped, follow global agent settings, support real inline edit/resend, show running state, and keep composer actions out of message overlap");
+	  }
+	  const promptBuildIndex = auxSessionsPy.indexOf("prompt = self.manager.build_prompt(self, message)");
+	  const appendUserIndex = auxSessionsPy.indexOf('self.chat_history.append({"role": "user", "text": message');
+	  if (promptBuildIndex < 0 || appendUserIndex < 0 || promptBuildIndex > appendUserIndex) {
+	    throw new Error("Chat prompts must be built before appending the current user message, otherwise reset replay duplicates the latest message");
+	  }
+  if (
+    !sessionsPanelJs.includes("function positionOpenSessionMenu()") ||
+    !sessionsPanelJs.includes('menu.style.position = "fixed"') ||
+    !sessionsPanelJs.includes('history.addEventListener("scroll", closeOpenSessionMenu)') ||
+    !sessionsPanelCss.includes(".rail-session-menu.project-menu-popover") ||
+    !stylesCss.includes("html[data-theme] .project-menu-popover")
+  ) {
+    throw new Error("Chat session overflow menus must be positioned outside the scroll clipping container");
+  }
+  if (
+    !sessionsPanelCss.includes("html[data-theme] .rail .rail-nav") ||
+    !sessionsPanelCss.includes("flex-direction: column") ||
+    !sessionsPanelCss.includes("grid-template-columns: 18px minmax(0, 1fr)") ||
+    !sessionsPanelCss.includes("white-space: nowrap") ||
+	    !sessionsPanelCss.includes(".rail-sessions[hidden]") ||
+	    !sessionsPanelCss.includes("display: none !important") ||
+	    !sessionsPanelCss.includes("html[data-theme] .rail-sessions") ||
+	    !sessionsPanelCss.includes("flex: 1 1 auto") ||
+	    sessionsPanelCss.includes("flex: 0 0 clamp(176px, 24vh, 240px)") ||
+	    !sessionsPanelCss.includes(".rail-sessions:not([hidden]) + .rail-footer") ||
+	    !sessionsPanelCss.includes("margin-top: 0")
+	  ) {
+	    throw new Error("Sidebar project navigation and Sessions rail must stay vertical, visible-state adaptive, and not fixed to a small height");
+	  }
   if (
     !appJs.includes('class="trial-chip-index"') ||
     !appJs.includes('class="trial-chip-status"') ||
@@ -3323,6 +3496,10 @@ Confidence: medium
       "context.session.clear(); context.session.update(module.new_research_session()); context.session.update({'id': 'S_claude_stream', 'backend': 'claude', 'settings': settings, 'status': 'running', 'mode': 'chat', 'transcript': []})",
       "claude_delta_a = json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': 'Hello '}})",
       "claude_delta_b = json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': 'Claude'}})",
+      "claude_wrapped_tool_delta = json.dumps({'type': 'stream_event', 'event': {'type': 'content_block_delta', 'index': 1, 'delta': {'type': 'input_json_delta', 'partial_json': '{\"command\":\"pwd\"}'}}})",
+      "assert module.format_claude_event(claude_wrapped_tool_delta) == ''",
+      "assert module.should_suppress_agent_event_summary(claude_wrapped_tool_delta, 'claude') is True",
+      "assert module.streaming_update_from_agent_line(claude_wrapped_tool_delta, 'claude')['kind'] == 'tool'",
       "module.append_research_log(claude_delta_a); module.append_research_log(claude_delta_b)",
       "claude_stream = [item for item in context.session['transcript'] if item.get('streaming')]",
       "assert len(claude_stream) == 1 and claude_stream[0]['content'] == 'Hello Claude', context.session['transcript']",

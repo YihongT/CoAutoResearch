@@ -29,7 +29,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png" />
     <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css?v=20260626-stop-preexec" />
-    <link rel="stylesheet" href="/sessions-panel.css?v=20260701-v3" />
+    <link rel="stylesheet" href="/sessions-panel.css?v=20260702-session-rail-hitfix" />
   </head>
   <body class="is-project-loading">
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
@@ -76,7 +76,6 @@
 
         <nav class="rail-nav" aria-label="Views" hidden>
           <div class="rail-section-label">Current project</div>
-          <button class="rail-action is-active" type="button" data-view="chat"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-agents"/></svg><span>Agents</span></button>
           <button class="rail-action" type="button" data-view="workspace"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-files"/></svg><span>Project files</span></button>
           <button class="rail-action" type="button" data-view="resources"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-resources"/></svg><span>Resources</span></button>
           <button class="rail-action" type="button" data-view="trials"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-trials"/></svg><span>Trials</span></button>
@@ -84,8 +83,11 @@
           <button class="rail-action" type="button" data-view="manuscript"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-manuscript"/></svg><span>Manuscript</span></button>
         </nav>
 
+        <div class="rail-sessions-fixed" id="rail-sessions-evolution" hidden></div>
+
+        <div class="rail-sessions-actions-slot" id="rail-sessions-actions-slot" hidden></div>
+
         <nav class="rail-sessions" id="rail-sessions" aria-label="Research sessions" hidden>
-          <div class="rail-section-label">Sessions</div>
           <div class="rail-sessions-list" id="rail-sessions-list"></div>
         </nav>
 
@@ -381,25 +383,94 @@
 
         <section class="workspace-view sessions-view" id="sessions-view" aria-label="Session chat">
           <div class="sessions-view-frame">
-            <header class="sessions-view-header">
-              <div class="sessions-view-title-row">
-                <h1 id="sv-title">Session</h1>
-                <div class="sessions-view-tools" id="sv-tools"></div>
-              </div>
-              <p class="sessions-view-hint" id="sv-hint"></p>
-            </header>
+            <div class="resume-command-bar sessions-resume-command-bar" id="sv-resume-command-bar" hidden>
+              <span id="sv-resume-command-label">Resume chat session</span>
+              <code id="sv-resume-command-text"></code>
+              <button class="copy-command-button" id="sv-copy-resume-command" type="button" data-session-copy-resume>Copy</button>
+            </div>
             <div class="sessions-view-body">
               <div class="sessions-chat-col">
                 <div class="sessions-chat-log" id="sv-chat-log"></div>
-                <form class="sessions-chat-form" id="sv-chat-form">
-                  <textarea class="sessions-chat-input" id="sv-chat-input" placeholder="Message this session…" rows="2"></textarea>
-                  <button class="sessions-chat-send" type="submit">Send</button>
+                <form class="sessions-chat-form brief-editor-shell is-framing-dock" id="sv-chat-form" aria-label="Send message to chat session">
+                  <div class="attachment-tray" id="sv-attachment-tray" aria-live="polite"></div>
+                  <div class="brief-composer-row sessions-composer-row" aria-label="Chat session send settings">
+                    <input class="composer-file-input" id="sv-composer-file-input" type="file" multiple hidden />
+                    <button class="composer-attach-button" id="sv-composer-attach-button" type="button" data-session-attach aria-label="Attach files" title="Attach files">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                    </button>
+                    <textarea class="sessions-chat-input" id="sv-chat-input" placeholder="Message this session..." rows="1" wrap="soft"></textarea>
+                    <div class="brief-run-controls">
+                      <button class="plan-mode-chip" type="button" data-session-plan-mode-toggle aria-pressed="false" aria-label="Use Plan mode" title="Plan mode">
+                        <span class="plan-mode-chip-icon" aria-hidden="true">
+                          <svg class="plan-mode-chip-plan-icon" viewBox="0 0 24 24" focusable="false">
+                            <path d="m5 7 1.4 1.4L9 5.8M12 7h7M5 13h.01M12 13h7M5 19h.01M12 19h7" />
+                          </svg>
+                          <svg class="plan-mode-chip-close-icon" viewBox="0 0 24 24" focusable="false">
+                            <path d="M7 7l10 10M17 7 7 17" />
+                          </svg>
+                        </span>
+                        <span>Plan</span>
+                      </button>
+                      <label>
+                        <span>Model</span>
+                        <select id="sv-composer-model" aria-label="Chat session model">
+                          <option value="gpt-5.5">GPT-5.5</option>
+                          <option value="gpt-5.4">GPT-5.4</option>
+                          <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                          <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
+                          <option value="gpt-5.3-codex-spark">GPT-5.3 Spark</option>
+                          <option value="gpt-5.2">GPT-5.2</option>
+                          <option value="default">Claude Default</option>
+                          <option value="best">Claude Best</option>
+                          <option value="opus">Claude Opus 4.8</option>
+                          <option value="opus[1m]">Claude Opus 4.8 1M</option>
+                          <option value="opusplan">Claude Opus Plan</option>
+                          <option value="opusplan[1m]">Claude Opus Plan 1M</option>
+                          <option value="sonnet">Claude Sonnet 4.6</option>
+                          <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
+                          <option value="haiku">Claude Haiku 4.5</option>
+                          <option value="glm-5.2[1m]">GLM-5.2 1M</option>
+                          <option value="glm-5.2">GLM-5.2</option>
+                          <option value="glm-5-turbo">GLM-5 Turbo</option>
+                          <option value="glm-4.7">GLM-4.7</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Reasoning</span>
+                        <select id="sv-composer-reasoning" aria-label="Chat session reasoning effort">
+                          <option value="low">Low</option>
+                          <option value="medium" selected>Medium</option>
+                          <option value="high">High</option>
+                          <option value="xhigh">Extra high</option>
+                        </select>
+                      </label>
+                    </div>
+                    <button class="primary-button brief-cold-start sessions-chat-send" id="sv-chat-send" type="submit" aria-label="Send" title="Send">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>
+                    </button>
+                  </div>
+                  <div class="sessions-composer-actions" aria-label="Chat session quick actions">
+                    <button class="session-composer-action-chip session-monitor-progress-chip" type="button" data-session-monitor-prompt>
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M5 19V8m7 11V5m7 14v-7M4 19h16" />
+                      </svg>
+                      <span>Monitor progress</span>
+                    </button>
+                    <button class="session-composer-action-chip sessions-clear-context-chip" type="button" data-session-clear-context>
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
+                      </svg>
+                      <span>Reset agent context</span>
+                    </button>
+                  </div>
                 </form>
               </div>
-              <div class="sessions-ws-col" id="sv-ws-col">
+              <div class="sessions-ws-col" id="sv-ws-col" hidden>
                 <div class="sessions-ws-head">
                   <span>📁 Workspace</span>
-                  <button class="sessions-ws-refresh" id="sv-ws-refresh" type="button">⟳</button>
+                  <button class="sessions-ws-refresh" id="sv-ws-refresh" type="button" data-sessions-ws-refresh>⟳</button>
                 </div>
                 <div class="sessions-ws-breadcrumb" id="sv-ws-breadcrumb"></div>
                 <div class="sessions-ws-list" id="sv-ws-list"></div>
@@ -461,6 +532,64 @@
         <footer class="project-dialog-actions">
           <button class="secondary-button" type="button" data-project-rename-close>Cancel</button>
           <button class="primary-button" type="submit">Rename</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog class="project-dialog" id="session-rename-dialog" aria-labelledby="session-rename-title">
+      <form class="project-dialog-shell" id="session-rename-form" method="dialog">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Rename session</p>
+            <h2 id="session-rename-title">Rename this chat.</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-session-rename-close aria-label="Close rename dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <label class="field">
+          <span>Session title</span>
+          <input id="session-rename-name" name="sessionName" type="text" autocomplete="off" required />
+        </label>
+        <p class="project-dialog-note" id="session-rename-note">Renaming changes the chat label only. It does not move workspace files.</p>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-session-rename-close>Cancel</button>
+          <button class="primary-button" type="submit">Rename</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog class="project-dialog session-search-dialog" id="session-search-dialog" aria-label="Search chats">
+      <section class="project-dialog-shell session-search-shell">
+        <div class="session-search-input-row">
+          <input id="session-search-input" type="search" placeholder="Search chats..." autocomplete="off" />
+          <button class="icon-button dialog-close-button" type="button" data-session-search-close aria-label="Close search" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+        <div class="session-search-results" id="session-search-results"></div>
+      </section>
+    </dialog>
+
+    <dialog class="project-dialog session-clear-dialog" id="session-clear-context-dialog" aria-labelledby="session-clear-context-title">
+      <form class="project-dialog-shell" id="session-clear-context-form" method="dialog">
+        <header class="project-dialog-head">
+          <div>
+            <p class="eyebrow">Reset context</p>
+            <h2 id="session-clear-context-title">Reset agent context?</h2>
+          </div>
+          <button class="icon-button dialog-close-button" type="button" data-session-clear-context-close aria-label="Close reset context dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="delete-warning session-clear-warning">
+          <strong>Agent context will restart for this chat.</strong>
+          <p>Chat history stays visible. The next agent run starts fresh and rereads the saved chat history from this app.</p>
+        </div>
+        <p class="project-dialog-note" id="session-clear-context-note">Workspace, title, and visible chat history are kept. This does not affect CoAutoResearch or other chats.</p>
+        <footer class="project-dialog-actions">
+          <button class="secondary-button" type="button" data-session-clear-context-close>Cancel</button>
+          <button class="danger-button" type="submit">Reset agent context</button>
         </footer>
       </form>
     </dialog>
@@ -829,7 +958,7 @@
             <div class="settings-row">
               <div>
                 <h3>Session continuity</h3>
-                <p>Chat, slash commands, raw JSON logs, and transcript entries continue on the same resumed session after launch.</p>
+                <p>Evolution resumes the captured agent session. Chat sessions keep isolated contexts for questions, monitoring, and experiments.</p>
               </div>
               <span class="settings-value">Resume enabled</span>
             </div>
@@ -1066,7 +1195,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260626-stop-preexec"></script>
-    <script src="/sessions-panel.js?v=20260701-v3"></script>
+    <script src="/app.js?v=20260702-session-rail-hitfix"></script>
+    <script src="/sessions-panel.js?v=20260702-session-rail-hitfix"></script>
   </body>
 </html>
