@@ -11,6 +11,12 @@ const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 const outDir = path.join(root, "tmp", "theme-screenshots");
 const stylesHref = pathToFileURL(path.join(root, "templates", "default", "ui", "styles.css")).href;
+const brandMarkIvoryHref = pathToFileURL(
+  path.join(root, "templates", "default", "ui", "assets", "brand", "brand-mark-ivory.png"),
+).href;
+const brandMarkNocturneHref = pathToFileURL(
+  path.join(root, "templates", "default", "ui", "assets", "brand", "brand-mark-nocturne.png"),
+).href;
 const rmOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 150 };
 
 const themes = [
@@ -314,12 +320,9 @@ function baseHead(theme, title, bodyClass = "visual-fixture") {
 
 function railHtml() {
   return `<aside class="rail" aria-label="CoAutoResearch navigation">
-    <div class="brand">
-      <div class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32"><use href="#brand-mark-glyph"/></svg></div>
-      <div>
-        <div class="brand-title">CoAutoResearch</div>
-        <div class="brand-subtitle">Research agent</div>
-      </div>
+    <div class="brand brand-image" aria-label="CoAutoResearch">
+      <span class="brand-mark" aria-hidden="true"><img class="brand-mark-img brand-mark-img-ivory" src="${brandMarkIvoryHref}" alt="" /><img class="brand-mark-img brand-mark-img-nocturne" src="${brandMarkNocturneHref}" alt="" /></span>
+      <span class="brand-wordmark">CoAutoResearch</span>
     </div>
     <nav class="rail-nav" aria-label="Views">
       <div class="rail-section-label">Current project</div>
@@ -706,9 +709,9 @@ function shellHtml(theme, label) {
     </defs></svg>
     <div class="app-shell">
       <aside class="rail" aria-label="navigation">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32"><use href="#brand-mark-glyph"/></svg></div>
-          <div><div class="brand-title">CoAutoResearch</div><div class="brand-subtitle">Research agent</div></div>
+        <div class="brand brand-image" aria-label="CoAutoResearch">
+          <span class="brand-mark" aria-hidden="true"><img class="brand-mark-img brand-mark-img-ivory" src="${brandMarkIvoryHref}" alt="" /><img class="brand-mark-img brand-mark-img-nocturne" src="${brandMarkNocturneHref}" alt="" /></span>
+          <span class="brand-wordmark">CoAutoResearch</span>
         </div>
         <section class="project-switcher" aria-label="Projects">
           <div class="project-switcher-head"><div class="rail-section-label">Projects</div></div>

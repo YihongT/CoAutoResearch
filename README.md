@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.svg" width="88" alt="CoAutoResearch logo" />
-
-# CoAutoResearch
+<img src="assets/logo.png" width="333" alt="CoAutoResearch logo" />
 
 **A self-improving autonomous research partner you stay in control of.**
 
@@ -17,9 +15,9 @@ understand, steer, and defend the project at every step.
 
 </div>
 
-![The CoAutoResearch dashboard](assets/hero.png)
+![CoAutoResearch premium brand identity board](assets/hero.png)
 
-<div align="center"><sub>The dashboard ships in two themes — Ivory and Nocturne.</sub></div>
+<div align="center"><sub>Premium brand system with matching Ivory and Nocturne app treatments.</sub></div>
 
 Most "auto research" tools optimize for autonomous output: generate ideas, run
 experiments, write a paper, done. CoAutoResearch optimizes for **research
@@ -120,6 +118,7 @@ Generated projects keep the pieces that make research usable, separate and legib
 - [Getting started](docs/getting-started.md) — install, prerequisites, first project
 - [Concepts](docs/conceptual-framework.md) — how the research loop works
 - [Best practices](docs/best-practices.md) — how to start well, and turn the blueprint into a paper
+- [Brand identity](docs/brand.md) — logo meaning and usage notes
 - [CLI reference](docs/cli.md) — every command and flag
 - [Multiple projects](docs/multiple-projects.md) · [Remote servers](docs/remote-server.md) · [Platform support](docs/platforms.md) · [Upgrading projects](docs/upgrading.md)
 
