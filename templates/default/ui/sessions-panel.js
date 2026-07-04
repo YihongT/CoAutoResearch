@@ -384,7 +384,11 @@
   function sessionSubtitle(session) {
     if (session && session.running) return "running";
     var status = sessionStatusLabel(session).toLowerCase();
-    var id = String(session?.cli_session_id || session?.id || "").slice(0, 8);
+    // Only the CLI's own resumable session id is meaningful here -- it's
+    // unique. Falling back to our own session.id (kind + creation
+    // timestamp) showed the SAME truncated prefix for every session created
+    // the same day, e.g. two different idle chats both showing "CHA20260".
+    var id = String(session?.cli_session_id || "").slice(0, 8);
     return id ? status + " · " + id : status;
   }
 
@@ -1431,7 +1435,10 @@
     pendingClearSessionId = id;
     var note = document.getElementById("session-clear-context-note");
     if (note) {
-      note.textContent = "Chat history stays visible. The next agent run starts fresh and rereads the saved chat history from this app.";
+      // Restore the default helper text (distinct from the warning box above
+      // it) in case a previous open left an error message here -- it was
+      // accidentally duplicating the warning's own sentence instead.
+      note.textContent = "Workspace, title, and visible chat history are kept. This does not affect CoAutoResearch or other chats.";
       note.dataset.tone = "";
     }
     var dialog = document.getElementById("session-clear-context-dialog");
@@ -1758,29 +1765,36 @@
       loadSessions();
     }
 
-    setInterval(function () {
-      var pid = window.activeProjectId || "";
-      if (pid === state.loadedProjectId) return;
-      state.loadedProjectId = pid;
-      autoCreateCheckedFor = "";
-      if (state.eventSource) {
-        state.eventSource.close();
-        state.eventSource = null;
-        state.eventSourceId = "";
-      }
-      state.sessions = [];
-      state.activeId = "";
-      state.surfaceActive = false;
-      state.wsPath = "";
-      state.wsItems = [];
-      loadSessions();
-    }, 1500);
+    setInterval(syncActiveProject, 1500);
 
     setInterval(function () {
       if (!window.activeProjectId) return;
       var shouldRefresh = state.surfaceActive || state.sessions.some(function (session) { return session.running; });
       if (shouldRefresh) loadSessions();
     }, 15000);
+  }
+
+  // Also called directly by app.js (window.CoAutoSessions.syncProject) the
+  // moment it resolves the real activeProjectId, since that's frequently
+  // still empty at mount (before /api/projects returns) -- without the
+  // direct call, the whole Sessions rail area stayed blank for however long
+  // the 1500ms poll in mount() took to notice the change.
+  function syncActiveProject() {
+    var pid = window.activeProjectId || "";
+    if (pid === state.loadedProjectId) return;
+    state.loadedProjectId = pid;
+    autoCreateCheckedFor = "";
+    if (state.eventSource) {
+      state.eventSource.close();
+      state.eventSource = null;
+      state.eventSourceId = "";
+    }
+    state.sessions = [];
+    state.activeId = "";
+    state.surfaceActive = false;
+    state.wsPath = "";
+    state.wsItems = [];
+    loadSessions();
   }
 
   if (document.readyState === "loading") {
@@ -1790,6 +1804,7 @@
   }
 
   window.CoAutoSessions = {
+    syncProject: syncActiveProject,
     leave: function () {
       if (!state.surfaceActive && !document.body.classList.contains("has-sessions-active")) return;
       state.surfaceActive = false;

@@ -2757,6 +2757,11 @@ async function loadProjects(options = {}) {
   renderProjectList();
   renderProjectAvailability();
   renderComposerModeControls();
+  // sessions-panel.js mounts before this resolves and often sees an empty
+  // activeProjectId at that point (nothing persisted yet, or the persisted
+  // id was stale) -- without this, the whole Sessions rail area stayed
+  // blank until its own 1500ms poll noticed the id had changed.
+  window.CoAutoSessions?.syncProject?.();
   if (options.showLoading && activeProjectId) setProjectLoadPhase("overview");
   else setProjectLoadPhase("ready");
   maybeOpenInitialProjectDialog();
@@ -2827,7 +2832,10 @@ function openProjectRenameDialog(projectId) {
   const dialog = $("#project-rename-dialog");
   if (dialog?.showModal) dialog.showModal();
   else dialog?.setAttribute("open", "");
-  requestAnimationFrame(() => input?.focus());
+  requestAnimationFrame(() => {
+    input?.focus();
+    input?.select();
+  });
 }
 
 function closeProjectRenameDialog() {
@@ -9257,20 +9265,25 @@ function renderTree(node, depth = 0) {
   if (!node) return empty("No files here yet.");
   if (node.type === "file") {
     const filePath = repoRelativePath(node.path || node.name);
-    const fileMeta = node.is_symlink ? `${filePath} · linked` : filePath;
+    // Only show a right-side label for symlinks -- that's real information
+    // (the name/tree position don't say it's a link). Repeating the full
+    // path here for every ordinary file just duplicated what the tree's own
+    // nesting already shows; the path is still available via the title
+    // attribute for anyone who wants to check it.
+    const fileMeta = node.is_symlink ? "linked" : "";
     if (!node.previewable) {
       return `
-        <div class="tree-file is-disabled">
+        <div class="tree-file is-disabled" title="${escapeHtml(filePath)}">
           <span>${escapeHtml(node.name)}</span>
-          <small>${escapeHtml(fileMeta)}</small>
+          ${fileMeta ? `<small>${escapeHtml(fileMeta)}</small>` : ""}
         </div>
       `;
     }
     return `
       <details class="tree-file-node" data-file-details="${escapeHtml(filePath)}">
-        <summary>
+        <summary title="${escapeHtml(filePath)}">
           <span>${escapeHtml(node.name)}</span>
-          <small>${escapeHtml(fileMeta)}</small>
+          ${fileMeta ? `<small>${escapeHtml(fileMeta)}</small>` : ""}
         </summary>
         <div class="inline-file" data-inline-file="${escapeHtml(filePath)}">
           <div class="tree-empty">Open to load file.</div>
@@ -9321,7 +9334,11 @@ function renderFileManager(title, rootPath, tree, emptyText) {
 function renderWorkspacePanel() {
   return renderFileManager(
     "Project files",
-    appState?.repo_root || "./",
+    // "./" to match Resources/Trials/etc's short relative-path convention --
+    // this used to print the full absolute filesystem path (e.g.
+    // "/Users/name/.../some-long-project-folder-name"), which just added
+    // visual noise under the heading instead of being a useful label.
+    "./",
     appState.trees?.workspace,
     "No project files found."
   );
@@ -9567,6 +9584,14 @@ function restoreReviewTrialStripScroll() {
   strip.scrollLeft = Math.max(0, nextLeft);
 }
 
+function reviewDecisionTone(decision) {
+  const value = String(decision || "").toLowerCase().replaceAll(" ", "_");
+  if (value === "pass") return "pass";
+  if (value === "blocked") return "blocked";
+  if (value === "needs_human") return "needs-human";
+  return "";
+}
+
 function reviewCardHtml(review) {
   const trialId = reviewTrialId(review);
   const decision = reviewDecision(review);
@@ -9576,8 +9601,8 @@ function reviewCardHtml(review) {
     reviewTypeLabel(review.type),
     trialId ? trialId : "",
     reviewer,
-    decision,
   ].filter(Boolean);
+  const decisionTone = reviewDecisionTone(decision);
   return `
     <article class="review-card">
       <header class="review-card-head">
@@ -9589,6 +9614,7 @@ function reviewCardHtml(review) {
       </header>
       <div class="review-meta-row">
         ${meta.map((item) => `<span class="review-chip">${escapeHtml(item)}</span>`).join("")}
+        ${decision ? `<span class="review-chip review-chip-decision${decisionTone ? ` is-${decisionTone}` : ""}">${escapeHtml(decision)}</span>` : ""}
       </div>
       <p class="review-summary">${escapeHtml(reviewSummary(review))}</p>
       <p class="review-path">${escapeHtml(review.path || "")}</p>

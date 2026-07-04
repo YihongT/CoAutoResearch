@@ -55,6 +55,7 @@
   min-height: 0;
   max-height: clamp(110px, 28vh, 280px);
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -127,6 +128,10 @@
   z-index: 2;
 }
 .rail-session-row .project-menu-button::before {
+  /* Expands the "..." button's hit region without visually growing it --
+     kept transparent/unpainted on purpose. .rail-chat-history-scroll clips
+     this via overflow-x: hidden, so the padding no longer leaks a phantom
+     horizontal scrollbar the way it did before that was added. */
   content: "";
   position: absolute;
   inset: -6px;
@@ -593,6 +598,16 @@ html[data-theme] .sessions-composer-row {
 }
 .sessions-composer-row :is(.composer-attach-button, .sessions-chat-send) {
   position: relative;
+}
+/* #sv-chat-send reuses the legacy `.brief-cold-start` class for its icon-button
+   styling. styles.css's `.brief-editor-shell.is-framing-dock .brief-cold-start`
+   rule forces `position: static !important` there, and its (0,3,0) specificity
+   beats the class-only selector above even if !important is added to it, so a
+   plain `!important` bump on the rule above is not enough. Override by ID
+   (specificity (1,0,0)) so this always wins and the ::before hit-region below
+   anchors to the button itself instead of ballooning to fill #sv-chat-form. */
+#sv-chat-send {
+  position: relative !important;
 }
 .sessions-composer-row :is(.composer-attach-button, .sessions-chat-send)::before {
   content: "";

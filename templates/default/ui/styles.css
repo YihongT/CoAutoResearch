@@ -13948,12 +13948,10 @@ body {
 }
 
 .rail {
-  border-color: color-mix(in srgb, var(--rail) 72%, var(--line));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--rail-ink) 7%, transparent), transparent 28%),
-    var(--rail);
+  border-right: 1px solid var(--line);
+  background: var(--rail);
   color: var(--rail-ink);
-  box-shadow: 10px 0 34px color-mix(in srgb, var(--rail) 18%, transparent);
+  box-shadow: none;
 }
 
 .brand-title,
@@ -14409,6 +14407,17 @@ html[data-theme] :is(
   border-color: var(--panel-border);
   background: var(--panel-bg);
   color: var(--panel-ink);
+}
+
+/* The empty-chat "What should we work on?" welcome reuses the onboarding
+   wizard's .cold-card markup (via emptyWelcomeHtml in app.js), but only ever
+   fills a small heading/subcopy block instead of the wizard's full framing
+   form. Left unstyled, it inherits the hard-override panel background above
+   and the wizard's full-height sizing, which together render as a large,
+   empty, meaningless pale rectangle behind the greeting. Strip just the
+   decorative background here (layout/height are intentionally left alone). */
+#sv-chat-log .cold-start-workspace.sessions-empty-start .cold-card {
+  background: transparent;
 }
 
 html[data-theme] :is(.file-viewer-head, .file-viewer-header, .file-viewer-body, .file-tabs, .file-preview-card, .markdown-preview, .project-rendered) {
@@ -16294,6 +16303,28 @@ html[data-theme] #cold-start-workspace:not(.has-framing-thread) .brief-editor-sh
 }
 .review-summary { color: var(--ink); }
 .review-path { color: var(--soft); }
+
+/* Color-code the decision chip so pass/blocked/needs_human read at a glance
+   instead of every reviewer's verdict looking like the same neutral pill as
+   its type/trial/reviewer tags. Needs !important + the html[data-theme]
+   prefix to beat the earlier html[data-theme] .review-chip{...!important}
+   rule (styles.css ~15034), which otherwise forces every chip to the same
+   link-tinted color regardless of this class. */
+html[data-theme] .review-chip.review-chip-decision.is-pass {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--line)) !important;
+  background: color-mix(in srgb, var(--success) 16%, var(--surface-soft)) !important;
+  color: var(--success) !important;
+}
+html[data-theme] .review-chip.review-chip-decision.is-blocked {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line)) !important;
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface-soft)) !important;
+  color: var(--danger) !important;
+}
+html[data-theme] .review-chip.review-chip-decision.is-needs-human {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--line)) !important;
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface-soft)) !important;
+  color: var(--warning) !important;
+}
 
 /* ===================================================================
    ATELIER — Part C7: manuscript (the deep surface). Editorial document
