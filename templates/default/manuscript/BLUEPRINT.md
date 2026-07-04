@@ -1,14 +1,22 @@
 # Manuscript Blueprint
 
-This file is the self-contained, target-venue-aware architecture for the active
-manuscript or deliverable. It must be useful to a human author without reading
-hidden trial logs or jumping through separate claim/evidence/display indexes.
+Status: pre-results stub. This file becomes the paper-writing handoff only
+after real, source-backed results, figures, tables, references, and appendix
+materials have been promoted. Until then, planned obligations and blockers live
+in `manuscript/PAPER_PLAN.md` and `research_trajectory/STATE.md` under
+`## Critical Path`.
+
+This file must contain only real manuscript-facing content. It must not contain
+trial logs, control registers, dependency registers, citation queues, blocker
+queues, or planned result slots. Trial paths are allowed only in `Provenance /
+Audit Index`, one concise line per source.
 
 Read before editing:
 
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
+- `manuscript/PAPER_PLAN.md`
 - `resources/target_venue/SEED_PAPERS.md`
 - `resources/target_venue/STYLE_NOTES.md`
 - `resources/target_venue/FIGURE_TABLE_NOTES.md`
@@ -17,275 +25,63 @@ Read before editing:
 
 ## Target Venue / Audience / Article Type
 
-Target venue:
-
-Audience:
-
-Article type:
-
-Contribution posture:
-
-Evidence standard:
-
-Expected display / method / result style:
+No real manuscript-facing venue content has been promoted yet.
 
 ---
 
 ## Target-Venue Organization Rationale
 
-Explain why the section order, section depth, display density, citation posture,
-method/result placement, and appendix/supplement plan fit the declared target
-venue and article type.
+No real organization rationale has been promoted yet.
 
 ---
 
 ## Core Story
 
-State the manuscript's central argument in self-contained prose. Do not leave
-stale statements such as "tentative until source-level evidence checks are
-completed" after the evidence gate has passed.
+No source-backed core story has been promoted yet.
 
 ---
 
 ## Architecture Overview / Table of Contents
 
-List the complete planned structure in manuscript order. Include every section,
-subsection, subsubsection, and deeper titled unit that the manuscript currently
-expects to use.
-
-- [Section 1: <target-venue section title>](#section-1-target-venue-section-title)
-  - [Subsection 1.1: <subsection title>](#subsection-11-subsection-title)
-  - [Figure F000000: <figure title>](#figure-f000000-figure-title)
-- [Section 2: <target-venue section title>](#section-2-target-venue-section-title)
+No source-backed manuscript architecture has been promoted yet.
 
 ---
 
 ## Manuscript Architecture
 
-Use the target venue's final reading order. Do not organize this section by
-claim IDs, evidence IDs, figure IDs, or table IDs. IDs may appear only as local
-provenance.
-
-For each titled unit, `Section brief` should be 2-4 sentences of finished-results
-paper-map prose: what this unit argues, what evidence/results/displays it uses,
-and why it appears here. Do not write expected-work or future-plan language.
-For each display/method/result block, `Reader takeaway` should state what a
-reader should understand from the object at this manuscript location.
-Do not use section-planning fields inside `Result`, `Dataset`, `Benchmark`,
-`Metric`, or `RSLT...` blocks. Those headings are artifact blocks. If a result
-is only planned or pending, list it under `Blocking Missing Evidence` with a
-precise `Remaining blocker`; do not create an inline result block. Candidate
-results must already have an actual metric/result summary and source artifact
-path.
-
-### Section 1: <target-venue section title>
-
-Target-venue role:
-
-Section brief:
-
-Reader question answered:
-
-Local thesis / purpose:
-
-Local claims in plain language:
-
-Local evidence, results, or artifacts:
-
-Placed displays / methods / results:
-
-Local qualifications:
-
-Transition job:
-
-Paragraph plan:
-
-| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |
-|---|---|---|---|---|---|---|---|
-| P1 | <move> | <specific content obligation> | <finding IDs plus plain-language support and artifact paths> | <figure/table/algorithm/result block or none> | <citation role> | <qualification or none> | <how this sets up the next paragraph/section> |
-
-#### Subsection 1.1: <subsection title>
-
-Target-venue role:
-
-Section brief:
-
-Reader question answered:
-
-Local thesis / purpose:
-
-Local claims in plain language:
-
-Local evidence, results, or artifacts:
-
-Placed displays / methods / results:
-
-Local qualifications:
-
-Transition job:
-
-Paragraph plan:
-
-| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |
-|---|---|---|---|---|---|---|---|
-| P1 | <move> | <specific content obligation> | <finding IDs plus plain-language support and artifact paths> | <figure/table/algorithm/result block or none> | <citation role> | <qualification or none> | <how this sets up the next paragraph/section> |
-
-##### Figure F000000: <title>
-
-Placement:
-
-Inclusion status: <active / candidate / supplement / deprecated / deferred>
-
-Purpose or result role:
-
-Reader takeaway:
-
-Content and panel layout:
-
-Visual style:
-
-Caption draft or current caption:
-
-Source artifact or spec path:
-
-Preview image:
-
-<Markdown image preview if the source is an image file, e.g. `![Figure F000000: <title>](figures/<file>.png)`; otherwise `none`.>
-
-Result shown or conceptual basis:
-
-Provenance links:
-
-Target-venue fit rationale:
-
-Remaining blocker: <none, or exact blocker>
-
-##### Table T000000: <title>
-
-Placement:
-
-Inclusion status: <active / candidate / supplement / deprecated / deferred>
-
-Purpose or result role:
-
-Reader takeaway:
-
-Table number/title:
-
-Publication-ready table:
-
-| Column 1 | Column 2 | Column 3 |
-|---|---|---|
-| <final row value> | <final row value> | <final row value> |
-
-Caption draft or current caption:
-
-Table notes / definitions / abbreviations: <none, or notes>
-
-Source artifact or spec path:
-
-Key result or conceptual contrast shown:
-
-Provenance links:
-
-Target-venue fit rationale:
-
-Remaining blocker: <none, or exact blocker>
-
-##### Algorithm A000000: <name>
-
-Placement:
-
-Purpose:
-
-Reader takeaway:
-
-Inputs:
-
-Outputs:
-
-Pseudocode / interface sketch:
-
-Assumptions and failure modes:
-
-Validation evidence:
-
-Source code or artifact links:
-
-Remaining blocker: <none, or exact blocker>
-
-##### Result RSLT000000: <name>
-
-Use this block only for an available active or candidate result with an actual
-metric/result summary and source artifact path. Missing or pending results
-belong in `Blocking Missing Evidence`.
-
-Placement:
-
-Inclusion status: <active / candidate / supplement / deprecated / deferred>
-
-Metric or result summary:
-
-Reader takeaway:
-
-Source artifact path:
-
-Comparison or baseline logic:
-
-Limitations and uncertainty:
-
-Manuscript claim supported in plain language:
-
-Remaining blocker: <none, or exact blocker>
+No real sections, figures, tables, algorithms, datasets, benchmarks, or result
+blocks have been promoted yet.
+
+When promoted, section units must include target-venue role, section brief,
+reader question answered, local thesis or purpose, local claims in plain
+language, local evidence/results/artifacts, paragraph plan, local
+qualifications, and transition job.
+
+Real artifact blocks use only these inclusion statuses: `active`, `candidate`,
+or `supplement`. A `candidate` block still requires an observed result summary,
+reader takeaway, and source artifact path.
 
 ---
 
 ## Reference / Literature Grounding Plan
 
-Describe the reference posture required by the target venue. Name the current
-seed papers, core literatures, source audits, and any remaining bibliography
-work.
+No source-backed reference posture has been promoted yet.
 
 ---
 
 ## References
 
-Canonical resolved reference list. This is the actual reader-facing list, not a
-strategy description (the strategy lives in `Reference / Literature Grounding
-Plan`).
-
-Format rules:
-
-- Each entry: author(s), title, venue or container, year, and a stable locator
-  (DOI preferred, else resolvable URL, else unambiguous publisher/standard ID).
-- One canonical entry and stable key per source; no duplicates.
-- Every inline citation must resolve to exactly one entry here, and every entry
-  here must be cited at least once in the manuscript architecture.
-- Use the citation/ordering style required by the target venue declared above.
-  If the venue does not fix one, use a single consistent style (numbered or
-  author–year) and state which here.
-
-<!-- Replace with the resolved list once sources are integrated, e.g.:
-1. Author A, Author B. Title. Venue, Year. https://doi.org/... -->
+No resolved references have been promoted yet.
 
 ---
 
 ## Appendix / Supplement Plan
 
-State whether appendix or supplement material is needed. If not needed, explain
-why that is appropriate for the target venue and current deliverable. If no
-active tables are used, explain here or in the relevant architecture section
-where the necessary comparison/evidence mapping is carried instead.
+No source-backed appendix or supplement material has been promoted yet.
 
 ---
 
 ## Blocking Missing Evidence
-
-List only blockers that prevent final gate pass. If any item remains here, the
-autoresearch gate must be `continue`.
-
-Place missing or pending result obligations here, not as inline result blocks in
-`Manuscript Architecture`.
 
 - none
 
@@ -293,41 +89,24 @@ Place missing or pending result obligations here, not as inline result blocks in
 
 ## Required Qualifications / Claim Constraints
 
-List non-blocking qualifications that must already be reflected locally in the
-manuscript architecture, captions, table entries, algorithm/result descriptions,
-and claim wording.
+No source-backed qualifications have been promoted yet.
 
 ---
 
 ## Provenance / Audit Index
 
-Use this section only for secondary audit. Do not make it necessary for reading
-the manuscript architecture.
-
-### Claim / Evidence Index
-
-If useful, list accepted or candidate claim/evidence IDs here after the same
-claims have already been explained locally in the relevant manuscript sections.
-
-### Display / Method / Result Inventory
-
-If useful, list active, candidate, deferred, or superseded display/method/result
-objects here after active objects have already been placed inline.
-
-### Source Links
-
-List project-relative source paths, trial reports, reviews, and artifact files
-that support the blueprint.
+No promoted manuscript evidence yet.
 
 ---
 
 ## Deprecated Or Superseded Ideas
 
-List ideas that should not be used unless revived by current state.
+- none
 
 ---
 
 ## Submission-Readiness Summary
 
-State whether the blueprint is ready for the declared scope, what reviewer gates
-passed, and what optional human preference or submission-packaging work remains.
+Not paper-ready. This is a pre-results stub; use `manuscript/PAPER_PLAN.md` for
+planned obligations and `research_trajectory/STATE.md` for the active Critical
+Path.

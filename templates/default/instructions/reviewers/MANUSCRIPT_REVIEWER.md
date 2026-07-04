@@ -51,22 +51,34 @@ Evaluate:
 - appendix and supplement posture;
 - treatment of limitations and alternatives;
 - whether the manuscript can stand on its own without hidden trial details.
+- artifact state:
+  `scaffold-ok | results-partial | paper-ready | structurally-unreadable`.
+
+`structurally-unreadable` means planned slots in manuscript architecture,
+status-log content, control registers, dependency registers, citation queues,
+contradictory artifact contracts, or trial-log pollution make the blueprint
+unusable as a paper-writing handoff. This makes structural repair the mandatory
+next action. `scaffold-ok` is valid only when `BLUEPRINT.md` is the explicit
+pre-results stub and `PAPER_PLAN.md` coherently carries planned obligations and
+blockers.
 
 ## Pass Standard
 
 Use `Decision: pass` only for submission-readiness or declared final-deliverable
-readiness. The manuscript must have no unresolved required revision constraints
-for the declared scope, and the review must account for contribution, evidence,
+readiness. The manuscript must have complete real results for the declared
+scope, no unresolved required revision constraints, and the review must account
+for contribution, evidence,
 venue fit, displays/methods/results, limitations, references, and
 self-contained readability. For manuscript-facing final pass,
-`manuscript/BLUEPRINT.md` must be self-contained and target-venue-ready:
+`manuscript/BLUEPRINT.md` must be self-contained, target-venue-ready, and
+non-stub:
 target-venue section titles/order/depth, abstract plan when applicable,
 compact reader-facing section briefs, paragraph-level writing plans, local
 claim/evidence/result explanations, inline figure/table/algorithm/dataset/
 benchmark/result blocks with reader takeaways, captions, publication-ready
 inline table bodies for every active table, Markdown preview images for
-image-source figures, references, appendix/supplement posture, blocking missing
-evidence, required qualifications, provenance/audit index, and
+image-source figures, references, appendix/supplement posture, required
+qualifications, provenance/audit index, and
 submission-readiness must all be explicit and mutually consistent.
 
 Artifact headings are not section headings. If a block titled `Result`,
@@ -80,8 +92,8 @@ not acceptable active result content.
 Numbered planned result slots do not count as a readable Results section. Any
 inline `Result`, `Metric`, `RSLT...`, dataset, or benchmark block in
 `Manuscript Architecture` must state an actual result summary and source
-artifact path, even when marked `candidate`; otherwise move it to `Blocking
-Missing Evidence`.
+artifact path, even when marked `candidate`; otherwise move it to
+`PAPER_PLAN.md`.
 
 Each active titled unit must specify the target-venue role, a section brief
 that reads as finished-results paper-map prose, reader question answered, local
@@ -117,7 +129,12 @@ those positives under `Qualified / Partial Passes`.
 
 ## Output Schema
 
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
-input paths for the blueprint, manuscript sections, figures, tables, appendix,
+Follow `instructions/reviewers/REVIEW_TAXONOMY.md` and include this additional
+line after `Context summary:`:
+
+`Artifact state: scaffold-ok | results-partial | paper-ready | structurally-unreadable`
+
+Include explicit reviewed input paths for `manuscript/PAPER_PLAN.md`,
+`manuscript/BLUEPRINT.md`, manuscript sections, figures, tables, appendix,
 target-venue resources, trial report, and any manuscript review mirrors you
 consulted.

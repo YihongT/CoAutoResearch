@@ -29,25 +29,56 @@ it.
 Either way, uploaded material is copied into `resources/` and recorded, so the
 agent can cite it and you can trace where everything came from.
 
+For ongoing projects, put research-bearing material under
+`resources/ongoing_work/` or upload it through the UI. CoAutoResearch now runs a
+mandatory conversion trial before normal autoresearch when that folder contains
+code, data, checkpoints, results, manuscript sources, or metrics. The conversion
+trial inventories what is present, activates large resources in place, migrates
+runnable code or derived data into `workspace/`, and registers prior quantitative
+results as tentative findings until the new run verifies them.
+
+## Keep the Critical Path empirical
+
+The loop is driven by the Critical Path in `research_trajectory/STATE.md`. Each
+trial should target the current bottleneck: acquire or substitute data, run or
+repair methods, produce results, build figures/tables, or assemble the
+deliverable. Audits and register cleanup are useful only when they unblock one
+of those items.
+
+When a public dataset or file is research-critical, the agent should not leave
+it as a link-only note. It should record an acquisition decision, try user
+provided ongoing work and local caches first, then official downloads and
+acceptable substitutes within the objective. A human decision is reserved for
+credentials, private resources, scope changes, or substitutions that would
+change the core claim.
+
 ## Working with the manuscript blueprint
 
-CoAutoResearch delivers the manuscript as a **blueprint** — a structured map of
-the paper (section plans, claims, evidence, figure specs, references) — not
-finished prose. That is deliberate. Today's models can plan and ground a paper
-far more reliably than they can write the full narrative with correct,
-defensible reasoning end to end. So we keep the part that must be right and
-traceable — the research itself — as the deliverable, and leave the final prose
-to you.
+CoAutoResearch uses two manuscript artifacts. `manuscript/PAPER_PLAN.md` is the
+working venue-format plan: section obligations, planned figures/tables, evidence
+gaps, and blockers live there. `manuscript/BLUEPRINT.md` is the exportable
+blueprint: it should contain only real, source-backed content, including real
+results, figure/table blocks, references, appendix posture, and provenance.
+
+The blueprint is not finished prose. That is deliberate. Today's models can plan
+and ground a paper far more reliably than they can write the full narrative with
+correct, defensible reasoning end to end. So we keep the part that must be right
+and traceable — the research itself — as the deliverable, and leave the final
+sentence-level prose to you.
 
 This is the Co in CoAutoResearch: every claim is tied to evidence you can check,
 and you can revise the argument before a single paragraph is written. You own
 and can defend the result, instead of inheriting prose you would have to
 reverse-engineer.
 
-When you want full text, hand the **blueprint pack** (the *Download blueprint
-pack* button) to GPT or Claude and ask it to write the paper from the blueprint.
-Because the structure, claims, and evidence are already fixed, the model is
-rendering your research into prose — not inventing it.
+When the paper is complete, hand the **Paper-Writing Pack** to GPT or Claude and
+ask it to write the paper from the blueprint. Because the structure, claims, and
+evidence are already fixed, the model is rendering your research into prose —
+not inventing it.
+
+If the UI offers a **Research Status Pack** instead, the run is not ready for
+paper writing. That export is an honest checkpoint containing `PAPER_PLAN.md`,
+state, findings, and blockers.
 
 ## Generating figures
 

@@ -87,13 +87,40 @@ Update `PROJECT.md` after launch only when:
 - a formal human intervention requires canonical reframing;
 - Resource Intake or Conversion shows that the canonical project framing is
   incomplete, wrong, or stale;
-- the execution agent intentionally promotes a verified project-definition
-  change and updates related trajectory artifacts consistently.
 
 Do not rewrite `PROJECT.md` after launch for ordinary chat, local wording
 preferences, temporary trial observations, raw outputs, or speculative ideas.
 When in doubt, record a pending human intervention or ask for clarification
 instead of silently changing the launch frame.
+
+### Agent-Proposed Scope Changes
+
+After launch, an agent-initiated change to the objective, research question,
+population, period, dataset vintage, target venue, or deliverable is a proposal,
+not a direct edit. Write:
+
+`research_trajectory/human_interventions/pending/SCOPE_CHANGE_<id>.md`
+
+Use this structure:
+
+```markdown
+# Scope Change Proposal
+
+Old objective:
+New objective:
+Why:
+Critical-path impact:
+Default if unanswered: keep old scope
+```
+
+Continue on the old scope. If the old scope cannot advance, set the
+Autoresearch Goal Gate to `Status: needs_human` with `Response to human:`
+pointing to the scope decision.
+
+Dataset substitution within the existing research objective under
+`instructions/RESOURCE_SCOUT.md` ladder rungs 4-5 is not a scope change. Record
+it in `ACQUISITION_DECISION.md`. Ladder rung 6, scope-downgrade proposal, is a
+scope change and requires the proposal above.
 
 ---
 

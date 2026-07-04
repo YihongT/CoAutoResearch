@@ -67,13 +67,20 @@ Check:
 - if the goal is manuscript-facing, the deliverable is at submission-readiness
   level for the declared target, not merely ready for another revision phase.
 - if the goal is manuscript-facing, `manuscript/BLUEPRINT.md` is a
-  self-contained, target-venue-ready blueprint with explicit organization,
+  non-stub, self-contained, target-venue-ready, full-results blueprint with
+  explicit organization,
   architecture overview/table of contents, target-manual section architecture,
   compact reader-facing section briefs, paragraph-level writing plans, local
   claim/evidence/result explanations, reader takeaways for inline
   figure/table/algorithm/dataset/benchmark/result blocks, reference plan,
-  appendix/supplement plan, blockers, qualifications, provenance/audit index,
-  deprecated ideas, and submission-readiness summary.
+  appendix/supplement plan, qualifications, provenance/audit index, deprecated
+  ideas, and submission-readiness summary.
+- all Critical Path items in `STATE.md` are `done` or `downgraded` through a
+  confirmed human intervention.
+- every research-critical resource has an `ACQUISITION_DECISION.md` terminal
+  verdict.
+- `manuscript/PAPER_PLAN.md` has no remaining blocking evidence unless the
+  scope has been formally downgraded by human intervention.
 - if the target deliverable has an abstract, the blueprint plans the abstract
   according to the target manual: structured headings when required, otherwise
   4-6 unstructured rhetorical moves, plus target-venue role, claim/evidence
@@ -83,26 +90,25 @@ Check:
   layout, visual style, caption draft/current caption, source artifact or spec
   path, preview image using Markdown image syntax when the source is an image
   file, result shown or conceptual basis, provenance links, target-venue fit
-  rationale, and remaining blocker value.
+  rationale.
 - every active table is placed inline in `Manuscript Architecture` and has a
   title, placement, inclusion status, purpose/result role, publication-ready
   Markdown table body in final row/column form, caption draft/current caption,
   table notes or `none`, source artifact or spec path, key result or conceptual
-  contrast, provenance links, target-venue fit rationale, and remaining blocker
-  value. Table specs, column lists, comparison logic, or source links are not
-  enough for an active manuscript table. If there are no active tables, the
+  contrast, provenance links, and target-venue fit rationale. Table specs,
+  column lists, comparison logic, or source links are not enough for an active
+  manuscript table. If there are no active tables, the
   blueprint must explain in the architecture or appendix/supplement plan where
   the needed comparison or evidence mapping is carried instead.
 - every active algorithm, method, dataset, benchmark, or result block is placed
   inline in `Manuscript Architecture` and includes placement, purpose, source
-  artifacts or code links, validation/evidence or limitations, and remaining
-  blocker value.
+  artifacts or code links, validation/evidence or limitations.
 - separate claim/evidence maps, `Figure Plan`, `Table Plan`, and
   `manuscript/figures/FIGURE_SPECS.md` may support audit, but they cannot be
   used as the primary proof that the manuscript blueprint is readable or
   complete.
-- `Blocking Missing Evidence` is empty or explicitly `none`; missing evidence
-  may not be hidden as a non-blocking qualification.
+- `Blocking Missing Evidence` is explicitly `none`; missing evidence may not be
+  hidden in `BLUEPRINT.md` or as a non-blocking qualification.
 - stale language such as "tentative until source-level evidence checks are
   completed" is absent once evidence/final gates are claimed as pass.
 
@@ -112,6 +118,10 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 
 - core instruction baseline status: current or outdated;
 - final blueprint section completeness;
+- Critical Path status: all items done or confirmed downgraded;
+- research-critical acquisition decisions: terminal verdicts present;
+- blueprint state: non-stub full-results blueprint;
+- Paper Plan remaining blockers status;
 - target manual section title/order fidelity;
 - architecture overview / table of contents completeness;
 - paragraph plan completeness;
@@ -130,7 +140,7 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - planned result slot integrity: any inline `Result`, `Metric`, `RSLT...`,
   dataset, or benchmark block marked `candidate` must still state an actual
   result summary and source artifact path; missing or pending results belong in
-  `Blocking Missing Evidence`;
+  `manuscript/PAPER_PLAN.md`;
 - reference/literature grounding completeness;
 - Resource Scout status: required and completed, skipped with valid reason, or
   blocking because missing/undocumented/inconsistent;

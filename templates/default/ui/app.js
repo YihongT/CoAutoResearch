@@ -3563,11 +3563,17 @@ function humanTaskItemHtml(task) {
   const id = cleanText(task?.id, "");
   const priority = cleanText(task?.priority, "");
   const blocks = cleanText(task?.blocks, "");
-  const meta = [id, priority, blocks && blocks !== "none" ? `blocks ${blocks.replaceAll("_", " ")}` : ""].filter(Boolean).join(" · ");
+  const critical = task?.critical_path === true || cleanText(task?.critical_path, "") === "true";
+  const meta = [
+    id,
+    priority,
+    critical ? "critical path" : "",
+    blocks && blocks !== "none" ? `blocks ${blocks.replaceAll("_", " ")}` : ""
+  ].filter(Boolean).join(" · ");
   const question = cleanText(task?.question, "");
   const meanwhile = cleanText(task?.continue_meanwhile, "");
   return `
-    <li>
+    <li class="${critical ? "is-critical-path" : ""}">
       ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
       <strong>${escapeHtml(question)}</strong>
       ${meanwhile ? `<em>${escapeHtml(meanwhile)}</em>` : ""}
@@ -7655,6 +7661,7 @@ function formatStopReason(value) {
     all_reviewer_gates_passed: "Reviewer gates passed",
     gate_requires_human_input: "Needs human input",
     review_checkpoint_reached: "Review checkpoint reached",
+    stalled_without_empirical_progress: "Stalled without empirical progress",
     paused_by_user: "Paused by user",
     cleared_by_user: "Cleared by user",
     stopped_by_user: "Stopped by user",
@@ -7755,6 +7762,8 @@ function statusCardHtml(payload, entry) {
   const lastEventAge = Number(events.last_event_age_seconds);
   const lastEvent = Number.isFinite(lastEventAge) ? `${formatWorkedDuration(lastEventAge)} ago` : "none";
   const gate = payload.gate || "missing";
+  const conversionPending = payload.conversion_pending && payload.conversion_pending.pending;
+  const scopeDrift = payload.scope_drift && payload.scope_drift.warning;
   const iteration = Number.isFinite(Number(payload.loop_iteration)) ? Number(payload.loop_iteration) : 0;
   const interval = Number.isFinite(Number(payload.review_checkpoint_interval)) && Number(payload.review_checkpoint_interval) > 0 ? Number(payload.review_checkpoint_interval) : 100;
   const checkpoint = Number.isFinite(Number(payload.loop_review_checkpoint_iteration)) && Number(payload.loop_review_checkpoint_iteration) > 0
@@ -7776,6 +7785,8 @@ function statusCardHtml(payload, entry) {
           ${statusMetricHtml("Next review", checkpoint)}
           ${statusMetricHtml("Trials", `${payload.trials_reported || 0} reported`)}
           ${statusMetricHtml("Gate", gate, gate === "pass" ? "active" : "")}
+          ${conversionPending ? statusMetricHtml("Conversion", "Pending", "active") : ""}
+          ${scopeDrift ? statusMetricHtml("Scope", "Unconfirmed change", "active") : ""}
           ${statusMetricHtml("Stop reason", formatStopReason(payload.stop_reason))}
           ${statusMetricHtml("Events", `${events.raw_logs || 0} raw · ${events.transcript || 0} shown`)}
           ${statusMetricHtml("Last event", lastEvent)}
@@ -7788,6 +7799,8 @@ function statusCardHtml(payload, entry) {
             <span>${escapeHtml(payload.gate_response_to_human)}</span>
           </p>
         ` : payload.gate_summary ? `<p class="status-note">${escapeHtml(payload.gate_summary)}</p>` : ""}
+        ${conversionPending ? `<p class="status-note">${escapeHtml("Conversion pending: ongoing work contains research-bearing content and must be converted before normal trials.")}</p>` : ""}
+        ${scopeDrift ? `<p class="status-note">${escapeHtml(payload.scope_drift.message || "Unconfirmed scope change detected in PROJECT.md.")}</p>` : ""}
         ${humanTasksListHtml(payload.human_tasks, "status-human-tasks")}
         <section>
           <h4>${escapeHtml(provider)} settings</h4>
@@ -9717,7 +9730,6 @@ const figureSpecFieldLabels = new Set([
   "Inclusion status",
   "Target-venue fit",
   "Target-venue fit rationale",
-  "Remaining blocker",
   "Result",
   "Result shown",
   "Key results shown",
@@ -10750,7 +10762,6 @@ function manuscriptTableCardHtml(block) {
     ["Key result / contrast", manuscriptFieldValue(block, ["Key result or conceptual contrast shown"])],
     ["Provenance", manuscriptFieldValue(block, ["Provenance links", "Source links"])],
     ["Target-venue fit", manuscriptFieldValue(block, ["Target-venue fit rationale"])],
-    ["Remaining blocker", manuscriptFieldValue(block, ["Remaining blocker"])],
   ].filter(([, value]) => hasRealText(value));
   return `
     <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card manuscript-table-card artifact-table depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
@@ -10806,7 +10817,6 @@ function manuscriptArtifactCardHtml(block) {
     ["Evidence / basis", manuscriptFieldValue(block, ["Result shown or conceptual basis", "Key result or conceptual contrast shown", "Validation evidence", "Manuscript claim supported in plain language"])],
     ["Provenance", manuscriptFieldValue(block, ["Provenance links", "Source links"])],
     ["Target-venue fit", manuscriptFieldValue(block, ["Target-venue fit rationale"])],
-    ["Remaining blocker", manuscriptFieldValue(block, ["Remaining blocker"])],
   ].filter(([, value]) => hasRealText(value));
   return `
     <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card artifact-${escapeHtml(String(block.kind || "artifact"))} depth-${Math.max(3, Math.min(6, Number(block.level || 3)))}">
@@ -11124,6 +11134,7 @@ function manuscriptReadinessStripHtml(manuscript) {
   const references = (manuscript.references || []).filter((ref) => hasRealText(ref?.reference) || hasRealText(ref?.key));
   const missingEvidence = (manuscript.missing_evidence || []).filter((item) => !looksPlaceholder(item));
   const readiness = manuscript.readiness && typeof manuscript.readiness === "object" ? manuscript.readiness : {};
+  const artifactLabel = cleanText(manuscript.artifact_label, manuscript.blueprint_stub ? "Paper Plan (pre-results)" : "Blueprint (full results)");
   const blueprintBlockers = Array.isArray(readiness.blueprint_blockers)
     ? readiness.blueprint_blockers.filter((item) => hasRealText(item))
     : [];
@@ -11137,6 +11148,7 @@ function manuscriptReadinessStripHtml(manuscript) {
         ? "Draftable with evidence gaps"
         : "Paper package ready";
   const facts = [
+    artifactLabel,
     `${sections.length} section${sections.length === 1 ? "" : "s"}`,
     `${figures.length} figure${figures.length === 1 ? "" : "s"}`,
     `${tables.length} table${tables.length === 1 ? "" : "s"}`,
@@ -11345,7 +11357,9 @@ function formatBytes(value) {
 }
 
 function exportKindLabel(kind) {
-  return kind === "final_project" ? "Clean Project Package" : "Paper-Writing Pack";
+  if (kind === "final_project") return "Clean Project Package";
+  if (kind === "research_status") return "Research Status Pack";
+  return "Paper-Writing Pack";
 }
 
 function exportJobTerminal(job) {
@@ -11448,23 +11462,39 @@ function renderExportProgress(job) {
 
 function renderExportPanel() {
   const busy = activeExportJob && !exportJobTerminal(activeExportJob);
+  const readiness = appState?.summaries?.manuscript?.readiness?.paper_pack || {};
+  const paperReady = readiness.ready === true;
+  const blockers = Array.isArray(readiness.blockers) ? readiness.blockers : [];
+  const blockerText = blockers.length ? blockers.slice(0, 4).join(" ") : "Research results are not ready for a paper-writing handoff.";
   return `
     <div class="export-panel">
       <div class="export-panel-intro">
         <strong>Paper-writing handoff</strong>
-        <p>A clean manuscript package for GPT, Claude, or human co-writing.</p>
+        <p>${paperReady ? "A clean manuscript package for GPT, Claude, or human co-writing." : "The paper-writing handoff is gated until the full-results blueprint is ready."}</p>
       </div>
       <div class="export-actions export-package-list">
         <section class="export-package-option is-primary">
           <div>
             <header>
               <strong>Paper-writing pack</strong>
-              <em>Best for GPT/Claude drafting</em>
+              <em>${paperReady ? "Best for GPT/Claude drafting" : "Blocked until paper-ready"}</em>
             </header>
-            <p>Includes BLUEPRINT.md, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets when available.</p>
+            <p>${paperReady ? "Includes BLUEPRINT.md, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets." : escapeHtml(blockerText)}</p>
           </div>
-          <button class="primary-button small-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>Download paper-writing pack</button>
+          <button class="primary-button small-button" type="button" data-export-kind="blueprint" ${busy || !paperReady ? "disabled" : ""}>${paperReady ? "Download paper-writing pack" : "Paper-writing pack blocked"}</button>
         </section>
+        ${paperReady ? "" : `
+          <section class="export-package-option">
+            <div>
+              <header>
+                <strong>Research status pack</strong>
+                <em>Best for incomplete runs</em>
+              </header>
+              <p>Includes PAPER_PLAN.md, STATE.md, HUMAN_TASKS.md, current findings, the blueprint stub or partial blueprint, and acquisition decisions.</p>
+            </div>
+            <button class="secondary-button small-button" type="button" data-export-kind="research_status" ${busy ? "disabled" : ""}>Download research status pack</button>
+          </section>
+        `}
         <section class="export-package-option">
           <div>
             <header>
@@ -11482,6 +11512,8 @@ function renderExportPanel() {
 }
 
 function renderExportEstimateDetails(estimate) {
+  const readiness = estimate?.readiness || {};
+  const blockers = Array.isArray(readiness.blockers) ? readiness.blockers : [];
   return `
     <div class="export-confirm-summary">
       <div class="export-confirm-grid">
@@ -11505,6 +11537,12 @@ function renderExportEstimateDetails(estimate) {
         <summary>Missing externals</summary>
         ${exportPathRows(estimate?.missing_externals || [], 12)}
       </details>
+      ${estimate?.kind === "blueprint" || estimate?.kind === "research_status" ? `
+        <details ${blockers.length ? "open" : ""}>
+          <summary>Paper pack readiness</summary>
+          ${readiness.ready ? `<p class="export-muted">Ready</p>` : exportPathRows(blockers.map((item) => ({ path: item, reason: "readiness blocker" })), 12)}
+        </details>
+      ` : ""}
     </div>
   `;
 }
@@ -11515,7 +11553,7 @@ function setActiveExportJob(job) {
 }
 
 async function beginExportFlow(kind) {
-  const cleanKind = kind === "final_project" ? "final_project" : "blueprint";
+  const cleanKind = kind === "final_project" ? "final_project" : kind === "research_status" ? "research_status" : "blueprint";
   setActiveExportJob({
     kind: cleanKind,
     label: exportKindLabel(cleanKind),

@@ -6,7 +6,11 @@ Use this protocol to convert raw materials into the canonical project state.
 
 Raw materials may include old repositories, ongoing work, proposals, notes, literature, datasets, seed papers, or a short user brief.
 
-Conversion does not acquire resources. It reinterprets filed raw materials into canonical project state. Conversion does not mean trusting old work; it means inspecting it, extracting what is useful, and recording what is current, tentative, deprecated, or unknown.
+Conversion does not fetch new external resources, but it MUST inventory,
+migrate, and activate everything the user already provided. It reinterprets
+filed raw materials into canonical project state. Conversion does not mean
+trusting old work; it means inspecting it, extracting what is useful, and
+recording what is current, tentative, deprecated, or unknown.
 
 Before conversion, run `instructions/RESOURCE_INTAKE.md` unless the relevant materials are already filed in `resources/` and listed in `resources/user_input/RESOURCE_MANIFEST.md`. Filed and listed is not enough for conversion claims: before deriving canonical state from a user-provided resource, complete the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md`.
 
@@ -20,6 +24,15 @@ Run conversion only when canonical project state needs to be built or reinterpre
 - a formal human intervention changes the research goal, method, target venue, claim, priority, or resource use;
 - a plan-level correction makes the active plan or current project framing invalid;
 - an imported or newly created project does not yet have coherent `PROJECT.md`, `STATE.md`, and `CURRENT_FINDINGS.md`.
+
+### Mandatory Conversion Trigger
+
+If `resources/ongoing_work/` contains research-bearing content, including via a
+symlink, a full `research_trajectory/trials/000000_project_conversion/` trial is
+required before any normal trial in both cold starts and restarts.
+Research-bearing content includes code, datasets, model checkpoints, generated
+results, metrics, manuscript sources, notebooks, configuration files, or prior
+reports. Restart intake does not satisfy this trigger.
 
 Do not run conversion for ordinary progress questions, simple continuation of the current plan, small attachments that do not affect project definition, documentation or UI edits, or a normal next trial inside an already coherent project.
 
@@ -74,6 +87,9 @@ The conversion `REPORT.md` should explain:
 - what should be reused;
 - what should not be trusted;
 - what useful working artifacts should be migrated into `workspace/`;
+- which large data, checkpoints, and result folders remain in place as active
+  resources with exact paths;
+- how the Critical Path was seeded from existing versus missing materials;
 - how `PROJECT.md` was derived;
 - how `STATE.md` was initialized;
 - whether any findings are already active, tentative, superseded, or rejected;
@@ -83,16 +99,28 @@ The conversion `REPORT.md` should explain:
 
 ## Handling Existing Repositories
 
-Do not treat an old repo as automatically current.
+Do not treat an old repo as automatically current, and do not leave it as
+passive context when it contains research-bearing materials.
 
-Recommended pattern:
+Required checklist:
 
-1. keep the original snapshot under `resources/ongoing_work/`;
-2. inspect it as raw input under the Content Inspection Gate;
-3. migrate only useful working artifacts to `workspace/`: executable pieces, prototypes, configs, evaluation harnesses, design/system implementation materials, or derived data needed for future work;
-4. record migration decisions in the conversion trial;
-5. record current method status in `STATE.md`;
-6. record accepted/tentative/rejected findings in `CURRENT_FINDINGS.md` only when evidence supports them.
+1. Keep the original snapshot under `resources/ongoing_work/`.
+2. Complete a full inventory with content-inspection status. Distinguish files
+   inspected, skipped, unreadable, too large, or irrelevant.
+3. Migrate runnable code, configs, notebooks, evaluation harnesses, prototypes,
+   and derived working data that future trials should modify into `workspace/`.
+4. Register large data, checkpoints, raw result trees, and prior output folders
+   in place as active resources in `STATE.md` with exact paths, rather than
+   copying them blindly.
+5. Convert every prior quantitative result into a tentative finding in
+   `research_trajectory/CURRENT_FINDINGS.md` with `prior work, unverified`
+   provenance. Do not silently drop prior results, and do not silently accept
+   them as current truth.
+6. Seed `STATE.md` `## Critical Path` from what already exists versus what is
+   missing for real results, figures, tables, references, and the deliverable.
+7. Record explicit `not migrated because ...` entries for anything skipped.
+8. Record accepted/tentative/rejected findings only when evidence supports that
+   status.
 
 ---
 

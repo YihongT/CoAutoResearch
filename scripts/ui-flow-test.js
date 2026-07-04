@@ -6917,13 +6917,15 @@ async function testCopyTextHelperWritesClipboard() {
 async function testExportBundleFlow() {
   const base = loadAppContext();
   const panel = base.run("__renderExportPanelProbe(null)");
-  assert.equal(panel.includes("Download paper-writing pack"), true);
+  assert.equal(panel.includes("Paper-writing pack blocked"), true);
   assert.equal(panel.includes('data-export-kind="blueprint"'), true);
   assert.equal(panel.includes("Download clean project package"), true);
   assert.equal(panel.includes('data-export-kind="final_project"'), true);
-  assert.equal(panel.includes("Best for GPT/Claude drafting"), true);
+  assert.equal(panel.includes("Blocked until paper-ready"), true);
+  assert.equal(panel.includes("Download research status pack"), true);
+  assert.equal(panel.includes('data-export-kind="research_status"'), true);
   assert.equal(panel.includes("Best for project handoff"), true);
-  assert.equal(panel.includes('class="primary-button small-button" type="button" data-export-kind="blueprint"'), true);
+  assert.equal(panel.includes('class="primary-button small-button" type="button" data-export-kind="blueprint" disabled'), true);
   assert.equal(panel.includes('class="secondary-button small-button" type="button" data-export-kind="final_project"'), true);
   assert.equal(panel.includes("Open BLUEPRINT.md"), false);
   assert.equal(panel.includes("Paper-writing handoff"), true);
@@ -7319,8 +7321,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "Preview image: none",
         "Result shown or conceptual basis: Evidence E1.",
         "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
-        "Target-venue fit rationale: Fits a compact result-led display.",
-        "Remaining blocker: none."
+        "Target-venue fit rationale: Fits a compact result-led display."
       ].join("\n")
     }, {
       title: "Figure F000002: Rendered Image",
@@ -7342,8 +7343,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "![Figure F000002: Rendered Image](figures/generated/rendered_image.png)",
         "Result shown or conceptual basis: Evidence E2.",
         "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
-        "Target-venue fit rationale: Fits an image-led display.",
-        "Remaining blocker: none."
+        "Target-venue fit rationale: Fits an image-led display."
       ].join("\n")
     }, {
       title: "Table T000001: Evidence Matrix",
@@ -7367,8 +7367,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
         "Source artifact or spec path: `manuscript/tables/evidence_matrix.csv`",
         "Key result or conceptual contrast shown: The claim is tied to reviewed evidence.",
         "Provenance links: `research_trajectory/CURRENT_FINDINGS.md`",
-        "Target-venue fit rationale: Compact enough for the main text.",
-        "Remaining blocker: none."
+        "Target-venue fit rationale: Compact enough for the main text."
       ].join("\n")
     }],
     claims: [],
@@ -7384,6 +7383,13 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
     }],
     provenance: "Claim C1 maps to calibration evidence E1.",
     missing_evidence: [],
+    artifact_label: "Blueprint (full results)",
+    blueprint_stub: false,
+    readiness: {
+      paper_pack: { ready: true, blockers: [] },
+      blueprint_blockers: [],
+      blueprint_blocker_count: 0
+    },
     figure_specs: [{
           title: "Figure F000001: Calibration Map",
           body: [

@@ -81,6 +81,24 @@ Seed paper status:
 
 ---
 
+## Critical Path
+
+Every dependency needed to produce real results, figures, tables, appendix
+materials, and the final manuscript-facing deliverable belongs here.
+Bookkeeping-only work is never a critical-path item.
+
+| ID | Dependency | Status | Evidence / artifact | Owner |
+|---|---|---|---|---|
+| CP1 | <data, method, evaluation, figure, table, or blueprint assembly dependency> | open | <path, decision record, or none yet> | <agent / human / resource scout / reviewer> |
+
+Allowed statuses: `open`, `in_progress`, `done`, `blocked_on_human`, `downgraded`.
+
+Current bottleneck: CP1 - <one-line dependency currently limiting real results>
+
+Consecutive non-empirical trials: 0
+
+---
+
 ## Blockers
 
 - <current blockers>
@@ -99,7 +117,10 @@ Required reviewer gates:
 - Venue fit reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/VENUE_FIT_REVIEW.md`.
 - Manuscript reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/MANUSCRIPT_REVIEW.md`.
 - Figure/table reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FIGURE_TABLE_REVIEW.md`.
+- Reference reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/REFERENCE_REVIEW.md`.
 - Final gate reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`.
+
+Critical path: CP1 - <bottleneck>; empirical progress this trial: no
 
 Next action: complete cold start or conversion, then create the first complete research attempt.
 

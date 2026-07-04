@@ -15,7 +15,9 @@ const forbiddenPatterns = [
   /physical ai must feel/i,
   /nature machine intelligence/i,
   /\bNMI\b/,
-  /s42256/i
+  /s42256/i,
+  new RegExp(["no meaningful", "non-human work"].join(" "), "i"),
+  new RegExp(["Conversion does not", "acquire resources"].join(" "), "i")
 ];
 
 const maxFileBytes = 10 * 1024 * 1024;
@@ -77,8 +79,22 @@ for (const file of reviewerFiles) {
 }
 
 const stateTemplate = await fsp.readFile(path.join(template, "research_trajectory", "STATE.md"), "utf8");
-if (!stateTemplate.includes("Final gate reviewer")) {
-  failures.push("research_trajectory/STATE.md: missing Final gate reviewer");
+if (!stateTemplate.includes("## Critical Path")) {
+  failures.push("research_trajectory/STATE.md: missing Critical Path section");
+}
+for (const reviewer of [
+  "Plan reviewer",
+  "Process reviewer",
+  "Evidence reviewer",
+  "Venue fit reviewer",
+  "Manuscript reviewer",
+  "Figure/table reviewer",
+  "Reference reviewer",
+  "Final gate reviewer"
+]) {
+  if (!stateTemplate.includes(reviewer)) {
+    failures.push(`research_trajectory/STATE.md: missing ${reviewer}`);
+  }
 }
 
 const manifest = JSON.parse(await fsp.readFile(path.join(template, ".co-auto-research-template", "manifest.json"), "utf8"));
@@ -120,6 +136,7 @@ for (const name of [
 }
 
 const blueprintTemplate = await fsp.readFile(path.join(template, "manuscript", "BLUEPRINT.md"), "utf8");
+const paperPlanTemplate = await fsp.readFile(path.join(template, "manuscript", "PAPER_PLAN.md"), "utf8");
 for (const heading of [
   "## Target Venue / Audience / Article Type",
   "## Target-Venue Organization Rationale",
@@ -127,6 +144,7 @@ for (const heading of [
   "## Architecture Overview / Table of Contents",
   "## Manuscript Architecture",
   "## Reference / Literature Grounding Plan",
+  "## References",
   "## Appendix / Supplement Plan",
   "## Blocking Missing Evidence",
   "## Required Qualifications / Claim Constraints",
@@ -138,21 +156,26 @@ for (const heading of [
     failures.push(`manuscript/BLUEPRINT.md: missing ${heading}`);
   }
 }
+if (!blueprintTemplate.includes("Status: pre-results stub")) {
+  failures.push("manuscript/BLUEPRINT.md: missing pre-results stub status");
+}
+if (!blueprintTemplate.includes("`active`, `candidate`,") || !blueprintTemplate.includes("`supplement`")) {
+  failures.push("manuscript/BLUEPRINT.md: missing active/candidate/supplement inclusion enum");
+}
+if (/\bdeferred\b/i.test(blueprintTemplate) || /Remaining blocker:/i.test(blueprintTemplate)) {
+  failures.push("manuscript/BLUEPRINT.md: contains deferred or Remaining blocker schema text");
+}
+if (/\bdeferred\b/i.test(paperPlanTemplate)) {
+  failures.push("manuscript/PAPER_PLAN.md: contains deferred text");
+}
 for (const requiredText of [
-  "Target-venue role:",
-  "Reader question answered:",
-  "Local thesis / purpose:",
-  "Paragraph plan:",
-  "Content to cover, not full prose",
-  "Placement:",
-  "Publication-ready table:",
-  "Caption draft or current caption:",
-  "Preview image:",
-  "Key result or conceptual contrast shown:",
-  "Source code or artifact links:"
+  "## Complete Architecture / Table of Contents",
+  "## Planned Figures And Tables",
+  "## Blocking Missing Evidence",
+  "Critical-path item"
 ]) {
-  if (!blueprintTemplate.includes(requiredText)) {
-    failures.push(`manuscript/BLUEPRINT.md: missing paragraph-level contract text ${requiredText}`);
+  if (!paperPlanTemplate.includes(requiredText)) {
+    failures.push(`manuscript/PAPER_PLAN.md: missing ${requiredText}`);
   }
 }
 
@@ -171,8 +194,17 @@ if (!includesCompact(finalGateReviewer, "publication-ready Markdown table body")
 }
 
 const manuscriptInstructions = await fsp.readFile(path.join(template, "instructions", "MANUSCRIPT.md"), "utf8");
+if (!includesCompact(manuscriptInstructions, "full venue-format proposal with complete real results")) {
+  failures.push("instructions/MANUSCRIPT.md: missing full-result blueprint definition");
+}
+if (!manuscriptInstructions.includes("PAPER_PLAN.md") || !manuscriptInstructions.includes("BLUEPRINT.md")) {
+  failures.push("instructions/MANUSCRIPT.md: missing two-artifact model");
+}
 if (!manuscriptInstructions.includes("Publication-ready table:") || !includesCompact(manuscriptInstructions, "Column lists, row descriptions, comparison logic, source links")) {
   failures.push("instructions/MANUSCRIPT.md: missing publication-ready inline table contract");
+}
+if (manuscriptInstructions.includes("Remaining blocker")) {
+  failures.push("instructions/MANUSCRIPT.md: still references per-block Remaining blocker fields");
 }
 
 const figureTableReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "FIGURE_TABLE_REVIEWER.md"), "utf8");
@@ -195,6 +227,32 @@ if (!serverTemplate.includes("paragraph_plan_complete")) {
 }
 if (!serverTemplate.includes("markdown_has_table") || !serverTemplate.includes("Publication-ready table:")) {
   failures.push("ui/server.py: missing publication-ready table consistency guard");
+}
+for (const token of [
+  "paper_pack_readiness",
+  "ongoing_work_requires_conversion",
+  "stalled_without_empirical_progress",
+  "critical_path_state",
+  "scope_drift_warning"
+]) {
+  if (!serverTemplate.includes(token)) {
+    failures.push(`ui/server.py: missing ${token}`);
+  }
+}
+
+const conversionInstructions = await fsp.readFile(path.join(template, "instructions", "CONVERSION.md"), "utf8");
+if (!conversionInstructions.includes("Mandatory Conversion Trigger")) {
+  failures.push("instructions/CONVERSION.md: missing Mandatory Conversion Trigger");
+}
+
+const resourceScoutInstructions = await fsp.readFile(path.join(template, "instructions", "RESOURCE_SCOUT.md"), "utf8");
+if (!resourceScoutInstructions.includes("Research-Critical Acquisition Mandate")) {
+  failures.push("instructions/RESOURCE_SCOUT.md: missing Research-Critical Acquisition Mandate");
+}
+for (const rung of ["1. Check", "2. Check", "3. Try", "4. Try", "5. Try", "6. If", "7. Use"]) {
+  if (!resourceScoutInstructions.includes(rung)) {
+    failures.push(`instructions/RESOURCE_SCOUT.md: missing acquisition ladder rung ${rung}`);
+  }
 }
 
 if (failures.length) {

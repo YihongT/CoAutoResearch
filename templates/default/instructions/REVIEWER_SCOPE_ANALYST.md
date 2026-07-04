@@ -30,8 +30,21 @@ If a human answer would help reviewer coverage but useful review or execution
 work can continue, report it as a `Human Task Candidates` entry in the decision
 artifact for the main execution agent to merge, and keep the gate
 `Status: continue`. Do not edit `research_trajectory/HUMAN_TASKS.md` directly.
-Only hard stop when no meaningful non-human work remains in the whole
-autoresearch loop.
+Escalate only when the current critical-path bottleneck is human-gated under
+`instructions/EXECUTION_AGENT.md`.
+
+## Visible Progress Line
+
+The main execution agent must emit these exact visible status formats for
+reviewer-scope work:
+
+```text
+Subagent update: Reviewer Scope Analyst | status: <starting | waiting | completed | fallback> | task: <short task> | output: <path or none>
+Subagent update: Specialized reviewer | status: <starting | waiting | completed | fallback> | task: <short task> | output: <path or none>
+```
+
+Use `output: research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
+when the scope decision path is known.
 
 ## Required Inputs
 

@@ -64,6 +64,10 @@ Ask:
 - Are recent trials repeatedly producing scaffolds, harnesses, audits, reviewer
   repairs, or manuscript placeholders without completing a research attempt?
 - Is the agent stuck on a minor technical issue?
+- Is the current Critical Path bottleneck advancing, or have recent trials
+  accumulated non-empirical bookkeeping work?
+- Have three recent closed trials reported `Empirical progress: no` while a
+  Critical Path item remains open?
 - Are we optimizing an unimportant metric or artifact?
 - Should the next step be execution, method revision, literature grounding, seed paper review, manuscript restructuring, or human intervention?
 - Is the current target venue still plausible?
@@ -83,6 +87,13 @@ Ask:
   does the named specialized review output exist under current trial `reviews/`?
 - If the reviewer spawn decision says `Spawn needed: no`, is the coverage reason
   specific enough to justify relying on the eight core reviewers?
+- Does the current trial objective, dataset vintage, population, period, venue,
+  and deliverable still match `PROJECT.md`?
+- If there is a mismatch, does a formal
+  `research_trajectory/human_interventions/pending/SCOPE_CHANGE_<id>.md`
+  proposal exist? An unexplained mismatch is blocking and requires filing the
+  proposal or reverting to the old scope. A mismatch persisting for two or more
+  trials requires `Decision: needs_human`.
 
 ## Expected Output
 
@@ -101,7 +112,9 @@ unresolved formal intervention or state inconsistency remains, recent trials are
 making substantive progress, and no known local-minimum or hidden-TODO risk
 needs a follow-up trial. "Process review completed" is not the same as pass.
 Repeated incomplete or scaffold-only trials without a documented first blocker
-are process failures and require `Decision: continue`.
+are process failures and require `Decision: continue`. Repeated non-empirical
+trials while a Critical Path item is open must make the next action advance the
+bottleneck or escalate under the gate rules.
 
 ## Output Schema
 

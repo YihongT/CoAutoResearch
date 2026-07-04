@@ -1540,7 +1540,10 @@ Confidence: medium
   if (
     !resourceScoutInstructions.includes("## Resource Scout Brief") ||
     !resourceScoutInstructions.includes("Scout: required | skipped") ||
+    !resourceScoutInstructions.includes("Criticality: research-critical | contextual") ||
     !resourceScoutInstructions.includes("Require a scout when any of these are true") ||
+    !resourceScoutInstructions.includes("Research-Critical Acquisition Mandate") ||
+    !resourceScoutInstructions.includes("ACQUISITION_DECISION.md") ||
     !resourceScoutInstructions.includes("Decision reason:") ||
     !resourceScoutInstructions.includes("Known resource clues:") ||
     !resourceScoutInstructions.includes("Freshness / date sensitivity:") ||
@@ -1596,11 +1599,12 @@ Confidence: medium
     !humanTasksTemplate.includes("# Human Tasks") ||
     !humanTasksTemplate.includes("Keep at most three open tasks") ||
     !executionInstructions.includes("research_trajectory/HUMAN_TASKS.md") ||
-    !executionInstructions.includes("only hard stop when no meaningful non-human work remains") ||
+    !executionInstructions.includes("Critical Path Accounting") ||
+    !compactText(executionInstructions).includes("Remaining bookkeeping, audits, manuscript cleanup, state repair, or reviewer refresh work") ||
     !executionInstructions.includes("The `Status:` value must be exactly one bare token") ||
     !executionInstructions.includes("main execution agent is the only") ||
     !executionInstructions.includes("Human task candidates") ||
-    !reviewTaxonomyInstructions.includes("whole autoresearch loop") ||
+    !reviewTaxonomyInstructions.includes("critical-path bottleneck is human-gated") ||
     !reviewTaxonomyInstructions.includes("Human Task Candidates") ||
     !reviewTaxonomyInstructions.includes("Reviewers must not edit") ||
     !resourceScoutInstructions.includes("Human Task Candidates") ||
@@ -1622,10 +1626,11 @@ Confidence: medium
   }
   if (
     !executionInstructions.includes("Subagent update: <Resource Scout | Reviewer Scope Analyst | Specialized reviewer>") ||
-    !serverPy.includes("Subagent update: Resource Scout") ||
-    !serverPy.includes("Subagent update: Reviewer Scope Analyst") ||
-    !serverPy.includes("Subagent update: Specialized reviewer") ||
-    !serverPy.includes("First try useful non-human work") ||
+    !resourceScoutInstructions.includes("Subagent update: Resource Scout") ||
+    !reviewerScopeInstructions.includes("Subagent update: Reviewer Scope Analyst") ||
+    !reviewerScopeInstructions.includes("Subagent update: Specialized reviewer") ||
+    !serverPy.includes("follow `instructions/RESOURCE_SCOUT.md` as the single source of truth") ||
+    !serverPy.includes("follow `instructions/EXECUTION_AGENT.md` section `Non-Blocking Human Tasks` as the single source of truth") ||
     serverPy.includes("If PROJECT.md is insufficient or contradictory, ask for clarification in the final message, set `Status: needs_human`") ||
     !appJs.includes("function parseSubagentUpdateLine") ||
     !appJs.includes("function liveStatusHtml") ||
@@ -2870,15 +2875,16 @@ Confidence: medium
     throw new Error("UI setup/readiness, settings layout, and autoresearch lifecycle controls must keep their checklist coverage contracts");
   }
   if (
-    !blueprintTemplate.includes("Section brief:") ||
-    !blueprintTemplate.includes("Reader takeaway:") ||
-    !blueprintTemplate.includes("Do not use section-planning fields inside `Result`, `Dataset`, `Benchmark`") ||
-    !blueprintTemplate.includes("Inclusion status: <active / candidate / supplement / deprecated / deferred>") ||
+    !blueprintTemplate.includes("Status: pre-results stub") ||
+    !blueprintTemplate.includes("`active`, `candidate`,") ||
+    !blueprintTemplate.includes("`supplement`") ||
+    blueprintTemplate.includes("Remaining blocker:") ||
+    /\bdeferred\b/i.test(blueprintTemplate) ||
     !manuscriptInstructions.includes("Section brief") ||
-    !manuscriptInstructions.includes("Do not promote planned work into a reader-facing result") ||
-    !manuscriptInstructions.includes("Active result blocks must be readable by a human") ||
+    !manuscriptInstructions.includes("PAPER_PLAN.md") ||
+    !manuscriptInstructions.includes("Active result blocks must be readable without opening trial logs") ||
     !compactText(manuscriptInstructions).includes("Reader takeaway") ||
-    !compactText(manuscriptInstructions).includes("finished-results paper map") ||
+    !compactText(manuscriptInstructions).includes("full venue-format proposal with complete real results") ||
     !compactText(manuscriptReviewer).includes("Artifact headings are not section headings") ||
     !compactText(finalGateReviewer).includes("reader-facing section briefs") ||
     !compactText(finalGateReviewer).includes("reader takeaways") ||
@@ -2998,10 +3004,21 @@ Confidence: medium
   await smokeEmptyDashboardSettings();
 
   const fakeBin = path.join(tempRoot, "fake-bin");
+  const doctorHome = path.join(tempRoot, "doctor-home");
+  await fsp.mkdir(doctorHome, { recursive: true });
+  const doctorBaseEnv = {
+    ...process.env,
+    HOME: doctorHome,
+    USERPROFILE: doctorHome,
+    LOCALAPPDATA: path.join(doctorHome, "AppData", "Local"),
+    COAUTO_CLOUDFLARED_INSTALL_DIR: path.join(doctorHome, "cloudflared-install"),
+    COAUTO_GRAFTCP_INSTALL_DIR: path.join(doctorHome, "graftcp-install"),
+    PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`
+  };
   await writeFakeCodexBin(fakeBin);
   const doctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
     cwd: root,
-    env: { ...process.env, COAUTO_REMOTE_PROXY_MODE: "off", PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    env: { ...doctorBaseEnv, COAUTO_REMOTE_PROXY_MODE: "off" },
     encoding: "utf8"
   });
   if (!doctorOutput.includes("codex fake 0.0.0")) {
@@ -3021,7 +3038,7 @@ Confidence: medium
   }
   const missingCloudflaredDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
     cwd: root,
-    env: { ...process.env, COAUTO_REMOTE_PROXY_MODE: "off", COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared"), PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    env: { ...doctorBaseEnv, COAUTO_REMOTE_PROXY_MODE: "off", COAUTO_CLOUDFLARED: path.join(tempRoot, "missing-cloudflared") },
     encoding: "utf8"
   });
   if (!missingCloudflaredDoctorOutput.includes("warn    cloudflared") || !missingCloudflaredDoctorOutput.includes("required for best --remote experience")) {
@@ -3031,11 +3048,10 @@ Confidence: medium
     const missingGraftcpDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
       cwd: root,
       env: {
-        ...process.env,
+        ...doctorBaseEnv,
         COAUTO_GRAFTCP: path.join(tempRoot, "missing-graftcp-doctor"),
         HTTPS_PROXY: "http://10.21.11.21:8888",
-        COAUTO_REMOTE_PROXY_MODE: "",
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`
+        COAUTO_REMOTE_PROXY_MODE: ""
       },
       encoding: "utf8"
     });
@@ -3045,7 +3061,7 @@ Confidence: medium
   }
   const invalidBackendDoctorOutput = execFileSync("node", [cli, "doctor", "--port", String(await freePort())], {
     cwd: root,
-    env: { ...process.env, COAUTO_REMOTE_PROXY_MODE: "off", COAUTO_AGENT_BACKEND: "not-a-backend", PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    env: { ...doctorBaseEnv, COAUTO_REMOTE_PROXY_MODE: "off", COAUTO_AGENT_BACKEND: "not-a-backend" },
     encoding: "utf8"
   });
   if (!invalidBackendDoctorOutput.includes("invalid value") || !invalidBackendDoctorOutput.includes("COAUTO_AGENT_BACKEND")) {
@@ -3073,7 +3089,7 @@ Confidence: medium
   }
   const installedDoctorOutput = execCommandSync(installedCli, ["doctor", "--port", String(await freePort())], {
     cwd: root,
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` },
+    env: { ...doctorBaseEnv },
     encoding: "utf8"
   });
   if (!installedDoctorOutput.includes("package-managed runtime") || !installedDoctorOutput.includes("codex fake 0.0.0") || !installedDoctorOutput.includes("claude fake 0.0.0") || !installedDoctorOutput.includes("cloudflared fake 0.0.0")) {
@@ -3838,36 +3854,23 @@ Confidence: medium
       "manual_prompts = {'manual_continue': manual_continue_prompt, 'manual_instruction': manual_instruction_prompt}",
       "review_files = ['PLAN_REVIEW.md', 'PROCESS_REVIEW.md', 'EVIDENCE_REVIEW.md', 'VENUE_FIT_REVIEW.md', 'MANUSCRIPT_REVIEW.md', 'FIGURE_TABLE_REVIEW.md', 'REFERENCE_REVIEW.md', 'FINAL_GATE_REVIEW.md']",
       "assert all('## Resource Scout Brief' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Scout: required | skipped' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Decision reason:' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Skip reason:' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Known resource clues:' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Freshness / date sensitivity:' in prompt for prompt in prompts.values()), prompts",
-      "assert all('RESOURCE_SCOUT_REPORT.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('instructions/RESOURCE_SCOUT.md' in prompt for prompt in prompts.values()), prompts",
-      "assert all('spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Resource Scout fallback' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Subagent update: Resource Scout' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Download Integrity And Fallback Ladder' in prompt for prompt in prompts.values()), prompts",
-      "assert all('quarantine HTML/error-page downloads' in prompt for prompt in prompts.values()), prompts",
-      "assert all('spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial\\'s review risks' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Reviewer Scope Analyst fallback' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Subagent update: Reviewer Scope Analyst' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Subagent update: Specialized reviewer' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Human Task Candidates' in prompt for prompt in prompts.values()), prompts",
-      "assert all('only hard stop when no meaningful non-human work remains in the whole autoresearch loop' in prompt for prompt in prompts.values()), prompts",
+      "assert all('follow `instructions/RESOURCE_SCOUT.md` as the single source of truth' in prompt for prompt in prompts.values()), prompts",
+      "assert all('follow `instructions/REVIEWER_SCOPE_ANALYST.md` as the single source of truth' in prompt for prompt in prompts.values()), prompts",
+      "assert all('Non-Blocking Human Tasks' in prompt for prompt in prompts.values()), prompts",
+      "obsolete_hard_stop_phrase = 'no meaningful ' + 'non-human work remains'",
+      "assert all(obsolete_hard_stop_phrase not in prompt for prompt in prompts.values()), prompts",
+      "assert all('Scout: required | skipped' not in prompt for prompt in prompts.values()), prompts",
       "assert all('REVIEWER_SPAWN_DECISION.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('instructions/REVIEWER_SCOPE_ANALYST.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('spawn or run the Resource Scout' not in prompt for prompt in prompts.values()), prompts",
       "assert all('do not silently do the work inline' not in prompt for prompt in prompts.values()), prompts",
-      "assert all('autoresearch_discovered' in prompt and 'not current truth' in prompt for prompt in prompts.values()), prompts",
       "assert all(all(name in prompt for name in review_files) for prompt in prompts.values()), prompts",
-      "assert all('Reference' in prompt and 'Final gate' in prompt for prompt in prompts.values()), prompts",
+      "assert all('REFERENCE_REVIEW.md' in prompt and 'FINAL_GATE_REVIEW.md' in prompt for prompt in prompts.values()), prompts",
       "assert all('Response to human' in prompt for prompt in prompts.values()), prompts",
-      "assert all('Subagent update: Resource Scout' in prompt for prompt in manual_prompts.values()), manual_prompts",
-      "assert all('Subagent update: Reviewer Scope Analyst' in prompt for prompt in manual_prompts.values()), manual_prompts",
-      "assert all('Subagent update: Specialized reviewer' in prompt for prompt in manual_prompts.values()), manual_prompts",
-      "assert all('Human Task Candidates' in prompt and 'research_trajectory/HUMAN_TASKS.md' in prompt for prompt in manual_prompts.values()), manual_prompts",
+      "assert all('follow `instructions/RESOURCE_SCOUT.md` as the single source of truth' in prompt for prompt in manual_prompts.values()), manual_prompts",
+      "assert all('follow `instructions/REVIEWER_SCOPE_ANALYST.md` as the single source of truth' in prompt for prompt in manual_prompts.values()), manual_prompts",
+      "assert all('research_trajectory/HUMAN_TASKS.md' in prompt for prompt in manual_prompts.values()), manual_prompts",
       "subagent_line = 'Subagent update: Resource Scout | status: starting | task: Find source files | output: none'",
       "codex_final = json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'content': subagent_line}})",
       "codex_parsed = module.transcript_from_agent_line(codex_final, 'codex')",
@@ -4091,11 +4094,13 @@ Confidence: medium
     "module._CONTEXT.project = context",
     "state = context.research_state_path",
     "blueprint = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'manuscript' / 'BLUEPRINT.md'",
+    "paper_plan = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'manuscript' / 'PAPER_PLAN.md'",
     "trial_dir = pathlib.Path(os.environ['COAUTO_PROJECT_ROOT']) / 'research_trajectory' / 'trials' / '000001_final_smoke'",
     "review_dir = trial_dir / 'reviews'",
     "review_dir.mkdir(parents=True, exist_ok=True)",
     "def write_final_artifacts():",
     "    trial_dir.mkdir(parents=True, exist_ok=True)",
+    "    paper_plan.write_text('# Paper Plan\\n\\n## Target Venue / Rationale\\n\\nGeneral research venue.\\n\\n## Core Story\\n\\nThe final blueprint carries the complete scoped result.\\n\\n## Blocking Missing Evidence\\n\\n- none\\n', encoding='utf-8')",
     "    (trial_dir / 'PLAN.md').write_text('# Plan\\n\\nFinal gate smoke plan.\\n\\n## Resource Scout Brief\\n\\nScout: skipped\\n\\nDecision reason: fixture uses local synthetic artifacts only and no external source can affect this smoke objective.\\n\\nSkip reason: fixture uses local synthetic artifacts only.\\n\\nSearch scope: none.\\n\\nResource types: none.\\n\\nDisciplines/domains: none.\\n\\nKnown resource clues: none.\\n\\nFreshness / date sensitivity: none.\\n\\nDownload policy: none.\\n\\nExpected destinations: none.\\n\\nStop criteria: fixture complete.\\n', encoding='utf-8')",
     "    (trial_dir / 'REPORT.md').write_text('# Report\\n\\nFinal gate smoke report.\\n', encoding='utf-8')",
     "    scout_dir = trial_dir / 'artifacts' / 'resource_scout'",
@@ -4104,7 +4109,7 @@ Confidence: medium
     "    spawn_dir = trial_dir / 'artifacts' / 'reviewer_spawn'",
     "    spawn_dir.mkdir(parents=True, exist_ok=True)",
     "    (spawn_dir / 'REVIEWER_SPAWN_DECISION.md').write_text('# Reviewer Scope Analyst Decision\\n\\nSpawn needed: no\\n\\n## Reasoning\\n\\nThe core reviewers cover this synthetic final-gate fixture.\\n', encoding='utf-8')",
-    "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected display / method / result style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Architecture Overview / Table of Contents\n\n- [Section 1: Introduction](#section-1-introduction)\n\n---\n\n## Manuscript Architecture\n\n### Section 1: Introduction\n\nTarget-venue role: Open the perspective with a qualified evidence synthesis.\n\nReader question answered: Why should this perspective exist and what claim is supported?\n\nLocal thesis / purpose: The bounded accepted claim is important but constrained by the reviewed evidence.\n\nLocal claims in plain language: The manuscript makes one bounded claim that is understandable without opening a claim/evidence index.\n\nLocal evidence, results, or artifacts: `research_trajectory/CURRENT_FINDINGS.md` supports the claim through the current source audit.\n\nPlaced displays / methods / results: none.\n\nLocal qualifications: The claim remains bounded to the reviewed evidence.\n\nTransition job: sets up the implication section.\n\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|\n| P1 | Establish problem and bounded claim | State the research problem and say exactly what the current finding supports without drafting final prose. | `research_trajectory/CURRENT_FINDINGS.md` | none | cite the accepted source audit | bounded to reviewed evidence | sets up the implication section |\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports. No active tables are needed because the comparison is carried locally in Section 1 paragraph P1.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence and that qualification is reflected in Section 1 paragraph P1.\n\n---\n\n## Provenance / Audit Index\n\n### Claim / Evidence Index\n\nC000001 maps to the local Section 1 claim and `research_trajectory/CURRENT_FINDINGS.md`.\n\n### Display / Method / Result Inventory\n\nNo active displays, methods, datasets, benchmarks, or result blocks are required for this scoped fixture.\n\n### Source Links\n\n- `research_trajectory/CURRENT_FINDINGS.md`\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
+    "    blueprint.write_text(\"\"\"# Manuscript Blueprint\n\n## Target Venue / Audience / Article Type\n\nTarget venue: General research venue.\n\nAudience: Researchers.\n\nArticle type: Perspective.\n\nContribution posture: Conceptual synthesis.\n\nEvidence standard: Cited and qualified.\n\nExpected display / method / result style: Minimal displays.\n\n---\n\n## Target-Venue Organization Rationale\n\nThe organization follows a venue-facing perspective structure with problem framing, evidence synthesis, implications, and limits.\n\n---\n\n## Core Story\n\nThe project advances a calibrated, evidence-bounded argument for the declared audience.\n\n---\n\n## Architecture Overview / Table of Contents\n\n- [Section 1: Introduction](#section-1-introduction)\n\n---\n\n## Manuscript Architecture\n\n### Section 1: Introduction\n\nTarget-venue role: Open the perspective with a qualified evidence synthesis.\n\nReader question answered: Why should this perspective exist and what claim is supported?\n\nLocal thesis / purpose: The bounded accepted claim is important but constrained by the reviewed evidence.\n\nLocal claims in plain language: The manuscript makes one bounded claim that is understandable without opening a claim/evidence index.\n\nLocal evidence, results, or artifacts: `research_trajectory/CURRENT_FINDINGS.md` supports the claim through the current source audit.\n\nPlaced displays / methods / results: none.\n\nLocal qualifications: The claim remains bounded to the reviewed evidence.\n\nTransition job: sets up the implication section.\n\nParagraph plan:\n\n| Para | Rhetorical move | Content to cover, not full prose | Local evidence / result / artifact | Display / method / result block | Citation posture | Required qualification | Transition job |\n|---|---|---|---|---|---|---|---|\n| P1 | Establish problem and bounded claim | State the research problem and say exactly what the current finding supports without drafting final prose. | `research_trajectory/CURRENT_FINDINGS.md` | none | cite the accepted source audit | bounded to reviewed evidence | sets up the implication section |\n\n---\n\n## Reference / Literature Grounding Plan\n\nUse the current source audit and seed literature recorded in CURRENT_FINDINGS.\n\n---\n\n## References\n\n1. Smoke Fixture Source. Synthetic final-gate source. CoAutoResearch Smoke Tests, 2026.\n\n---\n\n## Appendix / Supplement Plan\n\nNo appendix is needed for the scoped perspective; provenance remains in trial reports. No active tables are needed because the comparison is carried locally in Section 1 paragraph P1.\n\n---\n\n## Blocking Missing Evidence\n\n- none\n\n---\n\n## Required Qualifications / Claim Constraints\n\nThe claim remains qualified to the cited evidence and that qualification is reflected in Section 1 paragraph P1.\n\n---\n\n## Provenance / Audit Index\n\n### Claim / Evidence Index\n\nC000001 maps to the local Section 1 claim and `research_trajectory/CURRENT_FINDINGS.md`.\n\n### Display / Method / Result Inventory\n\nNo active displays, methods, datasets, benchmarks, or result blocks are required for this scoped fixture.\n\n### Source Links\n\n- `research_trajectory/CURRENT_FINDINGS.md`\n\n---\n\n## Deprecated Or Superseded Ideas\n\nNone active.\n\n---\n\n## Submission-Readiness Summary\n\nReady for the declared scope after all reviewer gates pass.\n\"\"\", encoding='utf-8')",
     "    review_template = \"\"\"Reviewer: {reviewer}\nScope: {scope}\nDecision: pass\nGate impact: pass\nConfidence: high\nSource trial: `000001_final_smoke`\nGenerated at: 2026-06-20T00:00:00Z\nInstruction file: `{instruction}`\nMigration source: `none`\n\n## Reviewed Inputs\n\n- `PROJECT.md`\n- `research_trajectory/STATE.md`\n- `research_trajectory/trials/000001_final_smoke/PLAN.md`\n- `research_trajectory/trials/000001_final_smoke/REPORT.md`\n\n## Context Summary\n\nSmoke test reviewer fixture.\n\n## Blocking Issues\n\n- none\n\n## Required Actions Before Pass\n\n- none\n\n## Qualified / Partial Passes\n\n- none\n\n## Unassessed Areas\n\n- none\n\"\"\"",
     "    for key, config in module.REQUIRED_REVIEWER_OUTPUTS.items():",
     "        if key == 'final_gate':",
@@ -4982,12 +4987,15 @@ Confidence: medium
       "    try:",
       "        (export_ctx.root / 'PROJECT.md').write_text('# Export Probe\\n', encoding='utf-8')",
       "        (export_ctx.root / 'research_trajectory').mkdir(parents=True, exist_ok=True)",
+      "        (export_ctx.root / 'research_trajectory' / 'STATE.md').write_text('# Research State\\n\\n## Critical Path\\n| ID | Dependency | Status | Evidence / artifact | Owner |\\n|---|---|---|---|---|\\n| CP1 | data | open | none | agent |\\nCurrent bottleneck: CP1 - data\\n', encoding='utf-8')",
+      "        (export_ctx.root / 'research_trajectory' / 'HUMAN_TASKS.md').write_text('# Human Tasks\\n\\n## Open Tasks\\n\\n- none\\n', encoding='utf-8')",
       "        (export_ctx.root / 'research_trajectory' / 'CURRENT_FINDINGS.md').write_text('# Current Findings\\n\\nFinal finding.', encoding='utf-8')",
       "        artifact_dir = export_ctx.root / 'research_trajectory' / 'trials' / '000001_export' / 'artifacts'",
       "        artifact_dir.mkdir(parents=True, exist_ok=True)",
       "        (artifact_dir / 'final_figure.png').write_bytes(b'final-figure')",
       "        figure_dir = export_ctx.root / 'manuscript' / 'figures'",
       "        figure_dir.mkdir(parents=True, exist_ok=True)",
+      "        (export_ctx.root / 'manuscript' / 'PAPER_PLAN.md').write_text('# Paper Plan\\n\\n## Blocking Missing Evidence\\n\\n- CP1 missing data\\n', encoding='utf-8')",
       "        (export_ctx.root / 'manuscript' / 'BLUEPRINT.md').write_text('Use `research_trajectory/trials/000001_export/artifacts/final_figure.png`.\\n', encoding='utf-8')",
       "        (figure_dir / 'FIGURE_SPECS.md').write_text('Existing source files: `research_trajectory/trials/000001_export/artifacts/final_figure.png`\\n', encoding='utf-8')",
       "        venue_dir = export_ctx.root / 'resources' / 'target_venue'",
@@ -5026,6 +5034,7 @@ Confidence: medium
       "        blueprint_estimate = module.export_estimate('blueprint')",
       "        assert blueprint_estimate['label'] == 'Paper-Writing Pack', blueprint_estimate",
       "        assert blueprint_estimate['filename'].endswith('-paper-writing-pack.zip'), blueprint_estimate",
+      "        assert blueprint_estimate['readiness']['ready'] is False, blueprint_estimate",
       "        blueprint_paths = {item['bundle_path'] for item in blueprint_estimate['largest_files']}",
       "        assert 'FINDINGS.md' in blueprint_paths, blueprint_paths",
       "        assert any(path.startswith('assets/') for path in blueprint_paths), blueprint_paths",
@@ -5035,7 +5044,15 @@ Confidence: medium
       "        skipped_paths = {item['path'] for item in blueprint_estimate['skipped']}",
       "        assert 'resources/ongoing_work/raw_bundle.zip' in skipped_paths, skipped_paths",
       "        assert 'workspace/results/model.bin' in skipped_paths, skipped_paths",
-      "        job = module.start_export({'kind': 'blueprint', 'confirmed': True})",
+      "        try:",
+      "            module.start_export({'kind': 'blueprint', 'confirmed': True})",
+      "            raise AssertionError('Paper-Writing Pack should be blocked for incomplete blueprint')",
+      "        except ValueError as exc:",
+      "            assert 'Paper-Writing Pack is blocked' in str(exc), exc",
+      "        status_estimate = module.export_estimate('research_status')",
+      "        assert status_estimate['label'] == 'Research Status Pack', status_estimate",
+      "        assert status_estimate['filename'].endswith('-research-status-pack.zip'), status_estimate",
+      "        job = module.start_export({'kind': 'research_status', 'confirmed': True})",
       "        deadline = time.time() + 10",
       "        status = job",
       "        while status['status'] == 'packaging' and time.time() < deadline:",
@@ -5046,14 +5063,12 @@ Confidence: medium
       "        assert zip_path.exists(), zip_path",
       "        with zipfile.ZipFile(zip_path) as archive:",
       "            names = set(archive.namelist())",
-      "            assert {'README.md', 'PROJECT.md', 'BLUEPRINT.md', 'FIGURE_SPECS.md', 'FINDINGS.md', 'MANIFEST.json'} <= names, names",
-      "            assert any(name.startswith('assets/') and name.endswith('final_figure.png') for name in names), names",
+      "            assert {'README.md', 'PROJECT.md', 'BLUEPRINT.md', 'PAPER_PLAN.md', 'STATE.md', 'HUMAN_TASKS.md', 'FIGURE_SPECS.md', 'FINDINGS.md', 'MANIFEST.json'} <= names, names",
       "            assert 'assets/raw_bundle.zip' not in names, names",
       "            assert 'assets/model.bin' not in names, names",
-      "            assert not any(name.startswith('research_trajectory/') for name in names), names",
       "            readme = archive.read('README.md').decode('utf-8')",
-      "            assert '# Paper-Writing Pack' in readme, readme",
-      "            assert 'human-machine paper writing' in readme, readme",
+      "            assert '# Research Status Pack' in readme, readme",
+      "            assert 'NOT a paper-writing handoff' in readme, readme",
       "            manifest = json.loads(archive.read('MANIFEST.json').decode('utf-8'))",
       "            assert any(item['bundle_path'] == 'FINDINGS.md' and item['sha256'] for item in manifest['files']), manifest",
       "    finally:",

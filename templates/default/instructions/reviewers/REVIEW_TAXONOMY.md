@@ -42,15 +42,17 @@ Use only these decisions in reviewer outputs:
 - `pass`: strict pass for the declared scope.
 - `continue`: useful progress, but at least one required action, unresolved
   qualification, unassessed critical area, or blocking uncertainty remains.
-- `blocked`: the whole autoresearch loop cannot continue without resolving a
-  non-human blocker such as missing files, broken tooling, or inaccessible
-  required resources. This is a hard stop, not a reviewer-local "I cannot
-  decide" state. Reviewer files using `blocked` must include `Response to
-  human:` with one concise user-facing blocker summary or decision request.
-- `needs_human`: a human decision or clarification is genuinely required and no
-  meaningful non-human work remains anywhere in the whole autoresearch loop.
-  Reviewer files using `needs_human` must include `Response to human:` with one
-  concise user-facing question or decision request.
+- `blocked`: the current critical-path bottleneck has a documented non-human
+  terminal blocker after the acquisition/substitution ladder, conversion, and
+  viable project-preserving alternatives have been exhausted. This is a hard
+  stop, not a reviewer-local "I cannot decide" state. Reviewer files using
+  `blocked` must include `Response to human:` with one concise user-facing
+  blocker summary or decision request.
+- `needs_human`: the current critical-path bottleneck genuinely requires a human
+  decision, clarification, scope confirmation, credential, private resource, or
+  access/environment change after the acquisition/substitution ladder has a
+  documented terminal verdict. Reviewer files using `needs_human` must include
+  `Response to human:` with one concise user-facing question or decision request.
 
 Do not use `approved`, `completed`, `ready`, `plausible`, `acceptable`,
 `architecture pass`, or `targeted revision ready` as reviewer decisions. If
@@ -109,8 +111,8 @@ file/upload/request that can wait while useful work continues. Keep
 `Decision: continue` and either list the required action or report a
 `Human Task Candidates` entry for the main execution agent to merge into
 `research_trajectory/HUMAN_TASKS.md`. Reviewers must not edit
-`HUMAN_TASKS.md` directly. Only hard stop when no meaningful non-human work
-remains in the whole autoresearch loop.
+`HUMAN_TASKS.md` directly. A queue of available bookkeeping work is not a reason
+to withhold `needs_human` once the critical-path bottleneck is human-gated.
 
 Every active trial must have all eight core reviewer files under
 `research_trajectory/trials/<trial_id>/reviews/`. A reviewer file can only

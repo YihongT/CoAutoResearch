@@ -41,8 +41,8 @@ Check:
 - Does `manuscript/BLUEPRINT.md` contain every active figure/table block in
   manuscript reading order, with placement, inclusion status, role, figure
   content/panel layout or publication-ready table body, complete caption, source
-  artifact/spec path, local evidence/provenance links, target-venue rationale,
-  and remaining blocker?
+  artifact/spec path, local evidence/provenance links, and target-venue
+  rationale?
 - For active tables, does the blueprint include the publication-ready Markdown
   table body directly in the local manuscript position, with final intended
   rows, columns, readable labels, caption, notes/definitions/abbreviations when

@@ -7042,6 +7042,12 @@ body.is-resizing-settings-dialog .settings-content {
   gap: 3px;
 }
 
+.status-human-tasks li.is-critical-path,
+.trial-human-tasks li.is-critical-path {
+  border-left: 2px solid rgba(161, 84, 38, 0.7);
+  padding-left: 8px;
+}
+
 .status-human-tasks li span,
 .trial-human-tasks li span {
   color: rgba(32, 31, 27, 0.52);

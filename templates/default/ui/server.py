@@ -109,6 +109,7 @@ CHAT_PROTECTED_PATHS = [
     "research_trajectory/trials",
     "research_trajectory/checkpoints",
     "manuscript/BLUEPRINT.md",
+    "manuscript/PAPER_PLAN.md",
     "manuscript/reviews",
     "manuscript/figures/FIGURE_SPECS.md",
 ]
@@ -289,6 +290,7 @@ REQUIRED_BLUEPRINT_SECTIONS = [
     "Architecture Overview / Table of Contents",
     "Manuscript Architecture",
     "Reference / Literature Grounding Plan",
+    "References",
     "Appendix / Supplement Plan",
     "Blocking Missing Evidence",
     "Required Qualifications / Claim Constraints",
@@ -4830,6 +4832,274 @@ def safe_read(path: Path, limit: int = MAX_TEXT_BYTES) -> str:
     return raw[:limit].decode("utf-8", errors="replace")
 
 
+CRITICAL_PATH_INCOMPLETE_STATUSES = {"open", "in_progress", "blocked_on_human"}
+
+
+def normalize_cp_status(value: str) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def critical_path_state(state_text: str | None = None) -> dict[str, Any]:
+    text = state_text if state_text is not None else (safe_read(RESEARCH_STATE_PATH) if RESEARCH_STATE_PATH.exists() else "")
+    section = markdown_section(text, "Critical Path") if text else ""
+    if not section:
+        return {"exists": False, "items": [], "current_bottleneck": "", "incomplete": False, "blocked_on_human": []}
+    items: list[dict[str, str]] = []
+    for raw_line in section.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("|") or re.match(r"^\|\s*-+", line):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < 5 or cells[0].lower() == "id" or not re.match(r"^CP\d+\b", cells[0], re.IGNORECASE):
+            continue
+        items.append({
+            "id": cells[0],
+            "dependency": cells[1],
+            "status": normalize_cp_status(cells[2]),
+            "evidence": cells[3],
+            "owner": cells[4],
+        })
+    current_bottleneck = regex_first_value(section, [r"^\s*Current bottleneck:\s*(.+?)\s*$"])
+    consecutive_raw = regex_first_value(section, [r"^\s*Consecutive non-empirical trials:\s*(\d+)\s*$"])
+    incomplete = any(item["status"] in CRITICAL_PATH_INCOMPLETE_STATUSES for item in items)
+    blocked = [item for item in items if item["status"] == "blocked_on_human"]
+    return {
+        "exists": True,
+        "items": items,
+        "current_bottleneck": compact_single_line(current_bottleneck, 260),
+        "consecutive_non_empirical_trials": int(consecutive_raw or 0),
+        "incomplete": incomplete,
+        "blocked_on_human": blocked,
+    }
+
+
+def critical_human_task_ids() -> set[str]:
+    state = critical_path_state()
+    if not state.get("exists"):
+        return set()
+    text = " ".join(
+        [
+            str(state.get("current_bottleneck") or ""),
+            *[
+                f"{item.get('id', '')} {item.get('dependency', '')} {item.get('evidence', '')}"
+                for item in state.get("blocked_on_human") or []
+                if isinstance(item, dict)
+            ],
+        ]
+    )
+    return {match.group(0) for match in re.finditer(r"\bHT\d{4,}\b", text)}
+
+
+def trial_report_empirical_progress(trial_dir: Path) -> str:
+    report_path = trial_dir / "REPORT.md"
+    if not report_path.exists():
+        return ""
+    report = safe_read(report_path)
+    value = regex_first_value(report, [r"^\s*Empirical progress:\s*`?(yes|no)`?\b"])
+    return str(value or "").strip().lower()
+
+
+def recent_non_empirical_stall() -> dict[str, Any]:
+    cp = critical_path_state()
+    if not cp.get("exists") or not cp.get("incomplete"):
+        return {"stalled": False, "critical_path": cp, "trials": []}
+    trials = closed_active_trial_dirs()[-3:]
+    if len(trials) < 3:
+        return {"stalled": False, "critical_path": cp, "trials": [rel_path(path) for path in trials]}
+    statuses = [trial_report_empirical_progress(path) for path in trials]
+    stalled = bool(statuses and all(status == "no" for status in statuses))
+    return {
+        "stalled": stalled,
+        "critical_path": cp,
+        "trials": [rel_path(path) for path in trials],
+        "statuses": statuses,
+    }
+
+
+ONGOING_WORK_RESEARCH_EXTENSIONS = {
+    ".bib",
+    ".ckpt",
+    ".csv",
+    ".dta",
+    ".feather",
+    ".h5",
+    ".hdf5",
+    ".ipynb",
+    ".jsonl",
+    ".md",
+    ".npz",
+    ".parquet",
+    ".pkl",
+    ".pt",
+    ".pth",
+    ".py",
+    ".r",
+    ".rds",
+    ".ris",
+    ".sav",
+    ".sas7bdat",
+    ".tex",
+    ".tsv",
+    ".xlsx",
+}
+ONGOING_WORK_RESEARCH_NAMES = {
+    "data",
+    "dataset",
+    "datasets",
+    "results",
+    "result",
+    "outputs",
+    "output",
+    "models",
+    "model",
+    "checkpoints",
+    "checkpoint",
+    "figures",
+    "tables",
+    "analysis",
+    "notebooks",
+    "src",
+    "scripts",
+    "manuscript",
+}
+
+
+def ongoing_work_research_bearing_paths(limit: int = 2500) -> list[str]:
+    root = REPO_ROOT / "resources" / "ongoing_work"
+    if not root.exists():
+        return []
+    found: list[str] = []
+    visited = 0
+    skip_names = {".git", "node_modules", "__pycache__", ".venv", "venv", ".cache"}
+    for current, dirnames, filenames in os.walk(root, followlinks=True):
+        dirnames[:] = [name for name in dirnames if name not in skip_names]
+        current_path = Path(current)
+        if current_path != root and current_path.name.lower() in ONGOING_WORK_RESEARCH_NAMES:
+            found.append(rel_path(current_path))
+        for filename in filenames:
+            visited += 1
+            if visited > limit:
+                return found or [rel_path(root)]
+            if filename in {".gitkeep", "README.md"}:
+                continue
+            path = current_path / filename
+            name_lower = filename.lower()
+            suffix = path.suffix.lower()
+            if suffix in ONGOING_WORK_RESEARCH_EXTENSIONS or any(token in name_lower for token in ("result", "metric", "model", "checkpoint", "manuscript", "analysis")):
+                found.append(rel_path(path))
+            if len(found) >= 25:
+                return found
+    return found
+
+
+def conversion_trial_report_exists() -> bool:
+    trials_root = REPO_ROOT / "research_trajectory" / "trials"
+    if not trials_root.is_dir():
+        return False
+    for path in trials_root.iterdir():
+        if not path.is_dir():
+            continue
+        if re.match(r"^(?:0+_)?project_conversion$|^0+_project_conversion\b|^0+project_conversion\b", path.name, re.IGNORECASE):
+            if (path / "REPORT.md").exists():
+                return True
+    return False
+
+
+def ongoing_work_requires_conversion() -> bool:
+    return bool(ongoing_work_research_bearing_paths()) and not conversion_trial_report_exists()
+
+
+def conversion_pending_status() -> dict[str, Any]:
+    paths = ongoing_work_research_bearing_paths()
+    pending = bool(paths) and not conversion_trial_report_exists()
+    return {
+        "pending": pending,
+        "reason": "resources/ongoing_work contains research-bearing content and no conversion REPORT.md exists." if pending else "",
+        "sample_paths": paths[:12],
+    }
+
+
+def mandatory_conversion_prompt_section() -> str:
+    status = conversion_pending_status()
+    if not status.get("pending"):
+        return ""
+    samples = "\n".join(f"- `{path}`" for path in status.get("sample_paths", [])[:8]) or "- `resources/ongoing_work/`"
+    return f"""
+
+Mandatory conversion pending:
+`resources/ongoing_work/` contains research-bearing content and no `research_trajectory/trials/000000_project_conversion/REPORT.md` exists. Before any normal trial, run the full conversion trial required by `instructions/CONVERSION.md`.
+
+Detected examples:
+{samples}
+"""
+
+
+def project_scope_text() -> str:
+    project = safe_read(REPO_ROOT / "PROJECT.md")
+    sections = []
+    for heading in ("One-Sentence Goal", "Target Venue / Audience", "Research Type", "Scope", "Success Criteria"):
+        section = markdown_section(project, heading)
+        if section:
+            sections.append(section)
+    return "\n\n".join(sections).strip() or project.strip()
+
+
+def project_scope_hash() -> str:
+    return hashlib.sha256(project_scope_text().encode("utf-8")).hexdigest()
+
+
+def record_project_scope_hash_at_launch(state: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = dict(state or read_trajectory_state())
+    if not payload.get("project_scope_hash"):
+        payload["project_scope_hash"] = project_scope_hash()
+        payload["project_scope_captured_at"] = now_iso()
+        payload["last_sync_reason"] = "project_scope_hash_captured"
+        return write_trajectory_state(payload)
+    return payload
+
+
+def intervention_files_after(iso_value: str) -> list[str]:
+    try:
+        threshold = datetime.fromisoformat(str(iso_value or "").replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        threshold = 0
+    roots = [
+        REPO_ROOT / "research_trajectory" / "human_interventions" / "pending",
+        REPO_ROOT / "research_trajectory" / "human_interventions" / "formal",
+    ]
+    files: list[str] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.glob("*.md")):
+            try:
+                if path.stat().st_mtime >= threshold:
+                    files.append(rel_path(path))
+            except OSError:
+                continue
+    return files
+
+
+def scope_drift_warning() -> dict[str, Any]:
+    state = read_trajectory_state()
+    baseline = str(state.get("project_scope_hash") or "")
+    if not baseline:
+        return {"warning": False}
+    current = project_scope_hash()
+    if current == baseline:
+        return {"warning": False}
+    intervention_files = intervention_files_after(str(state.get("project_scope_captured_at") or ""))
+    scope_files = [path for path in intervention_files if "SCOPE_CHANGE_" in Path(path).name]
+    if intervention_files or scope_files:
+        return {"warning": False, "intervention_files": intervention_files}
+    return {
+        "warning": True,
+        "message": "Unconfirmed scope change detected in PROJECT.md.",
+        "baseline_hash": baseline,
+        "current_hash": current,
+    }
+
+
 HUMAN_TASK_STATUS_VALUES = {"open", "answered", "closed", "deferred"}
 HUMAN_TASK_PRIORITY_VALUES = {"high", "medium", "low"}
 HUMAN_TASK_BLOCK_VALUES = {"none", "final_pass", "future_trial"}
@@ -4876,6 +5146,7 @@ def read_human_tasks() -> dict[str, Any]:
     path = human_tasks_path()
     text = safe_read(path, 80_000) if path.exists() else ""
     entries: list[dict[str, str]] = []
+    critical_ids = critical_human_task_ids()
     for match in re.finditer(r"^###\s+(HT\d{4,})\s*:\s*(.+?)\s*$([\s\S]*?)(?=^###\s+HT\d{4,}\s*:|\Z)", text, re.MULTILINE):
         block = match.group(3)
         item = normalize_human_task_entry(
@@ -4894,6 +5165,8 @@ def read_human_tasks() -> dict[str, Any]:
             }
         )
         if item:
+            if item["id"] in critical_ids:
+                item["critical_path"] = "true"
             entries.append(item)
     priority_rank = {"high": 0, "medium": 1, "low": 2}
     entries.sort(key=lambda item: (priority_rank.get(item["priority"], 1), item["id"]))
@@ -4904,6 +5177,8 @@ def read_human_tasks() -> dict[str, Any]:
         "open": open_tasks[:HUMAN_TASK_OPEN_LIMIT],
         "closed": closed_tasks,
         "open_count": len(open_tasks),
+        "critical_open_count": len([item for item in open_tasks if item.get("critical_path") == "true"]),
+        "critical_path_bottleneck": critical_path_state().get("current_bottleneck", ""),
     }
 
 
@@ -5346,6 +5621,8 @@ def parse_reference_table(references_text: str) -> list[dict[str, str]]:
 
 def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     sections = extract_sections(blueprint_text)
+    stub = blueprint_is_stub(blueprint_text)
+    paper_plan_text = safe_read(REPO_ROOT / "manuscript" / "PAPER_PLAN.md") if stub else ""
 
     def real_section(section: dict[str, Any]) -> bool:
         title = str(section.get("title", ""))
@@ -5465,7 +5742,11 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
             })
         return files
 
+    missing_evidence_source = paper_plan_text if stub and paper_plan_text.strip() else blueprint_text
     return {
+        "artifact_label": "Paper Plan (pre-results)" if stub else "Blueprint (full results)",
+        "blueprint_stub": stub,
+        "paper_plan_summary": first_meaningful_line(paper_plan_text, "") if paper_plan_text else "",
         "target": clean_summary_value(value_after_label(target_section, "Target venue") or first_meaningful_line(target_section)),
         "audience": clean_summary_value(value_after_label(target_section, "Audience")),
         "article_type": clean_summary_value(value_after_label(target_section, "Article type")),
@@ -5490,7 +5771,7 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
         "appendix_files": appendix_files(),
         "provenance": provenance,
         "traceability": provenance,
-        "missing_evidence": [item for item in list_section_items(extract_section(blueprint_text, "Blocking Missing Evidence") or extract_section(blueprint_text, "Missing Evidence")) if meaningful_summary_value(item)][:12],
+        "missing_evidence": [item for item in list_section_items(extract_section(missing_evidence_source, "Blocking Missing Evidence") or extract_section(missing_evidence_source, "Missing Evidence")) if meaningful_summary_value(item)][:12],
         "figure_specs": figure_specs[:10],
     }
 
@@ -7535,6 +7816,7 @@ def collect_resources() -> list[dict[str, Any]]:
 
 EXPORT_KIND_LABELS = {
     "blueprint": "Paper-Writing Pack",
+    "research_status": "Research Status Pack",
     "final_project": "Clean Project Package",
 }
 EXPORT_EXCLUDED_NAMES = {
@@ -7599,7 +7881,7 @@ def export_project_label() -> str:
 
 def export_filename(kind: str) -> str:
     stem = slugify(export_project_label(), "project")
-    suffix = "paper-writing-pack" if kind == "blueprint" else "clean-project-package"
+    suffix = "paper-writing-pack" if kind == "blueprint" else "research-status-pack" if kind == "research_status" else "clean-project-package"
     return f"{stem}-{suffix}.zip"
 
 
@@ -7658,6 +7940,52 @@ def blueprint_asset_skip_reason(relative_path: str, source: Path) -> str:
     if normalized.startswith("research_trajectory/") and "/artifacts/" not in normalized:
         return "reference-only trajectory provenance; autoresearch trajectory is not included in Paper-Writing Pack"
     return ""
+
+
+def paper_plan_blockers() -> list[str]:
+    path = REPO_ROOT / "manuscript" / "PAPER_PLAN.md"
+    if not path.exists():
+        return []
+    section = markdown_section(safe_read(path), "Blocking Missing Evidence")
+    return meaningful_section_lines(section) if section else []
+
+
+def active_result_blocks_with_sources() -> list[str]:
+    text = safe_read(REPO_ROOT / "manuscript" / "BLUEPRINT.md")
+    architecture = markdown_section(text, "Manuscript Architecture")
+    architecture_body = section_body(architecture)
+    matches = list(re.finditer(r"^(#{3,6})\s+(.+?)\s*$", architecture_body, re.MULTILINE))
+    results: list[str] = []
+    for index, match in enumerate(matches):
+        title = match.group(2).strip()
+        if not re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d+|\d+|block|:))\b", title, re.IGNORECASE):
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(architecture_body)
+        body = architecture_body[match.end():end].strip()
+        if re.search(r"Inclusion status:\s*(candidate|supplement|deprecated)\b", body, re.IGNORECASE):
+            continue
+        summary = value_after_label(body, "Metric or result summary")
+        source = value_after_label(body, "Source artifact path")
+        if meaningful_summary_value(summary) and meaningful_summary_value(source) and not re.search(r"\b(planned|pending|tbd|to be filled|future trial)\b", f"{summary}\n{source}", re.IGNORECASE):
+            results.append(title)
+    return results
+
+
+def paper_pack_readiness() -> dict[str, Any]:
+    blockers = final_blueprint_consistency_blockers()
+    gate_passed = gate_has_passed(read_autoresearch_gate(enforce_consistency=True))
+    if not gate_passed and not active_result_blocks_with_sources():
+        blockers.append("BLUEPRINT.md has no active result block with a usable source artifact.")
+    plan_blockers = paper_plan_blockers()
+    if plan_blockers:
+        blockers.append("PAPER_PLAN.md still lists blocking missing evidence.")
+    unique_blockers = list(dict.fromkeys(blockers))
+    return {
+        "ready": not unique_blockers or gate_passed,
+        "blockers": unique_blockers,
+        "active_result_blocks": active_result_blocks_with_sources(),
+        "paper_plan_blockers": plan_blockers[:12],
+    }
 
 
 def export_entry_dict(
@@ -7791,11 +8119,17 @@ def add_directory_export_entries(
 
 def export_readme(kind: str, estimate_only: bool = False) -> str:
     label = EXPORT_KIND_LABELS[kind]
-    scope = (
-        "This package is a clean manuscript handoff for human-machine paper writing. It includes the manuscript blueprint, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets when available."
-        if kind == "blueprint"
-        else "This package is a clean project handoff with final-facing manuscript, workspace, and resource files. It intentionally excludes autoresearch trajectory, runtime, archive, caches, secrets, and agent scaffolding."
-    )
+    if kind == "blueprint":
+        scope = "This package is a clean manuscript handoff for human-machine paper writing. It includes the full-results manuscript blueprint, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets."
+        extra: list[str] = []
+    elif kind == "research_status":
+        readiness = paper_pack_readiness()
+        blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
+        scope = "This is NOT a paper-writing handoff. Results are incomplete; use this status package to inspect current plans, blockers, state, and findings."
+        extra = ["", "Top blockers:", *(f"- {blocker}" for blocker in blockers[:12] or ["Paper-Writing Pack readiness has not passed."])]
+    else:
+        scope = "This package is a clean project handoff with final-facing manuscript, workspace, and resource files. It intentionally excludes autoresearch trajectory, runtime, archive, caches, secrets, and agent scaffolding."
+        extra = []
     return "\n".join(
         [
             f"# {label}",
@@ -7806,6 +8140,7 @@ def export_readme(kind: str, estimate_only: bool = False) -> str:
             scope,
             "",
             "Included files are listed in `MANIFEST.json` with original project paths and SHA-256 hashes when available.",
+            *extra,
             "",
         ]
     )
@@ -7900,6 +8235,14 @@ def build_export_plan(kind: str) -> dict[str, Any]:
             if source.exists() or source.is_symlink():
                 bundle_path = f"assets/{Path(relative).name or 'asset'}"
                 add_file_export_entry(entries, missing, skipped, used, source, bundle_path, relative, kind)
+    elif kind == "research_status":
+        add_existing_relative(entries, missing, skipped, used, "manuscript/PAPER_PLAN.md", "PAPER_PLAN.md", kind)
+        add_existing_relative(entries, missing, skipped, used, "manuscript/BLUEPRINT.md", "BLUEPRINT.md", kind)
+        add_existing_relative(entries, missing, skipped, used, "research_trajectory/STATE.md", "STATE.md", kind, allow_trajectory_asset=True)
+        add_existing_relative(entries, missing, skipped, used, "research_trajectory/HUMAN_TASKS.md", "HUMAN_TASKS.md", kind, allow_trajectory_asset=True)
+        add_existing_relative(entries, missing, skipped, used, "manuscript/figures/FIGURE_SPECS.md", "FIGURE_SPECS.md", kind)
+        for decision in sorted((REPO_ROOT / "research_trajectory" / "trials").glob("*/artifacts/resource_scout/ACQUISITION_DECISION.md")):
+            add_existing_relative(entries, missing, skipped, used, rel_path(decision), f"acquisition_decisions/{decision.parent.parent.parent.name}_ACQUISITION_DECISION.md", kind, allow_trajectory_asset=True)
     else:
         add_existing_relative(entries, missing, skipped, used, "manuscript", "manuscript", kind)
         add_existing_relative(entries, missing, skipped, used, "workspace", "workspace", kind)
@@ -7948,6 +8291,8 @@ def export_entry_public(entry: dict[str, Any]) -> dict[str, Any]:
 def export_estimate(kind: str) -> dict[str, Any]:
     plan = build_export_plan(kind)
     public = {key: value for key, value in plan.items() if key != "entries"}
+    if str(plan.get("kind") or "") in {"blueprint", "research_status"}:
+        public["readiness"] = paper_pack_readiness()
     public["ok"] = True
     return public
 
@@ -7994,6 +8339,8 @@ def cleanup_old_exports() -> None:
 
 def export_public_estimate_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
     public = {key: value for key, value in plan.items() if key != "entries"}
+    if str(plan.get("kind") or "") in {"blueprint", "research_status"}:
+        public["readiness"] = paper_pack_readiness()
     public["ok"] = True
     return public
 
@@ -8027,6 +8374,7 @@ def export_job_public(job: dict[str, Any]) -> dict[str, Any]:
         "large_files": job.get("large_files") or [],
         "skipped": job.get("skipped") or [],
         "missing_externals": job.get("missing_externals") or [],
+        "readiness": job.get("readiness") or {},
         "confirmation_threshold_bytes": int(job.get("confirmation_threshold_bytes") or EXPORT_CONFIRMATION_BYTES),
         "download_url": export_zip_path(export_id, filename) if status == "ready" else "",
     }
@@ -8264,6 +8612,11 @@ def prepare_export_plan_for_job(plan: dict[str, Any]) -> None:
 def start_export(payload: dict[str, Any]) -> dict[str, Any]:
     kind = normalize_export_kind(payload.get("kind"))
     confirmed = bool(payload.get("confirmed") or payload.get("confirmation") or payload.get("confirm"))
+    readiness = paper_pack_readiness() if kind in {"blueprint", "research_status"} else {}
+    if kind == "blueprint" and not readiness.get("ready"):
+        blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
+        detail = "; ".join(str(item) for item in blockers[:8]) or "Paper-Writing Pack readiness has not passed."
+        raise ValueError(f"Paper-Writing Pack is blocked: {detail}")
     plan = build_export_plan(kind)
     prepare_export_plan_for_job(plan)
     estimate = export_public_estimate_from_plan(plan)
@@ -8297,6 +8650,7 @@ def start_export(payload: dict[str, Any]) -> dict[str, Any]:
         "large_files": plan.get("large_files") or [],
         "skipped": plan.get("skipped") or [],
         "missing_externals": plan.get("missing_externals") or [],
+        "readiness": readiness,
         "entries": plan.get("entries") or [],
         "estimate": estimate,
         "work_dir": str(work_dir),
@@ -8349,12 +8703,16 @@ def build_overview() -> dict[str, Any]:
     project_overview = project_summary(project_text)
     manuscript_overview = manuscript_summary(blueprint_text, figure_text)
     blueprint_blockers = final_blueprint_consistency_blockers() if blueprint_text.strip() else []
+    pack_readiness = paper_pack_readiness() if blueprint_text.strip() else {"ready": False, "blockers": ["manuscript/BLUEPRINT.md is empty."]}
     manuscript_overview["readiness"] = {
         "blueprint_blockers": blueprint_blockers[:12],
         "blueprint_blocker_count": len(blueprint_blockers),
+        "paper_pack": pack_readiness,
     }
     trials = collect_trials()
     human_tasks = read_human_tasks()
+    conversion_pending = conversion_pending_status()
+    scope_warning = scope_drift_warning()
     return {
         "active_project_id": context.id,
         "project": context.summary(),
@@ -8384,6 +8742,8 @@ def build_overview() -> dict[str, Any]:
         },
         "trials": trials,
         "human_tasks": human_tasks,
+        "conversion_pending": conversion_pending,
+        "scope_drift": scope_warning,
         "trajectory_graph": collect_trajectory_graph(trials, trajectory),
         "reviews": collect_reviews(),
         "interventions": collect_interventions(),
@@ -9670,7 +10030,7 @@ def replace_or_insert_source_path(block: str, output_path: str, title: str = "Fi
 
     insert_at = len(lines)
     for index, line in enumerate(lines):
-        if re.match(r"^\s*(Result shown or conceptual basis|Provenance links|Target-venue fit rationale|Remaining blocker):", line, re.IGNORECASE):
+        if re.match(r"^\s*(Result shown or conceptual basis|Provenance links|Target-venue fit rationale):", line, re.IGNORECASE):
             insert_at = index
             break
     if insert_at == len(lines):
@@ -10238,6 +10598,11 @@ def trial_dir_satisfies_current_boundary(trial_dir: Path) -> bool:
     return trial_dir_satisfies_protocol_boundary(trial_dir)
 
 
+def blueprint_is_stub(text: str | None = None) -> bool:
+    value = text if text is not None else safe_read(REPO_ROOT / "manuscript" / "BLUEPRINT.md")
+    return bool(re.search(r"Status:\s*pre-results stub", value or "", re.IGNORECASE))
+
+
 def final_blueprint_consistency_blockers() -> list[str]:
     blockers: list[str] = []
     blueprint_path = REPO_ROOT / "manuscript" / "BLUEPRINT.md"
@@ -10246,6 +10611,18 @@ def final_blueprint_consistency_blockers() -> list[str]:
     text = safe_read(blueprint_path)
     if not text.strip():
         return ["manuscript/BLUEPRINT.md is empty."]
+    if blueprint_is_stub(text):
+        blockers.append("BLUEPRINT.md is still the pre-results stub; use PAPER_PLAN.md until real results are promoted.")
+    if re.search(r"\bdeferred\b", text, re.IGNORECASE):
+        blockers.append("BLUEPRINT.md contains `deferred`; planned, missing, or deferred content belongs in PAPER_PLAN.md.")
+    if re.search(r"Remaining\s+blocker\s*:", text, re.IGNORECASE):
+        blockers.append("BLUEPRINT.md contains per-block blocker fields; blockers belong in PAPER_PLAN.md and STATE.md Critical Path.")
+    if len(text.encode("utf-8")) > 100_000:
+        blockers.append("BLUEPRINT.md is larger than 100KB; check for status-log or register pollution.")
+    provenance = markdown_section(text, "Provenance / Audit Index")
+    text_outside_provenance = text.replace(provenance, "") if provenance else text
+    if len(re.findall(r"research_trajectory/trials/", text_outside_provenance)) > 20:
+        blockers.append("BLUEPRINT.md contains excessive trial-path references outside `Provenance / Audit Index`.")
     for heading in REQUIRED_BLUEPRINT_SECTIONS:
         section = markdown_section(text, heading)
         if not section:
@@ -10295,7 +10672,7 @@ def final_blueprint_consistency_blockers() -> list[str]:
             blockers.append(f"`{title}` is missing a complete paragraph plan table.")
 
     def active_block(body: str) -> bool:
-        return bool(re.search(r"Inclusion status:\s*active\b", body, re.IGNORECASE)) or not re.search(r"Inclusion status:\s*(candidate|deprecated|deferred|supplement)\b", body, re.IGNORECASE)
+        return bool(re.search(r"Inclusion status:\s*active\b", body, re.IGNORECASE)) or not re.search(r"Inclusion status:\s*(candidate|deprecated|supplement)\b", body, re.IGNORECASE)
 
     def block_has_label(body: str, label: str) -> bool:
         return bool(re.search(rf"^\s*{re.escape(label.rstrip(':'))}\s*:", body, re.IGNORECASE | re.MULTILINE))
@@ -10333,20 +10710,19 @@ def final_blueprint_consistency_blockers() -> list[str]:
 
     for title, body in result_blocks:
         if re.search(r"Inclusion status:\s*deferred\b", body, re.IGNORECASE):
-            blockers.append(f"Inline dataset/benchmark/result `{title}` is marked `deferred`; missing or deferred results belong in `Blocking Missing Evidence`, not `Manuscript Architecture`.")
+            blockers.append(f"Inline dataset/benchmark/result `{title}` is marked `deferred`; missing or deferred results belong in PAPER_PLAN.md, not `Manuscript Architecture`.")
             continue
         if re.search(r"Inclusion status:\s*candidate\b", body, re.IGNORECASE):
             if missing_result_content(body):
-                blockers.append(f"Inline dataset/benchmark/result `{title}` is a planned or missing result slot; move it to `Blocking Missing Evidence` unless it states an actual result summary and source artifact path.")
+                blockers.append(f"Inline dataset/benchmark/result `{title}` is a planned or missing result slot; move it to PAPER_PLAN.md unless it states an actual result summary and source artifact path.")
             for label in (
                 "Metric or result summary",
                 "Reader takeaway",
                 "Source artifact path",
                 "Manuscript claim supported in plain language",
-                "Remaining blocker",
             ):
                 if planned_placeholder_value(value_after_label(body, label)):
-                    blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; move it to `Blocking Missing Evidence` unless it states actual reader-facing result content.")
+                    blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; move it to PAPER_PLAN.md unless it states actual reader-facing result content.")
 
     for title, body in figure_blocks:
         if not active_block(body):
@@ -10361,7 +10737,6 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Result shown or conceptual basis:",
             "Provenance links:",
             "Target-venue fit rationale:",
-            "Remaining blocker:",
         ):
             if label not in body:
                 blockers.append(f"Inline figure `{title}` is missing `{label}`.")
@@ -10384,7 +10759,6 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Key result or conceptual contrast shown:",
             "Provenance links:",
             "Target-venue fit rationale:",
-            "Remaining blocker:",
         ):
             if label not in body:
                 blockers.append(f"Inline table `{title}` is missing `{label}`.")
@@ -10399,7 +10773,6 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Inputs:",
             "Outputs:",
             "Source code or artifact links:",
-            "Remaining blocker:",
         ):
             if label not in body:
                 blockers.append(f"Inline algorithm/method `{title}` is missing `{label}`.")
@@ -10427,7 +10800,6 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Source artifact path:",
             "Limitations and uncertainty:",
             "Manuscript claim supported in plain language:",
-            "Remaining blocker:",
         ):
             if label not in body:
                 blockers.append(f"Inline dataset/benchmark/result `{title}` is missing `{label}`.")
@@ -10436,10 +10808,9 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Reader takeaway",
             "Source artifact path",
             "Manuscript claim supported in plain language",
-            "Remaining blocker",
         ):
             if planned_placeholder_value(value_after_label(body, label)):
-                blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; move it to `Blocking Missing Evidence` unless it states actual reader-facing result content.")
+                blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; move it to PAPER_PLAN.md unless it states actual reader-facing result content.")
         if missing_result_content(body):
             blockers.append(f"Inline dataset/benchmark/result `{title}` must state an actual result summary and source artifact path.")
 
@@ -10479,6 +10850,11 @@ def final_gate_consistency_blockers() -> list[str]:
     blockers.extend(current_trial_reviewer_file_blockers())
     blockers.extend(current_trial_protocol_file_blockers())
     blockers.extend(final_blueprint_consistency_blockers())
+    cp = critical_path_state()
+    if cp.get("exists") and cp.get("incomplete"):
+        blockers.append("Critical Path still has open, in-progress, or human-blocked items.")
+    if paper_plan_blockers():
+        blockers.append("PAPER_PLAN.md still lists blocking missing evidence.")
     findings_path = REPO_ROOT / "research_trajectory" / "CURRENT_FINDINGS.md"
     if findings_path.exists():
         findings = safe_read(findings_path)
@@ -10522,10 +10898,20 @@ def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
             "path": str(RESEARCH_STATE_PATH.relative_to(REPO_ROOT)),
         }
     raw_status = ""
+    critical_path_line = ""
+    gate_empirical_progress = ""
     for line in section.splitlines():
         match = re.match(r"^\s*(?:status|overall status|gate status)\s*:\s*(.+?)\s*$", line, re.IGNORECASE)
         if match:
             raw_status = match.group(1).strip()
+            break
+    for line in section.splitlines():
+        match = re.match(r"^\s*Critical path:\s*(.+?)\s*$", line, re.IGNORECASE)
+        if match:
+            critical_path_line = match.group(1).strip()
+            empirical_match = re.search(r"empirical progress this trial:\s*(yes|no)\b", critical_path_line, re.IGNORECASE)
+            if empirical_match:
+                gate_empirical_progress = empirical_match.group(1).lower()
             break
     overall_status = normalize_gate_status(raw_status)
     response_to_human, response_to_human_source = gate_response_to_human(section, raw_status)
@@ -10570,6 +10956,9 @@ def read_autoresearch_gate(enforce_consistency: bool = True) -> dict[str, Any]:
         "all_reviewers_passed": all_reviewers_passed,
         "consistency_blockers": consistency_blockers,
         "reviewer_baseline": project_reviewer_baseline_status(REPO_ROOT),
+        "critical_path": critical_path_state(text),
+        "critical_path_line": critical_path_line,
+        "empirical_progress": gate_empirical_progress,
         "summary": "\n".join(reviewer_lines) if reviewer_lines else first_meaningful_line(section, "Gate section exists."),
         "path": str(RESEARCH_STATE_PATH.relative_to(REPO_ROOT)),
     }
@@ -10605,6 +10994,8 @@ Required reviewer gates:
 - Figure/table reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FIGURE_TABLE_REVIEW.md`
 - Reference reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/REFERENCE_REVIEW.md`
 - Final gate reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`
+
+Critical path: CP1 - initialize critical path; empirical progress this trial: no
 
 Next action: start or continue the next complete research attempt.
 """
@@ -10644,6 +11035,9 @@ def repair_autoresearch_gate_if_needed() -> dict[str, Any]:
             if review_path.exists():
                 path_note = f" - `{project_relative_path(REPO_ROOT, review_path)}`"
         lines.append(f"- {label}: {status}{path_note}")
+    cp = critical_path_state()
+    if cp.get("exists"):
+        lines.extend(["", f"Critical path: {cp.get('current_bottleneck') or 'current bottleneck not recorded'}; empirical progress this trial: no"])
     if consistency_blockers:
         lines.extend(["", "Consistency blockers:"])
         for blocker in consistency_blockers[:12]:
@@ -10794,6 +11188,8 @@ def research_session_snapshot() -> dict[str, Any]:
             "loop_stop_reason": loop_stop_reason,
             "gate": gate,
             "human_tasks": read_human_tasks(),
+            "conversion_pending": conversion_pending_status(),
+            "scope_drift": scope_drift_warning(),
             "trajectory": trajectory,
             "expected_trial": expected_trial,
             "active_run": active_run,
@@ -10936,48 +11332,27 @@ def human_tasks_prompt_section() -> str:
     return """
 Human task queue:
 - read `research_trajectory/HUMAN_TASKS.md` before choosing the next objective;
-- the main execution agent is the only canonical writer for `research_trajectory/HUMAN_TASKS.md`;
-- Resource Scout, Reviewer Scope Analyst, core reviewers, and specialized reviewers must report `Human task candidates` in their own artifacts or reviews; merge and deduplicate those candidates before writing the canonical queue;
-- maintain `research_trajectory/HUMAN_TASKS.md` as the non-blocking human task queue;
-- keep at most three `Status: open` tasks, merge duplicate topics before adding a new task, and close stale tasks when resolved or no longer needed;
-- use task ids `HT0001`, `HT0002`, etc. with fields `Status`, `Priority`, `Blocks`, `Question`, `Why needed`, `Continue meanwhile`, `Source`, `Created`, and `Updated`;
-- keep `Blocks` to `none`, `final_pass`, or `future_trial`; it must not express a hard stop;
-- if useful autoresearch work can continue, keep the Autoresearch Goal Gate `Status: continue` and record the human request in `HUMAN_TASKS.md`;
-- only hard stop when no meaningful non-human work remains in the whole autoresearch loop: use top-level gate `Status: blocked` only when a non-human blocker cannot be repaired or routed around, and use `Status: needs_human` only when the human decision, clarification, credential, private resource, or network/access change is on the critical path and no available resources, public alternatives, metadata-only work, follow-up retrieval trial, manuscript/evidence cleanup, or state repair can still move the project forward;
-- gate `Status:` lines must be exactly one bare token: `pass`, `continue`, `blocked`, or `needs_human`; do not write `continue - needs human later` or any other decorated status."""
+- follow `instructions/EXECUTION_AGENT.md` section `Non-Blocking Human Tasks` as the single source of truth for task fields, merging, and critical-path escalation;
+- gate `Status:` lines must be exactly one bare token: `pass`, `continue`, `blocked`, or `needs_human`."""
 
 
 def resource_scout_prompt_section() -> str:
     return """
 Resource Scout requirement for every trial:
 - read instructions/RESOURCE_SCOUT.md;
-- PLAN.md must include `## Resource Scout Brief` with `Scout: required | skipped`, `Decision reason:`, `Skip reason:`, `Search scope:`, `Resource types:`, `Disciplines/domains:`, `Known resource clues:`, `Freshness / date sensitivity:`, `Download policy:`, `Expected destinations:`, and `Stop criteria:`;
-- default to `Scout: required`; use `Scout: skipped` only for purely local work over already verified resources, explicitly offline runs, or truly irrelevant external search, and write a concrete skip reason;
-- after PLAN.md and reviews/PLAN_REVIEW.md, before main execution, `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` when required;
-- write `research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and save small public artifacts under the appropriate `resources/` folder;
-- record scout-discovered materials as `autoresearch_discovered`; they are raw inputs, not current truth, until promoted by the main execution agent into REPORT.md, STATE.md, CURRENT_FINDINGS.md, PROJECT.md, or manuscript files;
-- if scout outputs change assumptions, resources, risks, or success criteria, revise PLAN.md and rerun PLAN_REVIEW.md before execution;
-- prefer a real Resource Scout subagent when the runtime supports it; if subagent orchestration is unavailable, stalls, or fails, complete the same scout work inline as a clearly labeled `Resource Scout fallback`, write the scout report / manifest updates / resource files, disclose the fallback in REPORT.md, and continue;
-- emit visible status lines while handling scout work: `Subagent update: Resource Scout | status: starting | task: <short task> | output: none` before starting, `Subagent update: Resource Scout | status: waiting | task: <short task> | output: none` before waiting on a subagent, `Subagent update: Resource Scout | status: completed | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md` after completion, or `Subagent update: Resource Scout | status: fallback | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md` after inline fallback;
-- when a public file body is required, follow the Download Integrity And Fallback Ladder in `instructions/RESOURCE_SCOUT.md`: verify HTTP status, content type, size, magic bytes/archive listing/header rows/checksum when available; quarantine HTML/error-page downloads; retry safe downloader variants, user agent, configured proxy/direct profiles, official alternate links, and verified local caches; record attempts before asking for user help;
-- do not set the gate to `blocked` or `needs_human` solely because Resource Scout subagent orchestration failed; these are whole-loop hard stops;
-- do not set the gate to `blocked` or `needs_human` solely because a public download failed until the download fallback ladder is exhausted and recorded; if useful work can continue through metadata, alternate public resources, or a follow-up retrieval trial, use `Status: continue`;
-- record non-blocking human resource, credential, or preference requests as `Human Task Candidates` in the scout report for the main execution agent to merge into `research_trajectory/HUMAN_TASKS.md`;
-- the Resource Scout is not a ninth reviewer; keep the eight reviewer files exactly as Plan, Process, Evidence, Venue fit, Manuscript, Figure/table, Reference, and Final gate."""
+- PLAN.md must include `## Resource Scout Brief`;
+- Resource Scout outputs go under `research_trajectory/trials/<trial_id>/artifacts/resource_scout/`;
+- follow `instructions/RESOURCE_SCOUT.md` as the single source of truth for scout criticality, acquisition/substitution, `Subagent update:` line format, report format, and human-task candidates;
+- the Resource Scout is not a ninth reviewer."""
 
 
 def reviewer_scope_analyst_prompt_section() -> str:
     return """
 Reviewer Scope Analyst requirement for every trial:
 - read instructions/REVIEWER_SCOPE_ANALYST.md and instructions/reviewers/REVIEWER_SPAWNING.md;
-- after REPORT.md and before refreshing the eight core reviewers, `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks`;
+- after REPORT.md and before refreshing the eight core reviewers, run Reviewer Scope Analyst work;
 - write `research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`;
-- if the decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, then run the specialized review before the eight core reviewers and write it under the current trial `reviews/` directory;
-- prefer a real Reviewer Scope Analyst subagent when the runtime supports it; if subagent orchestration is unavailable, stalls, or fails, complete the same scope analysis inline as a clearly labeled `Reviewer Scope Analyst fallback`, write the decision file, disclose the fallback in REPORT.md, and continue;
-- emit visible status lines while handling reviewer-scope work: `Subagent update: Reviewer Scope Analyst | status: starting | task: <short task> | output: none` before starting, `Subagent update: Reviewer Scope Analyst | status: waiting | task: <short task> | output: none` before waiting on a subagent, `Subagent update: Reviewer Scope Analyst | status: completed | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` after completion, or `Subagent update: Reviewer Scope Analyst | status: fallback | task: <short task> | output: research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` after inline fallback;
-- when `Spawn needed: yes`, also emit `Subagent update: Specialized reviewer | status: starting | task: <short task> | output: none`, `waiting` if waiting on a spawned reviewer, and `completed` or `fallback` with the specialized review path when finished;
-- do not set the gate to `blocked` or `needs_human` solely because Reviewer Scope Analyst orchestration failed; these are whole-loop hard stops;
-- record non-blocking human reviewer-coverage questions as `Human Task Candidates` in the decision artifact for the main execution agent to merge into `research_trajectory/HUMAN_TASKS.md`;
+- follow `instructions/REVIEWER_SCOPE_ANALYST.md` as the single source of truth for spawning, fallback, `Subagent update:` line format, and human-task candidates;
 - the Reviewer Scope Analyst and any specialized reviewer are not core reviewers and must not add a ninth Autoresearch Goal Gate line."""
 
 
@@ -11104,6 +11479,16 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         stop_autoresearch_loop("gate_requires_human_input", gate)
         append_research_log("Autoresearch loop paused because the gate requires human input.")
         return
+    stall = recent_non_empirical_stall()
+    if stall.get("stalled"):
+        cp = stall.get("critical_path") if isinstance(stall.get("critical_path"), dict) else {}
+        bottleneck = str(cp.get("current_bottleneck") or "Critical Path bottleneck not recorded")
+        stop_autoresearch_loop("stalled_without_empirical_progress", gate)
+        append_research_log(
+            "Autoresearch loop paused because the last three closed trials reported no empirical progress "
+            f"while the Critical Path remains incomplete: {bottleneck}."
+        )
+        return
     cleanup = archive_interrupted_trial_tail("loop_continue_from_closed_boundary")
     archived = cleanup.get("archived") or []
     if archived:
@@ -11119,8 +11504,16 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
     checkpoint_iteration = current_review_checkpoint_iteration(settings)
     if iteration >= checkpoint_iteration:
         stop_autoresearch_loop("review_checkpoint_reached", gate)
+        cp = critical_path_state()
+        blocked_items = cp.get("blocked_on_human") if isinstance(cp.get("blocked_on_human"), list) else []
+        blocked_text = ", ".join(
+            f"{item.get('id')}: {item.get('dependency')}" for item in blocked_items if isinstance(item, dict)
+        )
+        bottleneck = str(cp.get("current_bottleneck") or "not recorded") if cp.get("exists") else "legacy project: no Critical Path section"
         append_research_log(
-            f"Autoresearch loop paused for human review at iteration {iteration}; reviewer gates have not all passed."
+            f"Autoresearch loop paused for human review at iteration {iteration}; reviewer gates have not all passed. "
+            f"Critical Path bottleneck: {bottleneck}. "
+            f"Open human-gated CP items: {blocked_text or 'none'}."
         )
         return
     append_research_log(
@@ -11698,7 +12091,7 @@ def start_research_run(
         command = agent_command_for_prompt(resume, settings)
         protected_snapshot = create_chat_protected_snapshot() if mode == "chat" else None
         if mode == "goal":
-            sync_trajectory_state("start_goal_run")
+            record_project_scope_hash_at_launch(sync_trajectory_state("start_goal_run"))
         previous_loop_iteration = latest_active_trial_iteration() if mode == "goal" else int(RESEARCH_SESSION.get("loop_iteration") or 0)
         next_loop_active = bool(RESEARCH_SESSION.get("loop_active")) if loop_active is None else bool(loop_active)
         if loop_iteration_override is not None:
@@ -12346,8 +12739,9 @@ User brief:
 Target venue / audience:
 {target_venue or "Not provided"}
 
-{chat_history_prompt_section(payload.get("conversationHistory"))}
-{response_language_prompt_section()}
+	{chat_history_prompt_section(payload.get("conversationHistory"))}
+	{response_language_prompt_section()}
+	{mandatory_conversion_prompt_section()}
 
 Resource locations to inspect:
 - ongoing work: resources/ongoing_work/
@@ -12434,8 +12828,9 @@ This is after the user-facing framing pass. Do not rerun cold-start framing just
 This is one bounded agent invocation. The CoAutoResearch server owns the outer loop and will inspect the gate after this run to decide whether another trial is needed.
 {instruction_section}
 {fast_mode_prompt_section(fast_mode)}
-{pending_intervention_prompt_section()}
-{human_tasks_prompt_section()}
+	{pending_intervention_prompt_section()}
+	{human_tasks_prompt_section()}
+	{mandatory_conversion_prompt_section()}
 
 Use the repository instructions:
 - read AGENTS.md
@@ -12480,24 +12875,27 @@ Required reviewer gates must all be strict `pass` before the autoresearch goal i
 Do not treat "approved", "completed", "ready", "plausible", "architecture pass", "supported with qualification", or "targeted revision ready" as pass. Those are partial results unless the relevant reviewer standard and Final gate standard are fully satisfied.
 
 Before any final pass in a manuscript-facing project, run a final synthesis step:
-update `manuscript/BLUEPRINT.md`, `research_trajectory/CURRENT_FINDINGS.md`,
-and `manuscript/figures/FIGURE_SPECS.md` as needed. The final blueprint must be
-self-contained and target-venue-ready in final manuscript reading order:
+update `manuscript/PAPER_PLAN.md`, `manuscript/BLUEPRINT.md`,
+`research_trajectory/CURRENT_FINDINGS.md`, and
+`manuscript/figures/FIGURE_SPECS.md` as needed. The final blueprint must be
+non-stub, full-results, self-contained, and target-venue-ready in final
+manuscript reading order:
 architecture overview/table of contents, section/subsection architecture, local
 claim/evidence/result explanations, inline figure/table/algorithm/dataset/
 benchmark/result blocks with captions/content/source/provenance/venue rationale,
 and Markdown preview images for image-source figures, reference/literature
-grounding, appendix/supplement posture, blocking missing evidence, required
+grounding, appendix/supplement posture, required
 qualifications, provenance/audit index, deprecated ideas, and
 submission-readiness summary must all be current. Separate
 claim/evidence maps, Figure Plan, Table Plan, or FIGURE_SPECS entries may
 support audit only; they do not satisfy final readability by themselves. If
-`Blocking Missing Evidence` is non-empty, if an active artifact lacks inline
-placement/caption/content/source/provenance/venue rationale, if reviewer
-instructions are outdated, or if stale language such as "tentative until
-source-level evidence checks are completed" remains, keep `Status: continue`.
+`BLUEPRINT.md` is a stub, if `PAPER_PLAN.md` still has blocking evidence, if an
+active artifact lacks inline placement/caption/content/source/provenance/venue
+rationale, if reviewer instructions are outdated, or if stale language such as
+"tentative until source-level evidence checks are completed" remains, keep
+`Status: continue`.
 
-Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, do not silently invent a different project, but also do not stop by default. First try useful non-human work: resource intake, state repair, safe framing cleanup, evidence audit, manuscript cleanup, or a complete attempt that preserves uncertainty without unsupported claims. Keep `Status: continue` when any complete research attempt remains. Set `Status: needs_human` and write `Response to human:` only when no complete research attempt can be chosen and no meaningful non-human work remains."""
+Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, do not silently invent a different project. Follow `instructions/EXECUTION_AGENT.md` for Critical Path escalation: continue while critical-path-advancing work or an acquisition/substitution rung remains; use `Status: needs_human` only for a documented human-gated Critical Path bottleneck with `Response to human:`."""
 
 
 def compact_chat_history_items(items: Any, limit: int = CHAT_HISTORY_MAX_MESSAGES) -> list[dict[str, Any]]:
@@ -12864,8 +13262,9 @@ User instruction for the resumed trajectory:
 {user_instruction.strip() or "Continue from the selected trial boundary."}
 
 {best_effort_note}
-{pending_intervention_prompt_section()}
-{human_tasks_prompt_section()}
+	{pending_intervention_prompt_section()}
+	{human_tasks_prompt_section()}
+	{mandatory_conversion_prompt_section()}
 Read:
 - AGENTS.md
 - instructions/EXECUTION_AGENT.md
@@ -13127,6 +13526,7 @@ User restart instruction:
 {reason.strip() or "Restart autoresearch from a clean active trajectory."}
 {pending_intervention_prompt_section()}
 {human_tasks_prompt_section()}
+{mandatory_conversion_prompt_section()}
 
 Semantics:
 - Treat archived trials, prior runtime state, prior working manuscript revisions, and prior current findings as superseded context.
@@ -14334,6 +14734,8 @@ def build_status_payload() -> dict[str, Any]:
         "gate_summary": gate.get("summary") or "",
         "gate_response_to_human": gate.get("response_to_human") or "",
         "human_tasks": session.get("human_tasks") if isinstance(session.get("human_tasks"), dict) else read_human_tasks(),
+        "conversion_pending": session.get("conversion_pending") if isinstance(session.get("conversion_pending"), dict) else conversion_pending_status(),
+        "scope_drift": session.get("scope_drift") if isinstance(session.get("scope_drift"), dict) else scope_drift_warning(),
         "stop_reason": stop_reason,
         "started_at": session.get("started_at") or "",
         "ended_at": session.get("ended_at") or "",

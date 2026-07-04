@@ -68,7 +68,7 @@ Use this contract whenever deciding where to read, write, move, or summarize inf
 | `research_trajectory/trials/` | Audit trail of planned research attempts | before continuing, reviewing, or synthesizing recent work | for every trial | global-only summaries without a concrete research attempt |
 | `research_trajectory/notes/` | Sparse, topic-based knowledge notes | when looking for reusable resource, method, process, or human-preference lessons | when a trial or review creates reusable knowledge that does not belong in a canonical state file; update `index.md` whenever adding or retiring a topic note | routine trial summaries, execution logs, or duplicates of `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, reports, or resource manifests |
 | `research_trajectory/human_interventions/` | Formal human control inputs | before major steps and when resolving contradictions | only when a user message changes direction, constraints, methods, claims, resources, venue, or priority | progress questions, ordinary pauses, log requests |
-| `manuscript/` | Manuscript blueprint and deliverable-facing materials | when story, claims, figures, tables, or venue fit matter | when manuscript-facing structure/evidence/figures/tables/reviews change | exploratory raw outputs not promoted as candidate deliverables |
+| `manuscript/` | Paper plan, manuscript blueprint, and deliverable-facing materials | when story, claims, figures, tables, or venue fit matter | when manuscript-facing structure/evidence/figures/tables/reviews change | exploratory raw outputs not promoted as candidate deliverables; trial logs; control/status/dependency/blocker registers; citation queues |
 | `archive/` | Deprecated or misleading materials retained for history | rarely, when checking old context | only after marking what superseded the material | active current files |
 
 General rule: raw material starts in `resources/` or `workspace/`; planned work is recorded in `trials/`; current control state is in `STATE.md`; current knowledge state is in `CURRENT_FINDINGS.md`; manuscript-facing synthesis is in `manuscript/`.
@@ -106,6 +106,48 @@ It contains:
 - open questions.
 
 Do not duplicate full method implementation in `CURRENT_FINDINGS.md`. Concrete method, model, framework, system, prototype, and implementation artifacts live in `workspace/`; their current status, rationale, constraints, and next action live in `STATE.md`.
+
+---
+
+## Critical Path Accounting
+
+`research_trajectory/STATE.md` must maintain a `## Critical Path` section.
+Create it during cold start or conversion and update it every trial.
+
+Every dependency needed for real deliverable content is a critical-path item:
+data, methods, evaluation, models, benchmarks, figures, tables, references,
+appendix material, and final `PAPER_PLAN.md` / `BLUEPRINT.md` assembly. A
+bookkeeping task, audit register, sync pass, reviewer refresh, or template
+repair is never a critical-path item unless it directly unlocks real evidence.
+
+Use this table shape:
+
+```markdown
+| ID | Dependency | Status | Evidence / artifact | Owner |
+|---|---|---|---|---|
+| CP1 | <dependency> | open | <path or decision record> | <agent / human / resource scout / reviewer> |
+```
+
+Allowed statuses are `open`, `in_progress`, `done`, `blocked_on_human`, and
+`downgraded`.
+
+Each trial must choose one `Critical path target: CP<n>` in `PLAN.md` and record
+whether the trial performs empirical work. Each `REPORT.md` must record whether
+the critical path advanced and whether empirical progress occurred. Empirical
+progress means real data, model, method, evaluation, result, figure, table,
+reference, appendix, acquisition, substitution, conversion, or blueprint
+promotion work that changes the evidence base. Scaffold, bookkeeping, review
+refreshes, status synchronization, or control-file cleanup alone are not
+empirical progress.
+
+While any critical-path item is `open`, `in_progress`, or `blocked_on_human`, at
+most two consecutive closed trials may report `Empirical progress: no`. The next
+trial must advance the current bottleneck or set `Status: needs_human` /
+`Status: blocked` with a concrete `Response to human:`.
+
+Every trial must leave `manuscript/PAPER_PLAN.md` and `manuscript/BLUEPRINT.md`
+as complete as current evidence allows: obligations and blockers in
+`PAPER_PLAN.md`, real source-backed content only in `BLUEPRINT.md`.
 
 ---
 
@@ -158,11 +200,12 @@ submission-readiness for that venue; otherwise it must be complete for the
 current `PROJECT.md` deliverable, audience, evidence standard, and expected
 output.
 
-A trial may still end incomplete, but only after recording the first blocking
-condition that prevents a complete attempt. Scaffold-only, harness-only,
-schema-only, audit-only, or placeholder-only work is valid only as part of that
-complete attempt or as proof of the first blocker; it is not a standalone trial
-success condition.
+A trial may still end `incomplete-blocked`, but only after executing the
+acquisition/substitution ladder for its blocker in the same trial or the
+immediately following trial. Recording a blocker and then doing side work is
+invalid. Scaffold-only, harness-only, schema-only, audit-only, sync-only, or
+placeholder-only work is valid only when it directly advances the declared
+critical-path target or proves the current bottleneck's terminal verdict.
 
 A trial is not required for trivial edits, ordinary clarification, progress reporting, or temporary pauses.
 
@@ -178,17 +221,19 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 4. Identify the complete research objective required to make the current
    deliverable submission-ready for the target venue if provided, or
    deliverable-ready under `PROJECT.md` if no target venue is provided.
-5. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
-6. Write `PLAN.md` before execution, including the required `Resource Scout Brief`.
-7. Create `reviews/` and run the Plan reviewer into `reviews/PLAN_REVIEW.md`; revise `PLAN.md` if the review requires it.
-8. If the plan says `Scout: required`, after `PLAN_REVIEW.md` and before main execution, run Resource Scout work: use a real Resource Scout subagent when available, otherwise use the inline Resource Scout fallback to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources. Save its report to `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and file small public artifacts under `resources/`.
-9. If the Resource Scout changes assumptions, required resources, risks, or success criteria, revise `PLAN.md` and rerun the Plan reviewer before execution. If the plan says `Scout: skipped`, the skip reason must be concrete.
-10. Execute mainly in `workspace/` or another clearly justified location.
-11. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
-12. Write `REPORT.md` after execution.
-13. Run Reviewer Scope Analyst work: use a real subagent when available, otherwise use the inline Reviewer Scope Analyst fallback, to decide whether the eight core reviewers cover the current trial's review risks. Write its decision to `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`.
-14. If the Reviewer Scope Analyst decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, run the specialized review, and write its output under the current trial `reviews/` directory before core reviewer refresh.
-15. Run or refresh all eight core reviewers for this trial and write their canonical files:
+5. Identify the current Critical Path bottleneck and select the trial's
+   `Critical path target: CP<n>`.
+6. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
+7. Write `PLAN.md` before execution, including the required `Resource Scout Brief`.
+8. Create `reviews/` and run the Plan reviewer into `reviews/PLAN_REVIEW.md`; revise `PLAN.md` if the review requires it.
+9. If the plan says `Scout: required`, after `PLAN_REVIEW.md` and before main execution, run Resource Scout work: use a real Resource Scout subagent when available, otherwise use the inline Resource Scout fallback to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources. Save its report to `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and file small public artifacts under `resources/`.
+10. If the Resource Scout changes assumptions, required resources, risks, or success criteria, revise `PLAN.md` and rerun the Plan reviewer before execution. If the plan says `Scout: skipped`, the skip reason must be concrete.
+11. Execute mainly in `workspace/` or another clearly justified location.
+12. Save or link raw outputs through the trial `artifacts/` and `REPORT.md`.
+13. Write `REPORT.md` after execution.
+14. Run Reviewer Scope Analyst work: use a real subagent when available, otherwise use the inline Reviewer Scope Analyst fallback, to decide whether the eight core reviewers cover the current trial's review risks. Write its decision to `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`.
+15. If the Reviewer Scope Analyst decision says `Spawn needed: yes`, reuse or create the specialized reviewer instruction under `instructions/reviewers/`, run the specialized review, and write its output under the current trial `reviews/` directory before core reviewer refresh.
+16. Run or refresh all eight core reviewers for this trial and write their canonical files:
     - `reviews/PLAN_REVIEW.md`
     - `reviews/PROCESS_REVIEW.md`
     - `reviews/EVIDENCE_REVIEW.md`
@@ -197,16 +242,16 @@ Do not write trial plans in the root directory. Do not write trial reports only 
     - `reviews/FIGURE_TABLE_REVIEW.md`
     - `reviews/REFERENCE_REVIEW.md`
     - `reviews/FINAL_GATE_REVIEW.md`
-16. A reviewer with little to assess still writes its file with a scoped judgment and explicit unassessed areas.
-17. Update only global files that genuinely changed:
+17. A reviewer with little to assess still writes its file with a scoped judgment and explicit unassessed areas.
+18. Update only global files that genuinely changed:
     - `research_trajectory/STATE.md`
     - `research_trajectory/CURRENT_FINDINGS.md`
     - `research_trajectory/notes/index.md` and topic notes when knowledge capture changes
     - `manuscript/BLUEPRINT.md`
     - `manuscript/figures/FIGURE_SPECS.md`
-18. Update the `Autoresearch Goal Gate` in `STATE.md` so each reviewer line references the current trial's reviewer file path.
-19. Commit changes to git.
-20. Push if a remote exists and progress is meaningful.
+19. Update the `Autoresearch Goal Gate` in `STATE.md` so each reviewer line references the current trial's reviewer file path and the current critical-path line.
+20. Commit changes to git.
+21. Push if a remote exists and progress is meaningful.
 
 ---
 
@@ -218,6 +263,8 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 - rationale;
 - required reading/resources;
 - complete research attempt:
+  - critical path target: `CP<n>`;
+  - empirical work: `yes | no - <what real data/model/result/resource/blueprint work this trial performs>`;
   - venue or deliverable requirements;
   - resources/data;
   - method/model/system/analysis;
@@ -232,6 +279,7 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 ```markdown
 ## Resource Scout Brief
 Scout: required | skipped
+Criticality: research-critical | contextual
 Decision reason:
 Skip reason:
 Search scope:
@@ -270,6 +318,8 @@ and include provenance:
 - deviations from plan;
 - commands, scripts, notebooks, or procedures used;
 - outputs and artifact paths;
+- critical path outcome: `advanced | no_change | blocked - <evidence path or decision record>`;
+- empirical progress: `yes | no`;
 - completion status: `submission-ready`, `deliverable-ready`, or
   `incomplete-blocked`;
 - first blocker if completion status is `incomplete-blocked`;
@@ -365,6 +415,7 @@ Use this section to decide whether the autoresearch loop should continue or stop
 - the next action when any gate is not `pass`;
 - `Response to human: <one concise user-facing question or decision request>`
   when `Status: blocked` or `Status: needs_human`.
+- `Critical path: CP<n> - <bottleneck>; empirical progress this trial: yes|no`.
 
 The `Status:` value must be exactly one bare token: `pass`, `continue`,
 `blocked`, or `needs_human`. Do not write decorated status text such as
@@ -385,6 +436,7 @@ For manuscript-facing projects, a pass also requires a final synthesis step
 before the gate is marked pass. That step must update:
 
 - `manuscript/BLUEPRINT.md`
+- `manuscript/PAPER_PLAN.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
 - `manuscript/figures/FIGURE_SPECS.md`, when figures or tables are active
 - any manuscript review notes needed to make current status clear
@@ -427,7 +479,19 @@ pass-conflicting language remain.
 `Next action` is the system's next step. `Response to human` is the user-facing
 question or decision request the UI should show.
 
-If a reviewer cannot yet pass because prerequisites are missing, mark that reviewer as `continue` and make the missing prerequisite the next action or a near-term trial. `Status: blocked` and `Status: needs_human` are both hard stops. Use either one only when the whole autoresearch loop has no meaningful non-human work remaining. Use `blocked` for non-human blockers that cannot be repaired or routed around by another useful trial. Use `needs_human` only when a human decision, clarification, credential, private resource, or access change is genuinely on the critical path. In both hard-stop cases, write the exact user-facing blocker or question in `Response to human:`.
+If a reviewer cannot yet pass because prerequisites are missing, mark that
+reviewer as `continue` and make the missing prerequisite the next critical-path
+action or a near-term trial. `Status: blocked` and `Status: needs_human` are both
+hard stops. Use `blocked` for a non-human critical-path blocker that cannot be
+repaired or routed around by the acquisition/substitution ladder, conversion, or
+another critical-path-advancing trial. Use `needs_human` when the current
+critical-path bottleneck genuinely needs a human decision, scope confirmation,
+credential, private resource, or environment/access change and the
+acquisition/substitution ladder has a documented terminal verdict. Remaining
+bookkeeping, audits, manuscript cleanup, state repair, or reviewer refresh work
+never justifies `continue` once the current bottleneck is human-gated. In both
+hard-stop cases, write the exact user-facing blocker or question in
+`Response to human:`.
 
 External file access failures are not automatically human blockers. When a
 trial needs a public file body such as a ZIP, CSV, PDF, dataset, or code
@@ -481,13 +545,10 @@ Rules:
 - absorb `Human task candidates` from Resource Scout reports, Reviewer Scope
   Analyst decisions, and reviewer files instead of letting those agents write
   the canonical queue directly;
-- only hard stop when no meaningful non-human work remains in the whole
-  autoresearch loop: use `Status: blocked` only when a non-human blocker cannot
-  be repaired or routed around, and use `Status: needs_human` only when the
-  human decision, clarification, credential, private resource, or network/access
-  change is on the critical path and no available resources, public
-  alternatives, metadata-only work, follow-up retrieval trial, manuscript
-  cleanup, evidence audit, or state repair can still move the project forward.
+- if the current critical-path bottleneck is genuinely human-gated and the
+  acquisition/substitution ladder has a documented terminal verdict, use the
+  Autoresearch Goal Gate `Status: needs_human` with a concrete
+  `Response to human:`. Queue useful-but-nonblocking requests here instead.
 
 ### Subagent Progress Visibility
 
@@ -629,7 +690,14 @@ Scout-discovered resources are recorded as `autoresearch_discovered`, not as
 current project truth, until the main execution agent promotes them through a
 trial report or canonical state/findings/manuscript update.
 
-The agent may search for or download relevant resources when useful for the research objective, including:
+For research-critical resources, acquisition is a mandatory part of a complete
+research attempt. A resource is research-critical when a critical-path item
+depends on it. A trial ending `incomplete-blocked` because of a resource is
+valid only when it links an `ACQUISITION_DECISION.md` record showing the current
+ladder position or terminal verdict.
+
+The agent must search for, download, activate, or substitute research-critical
+resources when needed for the research objective, including:
 
 - datasets;
 - model checkpoints;
@@ -639,7 +707,10 @@ The agent may search for or download relevant resources when useful for the rese
 - documentation;
 - target-venue seed papers.
 
-Before downloading large or restricted resources, check license, access constraints, disk usage, and whether the resource is necessary.
+Before downloading large or restricted resources, check license, access
+constraints, disk usage, and whether the resource is necessary. For public
+research-critical resources, link-only handling is insufficient unless the
+substitution ladder reaches a documented terminal verdict.
 
 Record provenance in the relevant trial `REPORT.md`:
 

@@ -45,3 +45,26 @@ co-auto-research upgrade-project --all --projects-dir co-autoresearch-projects
 The command writes a backup under `archive/template_migrations/`, installs the
 latest core reviewer and protocol files, and leaves research content plus custom
 extra reviewers or other instruction files alone.
+
+## Adopt The Critical-Path Deliverable Model
+
+Recent templates add Critical Path accounting, mandatory ongoing-work
+conversion, research-critical acquisition decisions, and the two-artifact
+manuscript model. Existing projects remain readable by the server, but older
+projects should adopt the new fields before long autoresearch runs:
+
+- Re-sync core instructions with `co-auto-research upgrade-project`.
+- Add a `## Critical Path` section to `research_trajectory/STATE.md` with the
+  current bottleneck and any open data, method, evaluation, figure/table, or
+  deliverable dependencies.
+- Add `manuscript/PAPER_PLAN.md` for planned evidence obligations and blockers.
+  Keep `manuscript/BLUEPRINT.md` for real, source-backed manuscript content only.
+- If `resources/ongoing_work/` contains code, data, checkpoints, metrics, or
+  manuscript sources, run a conversion trial before normal trials continue.
+- For research-critical resources, record acquisition/substitution decisions
+  under the trial's `artifacts/resource_scout/` directory.
+
+The UI now gates the Paper-Writing Pack. If the blueprint is still a stub,
+contains planned slots, lacks real result sources, or has blocking missing
+evidence, export a Research Status Pack instead. The status pack is compatible
+with legacy projects and is intentionally labeled as incomplete.

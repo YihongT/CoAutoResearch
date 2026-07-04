@@ -74,6 +74,18 @@ evidence/state work, include a `Human Task Candidates` entry in the scout report
 for the main execution agent to merge. Do not edit
 `research_trajectory/HUMAN_TASKS.md` directly.
 
+## Visible Progress Line
+
+The main execution agent must emit this exact visible status format for scout
+work:
+
+```text
+Subagent update: Resource Scout | status: <starting | waiting | completed | fallback> | task: <short task> | output: <path or none>
+```
+
+Use `output: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`
+when the report path is known.
+
 ## Required Inputs
 
 The scout reads only what is needed for the overall research goal and current
@@ -102,6 +114,7 @@ Each trial plan must include:
 ```markdown
 ## Resource Scout Brief
 Scout: required | skipped
+Criticality: research-critical | contextual
 Decision reason:
 Skip reason:
 Search scope:
@@ -169,9 +182,12 @@ Default handling:
   summary only.
 - News, reports, and articles: save URL, title, publisher, date, short summary,
   and only a minimal compliant excerpt when needed.
-- Large datasets, checkpoints, and repositories: save link, license, size,
-  access instructions, and summary by default. Download only when the current
-  trial explicitly needs a local copy and resource constraints permit it.
+- Contextual large datasets, checkpoints, and repositories: save link, license,
+  size, access instructions, and summary by default. Download only when the
+  current trial explicitly needs a local copy and resource constraints permit it.
+- Research-critical resources: follow the Research-Critical Acquisition Mandate
+  below. Link-only is forbidden unless the ladder reaches a documented terminal
+  verdict.
 
 Never write secrets into tracked files. Do not bypass access controls. Respect
 license, terms, robots, and privacy constraints.
@@ -187,7 +203,70 @@ license, terms, robots, and privacy constraints.
   when they are raw research inputs.
 - `resources/other/`: mixed or unclear resources.
 
-Large or restricted resources may be link-only entries in the manifest.
+Contextual large or restricted resources may be link-only entries in the
+manifest. Research-critical resources need an acquisition decision record.
+
+## Research-Critical Acquisition Mandate
+
+`Criticality: research-critical` means a `STATE.md` Critical Path item depends
+on the resource. A research-critical public dataset, code release, benchmark,
+model, or source file must be acquired, activated from existing user-provided
+materials, substituted within the research objective, or end in a documented
+terminal verdict. Link-only is not a terminal verdict for this class.
+
+Run this ordered substitution ladder and record every rung's attempt and
+outcome:
+
+1. Check `resources/ongoing_work/` and `workspace/` for user data, code,
+   checkpoints, prior results, derived data, or manuscript sources already in
+   hand.
+2. Check local caches and prior downloads in the project tree.
+3. Try the official public download. Within this rung, follow the full Download
+   Integrity And Fallback Ladder below.
+4. Try an alternate year or version from the same official source when it still
+   answers the research objective.
+5. Try an alternate public dataset that answers the research question, and state
+   any fidelity loss.
+6. If the only remaining path changes the objective, core claims, population,
+   period, dataset vintage beyond an in-objective substitution, venue, or
+   deliverable, write a scope-downgrade proposal using
+   `instructions/PROJECT_FRAMING.md`.
+7. Use `Status: needs_human` with a concrete `Response to human:` naming the
+   exact file, URL, credential, permission, or decision required, plus what was
+   tried.
+
+Rungs 1-5 must complete within two trials of a resource becoming
+research-critical. After that, a terminal verdict is mandatory:
+`acquired`, `substituted:<what>`, `scope_downgrade_proposed`, or
+`human_required`.
+
+For each research-critical resource, write:
+
+`research_trajectory/trials/<trial_id>/artifacts/resource_scout/ACQUISITION_DECISION.md`
+
+Use this structure:
+
+```markdown
+# Acquisition Decision
+
+Resource:
+Critical path item:
+Criticality: research-critical
+Decision date:
+
+## Ladder Attempts
+| Rung | Attempt | Evidence / artifact | Outcome |
+|---|---|---|---|
+| 1 | <ongoing_work/workspace check> | <path or none> | <outcome> |
+
+## Terminal Verdict
+Verdict: acquired | substituted:<what> | scope_downgrade_proposed | human_required
+Evidence / artifact:
+Next action:
+Response to human:
+```
+
+Mirror terminal verdicts in `research_trajectory/STATE.md`.
 
 ## Download Integrity And Fallback Ladder
 
@@ -226,19 +305,20 @@ Quarantine bad downloads under the trial artifacts with a clear suffix such as
 `.bad-download.html` or `.bad-download.txt`; never leave a verified-false HTML
 error page at the final `.zip`, `.csv`, `.pdf`, or dataset path. Do not set the
 gate to `blocked` or `needs_human` for a public download until this ladder is
-exhausted and recorded. If useful work can continue with metadata, alternate
-sources, or a follow-up retrieval trial, set `Status: continue`; use
-`needs_human` only when the remaining blocker is genuinely user-provided access,
-credentials, a private file, or a network environment the agent cannot change.
-If any useful non-human work can continue, include the request under
-`Human Task Candidates` in the scout report and keep the gate
-`Status: continue`.
+exhausted and recorded. For contextual resources, if useful work can continue
+with metadata, alternate sources, or a follow-up retrieval trial, set
+`Status: continue`. For research-critical resources, proceed to the next rung of
+the Research-Critical Acquisition Mandate and record the verdict.
 
 ## Required Outputs
 
 Write a scout report at:
 
 `research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`
+
+For every research-critical resource, also write:
+
+`research_trajectory/trials/<trial_id>/artifacts/resource_scout/ACQUISITION_DECISION.md`
 
 Update:
 
@@ -260,6 +340,7 @@ Use this structure:
 - Trial:
 - Objective:
 - Scout brief:
+- Criticality:
 - Search date:
 
 ## Queries And Sources
@@ -292,6 +373,10 @@ Use this structure:
 ## Download Integrity / Access Failures
 | Resource | Attempts | Verification result | Fallbacks tried | Final status | Next step |
 |---|---|---|---|---|---|
+
+## Acquisition Decisions
+| Resource | Critical path item | Ladder rung reached | Terminal verdict | Decision artifact |
+|---|---|---|---|---|
 
 ## Human Task Candidates
 - <none, or Priority; Blocks; Question/request; Why needed; Continue meanwhile; Source>
