@@ -61,10 +61,71 @@ const baseScenarios = [
     action: "await openSettingsDialog(); document.querySelector('[data-settings-tab=\"codex\"]')?.click();",
   },
   {
+    name: "settings-codex-api-key",
+    path: "/?view=chat",
+    kind: "dialog",
+    action: `
+      await openSettingsDialog('codex');
+      document.querySelector('[data-settings-tab="codex"]')?.click();
+      const form = document.querySelector('#settings-form');
+      form.elements.settingsBackend.value = 'codex';
+      form.elements.settingsBackend.dispatchEvent(new Event('change', { bubbles: true }));
+      form.elements.settingsCodexProvider.value = 'openai_api_key';
+      form.elements.settingsCodexProvider.dispatchEvent(new Event('change', { bubbles: true }));
+      form.elements.settingsCodexApiKey.value = 'sk-proj-audit-unsaved-key';
+      form.elements.settingsCodexApiKey.dispatchEvent(new Event('input', { bubbles: true }));
+    `,
+  },
+  {
+    name: "settings-claude-api-key",
+    path: "/?view=chat",
+    kind: "dialog",
+    action: `
+      await openSettingsDialog('codex');
+      document.querySelector('[data-settings-tab="codex"]')?.click();
+      const form = document.querySelector('#settings-form');
+      form.elements.settingsBackend.value = 'claude';
+      form.elements.settingsBackend.dispatchEvent(new Event('change', { bubbles: true }));
+      form.elements.settingsClaudeProvider.value = 'anthropic_api_key';
+      form.elements.settingsClaudeProvider.dispatchEvent(new Event('change', { bubbles: true }));
+      form.elements.settingsClaudeApiKey.value = 'sk-ant-audit-unsaved-key';
+      form.elements.settingsClaudeApiKey.dispatchEvent(new Event('input', { bubbles: true }));
+    `,
+  },
+  {
+    name: "settings-claude-gateway",
+    path: "/?view=chat",
+    kind: "dialog",
+    action: `
+      await openSettingsDialog('codex');
+      document.querySelector('[data-settings-tab="codex"]')?.click();
+      const form = document.querySelector('#settings-form');
+      form.elements.settingsBackend.value = 'claude';
+      form.elements.settingsBackend.dispatchEvent(new Event('change', { bubbles: true }));
+      form.elements.settingsClaudeProvider.value = 'zai_glm';
+      form.elements.settingsClaudeProvider.dispatchEvent(new Event('change', { bubbles: true }));
+      form.elements.settingsClaudeCredential.value = 'audit_gateway_credential_that_should_not_expand_the_dialog';
+      form.elements.settingsClaudeCredential.dispatchEvent(new Event('input', { bubbles: true }));
+    `,
+  },
+  {
     name: "launch-dialog",
     path: "/?view=chat",
     kind: "dialog",
     action: "document.querySelector('#launch-dialog')?.showModal();",
+  },
+  {
+    name: "launch-dialog-claude",
+    path: "/?view=chat",
+    kind: "dialog",
+    action: `
+      const backend = document.querySelector('#session-settings-form [name="backend"]');
+      if (backend) {
+        backend.value = 'claude';
+        backend.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      document.querySelector('#launch-dialog')?.showModal();
+    `,
   },
   {
     name: "attachment-menu",
@@ -152,6 +213,34 @@ const baseScenarios = [
       const warning = document.querySelector('#resume-trial-warning');
       if (warning) { warning.hidden = false; warning.textContent = 'This checks the fork confirmation layout with longer explanatory copy.'; }
       document.querySelector('#resume-trial-dialog')?.showModal();
+    `,
+  },
+  {
+    name: "resume-autoresearch-dialog",
+    path: "/?view=trials",
+    kind: "dialog",
+    action: `
+      const longId = '000046_final_pass_dependency_register_after_reference_pruning';
+      appState.trials = [
+        ...(appState.trials || []).filter((trial) => trial.id !== longId),
+        { id: longId, iteration: 46, status: 'complete', is_closed: true, report_path: 'research_trajectory/trials/' + longId + '/REPORT.md' }
+      ];
+      appState.research_session = {
+        ...(appState.research_session || {}),
+        queued_chat_count: 0,
+        expected_trial: {
+          status: 'pending',
+          expected_iteration: 47,
+          pending_intervention_ids: ['human_intervention_dependency_register_reference_pruning_followup'],
+          pending_intervention_paths: ['research_trajectory/human_interventions/000047_dependency_register_reference_pruning_followup.md']
+        },
+        trajectory: {
+          ...((appState.research_session || {}).trajectory || {}),
+          next_trial_number: 47,
+          latest_active_trial: longId
+        }
+      };
+      openResumeAutoresearchDialog();
     `,
   },
   {
@@ -963,7 +1052,8 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
       const mainEl = document.querySelector('.main-stage');
       const mainCs = mainEl ? getComputedStyle(mainEl) : null;
       const threadCs = getComputedStyle(dockedThread);
-      const composerDock = document.querySelector('.brief-editor-shell.is-framing-dock');
+      const composerDock = [...document.querySelectorAll('#brief-editor-shell.is-framing-dock, .brief-editor-shell.is-framing-dock')].find(visible)
+        || document.querySelector('#brief-editor-shell.is-framing-dock');
       const composerEditor = composerDock?.querySelector?.('#cold-file-editor');
       const threadRect = rectFor(dockedThread);
       const dockRect = rectFor(composerDock);
@@ -1075,7 +1165,8 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
         }
         if (${desktop ? "true" : "false"} && viewport.width >= 1100) {
           const mainRect = rectFor(document.querySelector('.main-stage'));
-          const composerDock = document.querySelector('.brief-editor-shell.is-framing-dock');
+          const composerDock = [...document.querySelectorAll('#brief-editor-shell.is-framing-dock, .brief-editor-shell.is-framing-dock')].find(visible)
+            || document.querySelector('#brief-editor-shell.is-framing-dock');
           const composerRect = rectFor(composerDock);
           if (mainRect && panelRect && mainRect.right > panelRect.left + 2) {
             issues.push({ type: 'activity-panel-overlap', message: 'Activity panel should occupy a separate right column instead of covering the main stage', main: mainRect, panel: panelRect });
@@ -1096,6 +1187,22 @@ function browserAuditExpression({ desktop, requireManuscriptCentering, requireAt
       const r = rectFor(dialog);
       if (r.left < -2 || r.right > viewport.width + 2 || r.bottom < 8 || r.top > viewport.height - 8) {
         issues.push({ type: 'dialog-bounds', message: 'open dialog is outside the viewport', id: dialog.id, rect: r, viewport });
+      }
+      if (dialog.scrollWidth > dialog.clientWidth + 2) {
+        issues.push({ type: 'dialog-horizontal-overflow', message: 'open dialog content is wider than the dialog', id: dialog.id, rect: r, scrollWidth: dialog.scrollWidth, clientWidth: dialog.clientWidth });
+      }
+      const dialogOverflowChildren = [...dialog.querySelectorAll('*')]
+        .filter(visible)
+        .map((el) => ({ el, rect: rectFor(el), text: (el.textContent || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 120) }))
+        .filter((item) => item.rect && (item.rect.left < r.left - 2 || item.rect.right > r.right + 2));
+      if (dialogOverflowChildren.length) {
+        issues.push({
+          type: 'dialog-child-overflow',
+          message: 'visible dialog child extends outside the dialog',
+          id: dialog.id,
+          rect: r,
+          children: dialogOverflowChildren.slice(0, 4).map((item) => ({ text: item.text, rect: item.rect, tag: item.el.tagName.toLowerCase(), className: String(item.el.className || '').slice(0, 120) })),
+        });
       }
     }
     const topDialog = openDialogs.at(-1) || null;

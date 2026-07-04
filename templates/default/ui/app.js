@@ -6227,6 +6227,7 @@ function renderAutoresearchDock(html, active = true) {
   syncAutoresearchDockGeometry();
   requestAnimationFrame(() => {
     syncAutoresearchDockGeometry();
+    updateFramingThreadGeometry();
     updateFramingScrollButton();
   });
 }
@@ -6275,6 +6276,8 @@ function updateBriefDockGeometry() {
   shell.style.setProperty("--brief-dock-height", `${height}px`);
   shell.style.setProperty("--brief-dock-bottom", `${bottom}px`);
   const rootStyle = document.documentElement?.style;
+  rootStyle?.setProperty?.("--main-stage-left", `${Math.max(0, rect.left || 0)}px`);
+  rootStyle?.setProperty?.("--main-stage-width", `${Math.max(0, rect.width || window.innerWidth || 0)}px`);
   rootStyle?.setProperty?.("--brief-dock-left", `${left}px`);
   rootStyle?.setProperty?.("--brief-dock-width", `${width}px`);
   rootStyle?.setProperty?.("--brief-dock-height", `${height}px`);
@@ -6287,13 +6290,38 @@ function updateBriefDockGeometry() {
 function updateFramingThreadGeometry(dockHeight = null, dockBottom = null) {
   const thread = $("#cold-start-workspace.has-framing-thread .framing-thread");
   if (!thread || thread.hidden) return;
-  const rect = typeof thread.getBoundingClientRect === "function" ? thread.getBoundingClientRect() : { top: 0 };
+  const readStyle = typeof getComputedStyle === "function" ? getComputedStyle : null;
+  const rootComputed = readStyle ? readStyle(document.documentElement) : null;
+  const cssNumber = (style, property, fallback = 0) => {
+    const value = style?.getPropertyValue?.(property) || style?.[property] || "";
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const main = $(".main-stage");
+  const mainRect = typeof main?.getBoundingClientRect === "function"
+    ? main.getBoundingClientRect()
+    : { left: 0, top: 0, width: window.innerWidth || 0 };
+  const dock = autoresearchDockElement || $("#autoresearch-dock");
+  const dockVisible = Boolean(dock && !dock.hidden && String(dock.innerHTML || "").trim());
+  const dockRect = dockVisible && typeof dock.getBoundingClientRect === "function" ? dock.getBoundingClientRect() : null;
   const viewportHeight = Number(window.innerHeight || 0);
-  const height = Number.isFinite(dockHeight) ? dockHeight : Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--brief-dock-height")) || 132;
-  const bottom = Number.isFinite(dockBottom) ? dockBottom : Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--brief-dock-bottom")) || 22;
+  const height = Number.isFinite(dockHeight) ? dockHeight : cssNumber(rootComputed, "--brief-dock-height", 132);
+  const bottom = Number.isFinite(dockBottom) ? dockBottom : cssNumber(rootComputed, "--brief-dock-bottom", 22);
+  const dockComputed = dockVisible && readStyle ? readStyle(dock) : null;
+  const dockTop = dockVisible
+    ? cssNumber(dockComputed, "top", Number(window.innerWidth || 0) <= 760 ? 12 : 22)
+    : 0;
+  const measuredDockHeight = dockRect ? Math.max(0, dockRect.height || 0) : 0;
+  const top = dockVisible
+    ? Math.min(Math.max(0, viewportHeight - height - bottom - 66), Math.max(0, dockTop + measuredDockHeight + 12))
+    : Math.max(0, mainRect.top || 0);
   const minHeight = Number(window.innerWidth || 0) <= 760 ? 48 : 180;
-  const available = Math.max(minHeight, viewportHeight - Number(rect.top || 0) - height - bottom - 18);
-  document.documentElement?.style?.setProperty?.("--framing-thread-height", `${available}px`);
+  const available = Math.max(minHeight, viewportHeight - top - height - bottom - 18);
+  const rootStyle = document.documentElement?.style;
+  rootStyle?.setProperty?.("--main-stage-left", `${Math.max(0, mainRect.left || 0)}px`);
+  rootStyle?.setProperty?.("--main-stage-width", `${Math.max(0, mainRect.width || window.innerWidth || 0)}px`);
+  rootStyle?.setProperty?.("--framing-thread-top", `${top}px`);
+  rootStyle?.setProperty?.("--framing-thread-height", `${available}px`);
 }
 
 function markFramingThreadScrolling(thread) {
@@ -13902,6 +13930,10 @@ function pendingInterventionSummaryItems() {
   return ids.map((id, index) => ({ id, path: paths[index] || "" }));
 }
 
+function breakableCodeHtml(value) {
+  return `<code class="breakable-code">${escapeHtml(value)}</code>`;
+}
+
 function resumeAutoresearchSummaryHtml() {
   const session = sessionState();
   const trajectory = session.trajectory && typeof session.trajectory === "object" ? session.trajectory : {};
@@ -13918,18 +13950,18 @@ function resumeAutoresearchSummaryHtml() {
   const queuedAt = cleanText(session.queued_chat_latest_at, "");
   const pendingItems = pendingInterventionSummaryItems();
   const pendingHtml = pendingItems.length
-    ? `<ul>${pendingItems.map((item) => `<li><code>${escapeHtml(item.id)}</code>${item.path ? ` · <code>${escapeHtml(item.path)}</code>` : ""}</li>`).join("")}</ul>`
+    ? `<ul>${pendingItems.map((item) => `<li>${breakableCodeHtml(item.id)}${item.path ? ` · ${breakableCodeHtml(item.path)}` : ""}</li>`).join("")}</ul>`
     : "<p>No pending interventions are currently queued.</p>";
   const boundaryParts = [];
-  if (latestReportedLabel) boundaryParts.push(`latest reported ${latestReportedLabel}`);
-  if (latestActive && latestActive !== latestReportedLabel) boundaryParts.push(`active boundary ${latestActive}`);
-  if (!boundaryParts.length && latestLabel) boundaryParts.push(`latest visible trial ${latestLabel}`);
+  if (latestReportedLabel) boundaryParts.push(`latest reported ${breakableCodeHtml(latestReportedLabel)}`);
+  if (latestActive && latestActive !== latestReportedLabel) boundaryParts.push(`active boundary ${breakableCodeHtml(latestActive)}`);
+  if (!boundaryParts.length && latestLabel) boundaryParts.push(`latest visible trial ${breakableCodeHtml(latestLabel)}`);
   return `
     <p>Resume will continue the current autoresearch trajectory. It will not restart, archive, or renumber existing trials.</p>
     <ul>
       <li><strong>Next boundary:</strong> ${nextTrial ? `Trial ${escapeHtml(nextTrial)}` : "computed from current project state"}</li>
-      <li><strong>Current boundary:</strong> ${escapeHtml(boundaryParts.join(" · ") || "current closed trajectory boundary")}</li>
-      ${baseTrial ? `<li><strong>Fork base:</strong> ${escapeHtml(baseTrial)}</li>` : ""}
+      <li><strong>Current boundary:</strong> ${boundaryParts.join(" · ") || "current closed trajectory boundary"}</li>
+      ${baseTrial ? `<li><strong>Fork base:</strong> ${breakableCodeHtml(baseTrial)}</li>` : ""}
       <li><strong>Queued chat:</strong> ${queuedCount ? `${escapeHtml(queuedCount)} message${queuedCount === 1 ? "" : "s"}${queuedAt ? `, latest ${escapeHtml(formatTimestamp(queuedAt))}` : ""}` : "none"}</li>
     </ul>
     <p><strong>Pending interventions for this resume:</strong></p>
