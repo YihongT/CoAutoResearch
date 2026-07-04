@@ -604,10 +604,11 @@ html[data-theme] .sessions-composer-row {
    rule forces `position: static !important` there, and its (0,3,0) specificity
    beats the class-only selector above even if !important is added to it, so a
    plain `!important` bump on the rule above is not enough. Override by ID
-   (specificity (1,0,0)) so this always wins and the ::before hit-region below
-   anchors to the button itself instead of ballooning to fill #sv-chat-form. */
+   (specificity (1,0,0)) so this always wins, and reset the old absolute
+   right/bottom offsets so the button stays centered in the session composer. */
 #sv-chat-send {
   position: relative !important;
+  inset: auto !important;
 }
 .sessions-composer-row :is(.composer-attach-button, .sessions-chat-send)::before {
   content: "";
