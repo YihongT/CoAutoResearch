@@ -476,6 +476,7 @@ body.has-sessions-active section.sessions-view.workspace-view {
   padding: 16px 28px;
   display: grid;
   align-content: start;
+  justify-items: center;
   gap: 14px;
 }
 .sessions-chat-log.is-empty {
@@ -495,15 +496,27 @@ body.has-sessions-active section.sessions-view.workspace-view {
 .sessions-chat-log .framing-message {
   width: min(var(--framing-column-width, 760px), 100%);
   max-width: min(var(--framing-column-width, 760px), 100%);
+  justify-self: center;
 }
 .sessions-chat-log .framing-message.user {
-  justify-self: end;
-  width: fit-content;
-  max-width: min(620px, 78%);
+  display: grid;
+  justify-items: end;
 }
 .sessions-chat-log .framing-message.assistant,
 .sessions-chat-log .framing-message.is-thinking {
   justify-self: center;
+}
+.sessions-chat-log .framing-message.user .transcript-body,
+.sessions-chat-log .framing-message.user .message-attachments {
+  width: fit-content;
+  max-width: min(620px, 78%);
+}
+.sessions-chat-log .framing-message.user .framing-edit-form {
+  width: min(620px, 100%);
+  max-width: min(620px, 100%);
+}
+.sessions-chat-log .framing-message.user .transcript-body {
+  overflow-wrap: anywhere;
 }
 .sessions-chat-log .message-action-row {
   margin-top: 6px;
@@ -938,6 +951,14 @@ html[data-theme] .sessions-chat-form :is(#sv-composer-model, #sv-composer-reason
     width: 100%;
     max-width: 100%;
     justify-self: stretch;
+  }
+  .sessions-chat-log .framing-message.user .transcript-body,
+  .sessions-chat-log .framing-message.user .message-attachments {
+    max-width: min(100%, calc(100vw - 36px));
+  }
+  .sessions-chat-log .framing-message.user .framing-edit-form {
+    width: 100%;
+    max-width: min(100%, calc(100vw - 36px));
   }
   .sessions-chat-form.brief-editor-shell.is-framing-dock {
     width: calc(100% - 24px) !important;

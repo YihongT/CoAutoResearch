@@ -50,7 +50,7 @@ Check:
 - if Resource Scout was skipped, `PLAN.md` contains a valid skip reason for the
   declared objective;
 - `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` exists for the current
-  substantive trial;
+  trial;
 - if the reviewer spawn decision says `Spawn needed: yes`, the named specialized
   reviewer instruction and specialized review output both exist;
 - any specialized review output has no unresolved blocking issue, required
@@ -127,6 +127,10 @@ Before deciding `pass`, write an artifact consistency audit. It must state:
 - active result readability: no active result block is merely `planned`,
   `pending`, `TBD`, or waiting on a future trial instead of stating an actual
   reader-facing result summary and takeaway;
+- planned result slot integrity: any inline `Result`, `Metric`, `RSLT...`,
+  dataset, or benchmark block marked `candidate` must still state an actual
+  result summary and source artifact path; missing or pending results belong in
+  `Blocking Missing Evidence`;
 - reference/literature grounding completeness;
 - Resource Scout status: required and completed, skipped with valid reason, or
   blocking because missing/undocumented/inconsistent;

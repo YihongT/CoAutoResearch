@@ -6982,7 +6982,7 @@ def write_resume_intervention(
             "",
             "- Treat the selected base trial as the active trajectory boundary.",
             "- Later active trials were superseded by this human fork request.",
-            "- Start the next coherent autoresearch iteration from this boundary.",
+            "- Start the next complete research attempt from this boundary.",
             "",
             "## Superseded Trials",
             "",
@@ -10272,7 +10272,7 @@ def final_blueprint_consistency_blockers() -> list[str]:
     if not architecture_matches:
         blockers.append("BLUEPRINT.md must include target-venue entries under `Manuscript Architecture`.")
 
-    artifact_title_re = re.compile(r"^(figure|fig\.?|f\d{3,}|table|tbl\.?|t\d{3,}|algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:)|dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d|\d|block|:))\b", re.IGNORECASE)
+    artifact_title_re = re.compile(r"^(figure|fig\.?|f\d{3,}|table|tbl\.?|t\d{3,}|algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:)|dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d+|\d+|block|:))\b", re.IGNORECASE)
     inline_artifacts: list[tuple[str, str, str]] = []
     for index, match in enumerate(architecture_matches):
         title = match.group(2).strip()
@@ -10304,16 +10304,49 @@ def final_blueprint_consistency_blockers() -> list[str]:
         normalized = str(value or "").strip().lower()
         if not normalized:
             return False
+        if re.fullmatch(r"(planned|pending|tbd|to be filled|not yet available|future trial)\.?", normalized, re.IGNORECASE):
+            return True
         return bool(re.search(
-            r"\b(planned only|pending(?:\s+[\w/-]+){0,4}\s+(?:trial|check|audit|analysis|run)|figure\s+\w*\s*planned|tbd|to be filled|not yet available|future trial)\b",
+            r"\b(planned\s+(?:only|slot|result|work|future)|pending(?:\s+[\w/-]+){0,4}\s+(?:trial|check|audit|analysis|run|result|evidence|data|source|validation)|figure\s+\w*\s*planned|tbd|to be filled|not yet available|future trial)\b",
             normalized,
             re.IGNORECASE,
         ))
 
+    def usable_result_value(value: str) -> bool:
+        normalized = str(value or "").strip()
+        return bool(
+            meaningful_summary_value(normalized)
+            and not re.fullmatch(r"(none|n/a|not applicable)\.?", normalized, re.IGNORECASE)
+            and not planned_placeholder_value(normalized)
+        )
+
+    def missing_result_content(body: str) -> bool:
+        return not (
+            usable_result_value(value_after_label(body, "Metric or result summary"))
+            and usable_result_value(value_after_label(body, "Source artifact path"))
+        )
+
     figure_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(figure|fig\.?|f\d{3,})\b", lower, re.IGNORECASE)]
     table_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(table|tbl\.?|t\d{3,})\b", lower, re.IGNORECASE)]
     algorithm_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:))\b", lower, re.IGNORECASE)]
-    result_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d|\d|block|:))\b", lower, re.IGNORECASE)]
+    result_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d+|\d+|block|:))\b", lower, re.IGNORECASE)]
+
+    for title, body in result_blocks:
+        if re.search(r"Inclusion status:\s*deferred\b", body, re.IGNORECASE):
+            blockers.append(f"Inline dataset/benchmark/result `{title}` is marked `deferred`; missing or deferred results belong in `Blocking Missing Evidence`, not `Manuscript Architecture`.")
+            continue
+        if re.search(r"Inclusion status:\s*candidate\b", body, re.IGNORECASE):
+            if missing_result_content(body):
+                blockers.append(f"Inline dataset/benchmark/result `{title}` is a planned or missing result slot; move it to `Blocking Missing Evidence` unless it states an actual result summary and source artifact path.")
+            for label in (
+                "Metric or result summary",
+                "Reader takeaway",
+                "Source artifact path",
+                "Manuscript claim supported in plain language",
+                "Remaining blocker",
+            ):
+                if planned_placeholder_value(value_after_label(body, label)):
+                    blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; move it to `Blocking Missing Evidence` unless it states actual reader-facing result content.")
 
     for title, body in figure_blocks:
         if not active_block(body):
@@ -10403,9 +10436,12 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Reader takeaway",
             "Source artifact path",
             "Manuscript claim supported in plain language",
+            "Remaining blocker",
         ):
             if planned_placeholder_value(value_after_label(body, label)):
-                blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; active result blocks must state the actual reader-facing result or be marked candidate/deferred.")
+                blockers.append(f"Inline dataset/benchmark/result `{title}` has planned/pending placeholder text in `{label}:`; move it to `Blocking Missing Evidence` unless it states actual reader-facing result content.")
+        if missing_result_content(body):
+            blockers.append(f"Inline dataset/benchmark/result `{title}` must state an actual result summary and source artifact path.")
 
     legacy_figure_plan = markdown_section(text, "Figure Plan")
     legacy_table_plan = markdown_section(text, "Table Plan")
@@ -10570,7 +10606,7 @@ Required reviewer gates:
 - Reference reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/REFERENCE_REVIEW.md`
 - Final gate reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`
 
-Next action: start or continue the next coherent autoresearch iteration.
+Next action: start or continue the next complete research attempt.
 """
     RESEARCH_STATE_PATH.write_text(upsert_markdown_section(existing, "Autoresearch Goal Gate", section), encoding="utf-8")
 
@@ -10878,7 +10914,7 @@ def fast_mode_prompt_section(fast_mode: bool) -> str:
     return """
 
 Fast mode is enabled for this autoresearch loop:
-- prefer the smallest coherent trial that materially advances the current gate;
+- prefer a complete research attempt that materially advances the current gate;
 - keep plans, reports, and progress updates concise and concrete;
 - avoid broad literature sweeps, large refactors, or exhaustive cleanup unless they are the blocking reviewer issue;
 - do not lower reviewer standards, skip required reviewer files, omit provenance, or mark partial work as pass."""
@@ -10913,10 +10949,10 @@ Human task queue:
 
 def resource_scout_prompt_section() -> str:
     return """
-Resource Scout requirement for every substantive trial:
+Resource Scout requirement for every trial:
 - read instructions/RESOURCE_SCOUT.md;
 - PLAN.md must include `## Resource Scout Brief` with `Scout: required | skipped`, `Decision reason:`, `Skip reason:`, `Search scope:`, `Resource types:`, `Disciplines/domains:`, `Known resource clues:`, `Freshness / date sensitivity:`, `Download policy:`, `Expected destinations:`, and `Stop criteria:`;
-- default to `Scout: required`; use `Scout: skipped` only for narrow local-only work, explicitly offline runs, or truly irrelevant external search, and write a concrete skip reason;
+- default to `Scout: required`; use `Scout: skipped` only for purely local work over already verified resources, explicitly offline runs, or truly irrelevant external search, and write a concrete skip reason;
 - after PLAN.md and reviews/PLAN_REVIEW.md, before main execution, `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources` when required;
 - write `research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, update `resources/user_input/RESOURCE_MANIFEST.md`, and save small public artifacts under the appropriate `resources/` folder;
 - record scout-discovered materials as `autoresearch_discovered`; they are raw inputs, not current truth, until promoted by the main execution agent into REPORT.md, STATE.md, CURRENT_FINDINGS.md, PROJECT.md, or manuscript files;
@@ -10932,7 +10968,7 @@ Resource Scout requirement for every substantive trial:
 
 def reviewer_scope_analyst_prompt_section() -> str:
     return """
-Reviewer Scope Analyst requirement for every substantive trial:
+Reviewer Scope Analyst requirement for every trial:
 - read instructions/REVIEWER_SCOPE_ANALYST.md and instructions/reviewers/REVIEWER_SPAWNING.md;
 - after REPORT.md and before refreshing the eight core reviewers, `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks`;
 - write `research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`;
@@ -10958,7 +10994,7 @@ def continue_autoresearch_loop_prompt(
     status = gate.get("raw_status") or gate.get("status") or "missing"
     summary = gate.get("summary") or "No reviewer gate summary yet."
     expected = int(next_iteration or next_active_trial_iteration())
-    return f"""Continue the CoAutoResearch autoresearch process from the current closed trajectory boundary. Complete exactly the next coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
+    return f"""Continue the CoAutoResearch autoresearch process from the current closed trajectory boundary. Complete exactly the next complete research-attempt boundary, update the autoresearch gate, then stop and return control to the UI.
 
 This is one bounded agent invocation. The CoAutoResearch server owns the outer loop and will inspect the gate after this run to decide whether another trial is needed.
 {fast_mode_prompt_section(fast_mode)}
@@ -10992,7 +11028,7 @@ Read:
 
 If the `Autoresearch Goal Gate` section in `research_trajectory/STATE.md` says `Status: pass` and every current-trial reviewer file is a strict pass, including the Final gate reviewer, do not create a new trial. Report that the autoresearch goal has passed all reviewer gates.
 
-Otherwise, run exactly the next coherent autoresearch iteration needed to move the gate toward pass:
+Otherwise, run exactly the next complete research attempt needed to move the gate toward pass:
 1. create or complete Trial {expected} under research_trajectory/trials/;
 2. write PLAN.md before execution, including `## Resource Scout Brief`;
 3. create `reviews/` and write PLAN_REVIEW.md before execution;
@@ -11012,7 +11048,7 @@ Required reviewer gates must all be strict `pass` before the overall autoresearc
 
 
 def intervention_goal_prompt(intervention_path: str, message: str, fast_mode: bool = False) -> str:
-    return f"""Apply the latest formal human intervention, then complete exactly the next coherent CoAutoResearch trial boundary. Update the autoresearch gate, then stop and return control to the UI.
+    return f"""Apply the latest formal human intervention, then complete exactly the next complete CoAutoResearch research-attempt boundary. Update the autoresearch gate, then stop and return control to the UI.
 
 A formal human intervention was recorded from UI chat.
 {fast_mode_prompt_section(fast_mode)}
@@ -11039,7 +11075,7 @@ Before creating or continuing any trial:
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
 
-Then run exactly one coherent autoresearch iteration under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, Resource Scout work via subagent or inline fallback if required, REPORT.md, Reviewer Scope Analyst work via subagent or inline fallback, any required specialized review, all eight reviewer files (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and the updated `Autoresearch Goal Gate` section. If the gate is `Status: blocked` or `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
+Then run exactly one complete research attempt under the updated state. Respect the latest formal human intervention as the highest-priority truth source. Close the current trial boundary by writing PLAN.md with `## Resource Scout Brief`, PLAN_REVIEW.md, Resource Scout work via subagent or inline fallback if required, REPORT.md, Reviewer Scope Analyst work via subagent or inline fallback, any required specialized review, all eight reviewer files (PLAN_REVIEW.md, PROCESS_REVIEW.md, EVIDENCE_REVIEW.md, VENUE_FIT_REVIEW.md, MANUSCRIPT_REVIEW.md, FIGURE_TABLE_REVIEW.md, REFERENCE_REVIEW.md, and FINAL_GATE_REVIEW.md), and the updated `Autoresearch Goal Gate` section. If the gate is `Status: blocked` or `Status: needs_human`, include `Response to human: <one concise user-facing question or decision request>`. Do not start a later trial in this invocation; the UI/server will inspect the gate and continue if needed."""
 
 
 def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
@@ -11182,8 +11218,8 @@ def codex_command_for_prompt(resume: bool, settings: dict[str, Any]) -> list[str
 # ---------------------------------------------------------------------------
 # Auxiliary (multi-)session engine helpers
 #
-# These are called by aux_sessions.AuxSessionManager to build isolated
-# Ordinary chat sessions never touch the evolution loop's global session.
+# These are called by aux_sessions.AuxSessionManager to build project-root chat
+# sessions that keep their conversation state separate from the evolution loop.
 # ---------------------------------------------------------------------------
 
 def evolution_loop_status(context: "ProjectContext") -> dict[str, Any]:
@@ -11205,13 +11241,19 @@ def aux_agent_command(session: Any, resume: bool) -> list[str]:
     backend = normalize_agent_backend(session.backend or settings.get("backend"))
     executable = resolve_agent_executable(backend, agent_process_env(backend))
     session_id = str(getattr(session, "cli_session_id", "") or "")
+    project_root = str(repo_path("."))
+    workspace = str(getattr(session, "workspace_dir", "") or "")
+    is_chat = getattr(session, "kind", "chat") == "chat"
+    codex_root_args = ["--cd", project_root] if is_chat else []
+    codex_workspace_args = ["--add-dir", workspace] if is_chat and workspace else []
+    claude_workspace_args = ["--add-dir", workspace] if is_chat and workspace else []
     if resume and session_id:
         if backend == "claude":
-            return [executable, *settings_to_claude_args(settings, resume=True), "--resume", session_id]
-        return [executable, "exec", "resume", *settings_to_codex_args(settings, resume=True), "--skip-git-repo-check", "--json", session_id, "-"]
+            return [executable, *settings_to_claude_args(settings, resume=True), *claude_workspace_args, "--resume", session_id]
+        return [executable, *codex_root_args, *codex_workspace_args, "exec", "resume", *settings_to_codex_args(settings, resume=True), "--skip-git-repo-check", "--json", session_id, "-"]
     if backend == "claude":
-        return [executable, *settings_to_claude_args(settings, resume=False)]
-    return [executable, "exec", *settings_to_codex_args(settings, resume=False), "--skip-git-repo-check", "--json", "-"]
+        return [executable, *settings_to_claude_args(settings, resume=False), *claude_workspace_args]
+    return [executable, *codex_root_args, *codex_workspace_args, "exec", *settings_to_codex_args(settings, resume=False), "--skip-git-repo-check", "--json", "-"]
 
 
 def _aux_read(relative: str, limit: int = 6000) -> str:
@@ -11258,19 +11300,15 @@ SESSION_INSTRUCTION_DIR = "instructions/sessions"
 
 CHAT_CONTEXT_FALLBACK = """# Chat Session Context
 
-This is an ordinary isolated CoAutoResearch chat session.
-
-## Session boundary
-- Work from this session's private workspace by default:
-  `{workspace}`
-- You may read project files when the user asks questions about the project.
-- Do not create, edit, delete, rename, or move files under
-  `research_trajectory/`, `manuscript/`, or `PROJECT.md`.
-- Do not start, resume, or continue the Evolution Run unless the user explicitly
-  asks to switch to that run's controls.
+This is an ordinary CoAutoResearch project agent session.
 
 ## Project root
 `{project_root}`
+
+## Session workspace
+`{workspace}`
+
+The session workspace stores attachments and temporary session-local files.
 """
 
 AUTORESEARCH_CONTEXT_FALLBACK = """# Evolution Session Context
@@ -11357,23 +11395,34 @@ def build_aux_prompt(session: Any, message: str) -> str:
     extra = str(message or "").strip()
     history = getattr(session, "chat_history", []) if kind == "chat" else []
     history_section = chat_history_prompt_section(history)
-    role_line = {
-        "evolution": "Respond in CoAutoResearch EVOLUTION mode.",
-    }.get(kind, "Respond in CoAutoResearch Chat mode.")
-    return f"""{role_line}
+    if kind == "evolution":
+        return f"""Respond in CoAutoResearch EVOLUTION mode.
 
 Read your session context document first:
 `{context_path}`
-{history_section}
 
 User message:
 {extra or "(No text.)"}
 
 {response_language_prompt_section()}
 Follow the boundary and workspace rules in that context document.
-Answer the user's question directly and substantively. This session's CLI
-context is isolated from the autoresearch loop, so nothing you say here affects
-the evolution process."""
+Answer the user's question directly and substantively."""
+
+    workspace = getattr(session, "workspace_dir", "")
+    return f"""Respond in CoAutoResearch project chat mode.
+
+Project root:
+`{repo_path(".")}`
+
+Session workspace for attachments and temporary files:
+`{workspace}`
+{history_section}
+
+User message:
+{extra or "(No text.)"}
+
+{response_language_prompt_section()}
+Answer the user's question directly and substantively. When the user asks for project edits, make them in the project root."""
 
 
 def aux_manager() -> AuxSessionManager:
@@ -12378,7 +12427,7 @@ Additional user instruction for this launch:
 {instruction}
 
 Apply this launch instruction when choosing and executing the next research objective, but do not let it weaken the reviewer gate, provenance, or final-pass requirements below."""
-    return f"""Start the CoAutoResearch autoresearch process from PROJECT.md. Complete exactly the next coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
+    return f"""Start the CoAutoResearch autoresearch process from PROJECT.md. Complete exactly the next complete research-attempt boundary, update the autoresearch gate, then stop and return control to the UI.
 
 This is after the user-facing framing pass. Do not rerun cold-start framing just to rewrite PROJECT.md.
 
@@ -12406,7 +12455,7 @@ Use the repository instructions:
 {reviewer_scope_analyst_prompt_section()}
 
 Run exactly the next autoresearch iteration and maintain the reviewer gate:
-1. choose one coherent next research objective;
+1. choose the complete research objective required to make the current deliverable submission-ready for the target venue if provided, or deliverable-ready under PROJECT.md if no target venue is provided;
 2. create the next trial under research_trajectory/trials/;
 3. write PLAN.md before execution, including `## Resource Scout Brief`;
 4. create `reviews/` and write PLAN_REVIEW.md before execution;
@@ -12448,7 +12497,7 @@ placement/caption/content/source/provenance/venue rationale, if reviewer
 instructions are outdated, or if stale language such as "tentative until
 source-level evidence checks are completed" remains, keep `Status: continue`.
 
-Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, do not silently invent a different project, but also do not stop by default. First try useful non-human work: resource intake, state repair, safe framing cleanup, evidence audit, manuscript cleanup, or a narrow trial that preserves the ambiguity without making unsupported claims. Keep `Status: continue` when any coherent next objective remains. Set `Status: needs_human` and write `Response to human:` only when no coherent next objective can be chosen and no meaningful non-human work remains."""
+Treat PROJECT.md as the current goal definition. If PROJECT.md is insufficient or contradictory, do not silently invent a different project, but also do not stop by default. First try useful non-human work: resource intake, state repair, safe framing cleanup, evidence audit, manuscript cleanup, or a complete attempt that preserves uncertainty without unsupported claims. Keep `Status: continue` when any complete research attempt remains. Set `Status: needs_human` and write `Response to human:` only when no complete research attempt can be chosen and no meaningful non-human work remains."""
 
 
 def compact_chat_history_items(items: Any, limit: int = CHAT_HISTORY_MAX_MESSAGES) -> list[dict[str, Any]]:
@@ -12755,10 +12804,10 @@ Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instructio
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
 
-For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
+For trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted.
 
 If the user is asking a question, asking for an explanation, or asking what the project is about, answer directly from the current project files and do not modify repository files. Only update files when the user explicitly asks for a change, asks you to continue research work, or gives an instruction that requires edits. Report either the answer or what changed."""
-    return f"""Continue the next coherent CoAutoResearch iteration in this same agent session.
+    return f"""Continue the next complete CoAutoResearch research attempt in this same agent session.
 
 {response_language_prompt_section()}
 
@@ -12769,7 +12818,7 @@ Follow AGENTS.md and research_trajectory/STATE.md. If the latest user instructio
 {resource_scout_prompt_section()}
 {reviewer_scope_analyst_prompt_section()}
 
-For substantive trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the next coherent objective, execute it, update repository files as needed, and report what changed."""
+For trial work, follow instructions/EXECUTION_AGENT.md, instructions/RESOURCE_SCOUT.md, and instructions/REVIEWER_SCOPE_ANALYST.md: PLAN.md must include `## Resource Scout Brief`, required scouts use a real Resource Scout subagent when available or the inline Resource Scout fallback when subagent orchestration is unavailable/stalled/failed, the review phase uses a real Reviewer Scope Analyst subagent when available or the inline Reviewer Scope Analyst fallback when needed, and scout-discovered resources remain `autoresearch_discovered` raw inputs until promoted. Check pending interventions, choose the complete research objective, execute it, update repository files as needed, and report what changed."""
 
 
 def resume_from_trial_prompt(
@@ -12792,7 +12841,7 @@ This selected trial did not have a saved checkpoint. Treat this as a best-effort
 - verify `research_trajectory/HUMAN_TASKS.md` and close or rewrite stale tasks before relying on them;
 - if the restored state is inconsistent, repair the project state before creating substantive new claims.
 """
-    return f"""Resume the CoAutoResearch autoresearch process from the selected trial boundary. Complete exactly the next coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
+    return f"""Resume the CoAutoResearch autoresearch process from the selected trial boundary. Complete exactly the next complete research-attempt boundary, update the autoresearch gate, then stop and return control to the UI.
 
 The user confirmed a human-directed fork of the autoresearch trajectory.
 
@@ -13067,7 +13116,7 @@ def write_restart_manifest(
 
 
 def restart_autoresearch_prompt(restart_id: str, manifest_path: str, reason: str) -> str:
-    return f"""Restart the CoAutoResearch autoresearch process from a clean active trajectory. Complete exactly the first coherent trial boundary, update the autoresearch gate, then stop and return control to the UI.
+    return f"""Restart the CoAutoResearch autoresearch process from a clean active trajectory. Complete exactly the first complete research-attempt boundary, update the autoresearch gate, then stop and return control to the UI.
 
 The user confirmed a full autoresearch restart.
 

@@ -51,7 +51,7 @@ auto_research_project/
 
 ## Trial Records
 
-Every substantive research work package belongs under:
+Every complete research attempt belongs under:
 
 `research_trajectory/trials/<trial_id>/`
 
@@ -62,7 +62,7 @@ Each trial has:
 - `reviews/` with the eight canonical reviewer files
 - `artifacts/`
 
-Substantive trials also include a Resource Scout brief in `PLAN.md`, a Resource
+Trials also include a Resource Scout brief in `PLAN.md`, a Resource
 Scout report when required, and a Reviewer Scope Analyst decision before the
 core reviewers run.
 

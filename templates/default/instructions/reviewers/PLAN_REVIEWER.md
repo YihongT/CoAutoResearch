@@ -25,15 +25,18 @@ Write the canonical current-trial plan review to:
 Check whether the plan:
 
 - fits the project scope and current state;
-- has a coherent objective;
-- is neither too broad nor too narrow;
+- has a complete research objective for the declared deliverable;
+- is scoped to a complete research attempt rather than a partial task;
+- covers the full research attempt needed for submission-readiness when a target
+  venue is provided, or deliverable-readiness under `PROJECT.md` when no target
+  venue is provided;
 - identifies required resources and compute;
 - avoids naive or invalid operationalization;
 - needs method grounding or literature grounding;
 - has interpretable success criteria;
 - records what outputs should update `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/`, or knowledge notes;
 - includes the required `Resource Scout Brief`;
-- uses `Scout: required` by default for substantive trials;
+- uses `Scout: required` by default for trials;
 - gives a concrete `Decision reason:` grounded in the overall research goal and
   current trial objective;
 - gives a concrete `Skip reason:` if `Scout: skipped`;
@@ -61,6 +64,10 @@ or feasibility issue for the declared autoresearch goal, not merely because the
 next trial plan is executable. If the current trial plan is approved but later
 planning, scope, method, resource, or success-criteria work remains, use
 `Gate impact: continue`.
+
+A plan that only creates scaffolding, schemas, harnesses, audits, package
+contracts, or manuscript placeholders without a complete research attempt or a
+documented first blocker requires `Decision: continue`.
 
 ## Output Schema
 

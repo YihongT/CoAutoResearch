@@ -399,13 +399,13 @@ function dashboardHtml(theme, label) {
                   </ul>
                   <ol>
                     <li>Frame the question and record the brief.</li>
-                    <li>Run one coherent trial, then report.</li>
+                    <li>Run one complete research attempt, then report.</li>
                   </ol>
                   <blockquote>A traceable trajectory you can defend and revise — not an artifact you cannot explain.</blockquote>
                   <hr>
                 </div>
                 <div class="framing-progress" aria-label="Agent progress">
-                  <div class="framing-progress-row assistant">Planned the next coherent objective.</div>
+                  <div class="framing-progress-row assistant">Planned the complete research objective.</div>
                   <div class="framing-progress-row tool">Ran Trial 8 and recorded the report.</div>
                   <div class="framing-progress-row assistant">Updated findings and project state.</div>
                 </div>

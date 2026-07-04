@@ -63,7 +63,7 @@ If reviewing, use the relevant file under:
 
 - `instructions/reviewers/`
 
-If planning or running a substantive trial, also read:
+If planning or running a trial, also read:
 
 - `instructions/RESOURCE_SCOUT.md`
 - `instructions/REVIEWER_SCOPE_ANALYST.md`
@@ -78,7 +78,7 @@ If planning or running a substantive trial, also read:
 - `workspace/`: live workbench for concrete research work products: implementations, models, methods, frameworks, system designs, prototypes, pipelines, analyses, simulations, configs, prompts, schemas, working/derived data, generated outputs, logs, checkpoints, weights, and caches.
 - `research_trajectory/STATE.md`: current control state: objective, active plan, method status, blockers, constraints, next step.
 - `research_trajectory/CURRENT_FINDINGS.md`: latest global synthesis of accepted/tentative/rejected findings, results, claims, limitations, and evidence.
-- `research_trajectory/trials/`: audit trail of planned research work packages.
+- `research_trajectory/trials/`: audit trail of complete research attempts.
 - `research_trajectory/notes/index.md`: map of sparse, topic-based knowledge
   notes for reusable resource, method, process, and human-preference lessons.
 - `research_trajectory/notes/NOTES.md`: compatibility entrypoint that points to
@@ -102,7 +102,7 @@ Research proceeds as a loop:
 1. read the required files;
 2. perform adaptive intake triage;
 3. check pending formal human interventions;
-4. choose one coherent next research objective;
+4. choose the complete research objective required for the current deliverable;
 5. create a trial under `research_trajectory/trials/<trial_id>/`;
 6. write `PLAN.md` with a `Resource Scout Brief`;
 7. write `reviews/PLAN_REVIEW.md`;

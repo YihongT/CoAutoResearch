@@ -77,6 +77,12 @@ state the actual metric/result summary and reader takeaway in plain language;
 `planned only`, `pending trial`, `TBD`, or similar future-work placeholders are
 not acceptable active result content.
 
+Numbered planned result slots do not count as a readable Results section. Any
+inline `Result`, `Metric`, `RSLT...`, dataset, or benchmark block in
+`Manuscript Architecture` must state an actual result summary and source
+artifact path, even when marked `candidate`; otherwise move it to `Blocking
+Missing Evidence`.
+
 Each active titled unit must specify the target-venue role, a section brief
 that reads as finished-results paper-map prose, reader question answered, local
 thesis or purpose, local claims in plain language, local evidence/results/

@@ -65,7 +65,7 @@ Use this contract whenever deciding where to read, write, move, or summarize inf
 | `research_trajectory/STATE.md` | Current control state | before every trial and after human intervention | when objective, plan, method status, constraints, blockers, active resources, or next step changes | raw logs, full artifacts, literature dumps |
 | `research_trajectory/CURRENT_FINDINGS.md` | Latest global synthesis of findings/results/claims/evidence | before interpreting results or updating manuscript | when accepted/tentative/rejected findings, active claims, limitations, or evidence map changes | raw outputs, command logs, full notebooks |
 | `research_trajectory/HUMAN_TASKS.md` | Non-blocking human task queue | before choosing each next objective | when a human answer would help but useful autoresearch can continue | hard-stop blockers, formal interventions, or more than three open tasks |
-| `research_trajectory/trials/` | Audit trail of planned work packages | before continuing, reviewing, or synthesizing recent work | for every substantive planned work package | global-only summaries without a concrete work package |
+| `research_trajectory/trials/` | Audit trail of planned research attempts | before continuing, reviewing, or synthesizing recent work | for every trial | global-only summaries without a concrete research attempt |
 | `research_trajectory/notes/` | Sparse, topic-based knowledge notes | when looking for reusable resource, method, process, or human-preference lessons | when a trial or review creates reusable knowledge that does not belong in a canonical state file; update `index.md` whenever adding or retiring a topic note | routine trial summaries, execution logs, or duplicates of `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, reports, or resource manifests |
 | `research_trajectory/human_interventions/` | Formal human control inputs | before major steps and when resolving contradictions | only when a user message changes direction, constraints, methods, claims, resources, venue, or priority | progress questions, ordinary pauses, log requests |
 | `manuscript/` | Manuscript blueprint and deliverable-facing materials | when story, claims, figures, tables, or venue fit matter | when manuscript-facing structure/evidence/figures/tables/reviews change | exploratory raw outputs not promoted as candidate deliverables |
@@ -152,7 +152,17 @@ Each trial contains:
 - `REPORT.md`: written after execution;
 - `artifacts/`: raw outputs, logs, figures, tables, downloaded files, scripts, or other files produced or collected during the trial.
 
-A trial is a planned research work package. It may include multiple actions if they serve one coherent objective, are planned before execution, and remain interpretable afterward.
+A trial is a complete research attempt for the declared deliverable. If a
+target venue is provided, the trial must be target-venue-specific and aim at
+submission-readiness for that venue; otherwise it must be complete for the
+current `PROJECT.md` deliverable, audience, evidence standard, and expected
+output.
+
+A trial may still end incomplete, but only after recording the first blocking
+condition that prevents a complete attempt. Scaffold-only, harness-only,
+schema-only, audit-only, or placeholder-only work is valid only as part of that
+complete attempt or as proof of the first blocker; it is not a standalone trial
+success condition.
 
 A trial is not required for trivial edits, ordinary clarification, progress reporting, or temporary pauses.
 
@@ -165,7 +175,9 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 1. Read the required files.
 2. Check `research_trajectory/human_interventions/pending/`.
 3. If a pending item is a formal human intervention, follow `instructions/INTERVENTION_PROTOCOL.md` before continuing.
-4. Identify the next coherent objective.
+4. Identify the complete research objective required to make the current
+   deliverable submission-ready for the target venue if provided, or
+   deliverable-ready under `PROJECT.md` if no target venue is provided.
 5. Create a new trial folder under `research_trajectory/trials/<new_trial_id>/`.
 6. Write `PLAN.md` before execution, including the required `Resource Scout Brief`.
 7. Create `reviews/` and run the Plan reviewer into `reviews/PLAN_REVIEW.md`; revise `PLAN.md` if the review requires it.
@@ -205,6 +217,16 @@ Do not write trial plans in the root directory. Do not write trial reports only 
 - objective;
 - rationale;
 - required reading/resources;
+- complete research attempt:
+  - venue or deliverable requirements;
+  - resources/data;
+  - method/model/system/analysis;
+  - implementation/execution;
+  - evaluation/results;
+  - figures/tables;
+  - manuscript updates;
+  - reviewer gates;
+  - blocking condition if incomplete;
 - required `Resource Scout Brief`:
 
 ```markdown
@@ -248,6 +270,9 @@ and include provenance:
 - deviations from plan;
 - commands, scripts, notebooks, or procedures used;
 - outputs and artifact paths;
+- completion status: `submission-ready`, `deliverable-ready`, or
+  `incomplete-blocked`;
+- first blocker if completion status is `incomplete-blocked`;
 - Resource Scout outcome:
   - `Scout report: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`;
   - or `Scout skipped: <specific reason from PLAN.md>`;
@@ -301,7 +326,7 @@ scout step is missing, undocumented, or inconsistent with evidence claims.
 
 The Reviewer Scope Analyst is also not a ninth core reviewer. It is a required
 pre-review coverage subagent. Its decision artifact must exist for every
-substantive trial before the eight core reviewers are refreshed. If it says
+trial before the eight core reviewers are refreshed. If it says
 `Spawn needed: yes`, the specialized reviewer instruction and specialized
 review output must exist before the core reviewer decisions can pass.
 

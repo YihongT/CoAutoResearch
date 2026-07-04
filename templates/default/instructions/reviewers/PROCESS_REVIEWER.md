@@ -59,7 +59,11 @@ Do not create `research_trajectory/process_reviews/`.
 Ask:
 
 - Are recent trials producing real research progress?
-- Is the agent stuck on a narrow technical issue?
+- Did the current trial complete a research attempt for the declared deliverable,
+  or document the first blocker that prevented completion?
+- Are recent trials repeatedly producing scaffolds, harnesses, audits, reviewer
+  repairs, or manuscript placeholders without completing a research attempt?
+- Is the agent stuck on a minor technical issue?
 - Are we optimizing an unimportant metric or artifact?
 - Should the next step be execution, method revision, literature grounding, seed paper review, manuscript restructuring, or human intervention?
 - Is the current target venue still plausible?
@@ -73,7 +77,7 @@ Ask:
 - If Resource Scout was skipped, was the skip reason valid for the current
   objective rather than a convenience omission?
 - Does `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` exist for the
-  current substantive trial?
+  current trial?
 - If the reviewer spawn decision says `Spawn needed: yes`, does the named
   specialized reviewer instruction exist under `instructions/reviewers/`, and
   does the named specialized review output exist under current trial `reviews/`?
@@ -96,6 +100,8 @@ Use `Decision: pass` only when the process is not drifting from `PROJECT.md`, no
 unresolved formal intervention or state inconsistency remains, recent trials are
 making substantive progress, and no known local-minimum or hidden-TODO risk
 needs a follow-up trial. "Process review completed" is not the same as pass.
+Repeated incomplete or scaffold-only trials without a documented first blocker
+are process failures and require `Decision: continue`.
 
 ## Output Schema
 

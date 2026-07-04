@@ -402,15 +402,22 @@
     var sessionId = String(session?.cli_session_id || "").trim();
     if (!sessionId) return "";
     var backend = String(session?.backend || session?.settings?.backend || "codex").toLowerCase();
+    var projectRoot = String(session?.project_root || "").trim();
     var workspace = String(session?.workspace || "").trim();
     var quote = typeof ui().shellQuote === "function" ? ui().shellQuote : function (value) {
       var text = String(value || "");
       return /^[A-Za-z0-9_./:=@%+-]+$/.test(text) ? text : "'" + text.replaceAll("'", "'\\''") + "'";
     };
-    var parts = backend === "claude" ? ["claude", "--resume"] : ["codex", "resume", "--include-non-interactive"];
-    if (workspace && backend === "codex") parts.push("-C", quote(workspace));
-    if (workspace && backend === "claude") parts.push("--add-dir", quote(workspace));
-    parts.push(quote(sessionId));
+    if (backend === "claude") {
+      var claudeParts = ["claude"];
+      if (workspace) claudeParts.push("--add-dir", quote(workspace));
+      claudeParts.push("--resume", quote(sessionId));
+      return projectRoot ? "cd " + quote(projectRoot) + " && " + claudeParts.join(" ") : claudeParts.join(" ");
+    }
+    var parts = ["codex"];
+    if (projectRoot) parts.push("--cd", quote(projectRoot));
+    if (workspace) parts.push("--add-dir", quote(workspace));
+    parts.push("resume", "--include-non-interactive", quote(sessionId));
     return parts.join(" ");
   }
 

@@ -13,7 +13,7 @@ written before the eight core reviewers run.
 
 ## When To Use
 
-After every substantive trial `REPORT.md` is written and before refreshing the
+After every trial `REPORT.md` is written and before refreshing the
 eight core reviewers, the main execution agent must:
 
 `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks`

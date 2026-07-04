@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Auxiliary chat-session isolation layer for CoAutoResearch.
+"""Auxiliary project chat-session layer for CoAutoResearch.
 
 This module adds Codex/Box-style multi-session support on top of the existing
 single-session autoresearch engine WITHOUT touching the evolution loop.
 
 Two session kinds are supported:
 
-- ``chat``      : ordinary isolated project chat with its own workspace. It may
-                  discuss ideas or monitor progress depending on the user's
-                  prompt, but it is not a separate instruction mode.
+- ``chat``      : ordinary project agent chat. It runs from the project root so
+                  users can ask questions and request edits; its private
+                  workspace stores attachments and session-local files.
 - ``evolution`` : the persistent autoresearch loop. There is exactly ONE and it
                   is handled by the legacy engine; this manager only tracks a
                   lightweight pointer to it so the UI can list it uniformly.
 
-Each ``chat`` session owns an independent CLI session id, so its context window
-is fully isolated from the evolution loop and from other chats.
+Each ``chat`` session owns an independent CLI session id, so its conversation
+context stays separate from the evolution loop and from other chats.
 
 The module is intentionally self-contained: it receives an ``engine`` object
 (the host module ``server``) that exposes the small set of helpers it needs, so
@@ -40,24 +40,6 @@ AUX_CHAT_HISTORY_MAX = 200
 AUX_LOG_MAX = 2000
 AUX_TRANSCRIPT_MAX = 600
 AUX_EVENT_BUFFER_MAX = 500
-
-# Files that chat sessions must never mutate. Enforced both by prompt
-# hard-boundary and by a snapshot+restore guard around every run.
-AUX_PROTECTED_PATHS = [
-    "research_trajectory/STATE.md",
-    "research_trajectory/CURRENT_FINDINGS.md",
-    "research_trajectory/TRAJECTORY.json",
-    "research_trajectory/NEXT_TRIAL.json",
-    "research_trajectory/trials",
-    "research_trajectory/checkpoints",
-    "research_trajectory/human_interventions",
-    "manuscript/BLUEPRINT.md",
-    "manuscript/reviews",
-    "manuscript/sections",
-    "manuscript/figures/FIGURE_SPECS.md",
-    "PROJECT.md",
-]
-
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
@@ -186,6 +168,7 @@ class AuxSession:
         with self.lock:
             running = (m["status"] == "running") if self.kind == "evolution" else self.is_active()
             m["workspace"] = str(self.workspace_dir)
+            m["project_root"] = str(self.manager.context.root)
             m["context_path"] = str(self.context_path)
             m["event_id"] = self.event_id
             m["last_event_at"] = self.last_event_at
@@ -408,82 +391,6 @@ class AuxSession:
         self.streaming_transcript = {}
         return finalized
 
-    # ---- protected-file guard -------------------------------------------
-    def _snapshot_protected(self) -> Path | None:
-        if self.kind == "evolution":
-            return None
-        engine = self.manager.engine
-        snap_root = self.manager.sessions_dir / "_guard" / f"{self.id}_{uuid.uuid4().hex[:8]}"
-        try:
-            snap_root.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            return None
-        manifest: list[dict[str, Any]] = []
-        for rel in AUX_PROTECTED_PATHS:
-            source = engine.repo_path(rel)
-            entry = {"path": rel, "exists": source.exists()}
-            if source.exists():
-                target = snap_root / "files" / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    if source.is_dir():
-                        shutil.copytree(source, target, symlinks=True)
-                    else:
-                        shutil.copy2(source, target, follow_symlinks=False)
-                except OSError:
-                    entry["skipped"] = True
-            manifest.append(entry)
-        try:
-            (snap_root / "MANIFEST.json").write_text(
-                json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-        except OSError:
-            pass
-        return snap_root
-
-    def _restore_protected(self, snap_root: Path | None) -> list[str]:
-        if not snap_root or not snap_root.exists():
-            return []
-        engine = self.manager.engine
-        try:
-            manifest = json.loads((snap_root / "MANIFEST.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            manifest = []
-        restored: list[str] = []
-        for entry in manifest if isinstance(manifest, list) else []:
-            rel = str(entry.get("path") or "")
-            if not rel:
-                continue
-            source = engine.repo_path(rel)
-            backup = snap_root / "files" / rel
-            existed = bool(entry.get("exists"))
-            # Detect mutation: current existence/content differs from snapshot.
-            changed = source.exists() != existed
-            if not changed and source.exists() and backup.exists() and source.is_file() and backup.is_file():
-                try:
-                    changed = source.read_bytes() != backup.read_bytes()
-                except OSError:
-                    changed = True
-            if not changed:
-                continue
-            try:
-                if source.exists():
-                    if source.is_dir():
-                        shutil.rmtree(source, ignore_errors=True)
-                    else:
-                        source.unlink()
-                if existed and backup.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    if backup.is_dir():
-                        shutil.copytree(backup, source, symlinks=True)
-                    else:
-                        shutil.copy2(backup, source, follow_symlinks=False)
-                restored.append(rel)
-            except OSError:
-                continue
-        shutil.rmtree(snap_root, ignore_errors=True)
-        return restored
-
     # ---- run -------------------------------------------------------------
     def start_message(self, message: str, settings: dict[str, Any], resume: bool) -> None:
         """Launch the CLI for this session in a background thread."""
@@ -526,10 +433,9 @@ class AuxSession:
             self.persist()
             self.emit("session", {"status": "interrupted"})
             return
-        snap = self._snapshot_protected()
         command = self.manager.agent_command(self, resume)
         env = engine.agent_process_env(self.backend)
-        cwd = self.workspace_dir if self.kind == "chat" else engine.repo_path(".")
+        cwd = engine.repo_path(".")
         try:
             popen_command, use_shell, _wrapper = engine.popen_command_for_agent(command, self.settings, env)
             proc = subprocess.Popen(
@@ -558,7 +464,6 @@ class AuxSession:
                 self.updated_at = _now_iso()
             self.persist()
             self.emit("error", {"status": "error"})
-            self._restore_protected(snap)
             return
         try:
             assert proc.stdout is not None
@@ -578,11 +483,6 @@ class AuxSession:
             self.append_log(f"Session error: {exc}")
             returncode = proc.poll()
             assistant_parts = []
-        restored = self._restore_protected(snap)
-        if restored:
-            self.append_log(
-                "Session guard restored protected autoresearch artifacts: " + ", ".join(restored)
-            )
         with self.lock:
             self._finalize_active_streaming_transcripts_locked()
             self._process = None

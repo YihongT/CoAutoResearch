@@ -35,6 +35,8 @@ Check:
 - Are alternative explanations addressed?
 - Is there overclaiming?
 - Are raw artifacts traceable through trial reports?
+- For result-dependent deliverables, did the trial produce actual result
+  evidence, a negative result, or a documented first blocker?
 - Do Resource Scout outputs reveal missing evidence, counterevidence,
   benchmark/data gaps, or source-quality issues that should prevent pass?
 - Are scout-discovered resources treated as raw inputs until promoted through
@@ -46,6 +48,8 @@ Check:
 Apply evidence-certainty judgment to each central claim. Consider source
 quality, bias, indirectness, imprecision, inconsistency, missing counterevidence,
 and whether the prose uses stronger language than the evidence warrants.
+Do not treat unexecuted scaffolds, schemas, harnesses, or package contracts as
+empirical, model, benchmark, or result evidence.
 
 ## Pass Standard
 

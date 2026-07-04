@@ -14,7 +14,7 @@ of the eight core reviewers.
 
 ## When To Use
 
-Every substantive trial `PLAN.md` must include a `Resource Scout Brief`.
+Every trial `PLAN.md` must include a `Resource Scout Brief`.
 
 Default:
 
@@ -37,7 +37,7 @@ Require a scout when any of these are true:
 - the trial uses or interprets external facts that could have changed;
 - there is material uncertainty about what resources exist.
 
-Skipping is allowed only when the trial is narrow local-only work over already
+Skipping is allowed only when the trial is purely local work over already
 verified resources, explicitly offline, or when no external source could
 plausibly affect the objective. A skipped scout requires a concrete `Skip
 reason:` in `PLAN.md`.

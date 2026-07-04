@@ -28,9 +28,14 @@ block, not a manuscript section. It must use the dataset/benchmark/result block
 schema below. Do not put section-planning fields such as `Section brief`, `Local
 thesis / purpose`, `Local claims in plain language`, `Placed displays / methods
 / results`, or `Transition job` inside a result block. If the result is not yet
-available, either keep it as a section writing obligation, or mark the artifact
-`Inclusion status: candidate` / `deferred` with a precise `Remaining blocker`;
-do not label it as an active result.
+available, keep it as a section writing obligation or list it under `Blocking
+Missing Evidence`; do not create an inline result block for planned or pending
+work. Do not promote planned work into a reader-facing result.
+
+`Inclusion status: candidate` means the result exists as an observed or computed
+artifact with a result summary and source artifact path, but inclusion is not
+final. A deferred or missing result is missing evidence and belongs in
+`Blocking Missing Evidence`, not in `Manuscript Architecture`.
 
 For a final or gate-passing manuscript-facing deliverable, the blueprint must be
 target-venue-ready and readable as a paper map. Cross-references may support
@@ -175,7 +180,7 @@ Every titled unit in `Manuscript Architecture` must state:
 
 - target-venue title;
 - target-venue role;
-- section brief: 2-4 sentences of finished-results paper-map prose explaining
+- section brief: 2-4 sentences of finished-results paper map prose explaining
   what this unit argues, what evidence/results/displays it uses, and why it
   appears here;
 - reader question answered;
@@ -304,8 +309,12 @@ Active result blocks must be readable by a human without opening trial logs. The
 result in plain language. Phrases such as `planned only`, `pending trial`,
 `pending source-role check`, `TBD`, `to be filled`, or `Figure planned` are not
 valid active result content. If those phrases are still true, the block is not
-active yet and must carry `Inclusion status: candidate` or `deferred` plus the
-exact remaining blocker.
+ready for inline result placement and must be listed under `Blocking Missing
+Evidence` with the exact remaining blocker.
+
+Candidate result blocks must meet the same readability standard: an observed or
+computed result summary, reader takeaway, and source artifact path. A planned or
+pending result is not a candidate result.
 
 ---
 

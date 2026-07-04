@@ -73,9 +73,10 @@ For each display/method/result block, `Reader takeaway` should state what a
 reader should understand from the object at this manuscript location.
 Do not use section-planning fields inside `Result`, `Dataset`, `Benchmark`,
 `Metric`, or `RSLT...` blocks. Those headings are artifact blocks. If a result
-is only planned or pending, mark it as `Inclusion status: candidate` or
-`deferred` with a precise `Remaining blocker`; do not present it as an active
-result.
+is only planned or pending, list it under `Blocking Missing Evidence` with a
+precise `Remaining blocker`; do not create an inline result block. Candidate
+results must already have an actual metric/result summary and source artifact
+path.
 
 ### Section 1: <target-venue section title>
 
@@ -133,7 +134,7 @@ Paragraph plan:
 
 Placement:
 
-Inclusion status: <active / candidate / supplement / deprecated>
+Inclusion status: <active / candidate / supplement / deprecated / deferred>
 
 Purpose or result role:
 
@@ -163,7 +164,7 @@ Remaining blocker: <none, or exact blocker>
 
 Placement:
 
-Inclusion status: <active / candidate / supplement / deprecated>
+Inclusion status: <active / candidate / supplement / deprecated / deferred>
 
 Purpose or result role:
 
@@ -214,6 +215,10 @@ Source code or artifact links:
 Remaining blocker: <none, or exact blocker>
 
 ##### Result RSLT000000: <name>
+
+Use this block only for an available active or candidate result with an actual
+metric/result summary and source artifact path. Missing or pending results
+belong in `Blocking Missing Evidence`.
 
 Placement:
 
@@ -278,6 +283,9 @@ where the necessary comparison/evidence mapping is carried instead.
 
 List only blockers that prevent final gate pass. If any item remains here, the
 autoresearch gate must be `continue`.
+
+Place missing or pending result obligations here, not as inline result blocks in
+`Manuscript Architecture`.
 
 - none
 

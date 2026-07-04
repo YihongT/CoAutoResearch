@@ -101,7 +101,7 @@ Required reviewer gates:
 - Figure/table reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FIGURE_TABLE_REVIEW.md`.
 - Final gate reviewer: continue - pending current trial file `research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`.
 
-Next action: complete cold start or conversion, then create the first coherent trial.
+Next action: complete cold start or conversion, then create the first complete research attempt.
 
 ---
 
@@ -117,4 +117,4 @@ Current effective consequences:
 
 ## Next Step
 
-<The next coherent action or trial.>
+<The complete research objective required for the current deliverable.>

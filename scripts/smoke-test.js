@@ -3826,7 +3826,7 @@ Confidence: medium
       "assert not custom.lstrip().startswith('/goal'), custom.splitlines()[0]",
       "assert 'Additional user instruction for this launch' not in base",
       "assert 'Prioritize source-level evidence.' in custom",
-      "assert 'Complete exactly the next coherent trial boundary' in custom",
+      "assert 'Complete exactly the next complete research-attempt boundary' in custom",
       "assert 'Required reviewer gates must all be strict `pass`' in custom",
       "resume = module.resume_from_trial_prompt({'id': 'trial_1', 'path': 'research_trajectory/trials/trial_1', 'report_path': 'research_trajectory/trials/trial_1/REPORT.md', 'checkpoint_path': ''}, 'Continue from here.', 'best_effort', 'archive/resume_forks/fork_1/manifest.json', 'research_trajectory/human_interventions/INDEX.md', [], 1, 2)",
       "assert not resume.lstrip().startswith('/goal'), resume.splitlines()[0]",
