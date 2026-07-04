@@ -573,7 +573,7 @@ async function smokeRemoteGraftcpMissing() {
       npm_lifecycle_event: "npx"
     },
     {
-      waitFor: (output) => output.includes("This server uses an HTTP proxy for internet access.") && output.includes("install-graftcp"),
+      waitFor: (output) => output.includes("This server uses an HTTP proxy for internet access.") && output.includes("install-graftcp") && output.includes("ui --remote"),
       assert: (output) => {
         if (!output.includes("npx --yes co-auto-research install-graftcp") || !output.includes("npx --yes co-auto-research ui --remote")) {
           throw new Error(`missing graftcp output should include setup and rerun commands:\n${output}`);

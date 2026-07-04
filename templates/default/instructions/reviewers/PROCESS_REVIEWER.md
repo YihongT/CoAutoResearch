@@ -66,8 +66,12 @@ Ask:
 - Is the agent stuck on a minor technical issue?
 - Is the current Critical Path bottleneck advancing, or have recent trials
   accumulated non-empirical bookkeeping work?
-- Have three recent closed trials reported `Empirical progress: no` while a
-  Critical Path item remains open?
+- Does `REPORT.md` include `Critical path outcome:` and `Empirical progress:`
+  with bare `yes` or `no` for empirical progress?
+- Has `STATE.md` `Consecutive non-empirical trials` been incremented or reset to
+  mirror the current REPORT history?
+- Have the two most recent consecutive closed normal trials reported
+  `Empirical progress: no` while a Critical Path item remains open?
 - Are we optimizing an unimportant metric or artifact?
 - Should the next step be execution, method revision, literature grounding, seed paper review, manuscript restructuring, or human intervention?
 - Is the current target venue still plausible?

@@ -13,10 +13,11 @@ The manuscript directory uses a two-artifact model:
 
 `BLUEPRINT.md` must contain only real, source-backed manuscript content: real
 results, real numbers when relevant, real figure/table/appendix/reference
-material, source artifact paths, and reader-facing local explanations. An empty
-or slot-filled blueprint is a system failure state. Fix it by producing results
-through conversion, acquisition, substitution, analysis, or escalation; do not
-accumulate planned slots in `BLUEPRINT.md`.
+material, source artifact paths, and reader-facing local explanations. Outside
+the explicit `Status: pre-results stub` state, an empty or slot-filled blueprint
+is a system failure state. Fix it by producing results through conversion,
+acquisition, substitution, analysis, or escalation; do not accumulate planned
+slots in `BLUEPRINT.md`.
 
 Before results are available, `BLUEPRINT.md` may be a clearly marked pre-results
 stub pointing to `PAPER_PLAN.md` and `research_trajectory/STATE.md` `## Critical

@@ -132,13 +132,19 @@ Allowed statuses are `open`, `in_progress`, `done`, `blocked_on_human`, and
 `downgraded`.
 
 Each trial must choose one `Critical path target: CP<n>` in `PLAN.md` and record
-whether the trial performs empirical work. Each `REPORT.md` must record whether
-the critical path advanced and whether empirical progress occurred. Empirical
-progress means real data, model, method, evaluation, result, figure, table,
-reference, appendix, acquisition, substitution, conversion, or blueprint
-promotion work that changes the evidence base. Scaffold, bookkeeping, review
-refreshes, status synchronization, or control-file cleanup alone are not
-empirical progress.
+whether the trial performs empirical work. Conversion trials may use
+`Critical path target: CP0 - seed Critical Path from provided materials` only
+until the conversion `REPORT.md` creates the real CP1/CP2/... items; normal
+trials must not target CP0. Each `REPORT.md` must record whether the critical
+path advanced and whether empirical progress occurred. Empirical progress means
+real data, model, method, evaluation, result, figure, table, reference,
+appendix, acquisition, substitution, conversion, or blueprint promotion work
+that changes the evidence or resource state. A failed acquisition/substitution
+rung counts as empirical progress only when it writes an
+`ACQUISITION_DECISION.md` with the attempted rung, evidence, outcome, and next
+rung or terminal verdict. Scaffold, bookkeeping, review refreshes, status
+synchronization, control-file cleanup, empty searches, or blocker recording
+alone are not empirical progress.
 
 While any critical-path item is `open`, `in_progress`, or `blocked_on_human`, at
 most two consecutive closed trials may report `Empirical progress: no`. The next
@@ -148,6 +154,10 @@ trial must advance the current bottleneck or set `Status: needs_human` /
 Every trial must leave `manuscript/PAPER_PLAN.md` and `manuscript/BLUEPRINT.md`
 as complete as current evidence allows: obligations and blockers in
 `PAPER_PLAN.md`, real source-backed content only in `BLUEPRINT.md`.
+Update `STATE.md` `Consecutive non-empirical trials` after each closed trial as
+a readable mirror of the recent REPORT history: increment on
+`Empirical progress: no`, reset to `0` on `yes`, and keep the server-computed
+REPORT history as the enforcement source of truth.
 
 ---
 
@@ -247,6 +257,7 @@ Do not write trial plans in the root directory. Do not write trial reports only 
     - `research_trajectory/STATE.md`
     - `research_trajectory/CURRENT_FINDINGS.md`
     - `research_trajectory/notes/index.md` and topic notes when knowledge capture changes
+    - `manuscript/PAPER_PLAN.md`
     - `manuscript/BLUEPRINT.md`
     - `manuscript/figures/FIGURE_SPECS.md`
 19. Update the `Autoresearch Goal Gate` in `STATE.md` so each reviewer line references the current trial's reviewer file path and the current critical-path line.

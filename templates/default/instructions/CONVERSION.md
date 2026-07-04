@@ -28,8 +28,12 @@ Run conversion only when canonical project state needs to be built or reinterpre
 ### Mandatory Conversion Trigger
 
 If `resources/ongoing_work/` contains research-bearing content, including via a
-symlink, a full `research_trajectory/trials/000000_project_conversion/` trial is
-required before any normal trial in both cold starts and restarts.
+symlink, a full conversion trial is required before any normal trial can rely on
+that material. Use `research_trajectory/trials/000000_project_conversion/` only
+for the initial conversion before ordinary numbered trials exist. If ongoing
+work appears or changes mid-project, use the next normal trial number with a
+`_project_conversion` suffix, for example
+`research_trajectory/trials/000087_project_conversion/`.
 Research-bearing content includes code, datasets, model checkpoints, generated
 results, metrics, manuscript sources, notebooks, configuration files, or prior
 reports. Restart intake does not satisfy this trigger.
@@ -67,9 +71,9 @@ Conversion should produce or update:
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
-- `research_trajectory/trials/000000_project_conversion/PLAN.md`
-- `research_trajectory/trials/000000_project_conversion/reviews/`
-- `research_trajectory/trials/000000_project_conversion/REPORT.md`
+- `research_trajectory/trials/<conversion_trial_id>/PLAN.md`
+- `research_trajectory/trials/<conversion_trial_id>/reviews/`
+- `research_trajectory/trials/<conversion_trial_id>/REPORT.md`
 - `manuscript/BLUEPRINT.md`, if enough information exists
 
 ---
@@ -78,11 +82,21 @@ Conversion should produce or update:
 
 Conversion itself is a trial:
 
-`research_trajectory/trials/000000_project_conversion/`
+`research_trajectory/trials/<conversion_trial_id>/`
+
+Use `000000_project_conversion` before any normal trial exists. Use the next
+numbered `<NNNNNN>_project_conversion` trial for restart or mid-project
+conversion. Conversion PLANs may declare
+`Critical path target: CP0 - seed Critical Path from provided materials`;
+conversion REPORTs must create or update the real CP1/CP2/... Critical Path
+items.
 
 The conversion `REPORT.md` should explain:
 
 - what raw materials were inspected;
+- `## Ongoing Work Coverage`: inspected roots, sample paths, newest observed
+  input timestamp, skipped paths/reasons, and whether any newer ongoing-work
+  material remains uncovered;
 - what the prior or proposed project was trying to do;
 - what should be reused;
 - what should not be trusted;

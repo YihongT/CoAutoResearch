@@ -10,6 +10,7 @@ Review manuscript-facing deliverables as a target-venue reviewer would.
 - `PROJECT.md`
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
+- `manuscript/PAPER_PLAN.md`
 - `manuscript/BLUEPRINT.md`
 - manuscript sections, figures, tables, appendix, and reviews when present
 - target venue seed papers and style notes when relevant
@@ -49,6 +50,9 @@ Evaluate:
   benchmark results, methods, and captions;
 - reference and literature grounding posture;
 - appendix and supplement posture;
+- `PAPER_PLAN.md` coherence: planned obligations tied to Critical Path items,
+  specific blockers, no unowned planned displays/results, and consistency with
+  the current pre-results stub or promoted blueprint;
 - treatment of limitations and alternatives;
 - whether the manuscript can stand on its own without hidden trial details.
 - artifact state:

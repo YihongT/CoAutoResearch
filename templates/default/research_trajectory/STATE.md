@@ -95,7 +95,7 @@ Allowed statuses: `open`, `in_progress`, `done`, `blocked_on_human`, `downgraded
 
 Current bottleneck: CP1 - <one-line dependency currently limiting real results>
 
-Consecutive non-empirical trials: 0
+Consecutive non-empirical trials: 0 (mirror of recent REPORT history; reset on `Empirical progress: yes`, increment on `no`)
 
 ---
 

@@ -209,10 +209,11 @@ manifest. Research-critical resources need an acquisition decision record.
 ## Research-Critical Acquisition Mandate
 
 `Criticality: research-critical` means a `STATE.md` Critical Path item depends
-on the resource. A research-critical public dataset, code release, benchmark,
-model, or source file must be acquired, activated from existing user-provided
-materials, substituted within the research objective, or end in a documented
-terminal verdict. Link-only is not a terminal verdict for this class.
+on the resource. That Critical Path link is the explicit trial need for the
+acquisition mandate below. A research-critical public dataset, code release,
+benchmark, model, or source file must be acquired, activated from existing
+user-provided materials, substituted within the research objective, or end in a
+documented terminal verdict. Link-only is not a terminal verdict for this class.
 
 Run this ordered substitution ladder and record every rung's attempt and
 outcome:
@@ -239,6 +240,11 @@ Rungs 1-5 must complete within two trials of a resource becoming
 research-critical. After that, a terminal verdict is mandatory:
 `acquired`, `substituted:<what>`, `scope_downgrade_proposed`, or
 `human_required`.
+
+A failed rung still counts as empirical progress when the trial writes the
+`ACQUISITION_DECISION.md` with the rung attempted, evidence inspected, outcome,
+and next rung or terminal verdict. Empty searching, link collection, or
+unexamined blocker recording does not count.
 
 For each research-critical resource, write:
 
@@ -395,7 +401,9 @@ The scout must not:
 - decide the final gate;
 - edit `research_trajectory/HUMAN_TASKS.md` directly;
 - start unrelated broad literature review beyond the trial scope;
-- download large/restricted assets without an explicit trial need.
+- download large/restricted assets without an explicit trial need. A current
+  `Criticality: research-critical` resource tied to a Critical Path item is such
+  a need, but license, disk, credential, and safety checks still apply.
 
 The main execution agent decides whether scout-discovered resources affect
 current state, findings, manuscript structure, references, or future plans.

@@ -180,6 +180,10 @@ for (const requiredText of [
 }
 
 const finalGateReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "FINAL_GATE_REVIEWER.md"), "utf8");
+const planReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "PLAN_REVIEWER.md"), "utf8");
+const processReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "PROCESS_REVIEWER.md"), "utf8");
+const evidenceReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "EVIDENCE_REVIEWER.md"), "utf8");
+const manuscriptReviewer = await fsp.readFile(path.join(template, "instructions", "reviewers", "MANUSCRIPT_REVIEWER.md"), "utf8");
 if (!finalGateReviewer.includes("## Artifact Consistency Audit")) {
   failures.push("instructions/reviewers/FINAL_GATE_REVIEWER.md: missing artifact consistency audit");
 }
@@ -196,6 +200,9 @@ if (!includesCompact(finalGateReviewer, "publication-ready Markdown table body")
 const manuscriptInstructions = await fsp.readFile(path.join(template, "instructions", "MANUSCRIPT.md"), "utf8");
 if (!includesCompact(manuscriptInstructions, "full venue-format proposal with complete real results")) {
   failures.push("instructions/MANUSCRIPT.md: missing full-result blueprint definition");
+}
+if (!includesCompact(manuscriptInstructions, "Outside the explicit `Status: pre-results stub` state")) {
+  failures.push("instructions/MANUSCRIPT.md: missing explicit stub exception to slot-filled failure rule");
 }
 if (!manuscriptInstructions.includes("PAPER_PLAN.md") || !manuscriptInstructions.includes("BLUEPRINT.md")) {
   failures.push("instructions/MANUSCRIPT.md: missing two-artifact model");
@@ -239,20 +246,48 @@ for (const token of [
     failures.push(`ui/server.py: missing ${token}`);
   }
 }
+if (!serverTemplate.includes("threshold = 2") || !serverTemplate.includes("last two closed normal trials")) {
+  failures.push("ui/server.py: non-empirical stall must enforce the two-trial threshold");
+}
+if (!serverTemplate.includes("latest_conversion_mtime") || !serverTemplate.includes("newest_ongoing_work_mtime")) {
+  failures.push("ui/server.py: conversion pending must compare ongoing_work freshness against latest conversion");
+}
+if (!serverTemplate.includes("scope_change_files") || serverTemplate.includes("if intervention_files or scope_files")) {
+  failures.push("ui/server.py: scope drift warning must only be suppressed by SCOPE_CHANGE files");
+}
 
 const conversionInstructions = await fsp.readFile(path.join(template, "instructions", "CONVERSION.md"), "utf8");
 if (!conversionInstructions.includes("Mandatory Conversion Trigger")) {
   failures.push("instructions/CONVERSION.md: missing Mandatory Conversion Trigger");
+}
+if (!conversionInstructions.includes("<NNNNNN>_project_conversion") || !conversionInstructions.includes("## Ongoing Work Coverage") || !conversionInstructions.includes("CP0 - seed Critical Path")) {
+  failures.push("instructions/CONVERSION.md: missing mid-project conversion, coverage, or CP0 rules");
 }
 
 const resourceScoutInstructions = await fsp.readFile(path.join(template, "instructions", "RESOURCE_SCOUT.md"), "utf8");
 if (!resourceScoutInstructions.includes("Research-Critical Acquisition Mandate")) {
   failures.push("instructions/RESOURCE_SCOUT.md: missing Research-Critical Acquisition Mandate");
 }
+if (!includesCompact(resourceScoutInstructions, "A failed rung still counts as empirical progress") || !includesCompact(resourceScoutInstructions, "Criticality: research-critical` resource tied to a Critical Path item is such a need")) {
+  failures.push("instructions/RESOURCE_SCOUT.md: missing failed-rung empirical rule or explicit-trial-need carveout");
+}
 for (const rung of ["1. Check", "2. Check", "3. Try", "4. Try", "5. Try", "6. If", "7. Use"]) {
   if (!resourceScoutInstructions.includes(rung)) {
     failures.push(`instructions/RESOURCE_SCOUT.md: missing acquisition ladder rung ${rung}`);
   }
+}
+
+if (!planReviewer.includes("Critical path target: CP<n>") || !planReviewer.includes("Empirical work: yes | no") || !planReviewer.includes("Criticality: research-critical | contextual")) {
+  failures.push("instructions/reviewers/PLAN_REVIEWER.md: missing Critical Path, empirical-work, or Criticality field ownership");
+}
+if (processReviewer.includes("three recent") || !processReviewer.includes("two most recent consecutive") || !processReviewer.includes("Critical path outcome:") || !processReviewer.includes("Consecutive non-empirical trials")) {
+  failures.push("instructions/reviewers/PROCESS_REVIEWER.md: missing two-trial stall and REPORT/counter ownership");
+}
+if (!evidenceReviewer.includes("ACQUISITION_DECISION.md") || !evidenceReviewer.includes("Empirical progress: yes")) {
+  failures.push("instructions/reviewers/EVIDENCE_REVIEWER.md: missing empirical-progress evidence ownership");
+}
+if (!manuscriptReviewer.includes("`manuscript/PAPER_PLAN.md`") || !manuscriptReviewer.includes("`PAPER_PLAN.md` coherence")) {
+  failures.push("instructions/reviewers/MANUSCRIPT_REVIEWER.md: missing PAPER_PLAN required reading or coherence review");
 }
 
 if (failures.length) {

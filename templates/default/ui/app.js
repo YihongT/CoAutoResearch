@@ -7924,10 +7924,14 @@ function trialIterationValue(trial) {
   return match ? Number(match[1]) : 0;
 }
 
+function isConversionTrialId(value) {
+  return /^(?:project_conversion|0*project_conversion|\d+_project_conversion)(?:$|[_-])/i.test(String(value || "").trim());
+}
+
 function visibleTrials() {
   return (appState?.trials || [])
     .filter((trial) => hasVisibleTrial(trial) && trial?.is_archived !== true)
-    .filter((trial) => !/^0*_?project_conversion/i.test(String(trial.id || "")))
+    .filter((trial) => !isConversionTrialId(trial.id))
     .sort((a, b) => trialIterationValue(a) - trialIterationValue(b) || String(a.id || "").localeCompare(String(b.id || "")));
 }
 

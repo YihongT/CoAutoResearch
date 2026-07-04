@@ -504,6 +504,13 @@ def project_relative_path(project_root: Path, path: Path) -> str:
         return path.as_posix()
 
 
+CONVERSION_TRIAL_ID_RE = re.compile(r"^(?:project_conversion|0*project_conversion|\d+_project_conversion)(?:$|[_-])", re.IGNORECASE)
+
+
+def is_conversion_trial_id(value: str | None) -> bool:
+    return bool(CONVERSION_TRIAL_ID_RE.match(str(value or "").strip()))
+
+
 def read_trajectory_archived_ids(project_root: Path) -> set[str]:
     path = project_root / "research_trajectory" / "TRAJECTORY.json"
     if not path.exists():
@@ -525,7 +532,7 @@ def project_active_trial_dirs(project_root: Path) -> list[Path]:
     for path in root.iterdir():
         if not path.is_dir() or path.name in archived_ids:
             continue
-        if re.match(r"^0*_?project_conversion", path.name, re.IGNORECASE):
+        if is_conversion_trial_id(path.name):
             continue
         if not any((path / name).exists() for name in ("PLAN.md", "REVIEW.md", "REPORT.md", "artifacts", "reviews")):
             continue
@@ -4900,12 +4907,13 @@ def trial_report_empirical_progress(trial_dir: Path) -> str:
 
 
 def recent_non_empirical_stall() -> dict[str, Any]:
+    threshold = 2
     cp = critical_path_state()
     if not cp.get("exists") or not cp.get("incomplete"):
-        return {"stalled": False, "critical_path": cp, "trials": []}
-    trials = closed_active_trial_dirs()[-3:]
-    if len(trials) < 3:
-        return {"stalled": False, "critical_path": cp, "trials": [rel_path(path) for path in trials]}
+        return {"stalled": False, "critical_path": cp, "trials": [], "threshold": threshold}
+    trials = closed_active_trial_dirs()[-threshold:]
+    if len(trials) < threshold:
+        return {"stalled": False, "critical_path": cp, "trials": [rel_path(path) for path in trials], "threshold": threshold}
     statuses = [trial_report_empirical_progress(path) for path in trials]
     stalled = bool(statuses and all(status == "no" for status in statuses))
     return {
@@ -4913,6 +4921,7 @@ def recent_non_empirical_stall() -> dict[str, Any]:
         "critical_path": cp,
         "trials": [rel_path(path) for path in trials],
         "statuses": statuses,
+        "threshold": threshold,
     }
 
 
@@ -4964,58 +4973,96 @@ ONGOING_WORK_RESEARCH_NAMES = {
 }
 
 
-def ongoing_work_research_bearing_paths(limit: int = 2500) -> list[str]:
+def ongoing_work_research_bearing_entries(limit: int = 2500) -> list[dict[str, Any]]:
     root = REPO_ROOT / "resources" / "ongoing_work"
     if not root.exists():
         return []
-    found: list[str] = []
+    found: list[dict[str, Any]] = []
     visited = 0
     skip_names = {".git", "node_modules", "__pycache__", ".venv", "venv", ".cache"}
+    def add_path(path: Path) -> None:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        found.append({"path": rel_path(path), "mtime": mtime})
     for current, dirnames, filenames in os.walk(root, followlinks=True):
         dirnames[:] = [name for name in dirnames if name not in skip_names]
         current_path = Path(current)
         if current_path != root and current_path.name.lower() in ONGOING_WORK_RESEARCH_NAMES:
-            found.append(rel_path(current_path))
+            add_path(current_path)
         for filename in filenames:
             visited += 1
             if visited > limit:
-                return found or [rel_path(root)]
+                return found or [{"path": rel_path(root), "mtime": 0.0}]
             if filename in {".gitkeep", "README.md"}:
                 continue
             path = current_path / filename
             name_lower = filename.lower()
             suffix = path.suffix.lower()
             if suffix in ONGOING_WORK_RESEARCH_EXTENSIONS or any(token in name_lower for token in ("result", "metric", "model", "checkpoint", "manuscript", "analysis")):
-                found.append(rel_path(path))
+                add_path(path)
             if len(found) >= 25:
                 return found
     return found
 
 
-def conversion_trial_report_exists() -> bool:
+def ongoing_work_research_bearing_paths(limit: int = 2500) -> list[str]:
+    return [str(entry.get("path") or "") for entry in ongoing_work_research_bearing_entries(limit) if str(entry.get("path") or "").strip()]
+
+
+def conversion_trial_report_paths() -> list[Path]:
     trials_root = REPO_ROOT / "research_trajectory" / "trials"
     if not trials_root.is_dir():
-        return False
+        return []
+    reports: list[Path] = []
     for path in trials_root.iterdir():
         if not path.is_dir():
             continue
-        if re.match(r"^(?:0+_)?project_conversion$|^0+_project_conversion\b|^0+project_conversion\b", path.name, re.IGNORECASE):
-            if (path / "REPORT.md").exists():
-                return True
-    return False
+        if is_conversion_trial_id(path.name):
+            report_path = path / "REPORT.md"
+            if report_path.exists():
+                reports.append(report_path)
+    return sorted(reports, key=lambda item: (trial_iteration_from_id(item.parent.name), item.parent.name))
+
+
+def latest_conversion_report() -> Path | None:
+    reports = conversion_trial_report_paths()
+    if not reports:
+        return None
+    return max(reports, key=lambda path: path.stat().st_mtime if path.exists() else 0.0)
+
+
+def conversion_trial_report_exists() -> bool:
+    return bool(conversion_trial_report_paths())
 
 
 def ongoing_work_requires_conversion() -> bool:
-    return bool(ongoing_work_research_bearing_paths()) and not conversion_trial_report_exists()
+    return bool(conversion_pending_status().get("pending"))
 
 
 def conversion_pending_status() -> dict[str, Any]:
-    paths = ongoing_work_research_bearing_paths()
-    pending = bool(paths) and not conversion_trial_report_exists()
+    entries = ongoing_work_research_bearing_entries()
+    paths = [str(entry.get("path") or "") for entry in entries if str(entry.get("path") or "").strip()]
+    newest_entry = max(entries, key=lambda entry: float(entry.get("mtime") or 0.0), default=None)
+    newest_mtime = float(newest_entry.get("mtime") or 0.0) if newest_entry else 0.0
+    latest_report = latest_conversion_report()
+    latest_mtime = latest_report.stat().st_mtime if latest_report and latest_report.exists() else 0.0
+    pending = bool(paths) and (latest_report is None or newest_mtime > latest_mtime)
+    if not pending:
+        reason = ""
+    elif latest_report is None:
+        reason = "resources/ongoing_work contains research-bearing content and no conversion REPORT.md exists."
+    else:
+        reason = "resources/ongoing_work contains research-bearing content newer than the latest conversion REPORT.md."
     return {
         "pending": pending,
-        "reason": "resources/ongoing_work contains research-bearing content and no conversion REPORT.md exists." if pending else "",
+        "reason": reason,
         "sample_paths": paths[:12],
+        "latest_conversion": rel_path(latest_report) if latest_report else "",
+        "latest_conversion_mtime": latest_mtime,
+        "newest_ongoing_work_mtime": newest_mtime,
+        "newest_uncovered_path": str(newest_entry.get("path") or "") if pending and newest_entry else "",
     }
 
 
@@ -5027,7 +5074,7 @@ def mandatory_conversion_prompt_section() -> str:
     return f"""
 
 Mandatory conversion pending:
-`resources/ongoing_work/` contains research-bearing content and no `research_trajectory/trials/000000_project_conversion/REPORT.md` exists. Before any normal trial, run the full conversion trial required by `instructions/CONVERSION.md`.
+`resources/ongoing_work/` contains research-bearing content that is not covered by the latest conversion report. Before any normal trial relies on it, run the full conversion trial required by `instructions/CONVERSION.md`. Use `000000_project_conversion` only before ordinary numbered trials exist; otherwise use the next numbered `<NNNNNN>_project_conversion` trial.
 
 Detected examples:
 {samples}
@@ -5090,13 +5137,15 @@ def scope_drift_warning() -> dict[str, Any]:
         return {"warning": False}
     intervention_files = intervention_files_after(str(state.get("project_scope_captured_at") or ""))
     scope_files = [path for path in intervention_files if "SCOPE_CHANGE_" in Path(path).name]
-    if intervention_files or scope_files:
-        return {"warning": False, "intervention_files": intervention_files}
+    if scope_files:
+        return {"warning": False, "intervention_files": intervention_files, "scope_change_files": scope_files}
     return {
         "warning": True,
         "message": "Unconfirmed scope change detected in PROJECT.md.",
         "baseline_hash": baseline,
         "current_hash": current,
+        "intervention_files": intervention_files,
+        "scope_change_files": scope_files,
     }
 
 
@@ -6274,7 +6323,7 @@ def active_trial_dirs() -> list[Path]:
             continue
         if not any((path / name).exists() for name in ("PLAN.md", "PLAN_REVIEW.md", "REPORT.md", "artifacts")):
             continue
-        if re.match(r"^0*_?project_conversion", path.name, re.IGNORECASE):
+        if is_conversion_trial_id(path.name):
             continue
         dirs.append(path)
     return sorted(dirs, key=lambda path: (trial_iteration_from_id(path.name), path.name))
@@ -6657,7 +6706,7 @@ def active_reported_trials() -> list[dict[str, Any]]:
             and str(trial.get("path") or "").startswith("research_trajectory/trials/")
             and str(trial.get("report_path") or "").strip()
             and bool(trial.get("is_closed"))
-            and not re.match(r"^0*_?project_conversion", str(trial.get("id") or ""), re.IGNORECASE)
+            and not is_conversion_trial_id(str(trial.get("id") or ""))
         ],
         key=trial_sort_key,
     )
@@ -11485,7 +11534,7 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
         bottleneck = str(cp.get("current_bottleneck") or "Critical Path bottleneck not recorded")
         stop_autoresearch_loop("stalled_without_empirical_progress", gate)
         append_research_log(
-            "Autoresearch loop paused because the last three closed trials reported no empirical progress "
+            "Autoresearch loop paused because the last two closed normal trials reported no empirical progress "
             f"while the Critical Path remains incomplete: {bottleneck}."
         )
         return
@@ -14709,7 +14758,7 @@ def build_status_payload() -> dict[str, Any]:
     completed_trials = [
         trial
         for trial in collect_trials()
-        if trial.get("is_active") and trial.get("report_path") and not re.match(r"^0*_?project_conversion", str(trial.get("id") or ""), re.IGNORECASE)
+        if trial.get("is_active") and trial.get("report_path") and not is_conversion_trial_id(str(trial.get("id") or ""))
     ]
     with RESEARCH_LOCK:
         proc = RESEARCH_SESSION.get("process")
@@ -14873,7 +14922,7 @@ def handle_local_slash_command(command: str, normalized: str, settings_payload: 
                     f"Goal gate: {gate.get('raw_status') or gate.get('status') or 'missing'}",
                     gate.get("summary") or "No gate summary yet.",
                     f"Loop active: {bool(RESEARCH_SESSION.get('loop_active'))}",
-                    f"Trials: {len([trial for trial in collect_trials() if trial.get('report_path') and not re.match(r'^0*_?project_conversion', str(trial.get('id') or ''), re.IGNORECASE)])} reported",
+                    f"Trials: {len([trial for trial in collect_trials() if trial.get('report_path') and not is_conversion_trial_id(str(trial.get('id') or ''))])} reported",
                 ]
             ),
         )

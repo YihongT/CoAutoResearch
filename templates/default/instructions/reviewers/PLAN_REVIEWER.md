@@ -30,12 +30,19 @@ Check whether the plan:
 - covers the full research attempt needed for submission-readiness when a target
   venue is provided, or deliverable-readiness under `PROJECT.md` when no target
   venue is provided;
+- declares `Critical path target: CP<n>` and targets the current Critical Path
+  bottleneck; only a conversion trial may use
+  `Critical path target: CP0 - seed Critical Path from provided materials`;
+- declares `Empirical work: yes | no - <...>` and explains what real
+  data/model/result/resource/blueprint work will or will not occur;
 - identifies required resources and compute;
 - avoids naive or invalid operationalization;
 - needs method grounding or literature grounding;
 - has interpretable success criteria;
 - records what outputs should update `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/`, or knowledge notes;
 - includes the required `Resource Scout Brief`;
+- includes `Criticality: research-critical | contextual` in the Resource Scout
+  Brief, and aligns `research-critical` with a named Critical Path item;
 - uses `Scout: required` by default for trials;
 - gives a concrete `Decision reason:` grounded in the overall research goal and
   current trial objective;

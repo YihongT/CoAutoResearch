@@ -37,6 +37,11 @@ Check:
 - Are raw artifacts traceable through trial reports?
 - For result-dependent deliverables, did the trial produce actual result
   evidence, a negative result, or a documented first blocker?
+- If `REPORT.md` says `Empirical progress: yes`, is that supported by a real
+  artifact, result, conversion inventory, or `ACQUISITION_DECISION.md` that
+  changed evidence/resource state?
+- If `REPORT.md` says `Empirical progress: no`, is the lack of empirical
+  progress reflected honestly in Critical Path status and next action?
 - Do Resource Scout outputs reveal missing evidence, counterevidence,
   benchmark/data gaps, or source-quality issues that should prevent pass?
 - Are scout-discovered resources treated as raw inputs until promoted through

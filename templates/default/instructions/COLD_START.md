@@ -37,7 +37,7 @@ Most inputs are optional. If input is missing, create placeholders and mark unce
 5. Read `instructions/PROJECT_FRAMING.md`, then create or update `PROJECT.md`.
 6. Create or update `research_trajectory/STATE.md`.
 7. Create or update `research_trajectory/CURRENT_FINDINGS.md`.
-8. Document initialization or conversion decisions in `research_trajectory/trials/000000_project_conversion/` only when conversion actually runs or a coherent initialization record is needed.
+8. Document initialization or initial conversion decisions in `research_trajectory/trials/000000_project_conversion/` only when conversion actually runs or a coherent initialization record is needed before ordinary numbered trials exist.
 9. Initialize `manuscript/BLUEPRINT.md` only if there is enough information to define a useful manuscript architecture.
 10. Commit the initialized scaffold.
 
@@ -51,7 +51,11 @@ conversion, important resource interpretation, or non-trivial decisions:
 
 `research_trajectory/trials/000000_project_conversion/`
 
-This trial records how raw inputs were converted or initialized into the current project state.
+This initial conversion trial records how raw inputs were converted or
+initialized into the current project state. If research-bearing ongoing work is
+discovered later in an already numbered trajectory, use the next
+`<NNNNNN>_project_conversion` trial required by `instructions/CONVERSION.md`
+instead of returning to `000000_project_conversion`.
 
 Use:
 
