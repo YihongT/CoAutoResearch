@@ -480,18 +480,33 @@ body.has-sessions-active section.sessions-view.workspace-view {
   gap: 14px;
 }
 .sessions-chat-log.is-empty {
-  display: block;
-  align-content: stretch;
-  padding: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: calc(100vh - 180px);
+  padding: 0 28px;
 }
 .sessions-chat-log.is-empty .sessions-empty-start {
-  min-height: 100%;
+  display: grid;
+  place-items: center;
+  width: min(1180px, 100%);
+  min-height: 0;
 }
 .sessions-chat-log.is-empty .sessions-empty-start .stage-panel[data-stage-panel="1"] {
-  min-height: 100%;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  width: 100%;
 }
 .sessions-chat-log.is-empty .sessions-empty-start .cold-card {
-  min-height: 100%;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  width: 100%;
+  padding: 0;
+}
+.sessions-chat-log.is-empty .sessions-empty-start .cold-card > .card-head {
+  padding: 0 18px;
 }
 .sessions-chat-log .framing-message {
   width: min(var(--framing-column-width, 760px), 100%);

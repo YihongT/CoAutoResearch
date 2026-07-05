@@ -2603,9 +2603,18 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
     justify-content: flex-start;
   }
 
+  .export-readiness-callout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .export-package-option {
     grid-template-columns: minmax(0, 1fr);
     justify-items: start;
+    gap: 10px;
+  }
+
+  .export-package-option .small-button {
+    justify-self: start;
   }
 
   .architecture-field-list {
@@ -2691,23 +2700,24 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
 
 .export-actions.export-package-list {
   display: grid;
-  gap: 10px;
+  gap: 0;
   align-items: stretch;
 }
 
 .export-package-option {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(104px, auto);
+  gap: 18px;
   align-items: center;
-  padding-top: 10px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
 }
 
 .export-package-option:first-child {
-  padding-top: 0;
+  padding-top: 12px;
   border-top: 0;
 }
+
 .export-panel-intro {
   display: grid;
   gap: 3px;
@@ -2726,11 +2736,60 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
   line-height: 1.45;
 }
 
-.export-package-option.is-primary {
-  padding: 10px;
+.export-readiness-callout {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.36fr) minmax(0, 1fr);
+  gap: 12px 18px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-soft);
+}
+
+.export-readiness-callout > div {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  min-width: 0;
+}
+
+.export-readiness-callout strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.export-readiness-callout span {
+  color: var(--soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.35;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.export-readiness-callout ul {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding-left: 1.1em;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.export-readiness-callout li {
+  overflow-wrap: anywhere;
+}
+
+.export-package-option.is-primary {
+  margin: 2px 0 0;
+  padding: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
 }
 
 .export-package-option header {
@@ -2760,11 +2819,12 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
 }
 
 .export-package-option p {
-  max-width: 520px;
+  max-width: 680px;
 }
 
 .export-package-option .small-button {
   justify-self: end;
+  min-width: 104px;
   white-space: nowrap;
 }
 
@@ -5820,6 +5880,25 @@ body.is-project-loading .cold-card > :not(.project-loading-state) {
 
 .plan-card-actions {
   align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+}
+
+.plan-card-copy-action,
+.plan-card-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.plan-card-copy-action {
+  justify-content: flex-start;
+}
+
+.plan-card-primary-actions {
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .framing-project-panel {
@@ -12000,6 +12079,29 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   min-width: 0;
 }
 
+.run-live-status-open {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  justify-content: space-between;
+  color: inherit;
+}
+
+.run-live-status-open:hover .working-duration,
+.run-live-status-open:focus-visible .working-duration,
+.run-live-status-open:hover strong,
+.run-live-status-open:focus-visible strong {
+  color: var(--ink);
+}
+
+.run-live-status-open:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 28%, transparent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
 .run-live-status-title {
   min-width: 0;
 }
@@ -12071,6 +12173,25 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
   font-size: 14px;
   line-height: 1.56;
   overflow-wrap: anywhere;
+}
+
+.run-live-updates.is-activity-trigger,
+.run-live-placeholder.is-activity-trigger {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.run-live-updates.is-activity-trigger:hover p,
+.run-live-updates.is-activity-trigger:focus-visible p,
+.run-live-placeholder.is-activity-trigger:hover,
+.run-live-placeholder.is-activity-trigger:focus-visible {
+  color: var(--ink);
+}
+
+.run-live-updates.is-activity-trigger:focus-visible,
+.run-live-placeholder.is-activity-trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 24%, transparent);
+  outline-offset: 5px;
 }
 
 .run-live-placeholder {
@@ -14850,7 +14971,7 @@ html[data-theme] :is(
   color: var(--panel-ink);
 }
 
-/* The empty-chat "What should we work on?" welcome reuses the onboarding
+/* The empty-chat welcome reuses the onboarding
    wizard's .cold-card markup (via emptyWelcomeHtml in app.js), but only ever
    fills a small heading/subcopy block instead of the wizard's full framing
    form. Left unstyled, it inherits the hard-override panel background above
@@ -17714,6 +17835,26 @@ html[data-theme] .run-live-status-head {
   gap: 14px;
   min-width: 0;
 }
+html[data-theme] .run-live-status-open {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  justify-content: space-between;
+  color: inherit;
+}
+html[data-theme] .run-live-status-open:hover .working-duration,
+html[data-theme] .run-live-status-open:focus-visible .working-duration,
+html[data-theme] .run-live-status-open:hover strong,
+html[data-theme] .run-live-status-open:focus-visible strong {
+  color: var(--ink);
+}
+html[data-theme] .run-live-status-open:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 28%, transparent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
 html[data-theme] .run-live-status-title { min-width: 0; }
 html[data-theme] .run-live-status-title strong {
   min-width: 0;
@@ -17760,6 +17901,25 @@ html[data-theme] :is(.run-live-updates, .trial-live-updates) p {
   font-size: 14px;
   line-height: 1.56;
   overflow-wrap: anywhere;
+}
+
+html[data-theme] .run-live-updates.is-activity-trigger,
+html[data-theme] .run-live-placeholder.is-activity-trigger {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+html[data-theme] .run-live-updates.is-activity-trigger:hover p,
+html[data-theme] .run-live-updates.is-activity-trigger:focus-visible p,
+html[data-theme] .run-live-placeholder.is-activity-trigger:hover,
+html[data-theme] .run-live-placeholder.is-activity-trigger:focus-visible {
+  color: var(--ink);
+}
+
+html[data-theme] .run-live-updates.is-activity-trigger:focus-visible,
+html[data-theme] .run-live-placeholder.is-activity-trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ink) 24%, transparent);
+  outline-offset: 5px;
 }
 
 html[data-theme] .run-live-placeholder {
@@ -19311,4 +19471,64 @@ html[data-theme] .brief-editor-shell.is-framing-dock #cold-file-editor.is-compac
   padding-block: 11px !important;
   line-height: 22px !important;
   overflow-y: hidden !important;
+}
+
+/* Autoresearch conversations use the same message rail as ordinary Chat. */
+html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
+  padding-inline: 28px !important;
+}
+
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-thread {
+  align-content: start;
+  justify-items: center;
+}
+
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-message {
+  width: min(var(--framing-column-width, 760px), 100%) !important;
+  max-width: min(var(--framing-column-width, 760px), 100%) !important;
+  justify-self: center !important;
+}
+
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user {
+  display: grid;
+  justify-items: end;
+}
+
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.assistant,
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.is-thinking {
+  justify-self: center !important;
+}
+
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user .transcript-body,
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user .message-attachments {
+  width: fit-content;
+  max-width: min(620px, 78%) !important;
+}
+
+html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user .framing-edit-form {
+  width: min(620px, 100%);
+  max-width: min(620px, 100%) !important;
+}
+
+@media (max-width: 760px) {
+  html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
+    padding-inline: 12px !important;
+  }
+
+  html[data-theme] #cold-start-workspace.has-framing-thread .framing-message,
+  html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user {
+    width: 100% !important;
+    max-width: 100% !important;
+    justify-self: stretch !important;
+  }
+
+  html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user .transcript-body,
+  html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user .message-attachments {
+    max-width: min(100%, calc(100vw - 36px)) !important;
+  }
+
+  html[data-theme] #cold-start-workspace.has-framing-thread .framing-message.user .framing-edit-form {
+    width: 100%;
+    max-width: min(100%, calc(100vw - 36px)) !important;
+  }
 }

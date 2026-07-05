@@ -6,6 +6,7 @@
   "use strict";
 
   var FIXED_RUN_LABEL = "CoAutoResearch";
+  var DRAFT_CHAT_ID = "__draft_chat__";
 
   var KIND_META = {
     chat: {
@@ -22,6 +23,7 @@
 
   var state = {
     sessions: [],
+    draftSession: null,
     activeId: "",
     surfaceActive: false,
     eventSource: null,
@@ -42,6 +44,33 @@
   var pendingClearSessionId = "";
 
   function projectId() { return window.activeProjectId || ""; }
+
+  function activeSessionStorageKey() {
+    var pid = projectId();
+    return pid ? "coauto:sessions:active:" + pid : "";
+  }
+
+  function readStoredActiveSessionId() {
+    var key = activeSessionStorageKey();
+    if (!key) return "";
+    try {
+      return String(localStorage.getItem(key) || "").trim();
+    } catch {
+      return "";
+    }
+  }
+
+  function writeStoredActiveSessionId(id) {
+    var key = activeSessionStorageKey();
+    if (!key) return;
+    try {
+      if (id) localStorage.setItem(key, String(id));
+      else localStorage.removeItem(key);
+    } catch {
+      // Storage can be unavailable in private contexts; state.activeId still
+      // preserves selection for the current page lifetime.
+    }
+  }
 
   function ui() { return window.CoAutoChatUi || {}; }
 
@@ -116,21 +145,79 @@
     return node;
   }
 
-  function normalizeSession(session) {
+  function normalizeSession(session, previous) {
     if (!session) return session;
-    var normalized = Object.assign({}, session);
+    var normalized = Object.assign({}, previous || {}, session);
     if (normalized.kind === "monitor" || normalized.kind === "idea") {
       normalized.kind = "chat";
     }
-    normalized.chat_history = Array.isArray(normalized.chat_history) ? normalized.chat_history : [];
-    normalized.transcript = Array.isArray(normalized.transcript) ? normalized.transcript : [];
-    normalized.plan_artifacts = normalized.plan_artifacts && typeof normalized.plan_artifacts === "object" ? normalized.plan_artifacts : {};
+    var has = Object.prototype.hasOwnProperty;
+    normalized.chat_history = has.call(session, "chat_history")
+      ? (Array.isArray(session.chat_history) ? session.chat_history : [])
+      : (Array.isArray(previous?.chat_history) ? previous.chat_history : []);
+    normalized.transcript = has.call(session, "transcript")
+      ? (Array.isArray(session.transcript) ? session.transcript : [])
+      : (Array.isArray(previous?.transcript) ? previous.transcript : []);
+    normalized.plan_artifacts = has.call(session, "plan_artifacts")
+      ? (session.plan_artifacts && typeof session.plan_artifacts === "object" ? session.plan_artifacts : {})
+      : (previous?.plan_artifacts && typeof previous.plan_artifacts === "object" ? previous.plan_artifacts : {});
     return normalized;
+  }
+
+  function isDraftSessionId(id) {
+    return String(id || "") === DRAFT_CHAT_ID;
+  }
+
+  function newDraftSession() {
+    return normalizeSession({
+      id: DRAFT_CHAT_ID,
+      kind: "chat",
+      title: "New chat",
+      status: "idle",
+      running: false,
+      backend: activeComposerBackend(),
+      settings: currentSettings(),
+      chat_history: [],
+      transcript: [],
+      plan_artifacts: {},
+      draft: true,
+    });
+  }
+
+  function activeSessionForView() {
+    if (isDraftSessionId(state.activeId)) return state.draftSession || null;
+    return visibleSessions().find(function (item) { return item.id === state.activeId; }) || null;
+  }
+
+  function chatSessionMessageCount(session) {
+    var direct = Number(session?.chat_history_count ?? session?.message_count ?? 0);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    if (Array.isArray(session?.chat_history)) return session.chat_history.length;
+    return 0;
+  }
+
+  function sessionTranscriptCount(session) {
+    var direct = Number(session?.transcript_count ?? 0);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    if (Array.isArray(session?.transcript)) return session.transcript.length;
+    return 0;
+  }
+
+  function isEstablishedChatSession(session) {
+    if (!session || session.kind !== "chat" || session.draft) return false;
+    if (session.running || String(session.status || "").toLowerCase() === "running") return true;
+    if (session.has_chat_history === true) return true;
+    if (chatSessionMessageCount(session) > 0) return true;
+    if (sessionTranscriptCount(session) > 0) return true;
+    if (String(session.cli_session_id || "").trim()) return true;
+    return false;
   }
 
   function visibleSessions() {
     return state.sessions.map(normalizeSession).filter(function (session) {
-      return session && (session.kind === "chat" || session.kind === "evolution");
+      if (!session) return false;
+      if (session.kind === "evolution") return true;
+      return isEstablishedChatSession(session);
     });
   }
 
@@ -172,10 +259,6 @@
         existing = (r.sessions || []).map(normalizeSession);
       }
       state.sessions = mergeSessionList(existing);
-      if (!state.activeId && state.sessions.length) {
-        var evolution = state.sessions.find(function (session) { return session.kind === "evolution"; });
-        state.activeId = evolution ? evolution.id : state.sessions[0].id;
-      }
     } catch (err) {
       console.warn("[sessions] ensureDefaults failed", err);
     }
@@ -457,7 +540,7 @@
   }
 
   function renderSessionView(options) {
-    var session = visibleSessions().find(function (item) { return item.id === state.activeId; });
+    var session = activeSessionForView();
     if (!session || !state.surfaceActive) {
       showSessionsView(false);
       return;
@@ -559,6 +642,90 @@
     });
   }
 
+  function sessionEntryTimeValue(value) {
+    var text = String(value?.created_at || value?.at || value?.updated_at || "");
+    var parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function sessionArtifactUpdatedTimeValue(value) {
+    var text = String(value?.updated_at || value?.created_at || value?.at || "");
+    var parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function sessionTranscriptRole(entry) {
+    var role = String(entry?.role || "").toLowerCase();
+    if (role) return role;
+    var kind = String(entry?.kind || "").toLowerCase();
+    if (kind === "command") return "command";
+    if (kind === "tool") return "tool";
+    if (kind === "error") return "tool";
+    if (kind === "final") return "final";
+    return "assistant";
+  }
+
+  function normalizedSessionText(value) {
+    return String(value || "").trim().replace(/\s+/g, " ");
+  }
+
+  function sessionPlanActivityEntries(message, index, session, artifact) {
+    var entries = Array.isArray(session?.transcript) ? session.transcript : [];
+    if (!entries.length) return [];
+    var planId = String(message?.plan_id || artifact?.id || "").trim();
+    var planText = normalizedSessionText(artifact?.plan_text || artifact?.text || message?.text || "");
+    var history = Array.isArray(session?.chat_history) ? session.chat_history : [];
+    var userMessage = null;
+    for (var cursor = Number(index) - 1; cursor >= 0; cursor -= 1) {
+      if (String(history[cursor]?.role || "").toLowerCase() === "user") {
+        userMessage = history[cursor];
+        break;
+      }
+    }
+    var start = sessionEntryTimeValue(userMessage);
+    var end = sessionArtifactUpdatedTimeValue(artifact) || sessionEntryTimeValue(message);
+    return entries.filter(function (entry) {
+      if (sessionTranscriptRole(entry) === "user") return false;
+      var entryArtifactId = String(entry?.artifact?.id || "").trim();
+      if (planId && entryArtifactId === planId) return true;
+      if (String(entry?.kind || "").toLowerCase() === "plan" && planText && normalizedSessionText(entry?.content) === planText) return true;
+      var createdAt = sessionEntryTimeValue(entry);
+      if (!start || !createdAt || createdAt < start - 1000) return false;
+      if (end && createdAt > end + 1000) return false;
+      return true;
+    });
+  }
+
+  function sessionPlanActivityHtml(message, index, session, artifact) {
+    if (typeof ui().inlineRunActivityHtml !== "function") return "";
+    var entries = sessionPlanActivityEntries(message, index, session, artifact);
+    if (!entries.length) return "";
+    var history = Array.isArray(session?.chat_history) ? session.chat_history : [];
+    var userMessage = null;
+    for (var cursor = Number(index) - 1; cursor >= 0; cursor -= 1) {
+      if (String(history[cursor]?.role || "").toLowerCase() === "user") {
+        userMessage = history[cursor];
+        break;
+      }
+    }
+    var planId = String(message?.plan_id || artifact?.id || "").trim();
+    return ui().inlineRunActivityHtml(
+      {
+        id: "session:" + String(session?.id || "") + ":plan:" + String(planId || index),
+        role: "user",
+        raw_type: "ui.plan",
+        content: userMessage?.text || artifact?.request?.display_message || artifact?.request?.message || "",
+        created_at: userMessage?.at || userMessage?.created_at || artifact?.created_at || "",
+      },
+      entries,
+      {
+        key: "session-plan:" + String(session?.id || "") + ":" + String(planId || index),
+        backend: session?.backend || session?.settings?.backend || artifact?.provider || "codex",
+        subtitle: "Plan worked activity",
+      }
+    );
+  }
+
   function focusSessionEditTextarea(index) {
     requestAnimationFrame(function () {
       var selector = '[data-session-edit-form="' + CSS.escape(String(index)) + '"] textarea';
@@ -574,6 +741,9 @@
     if (message?.kind === "plan" && message.plan_id) {
       var planId = String(message.plan_id || "").trim();
       var artifact = session?.plan_artifacts && session.plan_artifacts[planId];
+      if (session?.running && (!artifact || (!String(artifact.plan_text || artifact.text || artifact.error || "").trim()))) {
+        return "";
+      }
       if (!artifact) {
         return ui().conversationMessageHtml({ role: "assistant", text: "Planning..." }, {
           id: String(index),
@@ -587,9 +757,10 @@
         });
       }
       if (typeof ui().planCardHtml === "function") {
+        var activityHtml = sessionPlanActivityHtml(message, index, session, artifact);
         return ui().planCardHtml(
           { id: "session-plan-" + planId, kind: "plan", artifact: artifact },
-          { includeProjectLaunch: false }
+          { includeProjectLaunch: false, activityHtml: activityHtml }
         );
       }
     }
@@ -633,13 +804,13 @@
     if (typeof ui().emptyWelcomeHtml === "function") {
       return ui().emptyWelcomeHtml({
         eyebrow: "Chat",
-        title: "What should we work on?",
-        body: "Ask about this project, brainstorm ideas, or check the current research progress.",
+        title: "What is worth understanding next?",
+        body: "Follow a question, test an idea, or ask where the research should move.",
       });
     }
     return sessionMessageHtml({
       role: "control",
-      text: "What should we work on?\n\nAsk about this project, brainstorm ideas, or check the current research progress.",
+      text: "What is worth understanding next?\n\nFollow a question, test an idea, or ask where the research should move.",
     }, "empty");
   }
 
@@ -649,11 +820,11 @@
     var sendBtn = document.getElementById("sv-chat-send");
     document.querySelectorAll("[data-session-clear-context]").forEach(function (button) {
       button.dataset.sessionClearContext = session?.id || "";
-      button.disabled = !session?.id || session?.kind === "evolution";
+      button.disabled = !session?.id || session?.draft || session?.kind === "evolution";
     });
     document.querySelectorAll("[data-session-monitor-prompt]").forEach(function (button) {
       button.dataset.sessionMonitorPrompt = session?.id || "";
-      button.disabled = !session?.id || session?.kind === "evolution";
+      button.disabled = !session?.id || session?.draft || session?.kind === "evolution";
     });
     if (input) {
       input.placeholder = session.running ? "Session is running…" : "Message this session…";
@@ -772,7 +943,7 @@
   function rerenderActiveSessionComposer() {
     if (!state.surfaceActive) return;
     clearSessionComposerHydration();
-    renderSessionComposer(visibleSessions().find(function (item) { return item.id === state.activeId; }) || {});
+    renderSessionComposer(activeSessionForView() || {});
   }
 
   function fitSessionComposerSelects() {
@@ -854,7 +1025,7 @@
       });
     });
     renderAttachmentTray();
-    renderSessionComposer(visibleSessions().find(function (item) { return item.id === state.activeId; }) || {});
+    renderSessionComposer(activeSessionForView() || {});
   }
 
   function fileToPayload(item) {
@@ -954,7 +1125,7 @@
     });
   }
 
-  function currentSessionId() { return state.activeId; }
+  function currentSessionId() { return isDraftSessionId(state.activeId) ? "" : state.activeId; }
 
   function fileIcon(name) {
     var ext = (name.split(".").pop() || "").toLowerCase();
@@ -1019,18 +1190,35 @@
     try {
       if (!projectId()) {
         state.sessions = [];
+        state.draftSession = null;
+        delete state.planModeArmed[DRAFT_CHAT_ID];
         state.activeId = "";
         state.surfaceActive = false;
         renderAll();
         return;
       }
+      var mergeBase = state.sessions.slice();
       await ensureDefaults();
       var previousActive = visibleSessions().find(function (session) { return session.id === state.activeId; });
       var r = await apiCall("/api/sessions");
-      state.sessions = mergeSessionList((r.sessions || []).map(normalizeSession));
+      state.sessions = mergeSessionList(r.sessions || [], mergeBase);
+      if (isDraftSessionId(state.activeId) && state.surfaceActive && state.draftSession) {
+        renderAll();
+        return;
+      }
       if (!state.activeId && state.sessions.length) {
-        var evolution = state.sessions.find(function (session) { return session.kind === "evolution"; });
-        state.activeId = evolution ? evolution.id : state.sessions[0].id;
+        var storedId = readStoredActiveSessionId();
+        var visible = visibleSessions();
+        var stored = storedId ? visible.find(function (session) { return session.id === storedId; }) : null;
+        var evolution = visible.find(function (session) { return session.kind === "evolution"; });
+        var fallback = stored || evolution || visible.find(function (session) { return session.kind === "chat"; });
+        state.activeId = fallback ? fallback.id : "";
+        state.surfaceActive = Boolean(fallback && fallback.kind !== "evolution");
+        if (stored && stored.kind !== "evolution") {
+          renderRail();
+          selectSession(stored.id);
+          return;
+        }
       }
       var nextActive = visibleSessions().find(function (session) { return session.id === state.activeId; });
       renderRail();
@@ -1043,19 +1231,23 @@
   }
 
   async function createSession() {
-    try {
-      var r = await apiCall("/api/sessions", { method: "POST", body: JSON.stringify({ kind: "chat" }) });
-      state.sessions = mergeSessionList((r.result.sessions || state.sessions).map(normalizeSession));
-      state.activeId = r.result.session.id;
-      state.surfaceActive = true;
-      state.attachments = [];
-      state.wsPath = "";
-      state.wsItems = [];
-      await selectSession(r.result.session.id);
-      focusSessionComposer();
-    } catch (err) {
-      notify("Create failed: " + err.message, true);
+    state.draftSession = newDraftSession();
+    state.activeId = DRAFT_CHAT_ID;
+    state.surfaceActive = true;
+    state.openMenuId = "";
+    state.attachments = [];
+    state.editingMessageIndex = null;
+    delete state.planModeArmed[DRAFT_CHAT_ID];
+    state.wsPath = "";
+    state.wsItems = [];
+    writeStoredActiveSessionId("");
+    if (state.eventSource) {
+      state.eventSource.close();
+      state.eventSource = null;
+      state.eventSourceId = "";
     }
+    renderAll();
+    focusSessionComposer();
   }
 
   async function deleteSession(id) {
@@ -1063,7 +1255,7 @@
     var deletedActive = state.activeId === id;
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" });
-      state.sessions = mergeSessionList((r.result.sessions || []).map(normalizeSession));
+      state.sessions = mergeSessionList(r.result.sessions || []);
       delete state.eventLastIds[id];
       if (!deletedActive) {
         renderRail();
@@ -1092,7 +1284,7 @@
   async function refreshSession(id) {
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/refresh", { method: "POST", body: "{}" });
-      updateSession(normalizeSession(r.result.session));
+      updateSession(r.result.session);
       state.wsPath = "";
       state.clearNotices[id] = "Agent context reset. Chat history stayed visible; the next run will start fresh and reread the saved chat history.";
       renderAll();
@@ -1104,8 +1296,8 @@
   async function renameSession(id, title) {
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ title: title }) });
-      state.sessions = mergeSessionList((r.result.sessions || state.sessions).map(normalizeSession));
-      updateSession(normalizeSession(r.result.session));
+      state.sessions = mergeSessionList(r.result.sessions || state.sessions);
+      updateSession(r.result.session);
       renderRail();
       if (state.activeId === id) renderSessionView({ preserveScroll: true });
       notify("Session renamed.");
@@ -1130,8 +1322,12 @@
 
   async function selectSession(id) {
     var current = visibleSessions().find(function (session) { return session.id === id; });
+    if (!current) return;
+    state.draftSession = null;
+    delete state.planModeArmed[DRAFT_CHAT_ID];
     state.activeId = id;
     state.surfaceActive = Boolean(current && current.kind !== "evolution");
+    writeStoredActiveSessionId(id);
     state.openMenuId = "";
     state.attachments = [];
     state.editingMessageIndex = null;
@@ -1150,7 +1346,8 @@
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id));
       if (state.activeId !== id) return;
-      var fetched = normalizeSession(r.session);
+      var existing = state.sessions.find(function (item) { return item.id === id; });
+      var fetched = normalizeSession(r.session, existing);
       updateSession(fetched);
       state.surfaceActive = Boolean(fetched && fetched.kind !== "evolution");
       if (fetched && fetched.kind === "evolution") {
@@ -1175,7 +1372,7 @@
     options = options || {};
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id));
-      updateSession(normalizeSession(r.session));
+      updateSession(r.session);
       renderAll();
       if (options.workspace && state.activeId === id) loadWorkspace(id, state.wsPath || "");
     } catch (err) {
@@ -1199,11 +1396,14 @@
     var editIndex = Number.isInteger(options.editIndex) ? options.editIndex : null;
     var isEdit = editIndex !== null;
     var planState = sessionPlanModeState(id);
-    var isPlanSend = !isEdit && planState.armed;
+    var previousPlanState = { armed: planState.armed, revisePlanId: planState.revisePlanId };
+    var isPlanSend = planState.armed;
     var requestText = requestMessageText(text);
     var displayText = displayMessageText(text);
     var files = [];
     var attachmentSnapshot = state.attachments.slice();
+    var draftSend = isDraftSessionId(id);
+    var draftSessionSnapshot = draftSend && state.draftSession ? normalizeSession(state.draftSession) : null;
     if (!isEdit) {
       try {
         files = await collectAttachmentPayloads();
@@ -1218,20 +1418,82 @@
       }
       state.attachments = [];
     }
+    if (draftSend) {
+      try {
+        var created = await apiCall("/api/sessions", { method: "POST", body: JSON.stringify({ kind: "chat" }) });
+        state.sessions = mergeSessionList(created.result.sessions || state.sessions);
+        updateSession(created.result.session);
+        var createdId = String(created.result.session?.id || "");
+        if (!createdId) throw new Error("Created session missing id");
+        if (isPlanSend) {
+          setSessionPlanModeState(createdId, previousPlanState);
+          delete state.planModeArmed[DRAFT_CHAT_ID];
+          planState = sessionPlanModeState(createdId);
+          previousPlanState = { armed: planState.armed, revisePlanId: planState.revisePlanId };
+        }
+        state.draftSession = null;
+        state.activeId = createdId;
+        state.surfaceActive = true;
+        writeStoredActiveSessionId(createdId);
+        id = createdId;
+        renderRail();
+      } catch (err) {
+        state.draftSession = draftSessionSnapshot || newDraftSession();
+        state.activeId = DRAFT_CHAT_ID;
+        state.surfaceActive = true;
+        if (isPlanSend) setSessionPlanModeState(DRAFT_CHAT_ID, previousPlanState);
+        if (!isEdit) {
+          state.attachments = attachmentSnapshot;
+          var draftInput = document.getElementById("sv-chat-input");
+          if (draftInput && !draftInput.value) {
+            draftInput.value = text;
+            autoResizeSessionInput(draftInput);
+          }
+          renderAttachmentTray();
+        }
+        renderSessionView({ preserveScroll: true });
+        notify("Create failed: " + err.message, true);
+        return;
+      }
+    }
     var session = state.sessions.find(function (item) { return item.id === id; });
     var previousHistory = session ? (session.chat_history || []).slice() : [];
     var previousStatus = session ? session.status : "idle";
     var previousTranscript = session ? (session.transcript || []).slice() : [];
     var previousStartedAt = session ? session.started_at : "";
+    var originalPlanId = "";
+    if (isEdit && previousHistory[editIndex + 1]?.kind === "plan") {
+      originalPlanId = String(previousHistory[editIndex + 1].plan_id || "").trim();
+    }
+    var collapsePreviousDuplicateUser = false;
+    if (isEdit && editIndex > 0) {
+      var previousMessage = previousHistory[editIndex - 1] || {};
+      var editedMessage = previousHistory[editIndex] || {};
+      collapsePreviousDuplicateUser = String(previousMessage.role || "").toLowerCase() === "user"
+        && String(editedMessage.role || "").toLowerCase() === "user"
+        && String(previousMessage.text || "").trim() === String(editedMessage.text || "").trim()
+        && String(editedMessage.text || "").trim() === displayText;
+    }
     if (session) {
       session.chat_history = isEdit ? previousHistory.slice(0, editIndex) : (session.chat_history || []);
+      if (collapsePreviousDuplicateUser) session.chat_history.pop();
       session.chat_history.push({ role: "user", text: displayText });
+      if (isPlanSend) {
+        session.chat_history.push({
+          role: "assistant",
+          kind: "plan",
+          plan_id: "pending-" + id + "-" + Date.now(),
+          text: "",
+          at: new Date().toISOString(),
+        });
+      }
       session.running = true;
       session.status = "running";
       session.started_at = new Date().toISOString();
       session.transcript = [];
       state.editingMessageIndex = null;
       state.clearNotices[id] = "";
+      renderRail();
       renderSessionView(isEdit ? { focusIndex: editIndex, scrollToBottom: false } : { scrollToBottom: true });
     }
     try {
@@ -1239,7 +1501,8 @@
       var endpoint = "/api/sessions/" + encodeURIComponent(id) + (isPlanSend ? "/plan" : "/chat");
       if (isPlanSend) {
         body.files = files;
-        if (planState.revisePlanId) body.revisePlanId = planState.revisePlanId;
+        if (isEdit) body.editIndex = editIndex;
+        if (planState.revisePlanId || originalPlanId) body.revisePlanId = planState.revisePlanId || originalPlanId;
       } else if (isEdit) {
         body.editIndex = editIndex;
       } else {
@@ -1251,7 +1514,7 @@
       });
       if (isPlanSend) setSessionPlanModeState(id, null);
       if (!isEdit) state.attachments = [];
-      updateSession(normalizeSession(r.result.session));
+      updateSession(r.result.session);
       if (state.activeId === id) connectEvents(id);
       renderAll();
       if (isEdit && state.activeId === id) scrollSessionMessageIntoView(editIndex);
@@ -1264,6 +1527,7 @@
         session.transcript = previousTranscript;
         session.started_at = previousStartedAt;
       }
+      if (isPlanSend) setSessionPlanModeState(id, previousPlanState);
       if (isEdit) {
         state.editingMessageIndex = editIndex;
       } else {
@@ -1283,6 +1547,7 @@
   }
 
   async function insertMonitorPrompt(id) {
+    if (isDraftSessionId(id)) return;
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/monitor-progress-prompt");
       if (state.activeId !== id) return;
@@ -1292,7 +1557,7 @@
       if (controller?.setValue) controller.setValue(String(r.prompt || "").trim());
       else input.value = String(r.prompt || "").trim();
       autoResizeSessionInput(input);
-      renderSessionComposer(visibleSessions().find(function (item) { return item.id === state.activeId; }) || {});
+      renderSessionComposer(activeSessionForView() || {});
       if (controller?.focus) controller.focus();
       else input.focus({ preventScroll: true });
       input.setSelectionRange(0, 0);
@@ -1305,6 +1570,7 @@
   }
 
   async function loadWorkspace(id, relPath) {
+    if (isDraftSessionId(id)) return;
     if (state.activeId !== id) return;
     var requestedPath = relPath || "";
     state.wsPath = requestedPath;
@@ -1351,10 +1617,11 @@
 
   function updateSession(session) {
     if (!session) return;
-    session = normalizeSession(session);
-    rememberSessionEventId(session);
     var idx = state.sessions.findIndex(function (item) { return item.id === session.id; });
-    if (idx >= 0) state.sessions[idx] = Object.assign({}, state.sessions[idx], session);
+    var previous = idx >= 0 ? state.sessions[idx] : null;
+    session = normalizeSession(session, previous);
+    rememberSessionEventId(session);
+    if (idx >= 0) state.sessions[idx] = session;
     else state.sessions.push(session);
   }
 
@@ -1384,13 +1651,13 @@
     session.transcript = transcript.slice(-120);
   }
 
-  function mergeSessionList(sessions) {
+  function mergeSessionList(sessions, baseSessions) {
     var previous = {};
-    state.sessions.forEach(function (session) { previous[session.id] = session; });
+    (baseSessions || state.sessions).forEach(function (session) { previous[session.id] = session; });
     return (sessions || []).map(function (session) {
-      session = normalizeSession(session);
+      session = normalizeSession(session, previous[session.id]);
       rememberSessionEventId(session);
-      return Object.assign({}, previous[session.id] || {}, session);
+      return session;
     });
   }
 
@@ -1400,7 +1667,7 @@
       state.eventSource = null;
       state.eventSourceId = "";
     }
-    if (!id) return;
+    if (!id || isDraftSessionId(id)) return;
     var since = Number(state.eventLastIds[id] || 0);
     var url = withProject("/api/sessions/" + encodeURIComponent(id) + "/events" + (since > 0 ? "?since=" + encodeURIComponent(String(since)) : ""));
     var es = new EventSource(url);
@@ -1659,7 +1926,7 @@
     if (input) {
       input.addEventListener("input", function () {
         autoResizeSessionInput(input);
-        renderSessionComposer(visibleSessions().find(function (item) { return item.id === state.activeId; }) || {});
+        renderSessionComposer(activeSessionForView() || {});
       });
       input.addEventListener("keydown", function (event) {
         if (event.key === "Enter" && !event.shiftKey) {
@@ -1681,7 +1948,7 @@
             method: "POST",
             body: JSON.stringify({ planId: approvePlanId, settings: currentSettings() }),
           }).then(function (r) {
-            updateSession(normalizeSession(r.result.session));
+            updateSession(r.result.session);
             if (state.activeId) connectEvents(state.activeId);
             renderAll();
           }).catch(function (err) {
@@ -1701,17 +1968,22 @@
         var cancelButton = event.target.closest("[data-session-message-edit-cancel]");
         if (cancelButton) {
           state.editingMessageIndex = null;
-          renderSessionMessages(visibleSessions().find(function (item) { return item.id === state.activeId; }) || {}, { preserveScroll: true });
+          renderSessionMessages(activeSessionForView() || {}, { preserveScroll: true });
           return;
         }
         var editButton = event.target.closest("[data-session-message-edit]");
         if (!editButton) return;
         var index = Number(editButton.dataset.sessionMessageEdit);
-        var session = visibleSessions().find(function (item) { return item.id === state.activeId; });
+        var session = activeSessionForView();
         var message = session?.chat_history?.[index];
         if (!message || session?.running) return;
+        var nextMessage = session?.chat_history?.[index + 1];
+        if (nextMessage?.kind === "plan" && nextMessage.plan_id) {
+          setSessionPlanModeState(state.activeId, { armed: true, revisePlanId: nextMessage.plan_id });
+        }
         state.editingMessageIndex = index;
         renderSessionMessages(session, { focusIndex: index, scrollToBottom: false });
+        renderSessionPlanMode();
         focusSessionEditTextarea(index);
       });
       log.addEventListener("submit", function (event) {
@@ -1824,7 +2096,7 @@
         event.preventDefault();
         state.attachments = state.attachments.filter(function (item) { return item.id !== remove.dataset.sessionRemoveAttachment; });
         renderAttachmentTray();
-        renderSessionComposer(visibleSessions().find(function (item) { return item.id === state.activeId; }) || {});
+        renderSessionComposer(activeSessionForView() || {});
         return;
       }
       var copyResume = event.target.closest("[data-session-copy-resume]");
@@ -1886,6 +2158,8 @@
       state.eventSourceId = "";
     }
     state.sessions = [];
+    state.draftSession = null;
+    delete state.planModeArmed[DRAFT_CHAT_ID];
     state.activeId = "";
     state.surfaceActive = false;
     state.wsPath = "";

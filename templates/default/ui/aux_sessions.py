@@ -179,6 +179,9 @@ class AuxSession:
             m["last_event_at"] = self.last_event_at
             m["last_event_summary"] = self.last_event_summary
             m["running"] = running
+            m["chat_history_count"] = len(self.chat_history)
+            m["transcript_count"] = len(self.transcript)
+            m["has_chat_history"] = bool(self.chat_history)
         return m
 
     def snapshot(self) -> dict[str, Any]:
@@ -231,6 +234,8 @@ class AuxSession:
         with self.lock:
             meta = self.meta()
             history = list(self.chat_history)[-AUX_CHAT_HISTORY_MAX:]
+            logs = list(self.logs)[-200:]
+            transcript = list(self.transcript)[-120:]
         try:
             (self.dir / "meta.json").write_text(
                 json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -238,12 +243,20 @@ class AuxSession:
             (self.dir / "chat_history.json").write_text(
                 json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            (self.dir / "logs.json").write_text(
+                json.dumps(logs, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            (self.dir / "transcript.json").write_text(
+                json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except OSError:
             pass
 
     def load_persisted(self) -> None:
         meta_path = self.dir / "meta.json"
         history_path = self.dir / "chat_history.json"
+        logs_path = self.dir / "logs.json"
+        transcript_path = self.dir / "transcript.json"
         try:
             if meta_path.exists():
                 data = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -264,6 +277,14 @@ class AuxSession:
                 hist = json.loads(history_path.read_text(encoding="utf-8"))
                 if isinstance(hist, list):
                     self.chat_history = [h for h in hist if isinstance(h, dict)]
+            if logs_path.exists():
+                logs = json.loads(logs_path.read_text(encoding="utf-8"))
+                if isinstance(logs, list):
+                    self.logs = [str(item) for item in logs][-200:]
+            if transcript_path.exists():
+                transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+                if isinstance(transcript, list):
+                    self.transcript = [item for item in transcript if isinstance(item, dict)][-120:]
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -530,14 +551,22 @@ class AuxSession:
             with self.lock:
                 self.status = "error"
                 self._process = None
+                self.chat_history.append(
+                    {
+                        "role": "control",
+                        "text": f"Agent run failed before returning a response. Exit code: start failed. {exc}",
+                        "at": _now_iso(),
+                    }
+                )
+                self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
                 self.updated_at = _now_iso()
             self.persist()
-            self.emit("error", {"status": "error"})
+            self.emit("error", {"status": "error", "message": str(exc)})
             return
         try:
-            assert proc.stdout is not None
             assistant_parts: list[str] = []
             final_text = ""
+            assert proc.stdout is not None
             for line in proc.stdout:
                 self.append_log(line, normalizer)
                 text = engine.transcript_from_agent_line(line, self.backend)
@@ -571,9 +600,22 @@ class AuxSession:
                     {"role": "assistant", "text": reply, "at": _now_iso()}
                 )
                 self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
+            elif returncode != 0:
+                code = returncode if returncode is not None else "unknown"
+                self.chat_history.append(
+                    {
+                        "role": "control",
+                        "text": f"Agent run failed before returning a response. Exit code: {code}.\n\nThe provider returned no assistant message for this run.",
+                        "at": _now_iso(),
+                    }
+                )
+                self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
             self.updated_at = _now_iso()
         self.persist()
-        self.emit("completed" if returncode == 0 else "error", {"status": self.status, "returncode": returncode})
+        payload = {"status": self.status, "returncode": returncode}
+        if returncode != 0 and not reply:
+            payload["message"] = "Agent run failed before returning a response."
+        self.emit("completed" if returncode == 0 else "error", payload)
 
     def run_plan(self, prompt: str, artifact: dict[str, Any]) -> None:
         engine = self.manager.engine
@@ -1036,7 +1078,22 @@ class AuxSession:
                 raise ValueError("Unknown message to edit.")
             if str(history[index].get("role") or "").lower() != "user":
                 raise ValueError("Only user messages can be edited.")
-            archived_count = len(history) - index - 1
+            edited_text = str(history[index].get("text") or "").strip()
+            previous_user_duplicate = (
+                index > 0
+                and str(history[index - 1].get("role") or "").lower() == "user"
+                and str(history[index - 1].get("text") or "").strip() == edited_text
+            )
+            archived_tail = [item for item in history[index + 1 :] if isinstance(item, dict)]
+            archived_count = len(archived_tail)
+            archived_plan_ids = [
+                str(item.get("plan_id") or "").strip()
+                for item in archived_tail
+                if str(item.get("kind") or "") == "plan" and str(item.get("plan_id") or "").strip()
+            ]
+            first_archived_plan_id = ""
+            if archived_tail and str(archived_tail[0].get("kind") or "") == "plan":
+                first_archived_plan_id = str(archived_tail[0].get("plan_id") or "").strip()
             self.chat_history = history[:index]
             self.cli_session_id = ""
             self.logs = []
@@ -1045,11 +1102,37 @@ class AuxSession:
             self.returncode = None
             self.status = "idle"
             self.started_at = ""
+            if self.plan_id and self.plan_id in archived_plan_ids:
+                self.plan_id = ""
+                self.plan_thread_id = ""
+                self.plan_turn_id = ""
             if index == 0 and self.title_source == "auto":
                 self.title = self._default_title()
             self.updated_at = _now_iso()
         self.persist()
-        return {"archived_count": archived_count}
+        return {
+            "archived_count": archived_count,
+            "archived_plan_id": first_archived_plan_id,
+            "archived_plan_ids": archived_plan_ids,
+            "edited_text": edited_text,
+            "previous_user_duplicate": previous_user_duplicate,
+        }
+
+    def drop_trailing_duplicate_user(self, text: str) -> None:
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return
+        with self.lock:
+            if not self.chat_history:
+                return
+            last = self.chat_history[-1]
+            if str(last.get("role") or "").lower() != "user":
+                return
+            if str(last.get("text") or "").strip() != cleaned:
+                return
+            self.chat_history = self.chat_history[:-1]
+            self.updated_at = _now_iso()
+        self.persist()
 
     def rename(self, title: str) -> None:
         cleaned = " ".join(str(title or "").strip().split())
@@ -1213,7 +1296,9 @@ class AuxSessionManager:
         if edit_index is not None:
             if uploads:
                 raise ValueError("Edited chat messages cannot add new attachments yet.")
-            session.prepare_message_edit(edit_index)
+            edit_meta = session.prepare_message_edit(edit_index)
+            if edit_meta.get("previous_user_duplicate") and str(edit_meta.get("edited_text") or "").strip() == message:
+                session.drop_trailing_duplicate_user(message)
         saved_uploads = self._save_chat_uploads(session, uploads)
         if saved_uploads:
             if not message:
@@ -1228,7 +1313,7 @@ class AuxSessionManager:
         self.write_context(session)
         resume = bool(session.cli_session_id) and edit_index is None
         session.start_message(message, settings, resume)
-        return {"session": session.public()}
+        return {"session": session.snapshot()}
 
     def start_plan(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         session = self.get(session_id)
@@ -1236,10 +1321,24 @@ class AuxSessionManager:
             raise ValueError("Plan mode is only available for chat sessions.")
         message = str(payload.get("message") or "").strip()
         uploads = payload.get("files") if isinstance(payload.get("files"), list) else []
+        edit_index_raw = payload.get("editIndex", payload.get("edit_index"))
+        edit_index: int | None = None
+        if edit_index_raw not in (None, ""):
+            try:
+                edit_index = int(edit_index_raw)
+            except (TypeError, ValueError):
+                raise ValueError("Invalid message edit index.")
         if not message and not uploads:
             raise ValueError("Plan request is required.")
         if session.is_active():
             raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
+        if edit_index is not None and uploads:
+            raise ValueError("Edited plan messages cannot add new attachments yet.")
+        edit_meta: dict[str, Any] = {}
+        if edit_index is not None:
+            edit_meta = session.prepare_message_edit(edit_index)
+            if edit_meta.get("previous_user_duplicate") and str(edit_meta.get("edited_text") or "").strip() == message:
+                session.drop_trailing_duplicate_user(message)
 
         saved_uploads = self._save_chat_uploads(session, uploads)
         agent_message = message
@@ -1259,7 +1358,7 @@ class AuxSessionManager:
 
         settings = self.engine.normalize_research_settings(payload.get("settings") or session.settings)
         backend = self.engine.normalize_agent_backend(settings.get("backend"))
-        revision_of = self.engine.normalize_plan_id(payload.get("revisePlanId"))
+        revision_of = self.engine.normalize_plan_id(payload.get("revisePlanId") or edit_meta.get("archived_plan_id"))
         revision_plan = ""
         if revision_of:
             try:

@@ -5287,7 +5287,6 @@ function planCardHtml(message, options = {}) {
         <div class="transcript-meta plan-message-meta">
           <span>CoAutoResearch</span>
           <em>Plan mode</em>
-          <em class="plan-status ${escapeHtml(status)}">${escapeHtml(planStatusLabel(status))}</em>
         </div>
         ${activitySummary}
         <div class="transcript-body plan-message-body">
@@ -5300,19 +5299,25 @@ function planCardHtml(message, options = {}) {
   const body = error
     ? `<div class="plan-error">${escapeHtml(error)}</div>`
     : `<div class="plan-rendered markdown-preview">${markdownToHtml(planText)}</div>`;
-  const actionItems = [
-    planText ? messageCopyButton(planText, "Copy plan", "Plan copied.") : "",
+  const copyAction = planText ? messageCopyButton(planText, "Copy plan", "Plan copied.") : "";
+  const primaryActions = [
     includeProjectLaunch ? projectDraftLaunchButtonHtml(currentProjectDraftFooterMessage()) : "",
     ready ? `<button class="secondary-button small-button" type="button" data-plan-revise="${escapeHtml(planId)}">Revise</button>` : "",
     ready ? `<button class="primary-button small-button" type="button" data-plan-approve="${escapeHtml(planId)}">Approve &amp; run</button>` : "",
     approved ? `<span class="plan-approved-note">Implementation started.</span>` : "",
   ].filter(Boolean);
-  const actions = actionItems.length
-    ? `<div class="project-card-actions plan-card-actions">${actionItems.join("")}</div>`
+  const actions = copyAction || primaryActions.length
+    ? `<div class="project-card-actions plan-card-actions">
+        <div class="plan-card-copy-action">${copyAction}</div>
+        <div class="plan-card-primary-actions">${primaryActions.join("")}</div>
+      </div>`
     : "";
   return `
     <article class="framing-message assistant plan-card-message" data-framing-id="${escapeHtml(message.id)}" data-role="assistant" data-kind="plan">
-      <div class="transcript-meta">CoAutoResearch / Plan</div>
+      <div class="transcript-meta plan-message-meta">
+        <span>CoAutoResearch</span>
+        <em>Plan mode</em>
+      </div>
       ${activitySummary}
       <div class="transcript-body project-draft-bubble plan-card-bubble">
         <div class="project-card-head plan-card-head">
@@ -5320,7 +5325,6 @@ function planCardHtml(message, options = {}) {
             <strong>Plan</strong>
             <span>${escapeHtml(provider)}${model ? ` / ${escapeHtml(model)}` : ""}</span>
           </div>
-          <span class="plan-status ${escapeHtml(status)}">${escapeHtml(planStatusLabel(status))}</span>
         </div>
         ${planStepsHtml(artifact.steps)}
         ${body}
@@ -5419,32 +5423,93 @@ function framingThinkingHtml() {
 
 function currentRunLiveStatusHtml() {
   const entries = currentProgressEntries();
-  const processUpdates = currentRunProcessUpdatesHtml(entries);
   const waitNotice = agentWaitStateHtml();
   const showWaitNotice = Boolean(waitNotice);
-  const placeholder = !showWaitNotice ? currentRunPendingPlaceholderHtml(entries) : "";
-  const eventLabel = currentRunActivityEventLabel(entries.length);
+  const activity = currentRunActivitySource(entries);
+  const processUpdates = currentRunProcessUpdatesHtml(entries, { activityKey: activity.key });
+  const placeholder = !showWaitNotice ? currentRunPendingPlaceholderHtml(entries, { activityKey: activity.key }) : "";
+  const controls = runControlButtonsHtml();
   return `
     <article class="framing-message assistant is-thinking" aria-live="polite">
       <div class="transcript-meta">CoAutoResearch</div>
       <div class="transcript-body thinking-bubble">
         <section class="run-live-status" aria-live="polite" aria-label="Current run status">
           <div class="run-live-status-head">
-            <div class="thinking-status-row run-live-status-title">
-              <span class="thinking-dot"></span>
-              <span class="thinking-dot"></span>
-              <span class="thinking-dot"></span>
-              ${isRunVisiblyPending() ? workingDurationHtml() : ""}
-            </div>
-            <div class="run-live-status-actions">
-              <span>${escapeHtml(eventLabel)}</span>
-              ${runControlButtonsHtml()}
-            </div>
+            <button class="activity-open-button run-live-status-open" type="button" data-activity-open data-activity-key="${escapeHtml(activity.key)}" aria-label="${escapeHtml(`${activity.durationText}, ${activity.eventLabel}`)}">
+              <span class="thinking-status-row run-live-status-title">
+                <span class="thinking-dot"></span>
+                <span class="thinking-dot"></span>
+                <span class="thinking-dot"></span>
+                ${isRunVisiblyPending() ? workingDurationHtml() : ""}
+              </span>
+              <strong>${escapeHtml(activity.eventLabel)}</strong>
+            </button>
+            ${controls ? `<div class="run-live-status-actions">${controls}</div>` : ""}
           </div>
           ${processUpdates}
           ${placeholder}
           ${showWaitNotice ? waitNotice : ""}
-          ${currentRunActivityDetailsHtml(entries)}
+        </section>
+      </div>
+    </article>
+  `;
+}
+
+function sessionRunActivitySource(session, entries = []) {
+  const id = String(session?.id || "session").trim() || "session";
+  const backend = session?.backend || session?.settings?.backend || "codex";
+  const started = String(session?.started_at || "").trim();
+  const durationText = session?.running
+    ? workingDurationText(started, { serverClock: Boolean(started) })
+    : activityEntriesDurationText(entries);
+  const eventLabel = currentRunActivityEventLabel(entries.length);
+  const key = `session:${id}:activity`;
+  registerActivityPanelSource(key, {
+    title: "Activity",
+    subtitle: `${agentLabel(backend)} run`,
+    durationText,
+    eventLabel,
+    entries,
+    options: {
+      emptyText: `Waiting for ${agentLabel(backend)} events...`,
+      label: "Run activity timeline",
+    },
+  });
+  return { key, durationText: durationText || "Working", eventLabel };
+}
+
+function sessionRunActivityDetailsHtml(session, entries = []) {
+  sessionRunActivitySource(session, entries);
+  return "";
+}
+
+function sessionRunLiveStatusHtml(session = {}) {
+  const entries = progressEntriesFromTranscript(session.transcript || [], { startedAt: session.started_at || "" });
+  const hasUpdate = currentRunProcessUpdateEntries(entries, 1).length > 0;
+  const activity = sessionRunActivitySource(session, entries);
+  const processUpdates = currentRunProcessUpdatesHtml(entries, {
+    backend: session.backend || session.settings?.backend || "codex",
+    activityKey: activity.key,
+  });
+  const placeholder = !hasUpdate ? currentRunPendingPlaceholderHtml(entries, { activityKey: activity.key, force: true }) : "";
+  return `
+    <article class="framing-message assistant is-thinking" aria-live="polite">
+      ${sessionRunMetaHtml(session)}
+      <div class="transcript-body thinking-bubble">
+        <section class="run-live-status" aria-live="polite" aria-label="Current run status">
+          <div class="run-live-status-head">
+            <button class="activity-open-button run-live-status-open" type="button" data-activity-open data-activity-key="${escapeHtml(activity.key)}" aria-label="${escapeHtml(`${activity.durationText}, ${activity.eventLabel}`)}">
+              <span class="thinking-status-row run-live-status-title">
+                <span class="thinking-dot"></span>
+                <span class="thinking-dot"></span>
+                <span class="thinking-dot"></span>
+                ${workingDurationHtml(session.started_at || "")}
+              </span>
+              <strong>${escapeHtml(activity.eventLabel)}</strong>
+            </button>
+          </div>
+          ${processUpdates}
+          ${placeholder}
         </section>
       </div>
     </article>
@@ -5478,66 +5543,20 @@ function progressEntriesFromTranscript(transcript = [], options = {}) {
     .slice(-6);
 }
 
-function sessionRunActivityDetailsHtml(session, entries = []) {
-  const id = String(session?.id || "session").trim() || "session";
-  const backend = session?.backend || session?.settings?.backend || "codex";
-  const started = String(session?.started_at || "").trim();
-  const durationText = session?.running
-    ? workingDurationText(started, { serverClock: Boolean(started) })
-    : activityEntriesDurationText(entries);
-  const eventLabel = currentRunActivityEventLabel(entries.length);
-  const activityKey = `session:${id}:activity`;
-  registerActivityPanelSource(activityKey, {
-    title: "Activity",
-    subtitle: `${agentLabel(backend)} run`,
-    durationText,
-    eventLabel,
-    entries,
-    options: {
-      emptyText: `Waiting for ${agentLabel(backend)} events...`,
-      label: "Run activity timeline",
-    },
-  });
+function sessionRunMetaHtml(session = {}) {
+  const history = Array.isArray(session.chat_history) ? session.chat_history : [];
+  const lastMessage = history.length ? history[history.length - 1] : null;
+  const isPlanRun = Boolean(
+    session.running &&
+    String(lastMessage?.kind || "") === "plan" &&
+    String(lastMessage?.plan_id || "").trim()
+  );
+  if (!isPlanRun) return `<div class="transcript-meta">CoAutoResearch</div>`;
   return `
-    <div class="run-live-activity-entry">
-      ${activityOpenButtonHtml({
-        key: activityKey,
-        label: "Run activity",
-        eventLabel,
-        className: "run-live-activity-button",
-      })}
+    <div class="transcript-meta plan-message-meta">
+      <span>CoAutoResearch</span>
+      <em>Plan mode</em>
     </div>
-  `;
-}
-
-function sessionRunLiveStatusHtml(session = {}) {
-  const entries = progressEntriesFromTranscript(session.transcript || [], { startedAt: session.started_at || "" });
-  const processUpdates = currentRunProcessUpdatesHtml(entries, { backend: session.backend || session.settings?.backend || "codex" });
-  const hasUpdate = currentRunProcessUpdateEntries(entries, 1).length > 0;
-  const placeholder = !hasUpdate ? `<p class="run-live-placeholder">Preparing response...</p>` : "";
-  const eventLabel = currentRunActivityEventLabel(entries.length);
-  return `
-    <article class="framing-message assistant is-thinking" aria-live="polite">
-      <div class="transcript-meta">CoAutoResearch</div>
-      <div class="transcript-body thinking-bubble">
-        <section class="run-live-status" aria-live="polite" aria-label="Current run status">
-          <div class="run-live-status-head">
-            <div class="thinking-status-row run-live-status-title">
-              <span class="thinking-dot"></span>
-              <span class="thinking-dot"></span>
-              <span class="thinking-dot"></span>
-              ${workingDurationHtml(session.started_at || "")}
-            </div>
-            <div class="run-live-status-actions">
-              <span>${escapeHtml(eventLabel)}</span>
-            </div>
-          </div>
-          ${processUpdates}
-          ${placeholder}
-          ${sessionRunActivityDetailsHtml(session, entries)}
-        </section>
-      </div>
-    </article>
   `;
 }
 
@@ -5592,7 +5611,7 @@ function framingProgressContent(entry) {
   const webSearch = webSearchActivityInfo(entry);
   if (webSearch) return webSearch.summary;
   if (rawType.includes("reasoning") || kind === "reasoning") {
-    return compactText(content, 220);
+    return compactText(readableReasoningContent(content), 220);
   }
   if (content.includes("file_change")) {
     const lines = content.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -5602,6 +5621,15 @@ function framingProgressContent(entry) {
     return compactText(`${file ? basename(file) : "file"} ${action}${state ? `, ${state}` : ""}`, 180);
   }
   return compactText(content.replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, ""), 220);
+}
+
+function readableReasoningContent(value) {
+  return String(value || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^reasoning$/i.test(line) && !/^(?:reasoning\s+)?rs_[0-9a-f]{16,}$/i.test(line))
+    .join("\n\n")
+    .trim();
 }
 
 function normalizedAgentEventPrefix(value) {
@@ -5802,8 +5830,13 @@ function currentRunProcessUpdatesHtml(entries = currentProgressEntries(), option
   const updates = currentRunProcessUpdateEntries(entries, options.limit || 3);
   if (!updates.length) return "";
   const className = options.className || "run-live-updates";
+  const activityKey = String(options.activityKey || "").trim();
+  const triggerAttrs = activityKey
+    ? ` role="button" tabindex="0" data-activity-open data-activity-key="${escapeHtml(activityKey)}" aria-label="${escapeHtml(options.activityLabel || "Open activity")}" title="${escapeHtml(options.activityTitle || "Open activity")}"`
+    : "";
+  const interactiveClass = activityKey ? " is-activity-trigger" : "";
   return `
-    <div class="${escapeHtml(className)}" aria-label="${escapeHtml(options.label || `${agentLabel(options.backend || sessionBackend())} updates`)}">
+    <div class="${escapeHtml(className)}${interactiveClass}" aria-label="${escapeHtml(options.label || `${agentLabel(options.backend || sessionBackend())} updates`)}"${triggerAttrs}>
       ${updates
         .map((entry) => `<p>${escapeHtml(compactText(visibleProcessUpdateText(entry), options.maxLength || 360))}</p>`)
         .join("")}
@@ -5984,11 +6017,16 @@ function liveStatusHtml(entries = currentProgressEntries(), progress = {}, waitS
 }
 
 function currentRunPendingPlaceholderHtml(entries = currentProgressEntries(), options = {}) {
-  if (!isRunVisiblyPending()) return "";
+  if (!options.force && !isRunVisiblyPending()) return "";
   if (currentRunProcessUpdateEntries(entries, 1).length) return "";
   const className = options.className || "run-live-placeholder";
   const text = options.text || "Preparing response...";
-  return `<p class="${escapeHtml(className)}">${escapeHtml(text)}</p>`;
+  const activityKey = String(options.activityKey || "").trim();
+  const triggerAttrs = activityKey
+    ? ` role="button" tabindex="0" data-activity-open data-activity-key="${escapeHtml(activityKey)}" aria-label="${escapeHtml(options.activityLabel || "Open activity")}" title="${escapeHtml(options.activityTitle || "Open activity")}"`
+    : "";
+  const interactiveClass = activityKey ? " is-activity-trigger" : "";
+  return `<p class="${escapeHtml(className)}${interactiveClass}"${triggerAttrs}>${escapeHtml(text)}</p>`;
 }
 
 function framingProgressRowsHtml(entries) {
@@ -6026,15 +6064,15 @@ function framingProgressRowsHtml(entries) {
   `;
 }
 
-function currentRunActivityDetailsHtml(entries = currentProgressEntries()) {
+function currentRunActivitySource(entries = currentProgressEntries()) {
   const count = entries.length;
-  const activityKey = activeRunActivityDetailsKey();
+  const key = activeRunActivityDetailsKey();
   const eventLabel = currentRunActivityEventLabel(count);
   const session = sessionState();
   const run = activeRun();
   const started = currentRunStartedAtString(run.started_at || session.started_at || "");
   const durationText = isRunVisiblyPending() ? workingDurationText(started, { serverClock: Boolean(started) }) : activityEntriesDurationText(entries);
-  registerActivityPanelSource(activityKey, {
+  registerActivityPanelSource(key, {
     title: "Activity",
     subtitle: `${agentLabel(sessionBackend())} run`,
     durationText,
@@ -6045,16 +6083,12 @@ function currentRunActivityDetailsHtml(entries = currentProgressEntries()) {
       label: "Run activity timeline",
     },
   });
-  return `
-    <div class="run-live-activity-entry">
-      ${activityOpenButtonHtml({
-        key: activityKey,
-        label: "Run activity",
-        eventLabel,
-        className: "run-live-activity-button",
-      })}
-    </div>
-  `;
+  return { key, durationText: durationText || "Working", eventLabel };
+}
+
+function currentRunActivityDetailsHtml(entries = currentProgressEntries()) {
+  currentRunActivitySource(entries);
+  return "";
 }
 
 function framingProgressDetailsHtml() {
@@ -8223,7 +8257,7 @@ function transcriptPayloadHtml(entry) {
 
 function reasoningEventHtml(entry) {
   const id = String(entry?.id || "");
-  const content = String(entry?.content || "");
+  const content = readableReasoningContent(entry?.content || "");
   if (!content.trim()) return "";
   return `
     <article class="transcript-message assistant is-reasoning" data-transcript-id="${escapeHtml(id)}">
@@ -9229,24 +9263,26 @@ function workedDurationLabel(userEntry, entries) {
   return `Worked for ${formatWorkedDuration((end - start) / 1000)}`;
 }
 
-function inlineRunActivityHtml(userEntry, entries) {
+function inlineRunActivityHtml(userEntry, entries, options = {}) {
   if (!entries.length) return "";
-  const label = workedDurationLabel(userEntry, entries);
-  const eventLabel = currentRunActivityEventLabel(entries.length);
-  const activityKey = [
+  const label = options.label || workedDurationLabel(userEntry, entries);
+  const eventLabel = options.eventLabel || currentRunActivityEventLabel(entries.length);
+  const activityKey = options.key || [
     "inline",
     activeProjectId || appState?.active_project_id || "",
     String(userEntry?.id || entryTimeValue(userEntry) || ""),
   ].join(":");
+  const backend = options.backend || sessionBackend();
   registerActivityPanelSource(activityKey, {
-    title: "Activity",
-    subtitle: `${agentLabel(sessionBackend())} worked activity`,
+    title: options.title || "Activity",
+    subtitle: options.subtitle || `${agentLabel(backend)} worked activity`,
     durationText: label,
     eventLabel,
     entries,
     options: {
       label: "Worked activity timeline",
       emptyText: "No activity was recorded for this turn.",
+      ...(options.panelOptions || {}),
     },
   });
   return `
@@ -9254,9 +9290,30 @@ function inlineRunActivityHtml(userEntry, entries) {
       key: activityKey,
       label,
       eventLabel,
-      className: "framing-run-activity",
+      className: options.className || "framing-run-activity",
     })}
   `;
+}
+
+function fallbackPlanActivityEntries(message, userMessage, entries) {
+  const artifactId = String(message?.artifact?.id || message?.planId || "").trim();
+  const planText = normalizedTranscriptText(message?.artifact?.plan_text || message?.artifact?.text || message?.text || "");
+  const start = framingMessageTime(userMessage, 0);
+  const end = framingMessageTime(message, 0)
+    || Date.parse(String(message?.artifact?.updated_at || message?.artifact?.created_at || ""))
+    || 0;
+  let matches = (entries || []).filter((entry) => {
+    const role = transcriptRole(entry);
+    if (role === "user") return false;
+    const entryArtifactId = String(entry?.artifact?.id || "").trim();
+    if (artifactId && entryArtifactId === artifactId) return true;
+    if (String(entry?.kind || "").toLowerCase() === "plan" && planText && normalizedTranscriptText(entry?.content) === planText) return true;
+    const createdAt = entryTimeValue(entry);
+    if (!start || !createdAt || createdAt < start - 1000) return false;
+    if (end && createdAt > end + 1000) return false;
+    return true;
+  });
+  return matches;
 }
 
 function transcriptRunStart(entry) {
@@ -9320,11 +9377,21 @@ function buildFramingActivityByMessage(messages, entries) {
         renderedAssistantTexts.add(messageText);
       }
     }
+    if (attachIndex < 0) {
+      attachIndex = messages.findIndex((message, index) => (
+        index > userIndex &&
+        index < endIndex &&
+        message?.role === "assistant" &&
+        message.kind === "plan" &&
+        String(message.artifact?.id || message.planId || "").trim()
+      ));
+    }
     if (attachIndex < 0) return;
     const attachMessage = messages[attachIndex];
     if (!attachMessage?.id) return;
     const activityEntries = group.entries.filter((entry) => {
       if (entry === finalEntry || (finalEntry?.id && entry?.id === finalEntry.id)) return false;
+      if (attachMessage.kind === "plan" && String(entry?.kind || "").toLowerCase() === "plan") return false;
       const role = transcriptRole(entry);
       if (!["assistant", "final"].includes(role)) return true;
       return !renderedAssistantTexts.has(normalizedTranscriptText(entry?.content));
@@ -9336,6 +9403,30 @@ function buildFramingActivityByMessage(messages, entries) {
     group.entries.forEach((entry) => {
       if (entry?.id) omittedEntryIds.add(String(entry.id));
     });
+  });
+  messages.forEach((message, index) => {
+    if (message?.role !== "assistant" || message.kind !== "plan" || !String(message.artifact?.id || message.planId || "").trim()) return;
+    if (htmlBeforeMessageId.has(message.id)) return;
+    let userMessage = null;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      if (messages[cursor]?.role === "user") {
+        userMessage = messages[cursor];
+        break;
+      }
+    }
+    if (!userMessage) return;
+    const fallbackEntries = fallbackPlanActivityEntries(message, userMessage, visibleEntries);
+    if (!fallbackEntries.length) return;
+    htmlBeforeMessageId.set(message.id, inlineRunActivityHtml(
+      {
+        id: userMessage.id || `user-${index}`,
+        role: "user",
+        raw_type: "ui.plan",
+        content: userMessage.text || "",
+        created_at: userMessage.created_at || "",
+      },
+      fallbackEntries,
+    ));
   });
   return { htmlBeforeMessageId, omittedEntryIds };
 }
@@ -9521,8 +9612,7 @@ function transcriptEntryHtml(entry) {
   const payloadHtml = transcriptPayloadHtml(entry);
   if (payloadHtml) return payloadHtml;
   if (String(entry?.kind || "") === "reasoning") {
-    const reasoningHtml = reasoningEventHtml(entry);
-    if (reasoningHtml) return reasoningHtml;
+    return reasoningEventHtml(entry);
   }
   const fileChange = parseFileChangeInfo(content);
   const statusPayload = isUiCommandResult(entry) ? parseStatusCardPayload(content) : null;
@@ -9720,6 +9810,7 @@ window.CoAutoChatUi = {
   copyTextToClipboard,
   resumeCommandForSession,
   sessionRunLiveStatusHtml,
+  inlineRunActivityHtml,
   updateWorkingDurations,
   scheduleWorkingTicker,
   shellQuote,
@@ -11899,45 +11990,63 @@ function renderExportPanel() {
   const readiness = appState?.summaries?.manuscript?.readiness?.paper_pack || {};
   const paperReady = readiness.ready === true;
   const blockers = Array.isArray(readiness.blockers) ? readiness.blockers : [];
-  const blockerText = blockers.length ? blockers.slice(0, 4).join(" ") : "Research results are not ready for a paper-writing handoff.";
+  const blockerItems = blockers.length
+    ? blockers.slice(0, 3)
+    : ["The finished-results blueprint is not ready for drafting handoff."];
+  const hiddenBlockerCount = Math.max(0, blockers.length - blockerItems.length);
+  const readinessCallout = paperReady
+    ? ""
+    : `
+      <div class="export-readiness-callout">
+        <div>
+          <strong>Not paper-ready yet</strong>
+          <span>${blockers.length ? `${blockers.length} readiness issue${blockers.length === 1 ? "" : "s"}` : "Paper pack gate is closed"}</span>
+        </div>
+        <ul>
+          ${blockerItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          ${hiddenBlockerCount ? `<li>${hiddenBlockerCount} more issue${hiddenBlockerCount === 1 ? "" : "s"} in the readiness check.</li>` : ""}
+        </ul>
+      </div>
+    `;
   return `
     <div class="export-panel">
       <div class="export-panel-intro">
         <strong>Paper-writing handoff</strong>
-        <p>${paperReady ? "A clean manuscript package for GPT, Claude, or human co-writing." : "The paper-writing handoff is gated until the full-results blueprint is ready."}</p>
+        <p>${paperReady ? "A clean manuscript package for GPT, Claude, or human co-writing." : "Download the current writing package anytime; readiness only says whether it is paper-ready."}</p>
       </div>
+      ${readinessCallout}
       <div class="export-actions export-package-list">
         <section class="export-package-option is-primary">
           <div>
             <header>
               <strong>Paper-writing pack</strong>
-              <em>${paperReady ? "Best for GPT/Claude drafting" : "Blocked until paper-ready"}</em>
+              <em>${paperReady ? "Paper-ready" : "Current draft"}</em>
             </header>
-            <p>${paperReady ? "Includes BLUEPRINT.md, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets." : escapeHtml(blockerText)}</p>
+            <p>${paperReady ? "BLUEPRINT.md, final findings, venue notes, references, figure/table specs, and final manuscript assets." : "Current BLUEPRINT.md and supporting manuscript assets, with readiness notes included in README."}</p>
           </div>
-          <button class="primary-button small-button" type="button" data-export-kind="blueprint" ${busy || !paperReady ? "disabled" : ""}>${paperReady ? "Download paper-writing pack" : "Paper-writing pack blocked"}</button>
+          <button class="primary-button small-button" type="button" data-export-kind="blueprint" ${busy ? "disabled" : ""}>${paperReady ? "Download" : "Download current"}</button>
         </section>
         ${paperReady ? "" : `
           <section class="export-package-option">
             <div>
               <header>
                 <strong>Research status pack</strong>
-                <em>Best for incomplete runs</em>
+                <em>For incomplete runs</em>
               </header>
-              <p>Includes PAPER_PLAN.md, STATE.md, HUMAN_TASKS.md, current findings, the blueprint stub or partial blueprint, and acquisition decisions.</p>
+              <p>PAPER_PLAN.md, STATE.md, HUMAN_TASKS.md, current findings, partial blueprint, and acquisition decisions.</p>
             </div>
-            <button class="secondary-button small-button" type="button" data-export-kind="research_status" ${busy ? "disabled" : ""}>Download research status pack</button>
+            <button class="secondary-button small-button" type="button" data-export-kind="research_status" ${busy ? "disabled" : ""}>Download</button>
           </section>
         `}
         <section class="export-package-option">
           <div>
             <header>
               <strong>Clean project package</strong>
-              <em>Best for project handoff</em>
+              <em>For handoff</em>
             </header>
-            <p>Includes final-facing manuscript, workspace, resources, and generated outputs; excludes autoresearch logs, checkpoints, caches, and secrets.</p>
+            <p>Final-facing manuscript, workspace, resources, and generated outputs; excludes logs, checkpoints, caches, and secrets.</p>
           </div>
-          <button class="secondary-button small-button" type="button" data-export-kind="final_project" ${busy ? "disabled" : ""}>Download clean project package</button>
+          <button class="secondary-button small-button" type="button" data-export-kind="final_project" ${busy ? "disabled" : ""}>Download</button>
         </section>
       </div>
       ${renderExportProgress(activeExportJob)}
@@ -16162,6 +16271,13 @@ function bindEvents() {
       resendConversationMessage(framingForm.dataset.framingEditForm, framingForm.elements.message.value);
       return;
     }
+  });
+  document.body.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const activityOpen = event.target.closest("[data-activity-open]");
+    if (!activityOpen) return;
+    event.preventDefault();
+    openActivityPanel(activityOpen.dataset.activityKey || "");
   });
 
   document.body.addEventListener("change", (event) => {

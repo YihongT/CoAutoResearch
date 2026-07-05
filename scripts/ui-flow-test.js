@@ -1676,6 +1676,8 @@ function loadSessionsPanelContext() {
   }
 
   const sessionsById = new Map();
+  const localStore = new Map();
+  let createdSessionCount = 0;
   const cloneSession = (session) => JSON.parse(JSON.stringify(session));
   const upsertSession = (session) => {
     sessionsById.set(session.id, cloneSession(session));
@@ -1702,7 +1704,11 @@ function loadSessionsPanelContext() {
     clearTimeout,
     setInterval() { return 0; },
     clearInterval() {},
-    localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+    localStorage: {
+      getItem(key) { return localStore.has(String(key)) ? localStore.get(String(key)) : null; },
+      setItem(key, value) { localStore.set(String(key), String(value)); },
+      removeItem(key) { localStore.delete(String(key)); },
+    },
     window: {
       activeProjectId: "",
       innerWidth: 1280,
@@ -1742,12 +1748,16 @@ function loadSessionsPanelContext() {
           const includeProjectLaunch = options.includeProjectLaunch !== false;
           return [
             `<section class="plan-card" data-plan-card="${id}">`,
+            options.activityHtml || "",
             `<p>${this.escapeHtml(artifact.plan_text || "Planning...")}</p>`,
             `<button type="button" data-plan-revise="${id}">Revise</button>`,
             `<button type="button" data-plan-approve="${id}">Approve</button>`,
             includeProjectLaunch ? `<button type="button" data-project-draft-launch="${id}">Launch</button>` : "",
             `</section>`,
           ].join("");
+        },
+        inlineRunActivityHtml(_userEntry, entries = []) {
+          return entries.length ? `<button data-activity-open>Worked for 4s · ${entries.length} events</button>` : "";
         },
       },
       addEventListener() {},
@@ -1796,7 +1806,53 @@ function loadSessionsPanelContext() {
       context.__apiCalls.push({ endpoint, body, method: options.method || "GET" });
       const sessionMatch = endpoint.match(/^\/api\/sessions\/([^/]+)(?:\/(.*))?$/);
       if (endpoint === "/api/sessions" && (!options.method || options.method === "GET")) {
-        return { ok: true, json: async () => ({ ok: true, sessions: Array.from(sessionsById.values()).map(cloneSession) }) };
+        const sessions = Array.from(sessionsById.values()).map((session) => {
+          if (!context.__publicListResponse) return cloneSession(session);
+          return {
+            id: session.id,
+            kind: session.kind,
+            title: session.title,
+            title_source: session.title_source,
+            status: session.status,
+            running: session.running,
+            chat_history_count: Array.isArray(session.chat_history) ? session.chat_history.length : 0,
+            transcript_count: Array.isArray(session.transcript) ? session.transcript.length : 0,
+            has_chat_history: Array.isArray(session.chat_history) && session.chat_history.length > 0,
+          };
+        });
+        return { ok: true, json: async () => ({ ok: true, sessions }) };
+      }
+      if (endpoint === "/api/sessions" && options.method === "POST") {
+        const kind = body.kind || "chat";
+        const id = body.id || (kind === "evolution" ? "evolution_created" : `chat_created_${++createdSessionCount}`);
+        const now = "2026-07-05T00:00:00.000Z";
+        const session = {
+          id,
+          kind,
+          title: body.title || (kind === "evolution" ? "CoAutoResearch" : "New session"),
+          title_source: body.title ? "user" : "auto",
+          status: "idle",
+          running: false,
+          chat_history_count: 0,
+          transcript_count: 0,
+          has_chat_history: false,
+          created_at: now,
+          updated_at: now,
+          chat_history: [],
+          transcript: [],
+          plan_artifacts: {},
+        };
+        upsertSession(session);
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            result: {
+              session: cloneSession(session),
+              sessions: Array.from(sessionsById.values()).map(cloneSession),
+            },
+          }),
+        };
       }
       if (sessionMatch) {
         const id = decodeURIComponent(sessionMatch[1]);
@@ -1818,8 +1874,20 @@ function loadSessionsPanelContext() {
             plan_text: body.revisePlanId ? "Revised aux plan" : "Aux plan body",
             steps: [],
           };
+          const editIndex = Number.isInteger(body.editIndex) ? body.editIndex : null;
+          const base = Array.isArray(session.chat_history) ? session.chat_history : [];
+          const preserved = editIndex === null ? base.slice() : base.slice(0, editIndex);
+          if (
+            editIndex > 0 &&
+            String(base[editIndex - 1]?.role || "").toLowerCase() === "user" &&
+            String(base[editIndex]?.role || "").toLowerCase() === "user" &&
+            String(base[editIndex - 1]?.text || "").trim() === String(base[editIndex]?.text || "").trim() &&
+            String(base[editIndex]?.text || "").trim() === String(body.message || "").trim()
+          ) {
+            preserved.pop();
+          }
           session.chat_history = [
-            ...(session.chat_history || []),
+            ...preserved,
             { role: "user", text: body.message || "" },
             { role: "assistant", kind: "plan", plan_id: planId, text: "", at: "2026-07-05T00:00:00.000Z" },
           ];
@@ -1854,11 +1922,23 @@ function loadSessionsPanelContext() {
           const editIndex = Number.isInteger(body.editIndex) ? body.editIndex : null;
           const base = Array.isArray(session.chat_history) ? session.chat_history : [];
           session.chat_history = editIndex === null ? base.slice() : base.slice(0, editIndex);
+          if (
+            editIndex > 0 &&
+            String(base[editIndex - 1]?.role || "").toLowerCase() === "user" &&
+            String(base[editIndex]?.role || "").toLowerCase() === "user" &&
+            String(base[editIndex - 1]?.text || "").trim() === String(base[editIndex]?.text || "").trim() &&
+            String(base[editIndex]?.text || "").trim() === String(body.message || "").trim()
+          ) {
+            session.chat_history.pop();
+          }
           session.chat_history.push({ role: "user", text: body.message || "" });
           session.status = "idle";
           session.running = false;
           upsertSession(session);
-          return { ok: true, json: async () => ({ ok: true, result: { session: cloneSession(session) } }) };
+          const responseSession = context.__publicChatResponse
+            ? { id: session.id, kind: session.kind, title: session.title, status: session.status, running: session.running }
+            : cloneSession(session);
+          return { ok: true, json: async () => ({ ok: true, result: { session: responseSession } }) };
         }
       }
       return { ok: true, json: async () => ({ ok: true }) };
@@ -1866,6 +1946,8 @@ function loadSessionsPanelContext() {
     __apiCalls: [],
     __apiError: "",
     __apiErrorEndpoint: "",
+    __publicChatResponse: false,
+    __publicListResponse: false,
     __alerts: [],
     __toasts: [],
     __eventSources: eventSources,
@@ -1880,7 +1962,13 @@ function loadSessionsPanelContext() {
     `
   window.__SessionsPanelTest = {
     state,
+    draftChatId: DRAFT_CHAT_ID,
+    createSession,
+    visibleSessions,
+    chatSessions,
     sendMessage,
+    selectSession,
+    loadSessions,
     renderAll,
     connectEvents,
     setSessionPlanModeState,
@@ -1919,6 +2007,24 @@ function loadSessionsPanelContext() {
     chatLog.dispatchEvent(event);
     await new Promise((resolve) => setTimeout(resolve, 0));
     return { defaultPrevented: event.defaultPrevented, stopped: event.stopped };
+  };
+  context.__dispatchSessionEditClick = async (index) => {
+    const target = {
+      dataset: { sessionMessageEdit: String(index) },
+      closest(selector) {
+        if (selector === "[data-session-message-edit]") return this;
+        return null;
+      },
+    };
+    const event = {
+      type: "click",
+      target,
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    chatLog.dispatchEvent(event);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return event;
   };
   context.__seedSessions = (sessions, activeId) => {
     sessionsById.clear();
@@ -1977,6 +2083,7 @@ function testButtonInventoryHasHandlers() {
   const appJs = sourceText("templates/default/ui/app.js");
   const sessionsPanelJs = sourceText("templates/default/ui/sessions-panel.js");
   const sessionsPanelCss = sourceText("templates/default/ui/sessions-panel.css");
+  const stylesCss = sourceText("templates/default/ui/styles.css");
   const serverPy = sourceText("templates/default/ui/server.py");
   const auxSessionsPy = sourceText("templates/default/ui/aux_sessions.py");
   const monitorPrompt = sourceText("templates/default/instructions/sessions/chat/prompts/MONITOR_PROGRESS.md");
@@ -2035,6 +2142,10 @@ function testButtonInventoryHasHandlers() {
   assert.equal(sessionsPanelCss.includes(".sessions-empty-start .stage-panel[data-stage-panel=\"1\"]"), true, "sessions empty state should adapt the copied autoresearch start-page wrapper inside the chat log");
   assert.equal(sessionsPanelJs.includes("sv-empty-session"), false, "empty chat sessions should not use a separate sessions-only empty-state card");
   assert.equal(sessionsPanelCss.includes(".sv-empty-session"), false, "sessions CSS should not keep the old separate empty-state card");
+  assert.equal(stylesCss.includes("Autoresearch conversations use the same message rail as ordinary Chat."), true, "autoresearch conversations should explicitly share the chat message rail");
+  assert.equal(stylesCss.includes("body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread") && stylesCss.includes("padding-inline: 28px !important"), true, "autoresearch fixed scroller should keep chat-like gutter padding instead of shrinking the message rail through centering padding");
+  assert.equal(stylesCss.includes("#cold-start-workspace.has-framing-thread .framing-message") && stylesCss.includes("width: min(var(--framing-column-width, 760px), 100%)"), true, "autoresearch message width should match the ordinary chat message width");
+  assert.equal(stylesCss.includes("#cold-start-workspace.has-framing-thread .framing-message.user .transcript-body") && stylesCss.includes("max-width: min(620px, 78%)"), true, "autoresearch user bubbles should match ordinary chat bubble width");
   assert.equal(indexHtml.includes("Reset agent context") && !indexHtml.includes(">Clear context<"), true, "chat context action should use reset-agent-context wording");
   assert.equal(auxSessionsPy.includes("self.chat_history = []"), false, "resetting agent context must preserve visible chat history");
   assert.equal(auxSessionsPy.includes("Reset provider CLI context while preserving visible chat history"), true, "aux session reset should document the preserved-history behavior");
@@ -2501,6 +2612,97 @@ function testPlanCardHidesLaunchAfterAutoresearchStarts() {
   assert.equal(html.includes("data-plan-approve"), true, "plan approval remains a plan-specific action");
 }
 
+function testPlanCardUsesSingleModeChip() {
+  const app = loadAppContext();
+  const html = app.run(`planCardHtml({
+    id: "plan-running",
+    kind: "plan",
+    artifact: {
+      id: "P_running",
+      provider: "codex",
+      model: "gpt-5.5",
+      status: "running",
+      plan_text: "# Running plan\\n\\nInspect the project state.",
+      steps: []
+    }
+  }, { includeProjectLaunch: false })`);
+  assert.equal((html.match(/Plan mode/g) || []).length, 1, "plan cards should render one Plan mode chip");
+  assert.equal(html.includes("CoAutoResearch / Plan"), false, "plan cards should not render a second breadcrumb-style plan label");
+  assert.equal(html.includes(">Planning<"), false, "running plan cards should not render a duplicate Planning status pill");
+  assert.equal(html.includes("plan-card-copy-action"), true, "plan card copy control should have its own left-side action slot");
+  assert.equal(html.includes("plan-card-primary-actions"), true, "plan card approval controls should have their own right-side action slot");
+  assert.ok(html.indexOf("plan-card-copy-action") < html.indexOf("plan-card-primary-actions"), "plan card copy slot should precede primary actions in markup");
+}
+
+function testCompletedPlanCardKeepsWorkedActivityEntry() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", mode: "plan", text: "Can you write a plan?", created_at: "2026-06-17T10:00:00.000Z" },
+      {
+        id: "plan-P_done",
+        role: "assistant",
+        kind: "plan",
+        text: "# Plan\\n\\nDo the next step.",
+        created_at: "2026-06-17T10:00:06.000Z",
+        artifact: { id: "P_done", status: "ready", provider: "codex", model: "gpt-5.5", plan_text: "# Plan\\n\\nDo the next step." }
+      }
+    ]);
+    __setSession({
+      id: "s-plan",
+      session_id: "sid",
+      status: "completed",
+      mode: "plan",
+      started_at: "2026-06-17T10:00:00.000Z",
+      active_run: { running: false, mode: "plan", run_id: "s-plan", started_at: "2026-06-17T10:00:00.000Z" },
+      transcript: [
+        { id: "tr1", role: "assistant", kind: "reasoning", raw_type: "item.reasoning.summaryTextDelta", content: "Reading the project state.", created_at: "2026-06-17T10:00:02.000Z" },
+        { id: "tp1", role: "assistant", kind: "plan", raw_type: "ui.plan.artifact", content: "# Plan\\n\\nDo the next step.", created_at: "2026-06-17T10:00:06.000Z", artifact: { id: "P_done", status: "ready", plan_text: "# Plan\\n\\nDo the next step." } }
+      ],
+      latest_plan: { id: "P_done", status: "ready", provider: "codex", model: "gpt-5.5", plan_text: "# Plan\\n\\nDo the next step." }
+    });
+  `);
+  const html = app.run(`(() => {
+    const visible = visibleFramingMessagesForRender(localMessages);
+    const activity = buildFramingActivityByMessage(visible, sessionTranscriptEntries());
+    return visible.map((message) => framingMessageHtml(message, { activityHtml: activity.htmlBeforeMessageId.get(message.id) || "" })).join("");
+  })()`);
+  assert.equal(html.includes("Worked for"), true, "completed plan cards should keep a worked-duration activity affordance even when the transcript lacks a ui.plan user entry");
+  assert.equal(html.includes("data-activity-open"), true, "completed plan activity affordance should open the activity panel");
+  assert.equal(html.includes("Run activity"), false, "completed plan cards should not render a separate Run activity row");
+}
+
+function testCompletedPlanCardDoesNotInventWorkedActivity() {
+  const app = loadAppContext();
+  app.run(`
+    __setMessages([
+      { id: "u1", role: "user", kind: "text", mode: "plan", text: "Can you write a plan?", created_at: "2026-06-17T10:00:00.000Z" },
+      {
+        id: "plan-P_done",
+        role: "assistant",
+        kind: "plan",
+        text: "# Plan\\n\\nDo the next step.",
+        created_at: "2026-06-17T10:00:06.000Z",
+        artifact: { id: "P_done", status: "ready", provider: "codex", model: "gpt-5.5", plan_text: "# Plan\\n\\nDo the next step." }
+      }
+    ]);
+    __setSession({
+      id: "s-plan",
+      session_id: "sid",
+      status: "completed",
+      mode: "plan",
+      transcript: [],
+      latest_plan: { id: "P_done", status: "ready", provider: "codex", model: "gpt-5.5", plan_text: "# Plan\\n\\nDo the next step." }
+    });
+  `);
+  const html = app.run(`(() => {
+    const visible = visibleFramingMessagesForRender(localMessages);
+    const activity = buildFramingActivityByMessage(visible, sessionTranscriptEntries());
+    return visible.map((message) => framingMessageHtml(message, { activityHtml: activity.htmlBeforeMessageId.get(message.id) || "" })).join("");
+  })()`);
+  assert.equal(html.includes("Worked for"), false, "plan cards must not invent a worked-duration fallback when there are no real activity entries");
+}
+
 async function testAuxPlanSendUsesSessionPlanEndpoint() {
   const app = loadSessionsPanelContext();
   app.context.__seedSessions([
@@ -2516,6 +2718,112 @@ async function testAuxPlanSendUsesSessionPlanEndpoint() {
   assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").armed'), false, "successful aux plan sends should clear only that session's armed state");
 }
 
+function testAuxRunningPendingPlanHidesDuplicatePlanningMarker() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "running",
+      running: true,
+      plan_id: "P_pending",
+      chat_history: [
+        { role: "user", text: "plan this" },
+        { role: "assistant", kind: "plan", plan_id: "P_pending", text: "" },
+      ],
+      transcript: [],
+      plan_artifacts: {
+        P_pending: { id: "P_pending", type: "plan", status: "running", owner_session_id: "chat_a", plan_text: "", steps: [] },
+      },
+    },
+  ], "chat_a");
+  const html = app.context.__sessionElements.chatLog.innerHTML;
+  assert.equal(html.includes("Planning..."), false, "running pending aux plans should not render a separate Planning marker above live status");
+}
+
+async function testSessionsRefreshRestoresLastActiveChat() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    { id: "evo", kind: "evolution", title: "Autoresearch session", status: "idle", running: false },
+    { id: "chat_a", kind: "chat", title: "Chat A", status: "idle", running: false, chat_history: [{ role: "user", text: "Hi" }], transcript: [], plan_artifacts: {} },
+  ], "evo");
+  await app.run('window.__SessionsPanelTest.selectSession("chat_a")');
+  assert.equal(app.run('localStorage.getItem("coauto:sessions:active:p1")'), "chat_a", "selecting a chat should persist it as the project active session");
+  app.context.__apiCalls.length = 0;
+  app.run(`
+    window.__SessionsPanelTest.state.sessions = [];
+    window.__SessionsPanelTest.state.activeId = "";
+    window.__SessionsPanelTest.state.surfaceActive = false;
+  `);
+  await app.run('window.__SessionsPanelTest.loadSessions()');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(app.run('window.__SessionsPanelTest.state.activeId'), "chat_a", "refreshing while a chat was active should restore that chat, not the autoresearch session");
+  assert.equal(app.run('window.__SessionsPanelTest.state.surfaceActive'), true, "restored chat selection should reopen the chat surface");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions/chat_a" && item.method === "GET"), true, "restored chat should fetch its full session snapshot");
+}
+
+async function testNewChatDraftMaterializesOnlyAfterFirstSend() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    { id: "chat_a", kind: "chat", title: "Chat A", status: "idle", running: false, chat_history: [{ role: "user", text: "Hi" }], transcript: [], plan_artifacts: {} },
+  ], "chat_a");
+  app.context.__apiCalls.length = 0;
+  await app.run('window.__SessionsPanelTest.createSession()');
+  const draftId = app.run('window.__SessionsPanelTest.draftChatId');
+  assert.equal(app.run('window.__SessionsPanelTest.state.activeId'), draftId, "New chat should open a local draft chat");
+  assert.equal(app.run('window.__SessionsPanelTest.state.surfaceActive'), true, "draft chat should show the chat surface");
+  assert.equal(app.run('window.__SessionsPanelTest.state.sessions.some((session) => session.id === window.__SessionsPanelTest.draftChatId)'), false, "draft chat must not be added to persisted chat sessions");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions" && item.method === "POST"), false, "clicking New chat should not create a backend session");
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("What is worth understanding next?"), true, "draft chat should render the new empty welcome prompt");
+
+  await app.run('window.__SessionsPanelTest.sendMessage(window.__SessionsPanelTest.draftChatId, "Hello from draft.", {})');
+  const activeId = app.run('window.__SessionsPanelTest.state.activeId');
+  const createCall = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions" && item.method === "POST");
+  assert.equal(Boolean(createCall), true, "first draft send should create the backend chat session");
+  assert.equal(createCall.body.kind, "chat", "draft materialization should create an ordinary chat session");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === `/api/sessions/${activeId}/chat` && item.method === "POST"), true, "first draft send should continue through the real chat endpoint");
+  assert.equal(activeId === draftId, false, "successful first draft send should switch to the real session id");
+  assert.equal(app.run('window.__SessionsPanelTest.state.sessions.some((session) => session.id === window.__SessionsPanelTest.state.activeId)'), true, "materialized chat should be present in the persisted session list");
+  assert.equal(app.run('localStorage.getItem("coauto:sessions:active:p1")'), activeId, "materialized chat should become the stored active session");
+}
+
+async function testEmptyAutoChatSessionsStayOutOfChats() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    { id: "evo", kind: "evolution", title: "Autoresearch session", status: "idle", running: false },
+    { id: "empty_a", kind: "chat", title: "New session", title_source: "auto", status: "idle", running: false, chat_history: [], transcript: [], plan_artifacts: {} },
+    { id: "chat_hi", kind: "chat", title: "Hi", title_source: "auto", status: "idle", running: false, chat_history: [{ role: "user", text: "Hi" }], transcript: [], plan_artifacts: {} },
+    { id: "empty_b", kind: "chat", title: "New session", title_source: "auto", status: "idle", running: false, chat_history: [], transcript: [], plan_artifacts: {} },
+  ], "evo");
+  assert.deepEqual(app.run('window.__SessionsPanelTest.chatSessions().map((session) => session.id)'), ["chat_hi"], "old empty auto-created New session rows should not appear in Chats");
+
+  app.context.__publicListResponse = true;
+  app.context.__apiCalls.length = 0;
+  app.run(`
+    window.__SessionsPanelTest.state.sessions = [];
+    window.__SessionsPanelTest.state.activeId = "";
+    window.__SessionsPanelTest.state.surfaceActive = false;
+  `);
+  await app.run('window.__SessionsPanelTest.loadSessions()');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(app.run('window.__SessionsPanelTest.chatSessions().map((session) => session.id)'), ["chat_hi"], "public session lists should carry enough metadata to keep empty New session rows hidden");
+}
+
+async function testDraftPlanSendMaterializesThenUsesPlanEndpoint() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([], "");
+  await app.run('window.__SessionsPanelTest.createSession()');
+  app.context.__apiCalls.length = 0;
+  app.run('window.__SessionsPanelTest.setSessionPlanModeState(window.__SessionsPanelTest.draftChatId, { armed: true, revisePlanId: "" })');
+  await app.run('window.__SessionsPanelTest.sendMessage(window.__SessionsPanelTest.draftChatId, "Plan from a draft.", {})');
+  const activeId = app.run('window.__SessionsPanelTest.state.activeId');
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions" && item.method === "POST"), true, "draft Plan sends should still create a backend chat first");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === `/api/sessions/${activeId}/plan` && item.method === "POST"), true, "draft Plan sends should transfer Plan mode to the real session and use the plan endpoint");
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState(window.__SessionsPanelTest.draftChatId).armed'), false, "draft Plan mode should clear after materialization");
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState(window.__SessionsPanelTest.state.activeId).armed'), false, "successful draft Plan send should clear real-session Plan mode");
+}
+
 async function testAuxPlanFailedSendPreservesArmedState() {
   const app = loadSessionsPanelContext();
   app.context.__seedSessions([
@@ -2529,7 +2837,7 @@ async function testAuxPlanFailedSendPreservesArmedState() {
   assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").revisePlanId'), "P_old", "failed aux plan sends should preserve revision target");
 }
 
-async function testAuxPlanEditAlwaysUsesChatEndpoint() {
+async function testAuxPlanArmedEditUsesSessionPlanEndpoint() {
   const app = loadSessionsPanelContext();
   app.context.__seedSessions([
     {
@@ -2545,10 +2853,137 @@ async function testAuxPlanEditAlwaysUsesChatEndpoint() {
   ], "chat_a");
   app.run('window.__SessionsPanelTest.setSessionPlanModeState("chat_a", { armed: true, revisePlanId: "" })');
   await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "edited request", { editIndex: 0 })');
+  const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions/chat_a/plan");
+  assert.equal(Boolean(call), true, "editing in an armed aux session should post to plan");
+  assert.equal(call.body.editIndex, 0, "edited aux plan sends should carry editIndex");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions/chat_a/chat"), false, "armed edited aux sends must not hit the chat endpoint");
+  const history = app.run('window.__SessionsPanelTest.state.sessions.find((item) => item.id === "chat_a").chat_history');
+  assert.equal(history.length, 2, "edited aux plan sends should truncate later messages and replace them with a fresh plan marker");
+  assert.equal(history[0].text, "edited request");
+  assert.equal(history[1].kind, "plan");
+}
+
+async function testAuxPlanEditAutoArmsRevision() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "idle",
+      running: false,
+      chat_history: [
+        { role: "user", text: "old plan request" },
+        { role: "assistant", kind: "plan", plan_id: "P_old", text: "" },
+      ],
+      transcript: [],
+      plan_artifacts: {
+        P_old: { id: "P_old", type: "plan", status: "ready", owner_session_id: "chat_a", plan_text: "Old aux plan", steps: [] },
+      },
+    },
+  ], "chat_a");
+  await app.context.__dispatchSessionEditClick(0);
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").armed'), true, "editing a plan request should arm Plan mode");
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").revisePlanId'), "P_old", "editing a plan request should preserve the previous plan id as revision target");
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "revised plan request", { editIndex: 0 })');
+  const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions/chat_a/plan");
+  assert.equal(Boolean(call), true, "resending an edited plan request should use the plan endpoint");
+  assert.equal(call.body.revisePlanId, "P_old", "resending an edited plan request should send revisePlanId");
+}
+
+async function testAuxPlanResendCollapsesDuplicateUserHistory() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "idle",
+      running: false,
+      chat_history: [
+        { role: "user", text: "Can you write a plan on next steps?" },
+        { role: "user", text: "Can you write a plan on next steps?" },
+        { role: "assistant", kind: "plan", plan_id: "P_old", text: "" },
+      ],
+      transcript: [],
+      plan_artifacts: {
+        P_old: { id: "P_old", type: "plan", status: "ready", owner_session_id: "chat_a", plan_text: "Old aux plan", steps: [] },
+      },
+    },
+  ], "chat_a");
+  app.run('window.__SessionsPanelTest.setSessionPlanModeState("chat_a", { armed: true, revisePlanId: "P_old" })');
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "Can you write a plan on next steps?", { editIndex: 1 })');
+  const history = app.run('window.__SessionsPanelTest.state.sessions.find((item) => item.id === "chat_a").chat_history');
+  const userMessages = history.filter((message) => message.role === "user" && message.text === "Can you write a plan on next steps?");
+  assert.equal(userMessages.length, 1, "resending a duplicated plan user message should collapse the stale duplicate");
+  assert.equal(history.length, 2, "resending a duplicated plan user message should leave one user message and one plan marker");
+  assert.equal(history[1].kind, "plan", "resending a duplicated plan user message should still append a fresh plan marker");
+}
+
+async function testAuxOrdinaryEditUsesChatEndpoint() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "idle",
+      running: false,
+      chat_history: [{ role: "user", text: "old request" }, { role: "assistant", text: "old answer" }],
+      transcript: [],
+      plan_artifacts: {},
+    },
+  ], "chat_a");
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "edited request", { editIndex: 0 })');
   const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions/chat_a/chat");
-  assert.equal(Boolean(call), true, "editing in an armed aux session should still post to chat");
-  assert.equal(call.body.editIndex, 0, "edited aux chat sends should carry editIndex");
-  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions/chat_a/plan"), false, "edited aux chat sends must not hit the plan endpoint");
+  assert.equal(Boolean(call), true, "editing ordinary aux chat with Plan off should post to chat");
+  assert.equal(call.body.editIndex, 0, "ordinary edited aux chat sends should carry editIndex");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions/chat_a/plan"), false, "ordinary edited aux chat sends must not hit the plan endpoint");
+}
+
+async function testAuxPublicResponsesPreserveLoadedHistory() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "idle",
+      running: false,
+      chat_history: [{ role: "user", text: "loaded history" }],
+      transcript: [{ id: "t1", role: "assistant", content: "loaded trace" }],
+      plan_artifacts: { P_loaded: { id: "P_loaded", type: "plan", status: "ready", owner_session_id: "chat_a", plan_text: "Loaded plan", steps: [] } },
+    },
+  ], "chat_a");
+  app.context.__publicChatResponse = true;
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "new request", {})');
+  let session = app.run('window.__SessionsPanelTest.state.sessions.find((item) => item.id === "chat_a")');
+  assert.equal(session.chat_history.length, 2, "public chat responses missing chat_history should preserve optimistic loaded history");
+  assert.equal(Boolean(session.plan_artifacts.P_loaded), true, "public chat responses missing plan_artifacts should preserve loaded artifacts");
+
+  app.run('window.__SessionsPanelTest.state.sessions.find((item) => item.id === "chat_a").transcript = [{ id: "t2", role: "assistant", content: "still loaded" }]');
+  app.context.__publicListResponse = true;
+  await app.run('window.__SessionsPanelTest.loadSessions()');
+  session = app.run('window.__SessionsPanelTest.state.sessions.find((item) => item.id === "chat_a")');
+  assert.equal(session.chat_history.length, 2, "public session list responses should not clear loaded chat history");
+  assert.equal(session.transcript.length, 1, "public session list responses should not clear loaded transcript");
+}
+
+function testFailedAuxRunControlMessageRenders() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "error",
+      running: false,
+      chat_history: [{ role: "control", text: "Agent run failed before returning a response. Exit code: 1." }],
+      transcript: [],
+      plan_artifacts: {},
+    },
+  ], "chat_a");
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("Agent run failed before returning a response"), true, "failed aux runs should render a visible control message");
 }
 
 async function testAuxPlanArmedStateIsPerSession() {
@@ -2589,6 +3024,74 @@ async function testAuxPlanMarkerRendersPlanCardAndLiveUpdates() {
     plan: { id: "P_aux", type: "plan", status: "ready", owner_session_id: "chat_a", plan_text: "Updated aux plan", steps: [] },
   });
   assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("Updated aux plan"), true, "aux plan SSE updates should merge into the active session artifact map and rerender");
+}
+
+async function testAuxPlanCardShowsWorkedActivityFromTranscript() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "completed",
+      running: false,
+      chat_history: [
+        { role: "user", text: "Can you write a plan?", at: "2026-06-17T10:00:00.000Z" },
+        { role: "assistant", kind: "plan", plan_id: "P_aux", text: "", at: "2026-06-17T10:00:01.000Z" },
+      ],
+      transcript: [
+        { id: "r1", role: "assistant", kind: "reasoning", content: "Reading the project state.", created_at: "2026-06-17T10:00:02.000Z" },
+        { id: "t1", role: "tool", kind: "tool", content: "Read STATE.md", created_at: "2026-06-17T10:00:03.000Z" },
+      ],
+      plan_artifacts: {
+        P_aux: {
+          id: "P_aux",
+          type: "plan",
+          status: "ready",
+          owner_session_id: "chat_a",
+          provider: "codex",
+          plan_text: "Initial aux plan",
+          created_at: "2026-06-17T10:00:00.000Z",
+          updated_at: "2026-06-17T10:00:06.000Z",
+          steps: [],
+        },
+      },
+    },
+  ], "chat_a");
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("Worked for"), true, "aux plan cards should show worked activity from real session transcript entries");
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("data-activity-open"), true, "aux plan worked activity should open the activity panel");
+}
+
+async function testAuxPlanCardDoesNotInventWorkedActivity() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "completed",
+      running: false,
+      chat_history: [
+        { role: "user", text: "Can you write a plan?", at: "2026-06-17T10:00:00.000Z" },
+        { role: "assistant", kind: "plan", plan_id: "P_aux", text: "", at: "2026-06-17T10:00:01.000Z" },
+      ],
+      transcript: [],
+      plan_artifacts: {
+        P_aux: {
+          id: "P_aux",
+          type: "plan",
+          status: "ready",
+          owner_session_id: "chat_a",
+          provider: "codex",
+          plan_text: "Initial aux plan",
+          created_at: "2026-06-17T10:00:00.000Z",
+          updated_at: "2026-06-17T10:00:06.000Z",
+          steps: [],
+        },
+      },
+    },
+  ], "chat_a");
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("Worked for"), false, "aux plan cards should not show worked activity without real transcript entries");
 }
 
 async function testAuxPlanApproveAndReviseUseSessionRoutes() {
@@ -3448,6 +3951,37 @@ function testTranscriptEntriesDoNotExposeEdit() {
   })`);
   assert.equal(html.includes("data-transcript-edit"), false, "transcript/activity entries should not expose a second edit model");
   assert.equal(html.includes("transcript-edit-form"), false, "transcript/activity entries should not render resend forms");
+}
+
+function testReasoningEntriesHideMachineIds() {
+  const app = loadAppContext();
+  const html = app.run(`transcriptEntryHtml({
+    id: "r1",
+    role: "assistant",
+    kind: "reasoning",
+    raw_type: "item.reasoning.summaryTextDelta",
+    content: "Checking the intervention index before finalizing.\\n\\nreasoning rs_013b3fac77d12d18016a49cdff4bd081939d3f64a83cd21db6"
+  })`);
+  assert.equal(html.includes("Checking the intervention index before finalizing."), true, "reasoning cards should keep readable summaries");
+  assert.equal(html.includes("rs_013b3fac"), false, "reasoning cards should hide raw reasoning ids");
+  const idOnly = app.run(`transcriptEntryHtml({
+    id: "r2",
+    role: "assistant",
+    kind: "reasoning",
+    raw_type: "item.reasoning.summaryTextDelta",
+    content: "reasoning rs_013b3fac77d12d18016a49cdff4bd081939d3f64a83cd21db6"
+  })`);
+  assert.equal(idOnly, "", "reasoning entries that contain only a machine id should be hidden");
+  const progress = app.run(`framingProgressContent({
+    id: "r3",
+    role: "assistant",
+    kind: "reasoning",
+    raw_type: "item.reasoning.summaryTextDelta",
+    content: "reasoning\\n\\nHuman-readable planning note.\\n\\nreasoning rs_013b3fac77d12d18016a49cdff4bd081939d3f64a83cd21db6"
+  })`);
+  assert.equal(progress.includes("rs_013b3fac"), false, "live reasoning progress should not surface raw reasoning ids");
+  assert.equal(progress.startsWith("reasoning"), false, "live reasoning progress should not surface the raw reasoning block label");
+  assert.equal(progress.includes("Human-readable planning note."), true, "live reasoning progress should keep readable text");
 }
 
 function testStructuredTracePayloadCards() {
@@ -5299,7 +5833,8 @@ function testChatRunThinkingUsesLiveStatus() {
   assert.equal(html.includes("turn/completed"), false, "Codex turn completion lifecycle events should not render in the running UI");
   assert.equal(html.includes("Codex is working"), false, "running chat status should not render the verbose active run label");
   assert.equal(html.includes("Working for"), true, "running chat status should show elapsed running time");
-  assert.equal(html.includes("Run activity"), true, "running chat sessions should keep raw events folded under run activity");
+  assert.equal(html.includes("Run activity"), false, "running chat sessions should not render a separate Run activity row");
+  assert.equal(html.includes("data-activity-open"), true, "running chat status should open the activity panel from the working status row");
   assert.equal(html.includes("Current run activity"), false, "running chat sessions should not show the legacy current-run activity panel");
   assert.equal(html.includes("Pause after current turn"), false, "running chat sessions should not show autoresearch loop pause");
   assert.equal(html.includes("data-pause-autoresearch"), false, "chat runs do not have an autoresearch next turn to pause");
@@ -5310,7 +5845,9 @@ function testChatRunThinkingUsesLiveStatus() {
   assert.equal(actionButtons.chatClass.includes("is-stop-mode"), true, "chat composer stop affordance should use stop-mode styling");
   assert.equal(actionButtons.chatDisabled, false, "chat composer stop affordance should remain clickable while the run is active");
   assert.equal(html.includes("Update: Comparing the manuscript title against the current story logic."), false, "chat run status should not duplicate updates as a prefixed summary");
-  const visibleUpdates = html.match(/<div class="run-live-updates"[\s\S]*?<\/div>/)?.[0] || "";
+  const visibleUpdates = html.match(/<div class="run-live-updates[^"]*"[\s\S]*?<\/div>/)?.[0] || "";
+  assert.equal(visibleUpdates.includes("data-activity-open"), true, "chat run visible updates should open the same Activity panel");
+  assert.equal(visibleUpdates.includes("data-activity-key"), true, "chat run visible updates should carry the Activity panel key");
   assert.equal(visibleUpdates.includes("Preparing the current project context."), true, "chat run should show assistant updates even when the raw transcript used an Update prefix");
   assert.equal(visibleUpdates.includes("Update: Preparing the current project context."), false, "visible process updates should strip redundant Update prefixes");
   assert.equal(visibleUpdates.includes("Checking the selected trial boundary."), true, "chat run should show process assistant updates outside the raw activity fold");
@@ -5321,8 +5858,7 @@ function testChatRunThinkingUsesLiveStatus() {
   assert.equal(html.includes("Gate update"), false, "ordinary chat thinking should not render trial progress stages");
   assert.equal(app.run("__progressSummaryProbe()"), "Update: Comparing the manuscript title against the current story logic.", "chat run summary should prefer readable updates over later commands");
   const activityButtonHtml = app.run("__progressDetailsProbe()");
-  assert.equal(activityButtonHtml.includes("data-activity-open"), true, "run activity should render an Activity panel trigger");
-  assert.equal(activityButtonHtml.includes("git diff -- PROJECT.md"), false, "run activity trigger should not inline raw command details");
+  assert.equal(activityButtonHtml, "", "run activity should not render a separate trigger row");
   const panel = app.run("__activityPanelProbe(activeRunActivityDetailsKey())");
   assert.equal(panel.hidden, false, "run activity panel should stay open across re-render");
   assert.equal(panel.html.includes("git diff -- PROJECT.md"), true, "Activity panel should still include raw command details");
@@ -5356,9 +5892,50 @@ function testSessionChatRunUsesSharedLiveStatus() {
   assert.equal(html.includes("run-live-status"), true, "session chat running UI should use the same live-status surface");
   assert.equal(html.includes("Working for"), true, "session chat live status should show elapsed working time");
   assert.equal(html.includes("Reading the current project state."), true, "session chat live status should surface reasoning updates");
-  assert.equal(html.includes("Run activity"), true, "session chat live status should keep raw activity behind the activity affordance");
+  assert.equal(html.includes("Run activity"), false, "session chat live status should not render a separate Run activity row");
+  assert.equal(html.includes("data-activity-open"), true, "session chat live status should open activity from the working status row");
+  const sessionUpdates = html.match(/<div class="run-live-updates[^"]*"[\s\S]*?<\/div>/)?.[0] || "";
+  assert.equal(sessionUpdates.includes("data-activity-open"), true, "session chat visible updates should open the same Activity panel");
+  assert.equal(sessionUpdates.includes("data-activity-key=\"session:CHAT1:activity\""), true, "session chat visible updates should use the session Activity key");
   assert.equal(html.includes("CoAutoResearch is working"), false, "session chat should not use the old fake thinking message");
   assert.equal(html.includes("stream_event"), false, "session chat live status should not show raw stream-event text");
+
+  const ordinaryAfterPlanHtml = app.run(`
+    window.CoAutoChatUi.sessionRunLiveStatusHtml({
+      id: "CHAT2",
+      kind: "chat",
+      running: true,
+      status: "running",
+      backend: "codex",
+      plan_id: "P_old",
+      started_at: "2026-06-17T10:00:00.000Z",
+      chat_history: [
+        { role: "user", text: "Make a plan" },
+        { role: "assistant", kind: "plan", plan_id: "P_old", text: "" },
+        { role: "user", text: "Hi" }
+      ],
+      transcript: []
+    })
+  `);
+  assert.equal(ordinaryAfterPlanHtml.includes("Plan mode"), false, "ordinary chat runs after a previous plan card should not be mislabeled Plan mode");
+
+  const activePlanHtml = app.run(`
+    window.CoAutoChatUi.sessionRunLiveStatusHtml({
+      id: "CHAT3",
+      kind: "chat",
+      running: true,
+      status: "running",
+      backend: "codex",
+      plan_id: "P_active",
+      started_at: "2026-06-17T10:00:00.000Z",
+      chat_history: [
+        { role: "user", text: "Make a plan" },
+        { role: "assistant", kind: "plan", plan_id: "P_active", text: "" }
+      ],
+      transcript: []
+    })
+  `);
+  assert.equal(activePlanHtml.includes("Plan mode"), true, "active aux plan runs should still show the Plan mode badge");
 }
 
 function testChatRunCommandOnlyKeepsRawCommandFolded() {
@@ -5391,7 +5968,9 @@ function testChatRunCommandOnlyKeepsRawCommandFolded() {
   assert.equal(summary.includes("codex exec resume"), false, "command-only chat runs should not expose raw commands as the main summary");
   assert.match(summary, /Waiting|No agent events|Last event|Rate limit/i, "command-only chat runs should show a user-readable waiting summary");
   assert.equal(html.includes("Preparing response..."), true, "command-only chat runs should show a quiet pending placeholder until the first process update arrives");
-  assert.equal(html.includes("Run activity"), true, "command-only chat runs should still expose Activity details");
+  assert.equal(html.includes("run-live-placeholder is-activity-trigger"), true, "pending placeholders should be clickable Activity triggers");
+  assert.equal(html.includes("Run activity"), false, "command-only chat runs should not render a separate Run activity row");
+  assert.equal(html.includes("data-activity-open"), true, "command-only chat runs should expose Activity through the working status row");
   assert.equal(html.includes("codex exec resume"), false, "command-only chat runs should not inline raw command content");
   const panel = app.run("__activityPanelProbe(activeRunActivityDetailsKey())");
   assert.equal(panel.html.includes("codex exec resume"), true, "Activity panel should retain raw command content for debugging");
@@ -5499,7 +6078,7 @@ function testTerminalChatRunWithoutAssistantShowsStatus() {
   const html = app.run("terminalRunNoResponseHtml(latestUnansweredUserMessage(collapseProjectDraftMessages(localMessages)))");
   assert.equal(html.includes("The run failed before a response was saved."), true, "failed runs without an assistant answer should leave a visible status in the thread");
   assert.equal(html.includes("Exit code 1."), true, "terminal status should expose the process exit code when available");
-  assert.equal(html.includes("Run activity"), true, "terminal status should keep available run activity inspectable");
+  assert.equal(html.includes("Run activity"), false, "terminal status should not render a separate Run activity row");
 }
 
 function testRunningProgressFallsBackToReasoningSummary() {
@@ -7546,15 +8125,18 @@ async function testCopyTextHelperWritesClipboard() {
 async function testExportBundleFlow() {
   const base = loadAppContext();
   const panel = base.run("__renderExportPanelProbe(null)");
-  assert.equal(panel.includes("Paper-writing pack blocked"), true);
+  assert.equal(panel.includes("Not paper-ready yet"), true);
+  assert.equal(panel.includes("export-readiness-callout"), true);
+  assert.equal(panel.includes(">Locked<"), false);
+  assert.equal(panel.includes(">Download current<"), true);
   assert.equal(panel.includes('data-export-kind="blueprint"'), true);
-  assert.equal(panel.includes("Download clean project package"), true);
+  assert.equal(panel.includes("Clean project package"), true);
   assert.equal(panel.includes('data-export-kind="final_project"'), true);
-  assert.equal(panel.includes("Blocked until paper-ready"), true);
-  assert.equal(panel.includes("Download research status pack"), true);
+  assert.equal(panel.includes("with readiness notes included in README."), true);
+  assert.equal(panel.includes("Research status pack"), true);
   assert.equal(panel.includes('data-export-kind="research_status"'), true);
-  assert.equal(panel.includes("Best for project handoff"), true);
-  assert.equal(panel.includes('class="primary-button small-button" type="button" data-export-kind="blueprint" disabled'), true);
+  assert.equal(panel.includes("For handoff"), true);
+  assert.equal(panel.includes('class="primary-button small-button" type="button" data-export-kind="blueprint" disabled'), false);
   assert.equal(panel.includes('class="secondary-button small-button" type="button" data-export-kind="final_project"'), true);
   assert.equal(panel.includes("Open BLUEPRINT.md"), false);
   assert.equal(panel.includes("Paper-writing handoff"), true);
@@ -8049,10 +8631,10 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes('href="#manuscript-blueprint-section"'), true, "outline should link to the current manuscript file");
   assert.equal(html.includes("manuscript-export-bar"), true);
   assert.equal(html.includes("Paper-writing handoff"), true);
-  assert.equal(html.includes("Download paper-writing pack"), true);
-  assert.equal(html.includes("Download clean project package"), true);
-  assert.equal(html.includes("Best for GPT/Claude drafting"), true);
-  assert.equal(html.includes("Best for project handoff"), true);
+  assert.equal(html.includes("Paper-writing pack"), true);
+  assert.equal(html.includes("Clean project package"), true);
+  assert.equal(html.includes("Paper-ready"), true);
+  assert.equal(html.includes("For handoff"), true);
   assert.equal(html.includes("Paper package ready"), true);
   assert.equal(html.includes("Open BLUEPRINT.md"), false);
   assert.equal(html.includes("Download BLUEPRINT.md"), true);
@@ -8067,7 +8649,7 @@ async function testManuscriptPanelRendersPaperFiguresTablesAndTraceability() {
   assert.equal(html.includes("Download final project pack"), false);
   assert.equal(html.indexOf("manuscript-export-bar") < html.indexOf("context-card"), true, "export controls should render before manuscript context cards");
   assert.equal(
-    html.indexOf('<div class="export-panel">') < html.indexOf("Download paper-writing pack"),
+    html.indexOf('<div class="export-panel">') < html.indexOf("Paper-writing pack"),
     true,
     "export panel should render the package choices directly"
   );
@@ -8409,11 +8991,26 @@ await testPlanRequestBlockedDuringActiveRun();
 await testPlanCardApproveReviseAndResend();
 await testPlanCardShowsLaunchWhenProjectReady();
 testPlanCardHidesLaunchAfterAutoresearchStarts();
+testPlanCardUsesSingleModeChip();
+testCompletedPlanCardKeepsWorkedActivityEntry();
+testCompletedPlanCardDoesNotInventWorkedActivity();
 await testAuxPlanSendUsesSessionPlanEndpoint();
+testAuxRunningPendingPlanHidesDuplicatePlanningMarker();
+await testSessionsRefreshRestoresLastActiveChat();
+await testNewChatDraftMaterializesOnlyAfterFirstSend();
+await testEmptyAutoChatSessionsStayOutOfChats();
+await testDraftPlanSendMaterializesThenUsesPlanEndpoint();
 await testAuxPlanFailedSendPreservesArmedState();
-await testAuxPlanEditAlwaysUsesChatEndpoint();
+await testAuxPlanArmedEditUsesSessionPlanEndpoint();
+await testAuxPlanEditAutoArmsRevision();
+await testAuxPlanResendCollapsesDuplicateUserHistory();
+await testAuxOrdinaryEditUsesChatEndpoint();
+await testAuxPublicResponsesPreserveLoadedHistory();
+testFailedAuxRunControlMessageRenders();
 await testAuxPlanArmedStateIsPerSession();
 await testAuxPlanMarkerRendersPlanCardAndLiveUpdates();
+await testAuxPlanCardShowsWorkedActivityFromTranscript();
+await testAuxPlanCardDoesNotInventWorkedActivity();
 await testAuxPlanApproveAndReviseUseSessionRoutes();
 await testFreshRemoteProjectFirstMessageSends();
 await testFreshRemoteProjectStaleRunningSnapshotStillSends();
@@ -8445,6 +9042,7 @@ await testResearchEventStreamUpsertsTranscriptAndCompletes();
 testResearchEventStreamSyncsPlanArtifact();
 testResearchEventStreamProjectSwitchAndErrorFallback();
 testTranscriptEntriesDoNotExposeEdit();
+testReasoningEntriesHideMachineIds();
 testStructuredTracePayloadCards();
 testStructuredTracePayloadUpsertAndChecklistSupersede();
 await testEditTruncatesLaterConversationBeforeResend();

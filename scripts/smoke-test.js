@@ -2100,10 +2100,20 @@ Confidence: medium
     !stylesCss.includes(".plan-mode-chip.is-active") ||
     !sessionsPanelJs.includes("planModeArmed") ||
     sessionsPanelJs.includes("Please work in plan mode first") ||
+    sessionsPanelJs.includes("!isEdit && planState.armed") ||
+    !sessionsPanelJs.includes("var isPlanSend = planState.armed") ||
+    !sessionsPanelJs.includes("normalizeSession(session, previous)") ||
+    !sessionsPanelJs.includes("previous?.chat_history") ||
     !sessionsPanelJs.includes('"/api/sessions/" + encodeURIComponent(id) + (isPlanSend ? "/plan" : "/chat")') ||
     !sessionsPanelJs.includes('"/api/sessions/" + encodeURIComponent(state.activeId) + "/plan/approve"') ||
     !sessionsPanelJs.includes("event.stopPropagation()") ||
     !sessionsPanelJs.includes("includeProjectLaunch: false") ||
+    !auxSessionsPy.includes("edit_index_raw = payload.get(\"editIndex\", payload.get(\"edit_index\"))") ||
+    !auxSessionsPy.includes("archived_plan_id") ||
+    !auxSessionsPy.includes("return {\"session\": session.snapshot()}") ||
+    !auxSessionsPy.includes('"logs.json"') ||
+    !auxSessionsPy.includes('"transcript.json"') ||
+    !auxSessionsPy.includes("Agent run failed before returning a response") ||
     stylesCss.includes(".composer-mode-toggle")
   ) {
     throw new Error("real Plan Mode must use dedicated plan APIs, Codex app-server, Claude ExitPlanMode capture, and a single Plan chip without forwarding /plan");
@@ -2848,9 +2858,13 @@ Confidence: medium
     !stylesCss.includes(".paragraph-plan-block") ||
     !stylesCss.includes(".manuscript-actions") ||
     !stylesCss.includes(".traceability-details") ||
-    !appJs.includes("Download paper-writing pack") ||
-    !appJs.includes("Best for GPT/Claude drafting") ||
-    !appJs.includes("Best for project handoff") ||
+    !appJs.includes("Not paper-ready yet") ||
+    !appJs.includes("with readiness notes included in README.") ||
+    !appJs.includes("Download current") ||
+    !appJs.includes("For handoff") ||
+    !stylesCss.includes(".export-readiness-callout") ||
+    serverPy.includes("Paper-Writing Pack is blocked") ||
+    !serverPy.includes("Readiness: not paper-ready.") ||
     appJs.includes("Open BLUEPRINT.md") ||
     !appJs.includes("Download BLUEPRINT.md") ||
     !appJs.includes("data-download-single-file") ||
@@ -5065,11 +5079,23 @@ Confidence: medium
       "        skipped_paths = {item['path'] for item in blueprint_estimate['skipped']}",
       "        assert 'resources/ongoing_work/raw_bundle.zip' in skipped_paths, skipped_paths",
       "        assert 'workspace/results/model.bin' in skipped_paths, skipped_paths",
-      "        try:",
-      "            module.start_export({'kind': 'blueprint', 'confirmed': True})",
-      "            raise AssertionError('Paper-Writing Pack should be blocked for incomplete blueprint')",
-      "        except ValueError as exc:",
-      "            assert 'Paper-Writing Pack is blocked' in str(exc), exc",
+      "        blueprint_job = module.start_export({'kind': 'blueprint', 'confirmed': True})",
+      "        deadline = time.time() + 10",
+      "        blueprint_status = blueprint_job",
+      "        while blueprint_status['status'] == 'packaging' and time.time() < deadline:",
+      "            time.sleep(0.05)",
+      "            blueprint_status = module.export_status(blueprint_job['id'])",
+      "        assert blueprint_status['status'] == 'ready', blueprint_status",
+      "        blueprint_zip_path = pathlib.Path(module.EXPORT_JOBS[blueprint_job['id']]['zip_path'])",
+      "        assert blueprint_zip_path.exists(), blueprint_zip_path",
+      "        with zipfile.ZipFile(blueprint_zip_path) as archive:",
+      "            names = set(archive.namelist())",
+      "            assert {'README.md', 'PROJECT.md', 'BLUEPRINT.md', 'FIGURE_SPECS.md', 'FINDINGS.md', 'MANIFEST.json'} <= names, names",
+      "            assert 'assets/raw_bundle.zip' not in names, names",
+      "            assert 'assets/model.bin' not in names, names",
+      "            readme = archive.read('README.md').decode('utf-8')",
+      "            assert 'Readiness: not paper-ready.' in readme, readme",
+      "            assert 'Current readiness issues:' in readme, readme",
       "        status_estimate = module.export_estimate('research_status')",
       "        assert status_estimate['label'] == 'Research Status Pack', status_estimate",
       "        assert status_estimate['filename'].endswith('-research-status-pack.zip'), status_estimate",

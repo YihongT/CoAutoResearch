@@ -8368,8 +8368,14 @@ def add_directory_export_entries(
 def export_readme(kind: str, estimate_only: bool = False) -> str:
     label = EXPORT_KIND_LABELS[kind]
     if kind == "blueprint":
-        scope = "This package is a clean manuscript handoff for human-machine paper writing. It includes the full-results manuscript blueprint, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets."
-        extra: list[str] = []
+        readiness = paper_pack_readiness()
+        blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
+        if readiness.get("ready"):
+            scope = "This package is a clean manuscript handoff for human-machine paper writing. It includes the full-results manuscript blueprint, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets."
+            extra: list[str] = ["", "Readiness: paper-ready."]
+        else:
+            scope = "This package contains the current manuscript writing materials. It is downloadable for review, collaboration, and partial handoff, but it has not passed the paper-ready gate."
+            extra = ["", "Readiness: not paper-ready.", "", "Current readiness issues:", *(f"- {blocker}" for blocker in blockers[:12] or ["Paper-Writing Pack readiness has not passed."])]
     elif kind == "research_status":
         readiness = paper_pack_readiness()
         blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
@@ -8861,10 +8867,6 @@ def start_export(payload: dict[str, Any]) -> dict[str, Any]:
     kind = normalize_export_kind(payload.get("kind"))
     confirmed = bool(payload.get("confirmed") or payload.get("confirmation") or payload.get("confirm"))
     readiness = paper_pack_readiness() if kind in {"blueprint", "research_status"} else {}
-    if kind == "blueprint" and not readiness.get("ready"):
-        blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
-        detail = "; ".join(str(item) for item in blockers[:8]) or "Paper-Writing Pack readiness has not passed."
-        raise ValueError(f"Paper-Writing Pack is blocked: {detail}")
     plan = build_export_plan(kind)
     prepare_export_plan_for_job(plan)
     estimate = export_public_estimate_from_plan(plan)
@@ -12159,7 +12161,7 @@ def aux_approve_plan_session(session_id: str, payload: dict[str, Any]) -> dict[s
 def aux_stop_session(session_id: str) -> dict[str, Any]:
     session = aux_manager().get(session_id)
     session.stop(force=False)
-    return {"session": session.public()}
+    return {"session": session.snapshot()}
 
 
 def aux_workspace_list(session_id: str, parsed: Any) -> dict[str, Any]:
