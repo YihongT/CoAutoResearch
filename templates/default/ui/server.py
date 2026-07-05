@@ -12148,6 +12148,14 @@ def aux_chat_session(session_id: str, payload: dict[str, Any]) -> dict[str, Any]
     return aux_manager().chat(session_id, payload)
 
 
+def aux_start_plan_session(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return aux_manager().start_plan(session_id, payload)
+
+
+def aux_approve_plan_session(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return aux_manager().approve_plan(session_id, payload)
+
+
 def aux_stop_session(session_id: str) -> dict[str, Any]:
     session = aux_manager().get(session_id)
     session.stop(force=False)
@@ -12522,6 +12530,15 @@ def codex_plan_event_parts(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return codex_app_server_rpc.event_parts(event)
 
 
+def codex_server_request_result(method: str) -> dict[str, Any] | None:
+    lowered = str(method or "").lower()
+    if "approval" not in lowered:
+        return None
+    if "permission" in lowered:
+        return {"permissions": {}}
+    return {"decision": "decline"}
+
+
 def plan_steps_from_payload(value: Any) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []
@@ -12678,6 +12695,32 @@ def process_codex_app_server_plan_run(
                 continue
             if not isinstance(event, dict):
                 continue
+            rpc_request_id = event.get("id") if "id" in event else None
+            request_method = str(event.get("method") or "").strip()
+            if rpc_request_id is not None and request_method:
+                result = codex_server_request_result(request_method)
+                try:
+                    if result is None:
+                        json_rpc_write(
+                            proc,
+                            {
+                                "jsonrpc": "2.0",
+                                "id": rpc_request_id,
+                                "error": {
+                                    "code": -32601,
+                                    "message": f"CoAutoResearch does not handle {request_method} requests.",
+                                },
+                            },
+                        )
+                    else:
+                        json_rpc_write(proc, {"jsonrpc": "2.0", "id": rpc_request_id, "result": result})
+                        if normalizer is not None:
+                            resolved = normalizer.resolve_approval(str(rpc_request_id), "declined", "auto_policy")
+                            if resolved:
+                                append_trace_updates([resolved])
+                except Exception:
+                    pass
+                continue
             if event.get("error"):
                 error_text = event_payload_text(event.get("error")) or "Codex app-server returned an error."
                 raise RuntimeError(
@@ -12694,7 +12737,8 @@ def process_codex_app_server_plan_run(
                         RESEARCH_SESSION["plan_turn_id"] = turn_id
                     update_plan_artifact(plan_id, thread_id=thread_id, session_id=thread_id, status="running")
 
-            if "id" in event and int(event.get("id") or 0) == 1 and not sent_thread_start:
+            response_id = int(event.get("id") or 0) if str(event.get("id") or "").isdigit() else 0
+            if response_id == 1 and not sent_thread_start:
                 json_rpc_write(proc, {"jsonrpc": "2.0", "method": "initialized", "params": {}})
                 request(
                     "thread/start",
@@ -12923,18 +12967,35 @@ def process_codex_app_server_interactive_run(
             if not isinstance(event, dict):
                 continue
 
-            method, params = codex_plan_event_parts(event)
-            request_id = int(event.get("id") or 0) if str(event.get("id") or "").isdigit() else 0
-            if request_id and method and "approval" in method.lower():
+            rpc_request_id = event.get("id") if "id" in event else None
+            request_method = str(event.get("method") or "").strip()
+            if rpc_request_id is not None and request_method:
+                result = codex_server_request_result(request_method)
                 try:
-                    json_rpc_write(proc, {"jsonrpc": "2.0", "id": request_id, "result": {"decision": "decline"}})
-                    if normalizer is not None:
-                        resolved = normalizer.resolve_approval(str(request_id), "declined", "auto_policy")
+                    if result is None:
+                        json_rpc_write(
+                            proc,
+                            {
+                                "jsonrpc": "2.0",
+                                "id": rpc_request_id,
+                                "error": {
+                                    "code": -32601,
+                                    "message": f"CoAutoResearch does not handle {request_method} requests.",
+                                },
+                            },
+                        )
+                    else:
+                        json_rpc_write(proc, {"jsonrpc": "2.0", "id": rpc_request_id, "result": result})
+                    if result is not None and normalizer is not None:
+                        resolved = normalizer.resolve_approval(str(rpc_request_id), "declined", "auto_policy")
                         if resolved:
                             append_trace_updates([resolved])
                 except Exception:
                     pass
                 continue
+
+            method, params = codex_plan_event_parts(event)
+            request_id = int(event.get("id") or 0) if str(event.get("id") or "").isdigit() else 0
 
             if event.get("error"):
                 if request_id == thread_request_id and resume_requested:
@@ -13100,9 +13161,10 @@ if plan:
     artifact["updated_at"] = datetime.now(timezone.utc).isoformat()
     artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
 print(json.dumps({
-    "behavior": "deny",
-    "interrupt": True,
-    "message": "Plan captured by CoAutoResearch. Approve the plan in the UI to run implementation."
+    "hookSpecificOutput": {
+        "hookEventName": "PermissionRequest",
+        "decision": {"behavior": "deny"}
+    }
 }))
 """,
         encoding="utf-8",
@@ -14698,8 +14760,10 @@ def public_plan_artifact(artifact: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     request = artifact.get("request") if isinstance(artifact.get("request"), dict) else {}
     return {
+        "type": "plan",
         "schema_version": int(artifact.get("schema_version") or PLAN_ARTIFACT_SCHEMA_VERSION),
         "id": str(artifact.get("id") or ""),
+        "owner_session_id": str(artifact.get("owner_session_id") or ""),
         "provider": normalize_agent_backend(artifact.get("provider")),
         "model": str(artifact.get("model") or ""),
         "status": str(artifact.get("status") or "pending"),
@@ -14769,7 +14833,7 @@ def latest_plan_artifact() -> dict[str, Any]:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if isinstance(payload, dict):
+        if isinstance(payload, dict) and not str(payload.get("owner_session_id") or "").strip():
             return public_plan_artifact(payload)
     return {}
 
@@ -14781,11 +14845,13 @@ def create_plan_artifact(
     display_message: str,
     attachments: dict[str, Any],
     revision_of: str = "",
+    owner_session_id: str = "",
 ) -> dict[str, Any]:
     plan_id = f"P{now_id()}_{slugify(message[:48] or 'plan', 'plan')}"
     artifact = {
         "schema_version": PLAN_ARTIFACT_SCHEMA_VERSION,
         "id": plan_id,
+        "owner_session_id": str(owner_session_id or ""),
         "provider": normalize_agent_backend(provider),
         "model": str(settings.get("model") or ""),
         "status": "pending",
@@ -15866,6 +15932,14 @@ class ResearchUIHandler(BaseHTTPRequestHandler):
                     return
                 if parsed.path == "/api/sessions":
                     self.send_json({"ok": True, "result": aux_create_session(payload)}, status=201)
+                    return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/plan/approve"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/plan/approve")])
+                    self.send_json({"ok": True, "result": aux_approve_plan_session(session_id, payload)})
+                    return
+                if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/plan"):
+                    session_id = unquote(parsed.path[len("/api/sessions/"):-len("/plan")])
+                    self.send_json({"ok": True, "result": aux_start_plan_session(session_id, payload)})
                     return
                 if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/chat"):
                     session_id = unquote(parsed.path[len("/api/sessions/"):-len("/chat")])

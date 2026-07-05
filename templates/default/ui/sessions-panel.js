@@ -32,7 +32,7 @@
     loadedProjectId: "",
     openMenuId: "",
     attachments: [],
-    planMode: false,
+    planModeArmed: {},
     clearNotices: {},
     editingMessageIndex: null,
   };
@@ -118,10 +118,14 @@
 
   function normalizeSession(session) {
     if (!session) return session;
-    if (session.kind === "monitor" || session.kind === "idea") {
-      return Object.assign({}, session, { kind: "chat" });
+    var normalized = Object.assign({}, session);
+    if (normalized.kind === "monitor" || normalized.kind === "idea") {
+      normalized.kind = "chat";
     }
-    return session;
+    normalized.chat_history = Array.isArray(normalized.chat_history) ? normalized.chat_history : [];
+    normalized.transcript = Array.isArray(normalized.transcript) ? normalized.transcript : [];
+    normalized.plan_artifacts = normalized.plan_artifacts && typeof normalized.plan_artifacts === "object" ? normalized.plan_artifacts : {};
+    return normalized;
   }
 
   function visibleSessions() {
@@ -523,10 +527,10 @@
       html += emptySessionHtml();
     }
     history.forEach(function (message, index) {
-      html += sessionMessageHtml(message, index);
+      html += sessionMessageHtml(message, index, session);
     });
     if (resetNotice) {
-      html += sessionMessageHtml({ role: "control", text: resetNotice }, "reset");
+      html += sessionMessageHtml({ role: "control", text: resetNotice }, "reset", session);
     }
     if (session.running) {
       html += thinkingMessageHtml(session);
@@ -566,7 +570,29 @@
     });
   }
 
-  function sessionMessageHtml(message, index) {
+  function sessionMessageHtml(message, index, session) {
+    if (message?.kind === "plan" && message.plan_id) {
+      var planId = String(message.plan_id || "").trim();
+      var artifact = session?.plan_artifacts && session.plan_artifacts[planId];
+      if (!artifact) {
+        return ui().conversationMessageHtml({ role: "assistant", text: "Planning..." }, {
+          id: String(index),
+          idAttr: "data-session-message-index",
+          role: "assistant",
+          title: "CoAutoResearch",
+          markdown: false,
+          copy: false,
+          canEdit: false,
+          classExtra: " is-thinking",
+        });
+      }
+      if (typeof ui().planCardHtml === "function") {
+        return ui().planCardHtml(
+          { id: "session-plan-" + planId, kind: "plan", artifact: artifact },
+          { includeProjectLaunch: false }
+        );
+      }
+    }
     var role = message.role === "assistant" || message.role === "final"
       ? "assistant"
       : (message.role === "control" || message.role === "system" ? "control" : "user");
@@ -772,12 +798,35 @@
     return Boolean(String(document.getElementById("sv-chat-input")?.value || "").trim() || state.attachments.length);
   }
 
+  function sessionPlanModeState(id) {
+    var entry = state.planModeArmed[id || state.activeId] || {};
+    return {
+      armed: Boolean(entry.armed),
+      revisePlanId: String(entry.revisePlanId || ""),
+    };
+  }
+
+  function setSessionPlanModeState(id, next) {
+    if (!id) return;
+    if (!next || !next.armed) {
+      delete state.planModeArmed[id];
+      return;
+    }
+    state.planModeArmed[id] = {
+      armed: true,
+      revisePlanId: String(next.revisePlanId || ""),
+    };
+  }
+
   function renderSessionPlanMode() {
+    var planState = sessionPlanModeState(state.activeId);
     document.querySelectorAll("[data-session-plan-mode-toggle]").forEach(function (button) {
-      button.classList.toggle("is-active", state.planMode);
-      button.setAttribute("aria-pressed", state.planMode ? "true" : "false");
-      button.setAttribute("aria-label", state.planMode ? "Turn off Plan mode" : "Use Plan mode");
-      button.title = state.planMode ? "Turn off Plan mode" : "Plan mode";
+      button.classList.toggle("is-active", planState.armed);
+      button.setAttribute("aria-pressed", planState.armed ? "true" : "false");
+      button.setAttribute("aria-label", planState.armed ? "Turn off Plan mode" : "Use Plan mode");
+      button.title = planState.revisePlanId
+        ? "Plan revision mode"
+        : planState.armed ? "Turn off Plan mode" : "Plan mode";
     });
   }
 
@@ -1142,17 +1191,15 @@
   }
 
   function requestMessageText(text) {
-    var value = displayMessageText(text);
-    if (state.planMode && value) {
-      return "Please work in plan mode first: propose a concise plan and wait for confirmation before making changes.\n\n" + value;
-    }
-    return value;
+    return displayMessageText(text);
   }
 
   async function sendMessage(id, text, options) {
     options = options || {};
     var editIndex = Number.isInteger(options.editIndex) ? options.editIndex : null;
     var isEdit = editIndex !== null;
+    var planState = sessionPlanModeState(id);
+    var isPlanSend = !isEdit && planState.armed;
     var requestText = requestMessageText(text);
     var displayText = displayMessageText(text);
     var files = [];
@@ -1189,12 +1236,20 @@
     }
     try {
       var body = { message: requestText, settings: currentSettings() };
-      if (isEdit) body.editIndex = editIndex;
-      else body.files = files;
-      var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/chat", {
+      var endpoint = "/api/sessions/" + encodeURIComponent(id) + (isPlanSend ? "/plan" : "/chat");
+      if (isPlanSend) {
+        body.files = files;
+        if (planState.revisePlanId) body.revisePlanId = planState.revisePlanId;
+      } else if (isEdit) {
+        body.editIndex = editIndex;
+      } else {
+        body.files = files;
+      }
+      var r = await apiCall(endpoint, {
         method: "POST",
         body: JSON.stringify(body),
       });
+      if (isPlanSend) setSessionPlanModeState(id, null);
       if (!isEdit) state.attachments = [];
       updateSession(normalizeSession(r.result.session));
       if (state.activeId === id) connectEvents(id);
@@ -1360,7 +1415,14 @@
           if (eventId <= Number(state.eventLastIds[id] || 0)) return;
           state.eventLastIds[id] = eventId;
         }
-        if (data.kind === "completed" || data.kind === "error") {
+        if (data.kind === "plan" && data.plan?.id) {
+          var planSession = state.sessions.find(function (item) { return item.id === id; });
+          if (planSession) {
+            planSession.plan_artifacts = planSession.plan_artifacts && typeof planSession.plan_artifacts === "object" ? planSession.plan_artifacts : {};
+            planSession.plan_artifacts[data.plan.id] = data.plan;
+            if (state.activeId === id) renderSessionView();
+          }
+        } else if (data.kind === "completed" || data.kind === "error") {
           refreshSessionSnapshot(id, { workspace: true });
         } else if (data.log || data.transcript_entry) {
           var session = state.sessions.find(function (item) { return item.id === id; });
@@ -1610,6 +1672,32 @@
     var log = document.getElementById("sv-chat-log");
     if (log) {
       log.addEventListener("click", function (event) {
+        var planApprove = event.target.closest("[data-plan-approve]");
+        if (planApprove) {
+          event.preventDefault();
+          event.stopPropagation();
+          var approvePlanId = planApprove.dataset.planApprove || "";
+          apiCall("/api/sessions/" + encodeURIComponent(state.activeId) + "/plan/approve", {
+            method: "POST",
+            body: JSON.stringify({ planId: approvePlanId, settings: currentSettings() }),
+          }).then(function (r) {
+            updateSession(normalizeSession(r.result.session));
+            if (state.activeId) connectEvents(state.activeId);
+            renderAll();
+          }).catch(function (err) {
+            notify("Plan approval failed: " + err.message, true);
+          });
+          return;
+        }
+        var planRevise = event.target.closest("[data-plan-revise]");
+        if (planRevise) {
+          event.preventDefault();
+          event.stopPropagation();
+          setSessionPlanModeState(state.activeId, { armed: true, revisePlanId: planRevise.dataset.planRevise || "" });
+          renderSessionPlanMode();
+          document.getElementById("sv-chat-input")?.focus();
+          return;
+        }
         var cancelButton = event.target.closest("[data-session-message-edit-cancel]");
         if (cancelButton) {
           state.editingMessageIndex = null;
@@ -1645,7 +1733,8 @@
       event.target.value = "";
     });
     document.querySelector("[data-session-plan-mode-toggle]")?.addEventListener("click", function () {
-      state.planMode = !state.planMode;
+      var current = sessionPlanModeState(state.activeId);
+      setSessionPlanModeState(state.activeId, current.armed ? null : { armed: true, revisePlanId: "" });
       renderSessionPlanMode();
     });
     document.getElementById("sv-composer-model")?.addEventListener("change", function (event) {

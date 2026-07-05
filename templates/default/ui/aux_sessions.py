@@ -29,6 +29,7 @@ import base64
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -96,6 +97,9 @@ class AuxSession:
         self.started_at = ""
         self.settings: dict[str, Any] = {}
         self.backend = "codex"
+        self.plan_id = ""
+        self.plan_thread_id = ""
+        self.plan_turn_id = ""
         self.chat_history: list[dict[str, Any]] = []
         self.logs: list[str] = []
         self.transcript: list[dict[str, Any]] = []
@@ -161,6 +165,7 @@ class AuxSession:
                 "backend": self.backend,
                 "settings": self.settings,
                 "returncode": self.returncode,
+                "plan_id": self.plan_id,
             }
 
     def public(self) -> dict[str, Any]:
@@ -183,7 +188,29 @@ class AuxSession:
             m["logs"] = list(self.logs)[-200:]
             m["transcript"] = list(self.transcript)[-120:]
             m["context_preview"] = self.context_preview()
+            m["plan_artifacts"] = self.plan_artifacts_snapshot_locked()
         return m
+
+    def plan_artifacts_snapshot_locked(self) -> dict[str, Any]:
+        artifacts: dict[str, Any] = {}
+        seen: set[str] = set()
+        for message in self.chat_history:
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("kind") or "") != "plan":
+                continue
+            plan_id = str(message.get("plan_id") or "").strip()
+            if not plan_id or plan_id in seen:
+                continue
+            seen.add(plan_id)
+            try:
+                artifact = self.manager.engine.read_plan_artifact(plan_id)
+                public = self.manager.engine.public_plan_artifact(artifact)
+            except Exception:
+                continue
+            if public.get("id"):
+                artifacts[str(public["id"])] = public
+        return artifacts
 
     def context_preview(self, limit: int = 12000) -> str:
         try:
@@ -228,6 +255,7 @@ class AuxSession:
                     self.started_at = str(data.get("started_at") or "")
                     self.cli_session_id = str(data.get("cli_session_id") or "")
                     self.backend = str(data.get("backend") or "codex")
+                    self.plan_id = str(data.get("plan_id") or "")
                     if isinstance(data.get("settings"), dict):
                         self.settings = data["settings"]
                     prev = str(data.get("status") or "idle")
@@ -425,22 +453,24 @@ class AuxSession:
         return finalized
 
     # ---- run -------------------------------------------------------------
-    def start_message(self, message: str, settings: dict[str, Any], resume: bool) -> None:
-        """Launch the CLI for this session in a background thread."""
+    def start_prepared_run(self, prompt: str, display_message: str, settings: dict[str, Any], resume: bool) -> None:
+        """Launch a prepared CLI prompt while showing a compact user message."""
         engine = self.manager.engine
         self.ensure_dirs()
         self.settings = settings
         self.backend = engine.normalize_agent_backend(settings.get("backend"))
-        prompt = self.manager.build_prompt(self, message)
+        visible = str(display_message or "").strip()
         with self.lock:
             if self.kind == "chat" and self.title_source == "auto" and self.title == self._default_title():
-                self.title = auto_session_title(message)
-            self.chat_history.append({"role": "user", "text": message, "at": _now_iso()})
-            self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
+                self.title = auto_session_title(visible)
+            if visible:
+                self.chat_history.append({"role": "user", "text": visible, "at": _now_iso()})
+                self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
             self.status = "running"
             self.started_at = _now_iso()
             self.streaming_transcript = {}
             self.updated_at = self.started_at
+            self._cancel_requested = False
         self.persist()
         self.emit("session", {"status": "running"})
         thread = threading.Thread(
@@ -451,6 +481,11 @@ class AuxSession:
         with self.lock:
             self._thread = thread
         thread.start()
+
+    def start_message(self, message: str, settings: dict[str, Any], resume: bool) -> None:
+        """Launch the CLI for this session in a background thread."""
+        prompt = self.manager.build_prompt(self, message)
+        self.start_prepared_run(prompt, message, settings, resume)
 
     def _run(self, prompt: str, resume: bool) -> None:
         engine = self.manager.engine
@@ -540,9 +575,410 @@ class AuxSession:
         self.persist()
         self.emit("completed" if returncode == 0 else "error", {"status": self.status, "returncode": returncode})
 
+    def run_plan(self, prompt: str, artifact: dict[str, Any]) -> None:
+        engine = self.manager.engine
+        plan_id = str(artifact.get("id") or self.plan_id or "").strip()
+        settings = self.settings if isinstance(self.settings, dict) else {}
+        backend = engine.normalize_agent_backend(settings.get("backend") or self.backend)
+        returncode: int | None = None
+        normalizer: Any = None
+
+        def public_plan(value: dict[str, Any] | None = None) -> dict[str, Any]:
+            try:
+                return engine.public_plan_artifact(value or engine.read_plan_artifact(plan_id))
+            except Exception:
+                return {}
+
+        def update_artifact(**updates: Any) -> dict[str, Any]:
+            next_artifact = engine.update_plan_artifact(plan_id, **updates)
+            self.emit("plan", {"plan": public_plan(next_artifact)})
+            return next_artifact
+
+        def fail_plan(message: str) -> dict[str, Any]:
+            return update_artifact(status="failed", error=str(message or "Plan run failed."))
+
+        with self.lock:
+            cancelled = self._cancel_requested
+            if cancelled:
+                self._cancel_requested = False
+                self.status = "interrupted"
+                self.updated_at = _now_iso()
+        if cancelled:
+            self.persist()
+            self.emit("session", {"status": "interrupted"})
+            return
+
+        if not plan_id:
+            self.append_log("Plan run failed: missing plan id.")
+            with self.lock:
+                self.status = "error"
+                self.updated_at = _now_iso()
+            self.persist()
+            self.emit("error", {"status": "error"})
+            return
+
+        self.backend = backend
+        if backend == "claude":
+            returncode = self._run_claude_plan(prompt, settings, normalizer, update_artifact, fail_plan)
+        else:
+            returncode = self._run_codex_plan(prompt, settings, normalizer, update_artifact, fail_plan)
+
+        with self.lock:
+            proc = self._process
+        if proc is not None:
+            with self.lock:
+                self._process = None
+
+        artifact_after = {}
+        try:
+            artifact_after = engine.read_plan_artifact(plan_id)
+        except Exception:
+            artifact_after = {}
+        ready = str(artifact_after.get("status") or "") == "ready"
+        with self.lock:
+            self._finalize_active_streaming_transcripts_locked()
+            self._thread = None
+            self.returncode = 0 if ready else (returncode if returncode is not None else 1)
+            self.status = "completed" if ready else "error"
+            self.plan_thread_id = ""
+            self.plan_turn_id = ""
+            self.updated_at = _now_iso()
+        self.persist()
+        self.emit("completed" if ready else "error", {"status": self.status, "returncode": self.returncode, "plan": public_plan(artifact_after)})
+
+    def _run_codex_plan(
+        self,
+        prompt: str,
+        settings: dict[str, Any],
+        _normalizer: Any,
+        update_artifact: Callable[..., dict[str, Any]],
+        fail_plan: Callable[[str], dict[str, Any]],
+    ) -> int | None:
+        engine = self.manager.engine
+        proc: subprocess.Popen[str] | None = None
+        returncode: int | None = None
+        thread_id = ""
+        turn_id = ""
+        plan_text_parts: dict[str, list[str]] = {}
+        final_plan_text = ""
+        sent_thread_start = False
+        sent_turn_start = False
+        next_request_id = 1
+        normalizer = engine.make_research_trace_normalizer("codex", "app-server", settings)
+        wrapper_path: Path | None = None
+
+        def request(method: str, params: dict[str, Any] | None = None) -> int:
+            nonlocal next_request_id
+            request_id = next_request_id
+            next_request_id += 1
+            if proc is None:
+                raise RuntimeError("Codex app-server process has not started.")
+            engine.json_rpc_write(proc, {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}})
+            return request_id
+
+        try:
+            command = engine.codex_app_server_command(settings)
+            env = engine.agent_process_env("codex")
+            popen_command, use_shell, wrapper_path = engine.popen_command_for_agent(command, settings, env)
+            proc = subprocess.Popen(
+                popen_command,
+                cwd=str(engine.repo_path(".")),
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                shell=use_shell,
+                start_new_session=os.name != "nt",
+            )
+            if wrapper_path:
+                setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
+            with self.lock:
+                self._process = proc
+            self.append_log(f"Started: {' '.join(command)}")
+            update_artifact(status="running")
+            assert proc.stdout is not None
+            request(
+                "initialize",
+                {
+                    "clientInfo": {"name": "co-auto-research-ui", "version": "1.0", "title": "CoAutoResearch UI"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            )
+            for line in proc.stdout:
+                self.append_log(line, normalizer)
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    event = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                rpc_request_id = event.get("id") if "id" in event else None
+                request_method = str(event.get("method") or "").strip()
+                if rpc_request_id is not None and request_method:
+                    result = engine.codex_server_request_result(request_method)
+                    try:
+                        if result is None:
+                            engine.json_rpc_write(
+                                proc,
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": rpc_request_id,
+                                    "error": {
+                                        "code": -32601,
+                                        "message": f"CoAutoResearch does not handle {request_method} requests.",
+                                    },
+                                },
+                            )
+                        else:
+                            engine.json_rpc_write(proc, {"jsonrpc": "2.0", "id": rpc_request_id, "result": result})
+                            resolved = normalizer.resolve_approval(str(rpc_request_id), "declined", "auto_policy") if normalizer else None
+                            if resolved:
+                                self._append_trace_updates([resolved])
+                    except Exception:
+                        pass
+                    continue
+                if event.get("error"):
+                    error_text = engine.event_payload_text(event.get("error")) or "Codex app-server returned an error."
+                    raise RuntimeError(error_text)
+
+                method, params = engine.codex_plan_event_parts(event)
+                if method in {"thread/started", "thread.started"}:
+                    thread_id = engine.extract_nested_id(params, ("threadId", "thread_id", "id")) or thread_id
+                if method in {"turn/started", "turn.started"}:
+                    turn_id = engine.extract_nested_id(params, ("turnId", "turn_id", "id")) or turn_id
+                    if turn_id:
+                        with self.lock:
+                            self.plan_turn_id = turn_id
+                        update_artifact(thread_id=thread_id, session_id=thread_id, status="running")
+
+                if "id" in event and str(event.get("id") or "") == "1" and not sent_thread_start:
+                    engine.json_rpc_write(proc, {"jsonrpc": "2.0", "method": "initialized", "params": {}})
+                    request(
+                        "thread/start",
+                        {
+                            "cwd": str(engine.repo_path(".")),
+                            "model": engine.normalize_codex_model(settings.get("model")),
+                            "sandbox": "read-only",
+                            "approvalPolicy": "never",
+                        },
+                    )
+                    sent_thread_start = True
+                    continue
+
+                if sent_thread_start and not sent_turn_start:
+                    candidate_thread_id = engine.extract_nested_id(event, ("threadId", "thread_id", "id"))
+                    if candidate_thread_id:
+                        thread_id = thread_id or candidate_thread_id
+                        with self.lock:
+                            self.plan_thread_id = thread_id
+                        model = engine.normalize_codex_model(settings.get("model"))
+                        reasoning = engine.normalize_reasoning_effort(settings.get("reasoningEffort"), "codex", model)
+                        request(
+                            "turn/start",
+                            {
+                                "threadId": thread_id,
+                                "input": [{"type": "text", "text": prompt, "text_elements": []}],
+                                "cwd": str(engine.repo_path(".")),
+                                "model": model,
+                                "approvalPolicy": "never",
+                                "sandboxPolicy": {"type": "readOnly", "networkAccess": bool(settings.get("webSearch"))},
+                                "collaborationMode": {
+                                    "mode": "plan",
+                                    "settings": {
+                                        "model": model,
+                                        "reasoning_effort": reasoning or None,
+                                        "developer_instructions": None,
+                                    },
+                                },
+                            },
+                        )
+                        sent_turn_start = True
+                        update_artifact(thread_id=thread_id, session_id=thread_id, status="running")
+                        continue
+
+                if method in {"item/plan/delta", "item.plan.delta"}:
+                    item_id = str(params.get("itemId") or params.get("item_id") or "plan")
+                    delta = str(params.get("delta") or "")
+                    if delta:
+                        plan_text_parts.setdefault(item_id, []).append(delta)
+                        update_artifact(status="running", plan_text="".join(plan_text_parts[item_id]).strip(), thread_id=thread_id, session_id=thread_id)
+                    continue
+
+                if method in {"turn/plan/updated", "turn.plan.updated"}:
+                    update_artifact(
+                        status="running",
+                        steps=engine.plan_steps_from_payload(params.get("plan")),
+                        explanation=str(params.get("explanation") or ""),
+                        thread_id=thread_id,
+                        session_id=thread_id,
+                    )
+                    continue
+
+                if method in {"item/completed", "item.completed"}:
+                    item = params.get("item") if isinstance(params.get("item"), dict) else {}
+                    if str(item.get("type") or "").lower() == "plan":
+                        final_plan_text = str(item.get("text") or "").strip()
+                        if final_plan_text:
+                            update_artifact(status="ready", plan_text=final_plan_text, thread_id=thread_id, session_id=thread_id)
+                    continue
+
+                if method in {"turn/completed", "turn.completed"}:
+                    break
+            try:
+                if proc.stdin:
+                    proc.stdin.close()
+            except OSError:
+                pass
+            try:
+                returncode = proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                engine.signal_research_process(proc)
+                try:
+                    returncode = proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    engine.signal_research_process(proc, force=True)
+                    returncode = proc.wait(timeout=1)
+        except Exception as exc:
+            self.append_log(f"Codex plan mode error: {exc}")
+            fail_plan(str(exc))
+            returncode = proc.poll() if proc else returncode
+        finally:
+            wrapper_cleanup = getattr(proc, "_coauto_pre_exec_wrapper", None) if proc is not None else wrapper_path
+            if wrapper_cleanup:
+                try:
+                    Path(wrapper_cleanup).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            if proc is not None:
+                try:
+                    if proc.stdin:
+                        proc.stdin.close()
+                except OSError:
+                    pass
+            if normalizer is not None:
+                try:
+                    self._append_trace_updates(normalizer.finish(returncode))
+                except Exception:
+                    pass
+            with self.lock:
+                self._process = None
+
+        try:
+            artifact_after = engine.read_plan_artifact(self.plan_id)
+        except Exception:
+            artifact_after = {}
+        if str(artifact_after.get("status") or "") != "ready":
+            text = str(artifact_after.get("plan_text") or final_plan_text or "").strip()
+            if text:
+                update_artifact(status="ready", plan_text=text, thread_id=thread_id, session_id=thread_id)
+                returncode = 0
+            else:
+                fail_plan("Codex app-server did not return a plan item. Upgrade Codex CLI; CoAutoResearch does not fallback to sending `/plan` through codex exec.")
+                returncode = returncode if returncode not in {0, None} else 1
+        return returncode
+
+    def _run_claude_plan(
+        self,
+        prompt: str,
+        settings: dict[str, Any],
+        _normalizer: Any,
+        update_artifact: Callable[..., dict[str, Any]],
+        fail_plan: Callable[[str], dict[str, Any]],
+    ) -> int | None:
+        engine = self.manager.engine
+        proc: subprocess.Popen[str] | None = None
+        returncode: int | None = None
+        plan_settings = engine.normalize_claude_settings({**settings, "permissionPreset": "plan", "permissionMode": "plan"}, settings)
+        plan_settings["backend"] = "claude"
+        with self.lock:
+            self.settings = plan_settings
+            self.backend = "claude"
+        normalizer = engine.make_research_trace_normalizer("claude", "exec", plan_settings)
+        wrapper_path: Path | None = None
+        try:
+            settings_path = engine.write_claude_plan_hook(self.plan_id)
+            executable = engine.resolve_agent_executable("claude", engine.agent_process_env("claude"))
+            command = [executable, *engine.settings_to_claude_args(plan_settings, resume=False), "--settings", str(settings_path)]
+            env = engine.agent_process_env("claude")
+            popen_command, use_shell, wrapper_path = engine.popen_command_for_agent(command, plan_settings, env)
+            proc = subprocess.Popen(
+                popen_command,
+                cwd=str(engine.repo_path(".")),
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                shell=use_shell,
+                start_new_session=os.name != "nt",
+            )
+            if wrapper_path:
+                setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
+            with self.lock:
+                self._process = proc
+            self.append_log(f"Started: {' '.join(command)}")
+            update_artifact(status="running")
+            assert proc.stdin is not None
+            proc.stdin.write(prompt)
+            proc.stdin.write("\n")
+            proc.stdin.close()
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                self.append_log(line, normalizer)
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    event = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                plan = engine.extract_claude_exit_plan(event)
+                if plan:
+                    update_artifact(status="ready", plan_text=plan)
+            returncode = proc.wait()
+        except Exception as exc:
+            self.append_log(f"Claude plan mode error: {exc}")
+            fail_plan(str(exc))
+            returncode = proc.poll() if proc else returncode
+        finally:
+            wrapper_cleanup = getattr(proc, "_coauto_pre_exec_wrapper", None) if proc is not None else wrapper_path
+            if wrapper_cleanup:
+                try:
+                    Path(wrapper_cleanup).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            if normalizer is not None:
+                try:
+                    self._append_trace_updates(normalizer.finish(returncode))
+                except Exception:
+                    pass
+            with self.lock:
+                self._process = None
+
+        try:
+            artifact_after = engine.read_plan_artifact(self.plan_id)
+        except Exception:
+            artifact_after = {}
+        text = str(artifact_after.get("plan_text") or "").strip()
+        if text:
+            if str(artifact_after.get("status") or "") != "ready":
+                update_artifact(status="ready", plan_text=text)
+            return 0 if returncode in {0, None} else returncode
+        fail_plan("Claude plan mode did not provide an ExitPlanMode plan.")
+        return returncode if returncode not in {0, None} else 1
+
     def stop(self, force: bool = False) -> None:
         with self.lock:
             proc = self._process
+            plan_thread_id = self.plan_thread_id
+            plan_turn_id = self.plan_turn_id
+            backend = self.backend
             if self.status == "running" and proc is None:
                 # start_message() has marked this session running but the
                 # background thread hasn't reached Popen yet (still copying
@@ -551,6 +987,23 @@ class AuxSession:
                 # spawns one instead of silently doing nothing.
                 self._cancel_requested = True
         if proc and proc.poll() is None:
+            interrupted = False
+            if not force and backend == "codex" and plan_thread_id and plan_turn_id:
+                try:
+                    self.manager.engine.json_rpc_write(
+                        proc,
+                        {
+                            "jsonrpc": "2.0",
+                            "id": int(time.time() * 1000),
+                            "method": "turn/interrupt",
+                            "params": {"threadId": plan_thread_id, "turnId": plan_turn_id},
+                        },
+                    )
+                    interrupted = True
+                except Exception:
+                    interrupted = False
+            if interrupted:
+                return
             try:
                 self.manager.engine.signal_research_process(proc, force=force)
             except Exception:
@@ -771,11 +1224,112 @@ class AuxSessionManager:
             message += "\n".join(lines)
         if not message:
             raise ValueError("Message is required.")
-        settings = self.engine.normalize_research_settings(payload.get("settings") or session.settings)
+        settings = self.engine.implementation_settings_from_payload(payload.get("settings") or session.settings)
         self.write_context(session)
         resume = bool(session.cli_session_id) and edit_index is None
         session.start_message(message, settings, resume)
         return {"session": session.public()}
+
+    def start_plan(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        session = self.get(session_id)
+        if session.kind != "chat":
+            raise ValueError("Plan mode is only available for chat sessions.")
+        message = str(payload.get("message") or "").strip()
+        uploads = payload.get("files") if isinstance(payload.get("files"), list) else []
+        if not message and not uploads:
+            raise ValueError("Plan request is required.")
+        if session.is_active():
+            raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
+
+        saved_uploads = self._save_chat_uploads(session, uploads)
+        agent_message = message
+        display_message = message
+        if saved_uploads:
+            if not agent_message:
+                agent_message = "Please review the attached file(s)."
+                display_message = agent_message
+            lines = ["", "", "Attached files in this chat workspace:"]
+            for rel in saved_uploads:
+                lines.append(f"- `{rel}`")
+            metadata = "\n".join(lines)
+            agent_message += metadata
+            display_message += metadata
+        if not agent_message.strip():
+            raise ValueError("Plan request is required.")
+
+        settings = self.engine.normalize_research_settings(payload.get("settings") or session.settings)
+        backend = self.engine.normalize_agent_backend(settings.get("backend"))
+        revision_of = self.engine.normalize_plan_id(payload.get("revisePlanId"))
+        revision_plan = ""
+        if revision_of:
+            try:
+                prior = self.engine.read_plan_artifact(revision_of)
+                revision_plan = str(prior.get("plan_text") or "").strip()
+            except Exception:
+                revision_plan = ""
+        conversation_history = list(session.chat_history)
+        artifact = self.engine.create_plan_artifact(
+            backend,
+            settings,
+            agent_message,
+            display_message,
+            {"saved_files": saved_uploads},
+            revision_of=revision_of,
+            owner_session_id=session.id,
+        )
+        prompt = self.engine.plan_research_prompt(agent_message, conversation_history=conversation_history, revision_plan=revision_plan)
+
+        with session.lock:
+            session.plan_id = str(artifact.get("id") or "")
+            session.backend = backend
+            session.settings = settings
+            if session.title_source == "auto" and session.title == session._default_title():
+                session.title = auto_session_title(display_message)
+            session.chat_history.append({"role": "user", "text": display_message, "at": _now_iso()})
+            session.chat_history.append({"role": "assistant", "kind": "plan", "plan_id": session.plan_id, "text": "", "at": _now_iso()})
+            session.chat_history = session.chat_history[-AUX_CHAT_HISTORY_MAX:]
+            session.status = "running"
+            session.started_at = _now_iso()
+            session.streaming_transcript = {}
+            session.updated_at = session.started_at
+            session._cancel_requested = False
+        self.write_context(session)
+        session.persist()
+        session.emit("plan", {"plan": self.engine.public_plan_artifact(artifact)})
+        session.emit("session", {"status": "running"})
+        thread = threading.Thread(
+            target=self.engine.run_in_project,
+            args=(self.context, session.run_plan, prompt, artifact),
+            daemon=True,
+        )
+        with session.lock:
+            session._thread = thread
+        thread.start()
+        return {"session": session.snapshot(), "plan": self.engine.public_plan_artifact(artifact)}
+
+    def approve_plan(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        session = self.get(session_id)
+        if session.kind != "chat":
+            raise ValueError("Plan approval is only available for chat sessions.")
+        plan_id = self.engine.normalize_plan_id(payload.get("planId") or payload.get("id"))
+        if not plan_id or plan_id != str(session.plan_id or ""):
+            raise ValueError("Plan id does not match the active session plan.")
+        artifact = self.engine.read_plan_artifact(plan_id)
+        plan_text = str(artifact.get("plan_text") or "").strip()
+        status = str(artifact.get("status") or "").strip()
+        if status not in {"ready", "approved"} or not plan_text:
+            raise ValueError("Only a ready plan can be approved.")
+        if session.is_active():
+            raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
+        settings = self.engine.implementation_settings_from_payload(payload.get("settings") or session.settings)
+        artifact = self.engine.update_plan_artifact(plan_id, status="approved", approved_at=self.engine.now_iso(), implemented_run_id=session.id)
+        session.emit("plan", {"plan": self.engine.public_plan_artifact(artifact)})
+        instruction = str(payload.get("instruction") or "").strip()
+        prompt = self.engine.approved_plan_prompt(artifact, instruction)
+        display_message = f"Implement approved plan {plan_id}."
+        self.write_context(session)
+        session.start_prepared_run(prompt, display_message, settings, resume=False)
+        return {"session": session.snapshot(), "plan": self.engine.public_plan_artifact(artifact)}
 
     def _save_chat_uploads(self, session: AuxSession, uploads: list[Any]) -> list[str]:
         if session.kind != "chat" or not uploads:

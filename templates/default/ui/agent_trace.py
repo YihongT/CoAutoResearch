@@ -747,7 +747,7 @@ class CodexAppServerNormalizer(CodexExecNormalizer):
         if "approval" in method and "request" in method:
             params = _params(event)
             request_id = str(event.get("id") or params.get("requestId") or params.get("request_id") or _stable_suffix(params))
-            kind = "command" if "command" in method else "file_change"
+            kind = "command" if "command" in method else "permissions" if "permission" in method else "file_change"
             request_payload: dict[str, Any]
             if kind == "command":
                 request_payload = self._new_payload(
@@ -760,6 +760,16 @@ class CodexAppServerNormalizer(CodexExecNormalizer):
                         "output": "",
                         "duration_ms": None,
                         "started_at": _now_iso(),
+                    },
+                )
+            elif kind == "permissions":
+                request_payload = self._new_payload(
+                    "tool_call",
+                    {
+                        "tool": "permissions",
+                        "args": params,
+                        "status": "running",
+                        "result": "",
                     },
                 )
             else:
@@ -1046,4 +1056,3 @@ def make_trace_normalizer(backend: Any, flavor: Any = "", read_file: Callable[[s
     if "app" in flavor_name or "server" in flavor_name or "plan" in flavor_name:
         return CodexAppServerNormalizer(read_file=read_file)
     return CodexExecNormalizer(read_file=read_file)
-

@@ -2066,17 +2066,31 @@ Confidence: medium
     !serverPy.includes('"mode": "plan"') ||
     !serverPy.includes('"sandboxPolicy": {"type": "readOnly"') ||
     !serverPy.includes("Codex app-server did not return a plan item") ||
+    !serverPy.includes("def codex_server_request_result") ||
+    !serverPy.includes('return {"permissions": {}}') ||
+    !serverPy.includes('return {"decision": "decline"}') ||
+    (serverPy.match(/codex_server_request_result/g) || []).length < 3 ||
     !serverPy.includes("def write_claude_plan_hook") ||
+    !serverPy.includes('"hookSpecificOutput"') ||
+    !serverPy.includes('"hookEventName": "PermissionRequest"') ||
     !serverPy.includes('"PermissionRequest"') ||
     !serverPy.includes('"matcher": "ExitPlanMode"') ||
+    !serverPy.includes('"decision": {"behavior": "deny"}') ||
     !serverPy.includes('"behavior": "deny"') ||
-    !serverPy.includes('"interrupt": True') ||
+    serverPy.includes('"interrupt": True') ||
+    !serverPy.includes("def aux_start_plan_session") ||
+    !serverPy.includes("def aux_approve_plan_session") ||
+    !serverPy.includes('endswith("/plan")') ||
+    !serverPy.includes('endswith("/plan/approve")') ||
+    !serverPy.includes("owner_session_id") ||
     !serverPy.includes("Use Plan mode for `/plan`; CoAutoResearch will not forward `/plan` to the agent.") ||
     !appJs.includes("function parsePlanSlashCommand") ||
     !appJs.includes('const isPlanRequest = planSlashMessage !== null || (!text.startsWith("/") && isPlanComposerMode())') ||
     !appJs.includes('"/api/research/plan"') ||
     !appJs.includes('"/api/research/plan/approve"') ||
     !appJs.includes("function planCardHtml") ||
+    !appJs.includes("includeProjectLaunch") ||
+    !appJs.includes("planCardHtml,") ||
     !appJs.includes("data-plan-approve") ||
     !appJs.includes("data-plan-revise") ||
     !appJs.includes("[data-plan-mode-toggle]") ||
@@ -2084,6 +2098,12 @@ Confidence: medium
     indexHtml.includes("data-composer-mode") ||
     indexHtml.includes(">Chat</button>") ||
     !stylesCss.includes(".plan-mode-chip.is-active") ||
+    !sessionsPanelJs.includes("planModeArmed") ||
+    sessionsPanelJs.includes("Please work in plan mode first") ||
+    !sessionsPanelJs.includes('"/api/sessions/" + encodeURIComponent(id) + (isPlanSend ? "/plan" : "/chat")') ||
+    !sessionsPanelJs.includes('"/api/sessions/" + encodeURIComponent(state.activeId) + "/plan/approve"') ||
+    !sessionsPanelJs.includes("event.stopPropagation()") ||
+    !sessionsPanelJs.includes("includeProjectLaunch: false") ||
     stylesCss.includes(".composer-mode-toggle")
   ) {
     throw new Error("real Plan Mode must use dedicated plan APIs, Codex app-server, Claude ExitPlanMode capture, and a single Plan chip without forwarding /plan");
@@ -2709,10 +2729,11 @@ Confidence: medium
 	  ) {
 	    throw new Error("Chat sessions must stay project-scoped, follow global agent settings, support real inline edit/resend, show running state, and keep composer actions out of message overlap");
 	  }
-	  const promptBuildIndex = auxSessionsPy.indexOf("prompt = self.manager.build_prompt(self, message)");
-	  const appendUserIndex = auxSessionsPy.indexOf('self.chat_history.append({"role": "user", "text": message');
-	  if (promptBuildIndex < 0 || appendUserIndex < 0 || promptBuildIndex > appendUserIndex) {
-	    throw new Error("Chat prompts must be built before appending the current user message, otherwise reset replay duplicates the latest message");
+	  const startMessageIndex = auxSessionsPy.indexOf("def start_message");
+	  const promptBuildIndex = auxSessionsPy.indexOf("prompt = self.manager.build_prompt(self, message)", startMessageIndex);
+	  const startPreparedIndex = auxSessionsPy.indexOf("self.start_prepared_run(prompt, message, settings, resume)", promptBuildIndex);
+	  if (promptBuildIndex < 0 || startPreparedIndex < 0 || promptBuildIndex > startPreparedIndex) {
+	    throw new Error("Chat prompts must be built before start_prepared_run appends the current user message, otherwise reset replay duplicates the latest message");
 	  }
   if (
     !sessionsPanelJs.includes("function positionOpenSessionMenu()") ||

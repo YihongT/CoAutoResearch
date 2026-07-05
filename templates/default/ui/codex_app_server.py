@@ -51,13 +51,13 @@ class CodexAppServerClient:
         self,
         proc: subprocess.Popen[str],
         on_notification: Callable[[dict[str, Any]], None] | None = None,
-        on_request: Callable[[str, dict[str, Any], int], dict[str, Any] | None] | None = None,
+        on_request: Callable[[str, dict[str, Any], Any], dict[str, Any] | None] | None = None,
     ) -> None:
         self.proc = proc
         self.on_notification = on_notification or (lambda _event: None)
-        self.on_request = on_request or (lambda _method, _params, _request_id: {"decision": "decline"})
+        self.on_request = on_request or (lambda _method, _params, _request_id: None)
         self.next_request_id = 1
-        self.responses: dict[int, dict[str, Any]] = {}
+        self.responses: dict[Any, dict[str, Any]] = {}
 
     def request(self, method: str, params: dict[str, Any] | None = None) -> int:
         request_id = self.next_request_id
@@ -71,12 +71,21 @@ class CodexAppServerClient:
     def handle_event(self, event: dict[str, Any]) -> None:
         request_id = event.get("id")
         method, params = event_parts(event)
-        if isinstance(request_id, int) and method:
+        if request_id is not None and method:
             result = self.on_request(method, params, request_id)
-            json_rpc_write(self.proc, {"jsonrpc": "2.0", "id": request_id, "result": result or {}})
+            if isinstance(result, dict):
+                json_rpc_write(self.proc, {"jsonrpc": "2.0", "id": request_id, "result": result})
+            else:
+                json_rpc_write(
+                    self.proc,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32601, "message": f"CoAutoResearch does not handle {method} requests."},
+                    },
+                )
             return
-        if isinstance(request_id, int):
+        if request_id is not None:
             self.responses[request_id] = event
             return
         self.on_notification(event)
-

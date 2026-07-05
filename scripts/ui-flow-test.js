@@ -1504,6 +1504,435 @@ function loadAppContext() {
   };
 }
 
+function loadSessionsPanelContext() {
+  const elements = new Map();
+  const eventSources = [];
+  const classesFor = (initial = []) => new Set(initial);
+  const element = (extra = {}) => {
+    const classes = classesFor(extra.classNames || []);
+    const listeners = new Map();
+    const node = {
+      value: "",
+      hidden: false,
+      disabled: false,
+      innerHTML: "",
+      textContent: "",
+      dataset: {},
+      style: {
+        setProperty(name, value) { this[name] = String(value); },
+        removeProperty(name) { delete this[name]; },
+      },
+      classList: {
+        add(...names) { names.forEach((name) => classes.add(name)); },
+        remove(...names) { names.forEach((name) => classes.delete(name)); },
+        toggle(name, force) {
+          const enabled = force === undefined ? !classes.has(name) : Boolean(force);
+          if (enabled) classes.add(name);
+          else classes.delete(name);
+          return enabled;
+        },
+        contains(name) { return classes.has(name); },
+        toString() { return Array.from(classes).join(" "); },
+      },
+      children: [],
+      addEventListener(type, callback) {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(callback);
+      },
+      dispatchEvent(event) {
+        event.currentTarget = event.currentTarget || node;
+        const callbacks = listeners.get(event?.type) || [];
+        callbacks.forEach((callback) => callback(event));
+        const handler = node[`on${event?.type}`];
+        if (typeof handler === "function") handler(event);
+        return !event?.defaultPrevented;
+      },
+      appendChild(child) {
+        if (child && typeof child === "object") child.parentElement = node;
+        node.children.push(child);
+        if (child?.tagName === "OPTION") node.options = [...(node.options || []), child];
+        return child;
+      },
+      insertAdjacentElement(_position, child) {
+        return node.appendChild(child);
+      },
+      remove() {},
+      focus() { node.focused = true; },
+      select() { node.selected = true; },
+      scrollTo(options) { node.scrollTop = Number(options?.top || 0); },
+      setSelectionRange() {},
+      setAttribute(name, value) { node[name] = String(value); },
+      getAttribute(name) { return node[name]; },
+      removeAttribute(name) { delete node[name]; },
+      toggleAttribute(name, force) { node[name] = Boolean(force); },
+      closest() { return null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      getBoundingClientRect() { return { left: 0, top: 0, right: 48, bottom: 32, width: 48, height: 32 }; },
+      ...extra,
+    };
+    return node;
+  };
+
+  const chatLog = element({
+    clientHeight: 480,
+    scrollHeight: 900,
+    scrollTop: 0,
+  });
+  const chatInput = element({
+    value: "",
+    scrollHeight: 44,
+    closest(selector) {
+      return selector === ".sessions-chat-form" ? chatForm : null;
+    },
+  });
+  const chatSend = element({ dataset: {} });
+  const chatForm = element({
+    requestSubmit() {
+      this.onsubmit?.({
+        type: "submit",
+        target: this,
+        currentTarget: this,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+      });
+    },
+  });
+  const planToggle = element({ dataset: { sessionPlanModeToggle: "true" } });
+  const sessionSettingsForm = element({
+    elements: {
+      backend: element({ value: "codex" }),
+      model: element({ value: "gpt-5.5" }),
+      reasoningEffort: element({ value: "medium" }),
+      permissionPreset: element({ value: "default" }),
+      webSearch: element({ checked: true }),
+      reviewCheckpointInterval: element({ value: "100" }),
+    },
+  });
+  const composerModel = element({ value: "gpt-5.5", options: [] });
+  const composerReasoning = element({ value: "medium", options: [] });
+  const svComposerModel = element({ value: "gpt-5.5", options: [] });
+  const svComposerReasoning = element({ value: "medium", options: [] });
+  const sessionsView = element();
+  const wsCol = element({ hidden: true });
+
+  [
+    ["#sessions-view", sessionsView],
+    ["#rail-sessions-list", element()],
+    ["#rail-sessions", element()],
+    ["#rail-sessions-evolution", element()],
+    ["#rail-sessions-actions-slot", element()],
+    ["#sv-resume-command-bar", element()],
+    ["#sv-resume-command-label", element()],
+    ["#sv-resume-command-text", element()],
+    ["#sv-copy-resume-command", element()],
+    ["#sv-chat-log", chatLog],
+    ["#sv-chat-form", chatForm],
+    ["#sv-chat-input", chatInput],
+    ["#sv-chat-send", chatSend],
+    ["#sv-composer-model", svComposerModel],
+    ["#sv-composer-reasoning", svComposerReasoning],
+    ["#composer-model", composerModel],
+    ["#composer-reasoning", composerReasoning],
+    ["#session-settings-form", sessionSettingsForm],
+    ["#sv-attachment-tray", element({ hidden: true })],
+    ["#sv-composer-file-input", element({ click() { this.clicks = (this.clicks || 0) + 1; } })],
+    ["#sv-ws-col", wsCol],
+    ["#sv-ws-breadcrumb", element()],
+    ["#sv-ws-list", element()],
+    ["#framing-scroll-bottom", element()],
+    ["#session-search-input", element()],
+    ["#session-search-dialog", element({ showModal() { this.open = true; }, close() { this.open = false; } })],
+    ["#session-search-results", element()],
+    ["#session-rename-form", element({ reset() {} })],
+    ["#session-rename-name", element()],
+    ["#session-rename-note", element()],
+    ["#session-rename-dialog", element({ showModal() { this.open = true; }, close() { this.open = false; } })],
+    ["#session-clear-context-form", element()],
+    ["#session-clear-context-note", element()],
+    ["#session-clear-context-dialog", element({ showModal() { this.open = true; }, close() { this.open = false; } })],
+  ].forEach(([selector, value]) => elements.set(selector, value));
+
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.closed = false;
+      this.listeners = new Map();
+      eventSources.push(this);
+    }
+    addEventListener(type, callback) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(callback);
+    }
+    emit(type, payload = {}) {
+      const event = type === "research" || type === "message"
+        ? { data: JSON.stringify(payload) }
+        : payload;
+      (this.listeners.get(type) || []).forEach((callback) => callback(event));
+      const handler = this[`on${type}`];
+      if (typeof handler === "function") handler(event);
+    }
+    close() { this.closed = true; }
+  }
+
+  const sessionsById = new Map();
+  const cloneSession = (session) => JSON.parse(JSON.stringify(session));
+  const upsertSession = (session) => {
+    sessionsById.set(session.id, cloneSession(session));
+    return sessionsById.get(session.id);
+  };
+  const sessionResponse = (id) => cloneSession(sessionsById.get(id) || { id, kind: "chat", title: id, chat_history: [], transcript: [], plan_artifacts: {} });
+  const context = {
+    console,
+    URL,
+    URLSearchParams,
+    CSS: { escape: (value) => String(value) },
+    EventSource: FakeEventSource,
+    FileReader: class FileReader {
+      readAsDataURL(file) {
+        this.result = `data:${file?.type || "application/octet-stream"};base64,${file?.contentBase64 || ""}`;
+        if (typeof this.onload === "function") this.onload();
+      }
+    },
+    alert(message) { context.__alerts.push(String(message || "")); },
+    confirm() { return true; },
+    navigator: { clipboard: { writeText: async () => {} } },
+    requestAnimationFrame(callback) { callback(); },
+    setTimeout,
+    clearTimeout,
+    setInterval() { return 0; },
+    clearInterval() {},
+    localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+    window: {
+      activeProjectId: "",
+      innerWidth: 1280,
+      innerHeight: 800,
+      setTimeout,
+      clearTimeout,
+      EventSource: FakeEventSource,
+      CoAutoChatUi: {
+        escapeHtml(value) {
+          return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;");
+        },
+        showToast(message, error = false) { context.__toasts.push({ message, error }); },
+        settingsFromForm() {
+          return { backend: "codex", model: "gpt-5.5", reasoningEffort: "medium", permissionPreset: "default", webSearch: true };
+        },
+        normalizeAgentBackend(value) { return String(value || "").toLowerCase() === "claude" ? "claude" : "codex"; },
+        syncModelSelectOptions(select, _backend, value) { select.value = value || select.value || "gpt-5.5"; },
+        syncReasoningSelectOptions(select, _backend, _model, value) { select.value = value || select.value || "medium"; },
+        fitComposerSelectWidth() {},
+        composerSendIconHtml() { return "<span>send</span>"; },
+        composerStopIconHtml() { return "<span>stop</span>"; },
+        messageHtml(message) {
+          return `<article class="msg ${message.role || ""}">${this.escapeHtml(message.text || "")}</article>`;
+        },
+        conversationMessageHtml(message, options = {}) {
+          const attr = options.idAttr ? ` ${options.idAttr}="${this.escapeHtml(options.id || "")}"` : "";
+          const edit = options.canEdit ? `<button type="button" data-session-message-edit="${this.escapeHtml(options.id || "")}">Edit</button>` : "";
+          return `<article class="session-message ${this.escapeHtml(options.role || message.role || "")}"${attr}>${this.escapeHtml(message.text || "")}${edit}</article>`;
+        },
+        planCardHtml(message, options = {}) {
+          const artifact = message.artifact || {};
+          const id = artifact.id || "";
+          const includeProjectLaunch = options.includeProjectLaunch !== false;
+          return [
+            `<section class="plan-card" data-plan-card="${id}">`,
+            `<p>${this.escapeHtml(artifact.plan_text || "Planning...")}</p>`,
+            `<button type="button" data-plan-revise="${id}">Revise</button>`,
+            `<button type="button" data-plan-approve="${id}">Approve</button>`,
+            includeProjectLaunch ? `<button type="button" data-project-draft-launch="${id}">Launch</button>` : "",
+            `</section>`,
+          ].join("");
+        },
+      },
+      addEventListener() {},
+    },
+    document: {
+      readyState: "complete",
+      body: element(),
+      documentElement: { dataset: {}, style: { setProperty() {}, removeProperty() {} } },
+      getElementById(id) { return elements.get(`#${id}`) || null; },
+      querySelector(selector) {
+        if (selector === "[data-session-plan-mode-toggle]") return planToggle;
+        if (selector === "[data-session-attach]") return elements.get("#sv-composer-file-input");
+        if (selector === "[data-sessions-ws-refresh]") return element();
+        return elements.get(selector) || null;
+      },
+      querySelectorAll(selector) {
+        if (selector === "[data-session-plan-mode-toggle]") return [planToggle];
+        if (selector === ".rail-action") return [];
+        if (selector === "[data-session-clear-context]") return [];
+        if (selector === "[data-session-monitor-prompt]") return [];
+        if (selector === "[data-session-rename-close]") return [];
+        if (selector === "[data-session-clear-context-close]") return [];
+        return [];
+      },
+      createElement(tag) {
+        const node = element({ tagName: String(tag || "").toUpperCase() });
+        Object.defineProperty(node, "id", {
+          get() { return this.__id || ""; },
+          set(value) {
+            this.__id = String(value || "");
+            if (this.__id) elements.set(`#${this.__id}`, this);
+          },
+          configurable: true,
+        });
+        return node;
+      },
+      addEventListener() {},
+    },
+    fetch: async (url, options = {}) => {
+      const parsed = new URL(url, "http://local");
+      const endpoint = parsed.pathname;
+      if (context.__apiError && (!context.__apiErrorEndpoint || context.__apiErrorEndpoint === endpoint)) {
+        throw new Error(context.__apiError);
+      }
+      const body = options.body ? JSON.parse(options.body) : {};
+      context.__apiCalls.push({ endpoint, body, method: options.method || "GET" });
+      const sessionMatch = endpoint.match(/^\/api\/sessions\/([^/]+)(?:\/(.*))?$/);
+      if (endpoint === "/api/sessions" && (!options.method || options.method === "GET")) {
+        return { ok: true, json: async () => ({ ok: true, sessions: Array.from(sessionsById.values()).map(cloneSession) }) };
+      }
+      if (sessionMatch) {
+        const id = decodeURIComponent(sessionMatch[1]);
+        const action = sessionMatch[2] || "";
+        const session = sessionResponse(id);
+        if (!action && (!options.method || options.method === "GET")) {
+          return { ok: true, json: async () => ({ ok: true, session }) };
+        }
+        if (action.startsWith("workspace")) {
+          return { ok: true, json: async () => ({ ok: true, items: [] }) };
+        }
+        if (action === "plan" && options.method === "POST") {
+          const planId = body.revisePlanId || `P_${id}`;
+          const artifact = {
+            id: planId,
+            type: "plan",
+            status: "ready",
+            owner_session_id: id,
+            plan_text: body.revisePlanId ? "Revised aux plan" : "Aux plan body",
+            steps: [],
+          };
+          session.chat_history = [
+            ...(session.chat_history || []),
+            { role: "user", text: body.message || "" },
+            { role: "assistant", kind: "plan", plan_id: planId, text: "", at: "2026-07-05T00:00:00.000Z" },
+          ];
+          session.plan_artifacts = { ...(session.plan_artifacts || {}), [planId]: artifact };
+          session.plan_id = planId;
+          session.status = "idle";
+          session.running = false;
+          upsertSession(session);
+          return { ok: true, json: async () => ({ ok: true, result: { session: cloneSession(session), plan: artifact } }) };
+        }
+        if (action === "plan/approve" && options.method === "POST") {
+          const planId = body.planId || "";
+          const artifact = {
+            id: planId,
+            type: "plan",
+            status: "approved",
+            owner_session_id: id,
+            plan_text: "Aux plan body",
+            steps: [],
+          };
+          session.chat_history = [
+            ...(session.chat_history || []),
+            { role: "user", text: `Implement approved plan ${planId}.` },
+          ];
+          session.plan_artifacts = { ...(session.plan_artifacts || {}), [planId]: artifact };
+          session.status = "running";
+          session.running = true;
+          upsertSession(session);
+          return { ok: true, json: async () => ({ ok: true, result: { session: cloneSession(session), plan: artifact } }) };
+        }
+        if (action === "chat" && options.method === "POST") {
+          const editIndex = Number.isInteger(body.editIndex) ? body.editIndex : null;
+          const base = Array.isArray(session.chat_history) ? session.chat_history : [];
+          session.chat_history = editIndex === null ? base.slice() : base.slice(0, editIndex);
+          session.chat_history.push({ role: "user", text: body.message || "" });
+          session.status = "idle";
+          session.running = false;
+          upsertSession(session);
+          return { ok: true, json: async () => ({ ok: true, result: { session: cloneSession(session) } }) };
+        }
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+    __apiCalls: [],
+    __apiError: "",
+    __apiErrorEndpoint: "",
+    __alerts: [],
+    __toasts: [],
+    __eventSources: eventSources,
+    globalThis: null,
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+
+  const sessionsPanelPath = path.join(root, "templates", "default", "ui", "sessions-panel.js");
+  const sessionsPanelCode = fs.readFileSync(sessionsPanelPath, "utf8").replace(
+    /\}\)\(\);\s*$/,
+    `
+  window.__SessionsPanelTest = {
+    state,
+    sendMessage,
+    renderAll,
+    connectEvents,
+    setSessionPlanModeState,
+    sessionPlanModeState,
+    setSessions(sessions, activeId) {
+      state.sessions = (sessions || []).map(normalizeSession);
+      state.activeId = activeId || (state.sessions[0] && state.sessions[0].id) || "";
+      state.surfaceActive = Boolean(state.activeId);
+      renderAll();
+    },
+  };
+})();
+`
+  );
+  vm.runInContext(sessionsPanelCode, context, { filename: sessionsPanelPath });
+  context.window.activeProjectId = "p1";
+  context.__upsertSession = upsertSession;
+  context.__sessionElements = { chatLog, chatInput, chatForm, planToggle };
+  context.__dispatchSessionPlanClick = async (kind, planId) => {
+    const target = {
+      dataset: kind === "approve" ? { planApprove: planId } : { planRevise: planId },
+      closest(selector) {
+        if (kind === "approve" && selector === "[data-plan-approve]") return this;
+        if (kind === "revise" && selector === "[data-plan-revise]") return this;
+        return null;
+      },
+    };
+    const event = {
+      type: "click",
+      target,
+      defaultPrevented: false,
+      stopped: false,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.stopped = true; },
+    };
+    chatLog.dispatchEvent(event);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { defaultPrevented: event.defaultPrevented, stopped: event.stopped };
+  };
+  context.__seedSessions = (sessions, activeId) => {
+    sessionsById.clear();
+    sessions.forEach(upsertSession);
+    context.window.__SessionsPanelTest.setSessions(sessions.map(cloneSession), activeId);
+  };
+  return {
+    context,
+    run(expression) {
+      return vm.runInContext(expression, context);
+    },
+  };
+}
+
 function sourceText(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
@@ -1609,7 +2038,10 @@ function testButtonInventoryHasHandlers() {
   assert.equal(indexHtml.includes("Reset agent context") && !indexHtml.includes(">Clear context<"), true, "chat context action should use reset-agent-context wording");
   assert.equal(auxSessionsPy.includes("self.chat_history = []"), false, "resetting agent context must preserve visible chat history");
   assert.equal(auxSessionsPy.includes("Reset provider CLI context while preserving visible chat history"), true, "aux session reset should document the preserved-history behavior");
-  assert.equal(auxSessionsPy.indexOf("prompt = self.manager.build_prompt(self, message)") < auxSessionsPy.indexOf('self.chat_history.append({"role": "user", "text": message'), true, "chat prompt should be built before appending the current user message to avoid replay duplication");
+  const startMessageIndex = auxSessionsPy.indexOf("def start_message");
+  const startMessagePromptIndex = auxSessionsPy.indexOf("prompt = self.manager.build_prompt(self, message)", startMessageIndex);
+  const startPreparedIndex = auxSessionsPy.indexOf("self.start_prepared_run(prompt, message, settings, resume)", startMessagePromptIndex);
+  assert.equal(startMessagePromptIndex >= 0 && startPreparedIndex > startMessagePromptIndex, true, "chat prompt should be built before start_prepared_run appends the visible current user message");
   assert.equal(appJs.includes("syncModelSelectOptions,") && appJs.includes("syncReasoningSelectOptions,"), true, "shared chat UI should export the existing model/reasoning option filters");
   assert.equal(sessionsPanelJs.includes("ui().syncModelSelectOptions(model, backend, modelValue)"), true, "session composer model options should follow the active backend instead of showing every model");
   assert.equal(sessionsPanelJs.includes("ui().syncReasoningSelectOptions(reasoning, backend, model?.value || modelValue, reasoningValue)"), true, "session composer reasoning options should follow the active backend/model");
@@ -2067,6 +2499,127 @@ function testPlanCardHidesLaunchAfterAutoresearchStarts() {
   const html = app.run('framingMessageHtml(localMessages.find((message) => message.kind === "plan"))');
   assert.equal(html.includes("data-project-launch"), false, "plan card should hide Start after autoresearch starts");
   assert.equal(html.includes("data-plan-approve"), true, "plan approval remains a plan-specific action");
+}
+
+async function testAuxPlanSendUsesSessionPlanEndpoint() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    { id: "chat_a", kind: "chat", title: "Chat A", status: "idle", running: false, chat_history: [], transcript: [], plan_artifacts: {} },
+  ], "chat_a");
+  app.run('window.__SessionsPanelTest.setSessionPlanModeState("chat_a", { armed: true, revisePlanId: "" })');
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "Plan this aux change.", {})');
+  const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions/chat_a/plan");
+  assert.equal(Boolean(call), true, "aux Plan mode should post to the per-session plan endpoint");
+  assert.equal(call.body.message, "Plan this aux change.", "aux plan request body should keep the user's text unchanged");
+  assert.equal(call.body.message.includes("Please work in plan mode"), false, "aux plan request body must not include the old fake plan prefix");
+  assert.equal(call.body.editIndex, undefined, "aux plan sends must not include editIndex");
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").armed'), false, "successful aux plan sends should clear only that session's armed state");
+}
+
+async function testAuxPlanFailedSendPreservesArmedState() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    { id: "chat_a", kind: "chat", title: "Chat A", status: "idle", running: false, chat_history: [], transcript: [], plan_artifacts: {} },
+  ], "chat_a");
+  app.run('window.__SessionsPanelTest.setSessionPlanModeState("chat_a", { armed: true, revisePlanId: "P_old" })');
+  app.context.__apiError = "network down";
+  app.context.__apiErrorEndpoint = "/api/sessions/chat_a/plan";
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "Retryable plan.", {})');
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").armed'), true, "failed aux plan sends should preserve armed state for retry");
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").revisePlanId'), "P_old", "failed aux plan sends should preserve revision target");
+}
+
+async function testAuxPlanEditAlwaysUsesChatEndpoint() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "idle",
+      running: false,
+      chat_history: [{ role: "user", text: "old request" }, { role: "assistant", text: "old answer" }],
+      transcript: [],
+      plan_artifacts: {},
+    },
+  ], "chat_a");
+  app.run('window.__SessionsPanelTest.setSessionPlanModeState("chat_a", { armed: true, revisePlanId: "" })');
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_a", "edited request", { editIndex: 0 })');
+  const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions/chat_a/chat");
+  assert.equal(Boolean(call), true, "editing in an armed aux session should still post to chat");
+  assert.equal(call.body.editIndex, 0, "edited aux chat sends should carry editIndex");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions/chat_a/plan"), false, "edited aux chat sends must not hit the plan endpoint");
+}
+
+async function testAuxPlanArmedStateIsPerSession() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    { id: "chat_a", kind: "chat", title: "Chat A", status: "idle", running: false, chat_history: [], transcript: [], plan_artifacts: {} },
+    { id: "chat_b", kind: "chat", title: "Chat B", status: "idle", running: false, chat_history: [], transcript: [], plan_artifacts: {} },
+  ], "chat_a");
+  app.run('window.__SessionsPanelTest.setSessionPlanModeState("chat_a", { armed: true, revisePlanId: "" })');
+  await app.run('window.__SessionsPanelTest.sendMessage("chat_b", "Normal message in B.", {})');
+  const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions/chat_b/chat");
+  assert.equal(Boolean(call), true, "arming aux Plan in session A must not affect session B");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/sessions/chat_b/plan"), false, "unarmed session B should not post to plan");
+}
+
+async function testAuxPlanMarkerRendersPlanCardAndLiveUpdates() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "idle",
+      running: false,
+      chat_history: [{ role: "assistant", kind: "plan", plan_id: "P_aux", text: "" }],
+      transcript: [],
+      plan_artifacts: {
+        P_aux: { id: "P_aux", type: "plan", status: "ready", owner_session_id: "chat_a", plan_text: "Initial aux plan", steps: [] },
+      },
+    },
+  ], "chat_a");
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes('data-plan-card="P_aux"'), true, "aux plan markers should render as plan cards");
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("data-project-draft-launch"), false, "aux plan cards should not include project launch buttons");
+  app.run('window.__SessionsPanelTest.connectEvents("chat_a")');
+  app.context.__eventSources.at(-1).emit("research", {
+    kind: "plan",
+    event_id: 1,
+    plan: { id: "P_aux", type: "plan", status: "ready", owner_session_id: "chat_a", plan_text: "Updated aux plan", steps: [] },
+  });
+  assert.equal(app.context.__sessionElements.chatLog.innerHTML.includes("Updated aux plan"), true, "aux plan SSE updates should merge into the active session artifact map and rerender");
+}
+
+async function testAuxPlanApproveAndReviseUseSessionRoutes() {
+  const app = loadSessionsPanelContext();
+  app.context.__seedSessions([
+    {
+      id: "chat_a",
+      kind: "chat",
+      title: "Chat A",
+      status: "idle",
+      running: false,
+      chat_history: [{ role: "assistant", kind: "plan", plan_id: "P_aux", text: "" }],
+      transcript: [],
+      plan_artifacts: {
+        P_aux: { id: "P_aux", type: "plan", status: "ready", owner_session_id: "chat_a", plan_text: "Aux plan body", steps: [] },
+      },
+      plan_id: "P_aux",
+    },
+  ], "chat_a");
+  const reviseEvent = await app.context.__dispatchSessionPlanClick("revise", "P_aux");
+  assert.equal(reviseEvent.defaultPrevented, true, "aux plan revise should be handled inside the sessions log");
+  assert.equal(reviseEvent.stopped, true, "aux plan revise should not bubble to the main plan handler");
+  assert.equal(app.run('window.__SessionsPanelTest.sessionPlanModeState("chat_a").revisePlanId'), "P_aux", "aux plan revise should arm the active session with revisePlanId");
+
+  const approveEvent = await app.context.__dispatchSessionPlanClick("approve", "P_aux");
+  assert.equal(approveEvent.defaultPrevented, true, "aux plan approve should be handled inside the sessions log");
+  assert.equal(approveEvent.stopped, true, "aux plan approve should not bubble to the main plan handler");
+  const call = app.context.__apiCalls.find((item) => item.endpoint === "/api/sessions/chat_a/plan/approve");
+  assert.equal(Boolean(call), true, "aux plan approve should use the per-session approve endpoint");
+  assert.equal(call.body.planId, "P_aux", "aux plan approve should send the plan id");
+  assert.equal(app.context.__apiCalls.some((item) => item.endpoint === "/api/research/plan/approve"), false, "aux plan approve must not use the main-panel approval route");
 }
 
 async function testFreshRemoteProjectFirstMessageSends() {
@@ -7856,6 +8409,12 @@ await testPlanRequestBlockedDuringActiveRun();
 await testPlanCardApproveReviseAndResend();
 await testPlanCardShowsLaunchWhenProjectReady();
 testPlanCardHidesLaunchAfterAutoresearchStarts();
+await testAuxPlanSendUsesSessionPlanEndpoint();
+await testAuxPlanFailedSendPreservesArmedState();
+await testAuxPlanEditAlwaysUsesChatEndpoint();
+await testAuxPlanArmedStateIsPerSession();
+await testAuxPlanMarkerRendersPlanCardAndLiveUpdates();
+await testAuxPlanApproveAndReviseUseSessionRoutes();
 await testFreshRemoteProjectFirstMessageSends();
 await testFreshRemoteProjectStaleRunningSnapshotStillSends();
 testPrestartPendingExpectedTrialDoesNotShowAutoresearchPanel();

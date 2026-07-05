@@ -5271,6 +5271,7 @@ function inlineActivitySummaryHtml(options = {}) {
 
 function planCardHtml(message, options = {}) {
   const activitySummary = inlineActivitySummaryHtml(options);
+  const includeProjectLaunch = options.includeProjectLaunch !== false;
   const artifact = message.artifact || {};
   const planId = String(artifact.id || message.planId || "").trim();
   const status = String(artifact.status || "pending").toLowerCase();
@@ -5301,7 +5302,7 @@ function planCardHtml(message, options = {}) {
     : `<div class="plan-rendered markdown-preview">${markdownToHtml(planText)}</div>`;
   const actionItems = [
     planText ? messageCopyButton(planText, "Copy plan", "Plan copied.") : "",
-    projectDraftLaunchButtonHtml(currentProjectDraftFooterMessage()),
+    includeProjectLaunch ? projectDraftLaunchButtonHtml(currentProjectDraftFooterMessage()) : "",
     ready ? `<button class="secondary-button small-button" type="button" data-plan-revise="${escapeHtml(planId)}">Revise</button>` : "",
     ready ? `<button class="primary-button small-button" type="button" data-plan-approve="${escapeHtml(planId)}">Approve &amp; run</button>` : "",
     approved ? `<span class="plan-approved-note">Implementation started.</span>` : "",
@@ -9707,6 +9708,7 @@ window.CoAutoChatUi = {
   transcriptContentHtml,
   messageCopyButton,
   conversationMessageHtml,
+  planCardHtml,
   emptyWelcomeHtml,
   composerSendIconHtml,
   composerStopIconHtml,
