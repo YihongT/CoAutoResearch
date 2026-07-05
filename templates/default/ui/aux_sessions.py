@@ -258,15 +258,35 @@ class AuxSession:
             self.event_condition.notify_all()
         return event
 
-    def append_log(self, line: str) -> None:
+    def _append_trace_updates(self, updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        engine = self.manager.engine
+        entries: list[dict[str, Any]] = []
+        with self.lock:
+            for update in updates:
+                if not isinstance(update, dict):
+                    continue
+                entry = engine.trace_transcript_entry(update, run_id=self.id, entry_count=len(self.transcript))
+                entries.append(self._upsert_transcript_entry_locked(entry))
+        for entry in entries:
+            self.emit("agent_event", {"transcript_entry": entry})
+        return entries
+
+    def append_log(self, line: str, normalizer: Any = None) -> None:
         engine = self.manager.engine
         backend = self.backend or "codex"
         display = engine.format_agent_event(line, backend)
-        transcript = engine.transcript_from_agent_line(line, backend)
-        streaming_update = None if transcript else engine.streaming_update_from_agent_line(line, backend)
+        trace_updates: list[dict[str, Any]] = []
+        if normalizer is not None:
+            try:
+                trace_updates = [item for item in normalizer.feed(line) if isinstance(item, dict)]
+            except Exception:
+                trace_updates = []
+        transcript = None if trace_updates else engine.transcript_from_agent_line(line, backend)
+        streaming_update = None if trace_updates or transcript else engine.streaming_update_from_agent_line(line, backend)
         suppress_summary = engine.should_suppress_agent_event_summary(line, backend)
         event_at = _now_iso()
         transcript_update: dict[str, Any] | None = None
+        transcript_updates: list[dict[str, Any]] = []
         with self.lock:
             if line.strip():
                 self.logs.append(line.rstrip("\n"))
@@ -283,7 +303,13 @@ class AuxSession:
                 sid = engine.find_session_identifier(line)
             if sid:
                 self.cli_session_id = sid
-            if transcript and transcript.get("content"):
+            if trace_updates:
+                for update in trace_updates:
+                    entry = engine.trace_transcript_entry(update, run_id=self.id, entry_count=len(self.transcript))
+                    transcript_updates.append(self._upsert_transcript_entry_locked(entry))
+                if transcript_updates:
+                    transcript_update = transcript_updates[-1]
+            elif transcript and transcript.get("content"):
                 transcript_update = self._finalize_streaming_transcript_locked(transcript)
             elif streaming_update:
                 transcript_update = self._upsert_streaming_transcript_locked(streaming_update)
@@ -291,6 +317,13 @@ class AuxSession:
         payload: dict[str, Any] = {}
         if display and not suppress_summary:
             payload["log"] = display
+        if transcript_updates:
+            for index, entry in enumerate(transcript_updates):
+                entry_payload = {"transcript_entry": entry}
+                if index == 0 and payload.get("log"):
+                    entry_payload["log"] = payload["log"]
+                self.emit("agent_event", entry_payload)
+            return
         if transcript_update and transcript_update.get("content"):
             payload["transcript_entry"] = transcript_update
         if payload or line.strip():
@@ -436,6 +469,7 @@ class AuxSession:
         command = self.manager.agent_command(self, resume)
         env = engine.agent_process_env(self.backend)
         cwd = engine.repo_path(".")
+        normalizer = engine.make_research_trace_normalizer(self.backend, "exec", self.settings)
         try:
             popen_command, use_shell, _wrapper = engine.popen_command_for_agent(command, self.settings, env)
             proc = subprocess.Popen(
@@ -470,7 +504,7 @@ class AuxSession:
             assistant_parts: list[str] = []
             final_text = ""
             for line in proc.stdout:
-                self.append_log(line)
+                self.append_log(line, normalizer)
                 text = engine.transcript_from_agent_line(line, self.backend)
                 if isinstance(text, dict) and text.get("content"):
                     role = str(text.get("role") or "")
@@ -483,6 +517,11 @@ class AuxSession:
             self.append_log(f"Session error: {exc}")
             returncode = proc.poll()
             assistant_parts = []
+        if normalizer is not None:
+            try:
+                self._append_trace_updates(normalizer.finish(returncode))
+            except Exception:
+                pass
         with self.lock:
             self._finalize_active_streaming_transcripts_locked()
             self._process = None

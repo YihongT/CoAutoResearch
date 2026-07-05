@@ -799,6 +799,20 @@
                 <small>Allow current-source checks during the run.</small>
               </span>
             </label>
+            <label class="toggle-field launch-toggle">
+              <input name="richTrace" type="checkbox" checked />
+              <span>
+                <strong>Structured trace</strong>
+                <small>Show commands, tools, diffs, checklists, and usage as inspectable cards.</small>
+              </span>
+            </label>
+            <label class="toggle-field launch-toggle">
+              <input name="codexAppServerChat" type="checkbox" />
+              <span>
+                <strong>Codex app-server chat</strong>
+                <small>Experimental for Codex chat and framing only; autoresearch trials still use exec.</small>
+              </span>
+            </label>
           </div>
           <label class="field launch-instruction-field">
             <span>Optional launch instruction</span>
@@ -1126,6 +1140,14 @@
               <label class="toggle-field">
                 <input name="settingsWebSearch" type="checkbox" />
                 <span>Live web search</span>
+              </label>
+              <label class="toggle-field">
+                <input name="settingsRichTrace" type="checkbox" checked />
+                <span>Structured trace cards</span>
+              </label>
+              <label class="toggle-field">
+                <input name="settingsCodexAppServerChat" type="checkbox" />
+                <span>Codex app-server chat</span>
               </label>
               <label class="field wide settings-advanced-config">
                 <span>Advanced config</span>

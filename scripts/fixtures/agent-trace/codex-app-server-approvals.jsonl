@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":41,"method":"item/commandExecution/requestApproval","params":{"command":"rm -rf build","cwd":"/tmp/project"}}
+{"jsonrpc":"2.0","method":"turn/plan/updated","params":{"plan":[{"step":"Inspect","status":"completed"},{"step":"Patch","status":"pending"}],"explanation":"Plan updated."}}

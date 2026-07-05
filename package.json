@@ -34,8 +34,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node scripts/verify-template.js && node scripts/check-prompt-sync.js && node scripts/ui-flow-test.js && node scripts/smoke-test.js",
+    "test": "node scripts/verify-template.js && node scripts/check-prompt-sync.js && node scripts/agent-trace-test.js && node scripts/ui-flow-test.js && node scripts/smoke-test.js",
     "verify": "node scripts/verify-template.js && node scripts/check-prompt-sync.js",
+    "agent-trace": "node scripts/agent-trace-test.js",
     "smoke": "node scripts/smoke-test.js",
     "scenarios": "node scripts/scenario-tests/server-scenarios.js",
     "visual:themes": "node scripts/visual-theme-check.js",

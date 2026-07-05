@@ -190,6 +190,8 @@ const defaultCodexSessionSettings = {
   extraConfig: "",
   preExecScript: "",
   reviewCheckpointInterval: 100,
+  richTrace: true,
+  codexAppServerChat: false,
 };
 const defaultClaudeSessionSettings = {
   model: "sonnet",
@@ -202,6 +204,7 @@ const defaultClaudeSessionSettings = {
   extraConfig: "",
   preExecScript: "",
   reviewCheckpointInterval: 100,
+  richTrace: true,
 };
 const defaultSessionSettings = defaultCodexSessionSettings;
 const sessionDefaultsByBackend = {
@@ -5538,6 +5541,18 @@ function sessionRunLiveStatusHtml(session = {}) {
 }
 
 function framingProgressTitle(entry) {
+  const payload = tracePayload(entry);
+  if (payload?.type === "command") return payload.status === "running" ? "Running command" : "Ran command";
+  if (payload?.type === "file_change") {
+    const count = Array.isArray(payload.changes) ? payload.changes.length : 0;
+    return count === 1 ? "Edited file" : `Edited ${count || ""} files`.trim();
+  }
+  if (payload?.type === "plan_update") return "Checklist";
+  if (payload?.type === "tool_call") return payload.status === "running" ? "Using tool" : "Tool result";
+  if (payload?.type === "web_search") return "Web search";
+  if (payload?.type === "approval") return "Approval";
+  if (payload?.type === "usage") return "Usage";
+  if (payload?.type === "error") return "Error";
   const kind = String(entry?.kind || "").toLowerCase();
   const role = transcriptRole(entry);
   const rawType = String(entry?.raw_type || "").toLowerCase();
@@ -5553,6 +5568,22 @@ function framingProgressTitle(entry) {
 }
 
 function framingProgressContent(entry) {
+  const payload = tracePayload(entry);
+  if (payload?.type === "command") return compactText(compactCommandText(payload.command || ""), 220);
+  if (payload?.type === "file_change") {
+    const changes = Array.isArray(payload.changes) ? payload.changes : [];
+    return compactText(changes.map((change) => change.path || "").filter(Boolean).slice(0, 3).join(", "), 220);
+  }
+  if (payload?.type === "plan_update") {
+    const steps = Array.isArray(payload.steps) ? payload.steps : [];
+    const done = steps.filter((step) => String(step.status || "") === "completed").length;
+    return `${done}/${steps.length} complete`;
+  }
+  if (payload?.type === "tool_call") return compactText(payload.tool || "tool", 220);
+  if (payload?.type === "web_search") return compactText(payload.query || "Searching the web", 220);
+  if (payload?.type === "approval") return compactText(payload.decision || "Pending approval", 220);
+  if (payload?.type === "usage") return compactText(`total ${payload.total_tokens || 0} tokens`, 220);
+  if (payload?.type === "error") return compactText(payload.message || "", 220);
   const rawType = String(entry?.raw_type || "").toLowerCase();
   const kind = String(entry?.kind || "").toLowerCase();
   const content = String(entry?.content || "").trim();
@@ -6185,6 +6216,7 @@ function renderFramingConversation() {
   const legacyDockActive = !sessionsSurfaceActive && activeView === "chat" && hasThreadContent;
   syncBriefComposerDock(legacyDockActive);
   renderAutoresearchDock(autoresearchDockHtml, legacyDockActive);
+  scrollLiveCommandOutputs();
   renderComposerSuggestions();
   updateFramingScrollButton();
   if (!sessionsSurfaceActive) refreshActivityPanel();
@@ -6444,6 +6476,15 @@ function scrollFramingToBottomSoon() {
   });
 }
 
+function scrollLiveCommandOutputs() {
+  requestAnimationFrame(() => {
+    document.querySelectorAll(".command-output.is-live").forEach((node) => {
+      const distance = node.scrollHeight - (node.scrollTop + node.clientHeight);
+      if (distance <= 36) node.scrollTop = node.scrollHeight;
+    });
+  });
+}
+
 function mergeModelOptionsLists(...lists) {
   const seen = new Set();
   const merged = [];
@@ -6678,6 +6719,8 @@ function settingsFromForm() {
     ...permissionPresetForBackend(backend, permissionPreset),
     webSearch: Boolean(data.get("webSearch")),
     fastMode: Boolean(data.get("fastMode")),
+    richTrace: form.elements.richTrace ? Boolean(data.get("richTrace")) : true,
+    codexAppServerChat: Boolean(data.get("codexAppServerChat")),
     extraConfig: String(data.get("extraConfig") || "").trim(),
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("reviewCheckpointInterval")),
   });
@@ -6773,6 +6816,8 @@ function normalizeSessionSettings(settings = {}) {
   merged.reasoningEffort = normalizeReasoningEffort(merged.reasoningEffort, backend, merged.model);
   merged.reviewCheckpointInterval = normalizeReviewCheckpointInterval(merged.reviewCheckpointInterval);
   merged.fastMode = Boolean(merged.fastMode);
+  merged.richTrace = merged.richTrace !== false;
+  if (backend === "codex") merged.codexAppServerChat = Boolean(merged.codexAppServerChat);
   merged.preExecScript = String(merged.preExecScript || "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").replaceAll("\0", "").trim().slice(0, 4000);
   merged.permissionPreset = normalizePermissionPreset(merged.permissionPreset, merged);
   if (backend === "claude") {
@@ -6802,6 +6847,8 @@ function applySessionSettings(settings, persist = false) {
   form.elements.permissionPreset.value = merged.permissionPreset;
   form.elements.webSearch.checked = Boolean(merged.webSearch);
   if (form.elements.fastMode) form.elements.fastMode.checked = Boolean(merged.fastMode);
+  if (form.elements.richTrace) form.elements.richTrace.checked = merged.richTrace !== false;
+  if (form.elements.codexAppServerChat) form.elements.codexAppServerChat.checked = Boolean(merged.codexAppServerChat);
   form.elements.extraConfig.value = merged.extraConfig || "";
   if (form.elements.reviewCheckpointInterval) form.elements.reviewCheckpointInterval.value = merged.reviewCheckpointInterval;
   if (persist) persistSessionSettings(merged);
@@ -6834,6 +6881,8 @@ function settingsLabel(settings) {
   parts.push(labelForReasoning(normalized.reasoningEffort, normalized.backend, normalized.model));
   parts.push(permissionPresetForBackend(normalized.backend, normalized.permissionPreset)?.label || "Default permissions");
   if (normalized.fastMode) parts.push("fast");
+  if (normalized.richTrace !== false) parts.push("trace");
+  if (normalized.backend === "codex" && normalized.codexAppServerChat) parts.push("app-server chat");
   parts.push(`review ${normalized.reviewCheckpointInterval}`);
   if (normalized.webSearch) parts.push("web");
   return parts.join(" / ");
@@ -6978,6 +7027,8 @@ function settingsProviderFromModal(backend) {
     permissionPreset,
     ...permissionPresetForBackend(normalizedBackend, permissionPreset),
     webSearch: Boolean(data.get("settingsWebSearch")),
+    richTrace: form.elements.settingsRichTrace ? Boolean(data.get("settingsRichTrace")) : true,
+    codexAppServerChat: Boolean(data.get("settingsCodexAppServerChat")),
     extraConfig: String(data.get("settingsExtraConfig") || "").trim(),
     preExecScript: String(data.get(normalizedBackend === "claude" ? "settingsClaudePreExecScript" : "settingsCodexPreExecScript") || ""),
     reviewCheckpointInterval: normalizeReviewCheckpointInterval(data.get("settingsReviewCheckpointInterval")),
@@ -7016,6 +7067,8 @@ function hydrateSettingsDialog(settings) {
   syncPermissionSelectOptions(form.elements.settingsPermissionPreset, backend, provider.permissionPreset);
   form.elements.settingsPermissionPreset.value = provider.permissionPreset;
   form.elements.settingsWebSearch.checked = Boolean(provider.webSearch);
+  if (form.elements.settingsRichTrace) form.elements.settingsRichTrace.checked = provider.richTrace !== false;
+  if (form.elements.settingsCodexAppServerChat) form.elements.settingsCodexAppServerChat.checked = Boolean(provider.codexAppServerChat);
   form.elements.settingsExtraConfig.value = provider.extraConfig || "";
   const codexProvider = normalizeSessionSettings({ ...(settings?.codex || defaultCodexSessionSettings), backend: "codex" });
   const claudeProvider = normalizeSessionSettings({ ...(settings?.claude || defaultClaudeSessionSettings), backend: "claude" });
@@ -7852,6 +7905,338 @@ function webSearchActivityInfo(entry) {
   };
 }
 
+function tracePayload(entry) {
+  const payload = entry?.payload;
+  if (!payload || typeof payload !== "object") return null;
+  if (Number(payload.v || 1) !== 1) return null;
+  const type = String(payload.type || "").trim();
+  return type ? payload : null;
+}
+
+function traceDetailsAttrs(key) {
+  const clean = String(key || "").trim();
+  return clean ? ` data-run-activity-details="${escapeHtml(clean)}"${runActivityOpenAttribute(clean)}` : "";
+}
+
+function traceStatusPill(status, label = "") {
+  const value = String(status || "").trim().toLowerCase() || "running";
+  const text = label || value.replace(/_/g, " ");
+  return `<span class="trace-status is-${escapeHtml(value)}">${escapeHtml(text)}</span>`;
+}
+
+function traceDuration(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (value < 1000) return `${Math.round(value)}ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+}
+
+function stableJsonStringify(value) {
+  const seen = new WeakSet();
+  const normalize = (item) => {
+    if (!item || typeof item !== "object") return item;
+    if (seen.has(item)) return "[Circular]";
+    seen.add(item);
+    if (Array.isArray(item)) return item.map(normalize);
+    return Object.keys(item).sort().reduce((memo, key) => {
+      memo[key] = normalize(item[key]);
+      return memo;
+    }, {});
+  };
+  try {
+    return JSON.stringify(normalize(value), null, 2);
+  } catch {
+    return String(value || "");
+  }
+}
+
+function traceMetaRow(items) {
+  const values = (items || []).filter(Boolean);
+  if (!values.length) return "";
+  return `<div class="trace-meta-row">${values.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`;
+}
+
+function commandCardHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  const key = `cmd-${id}`;
+  const command = compactCommandText(payload.command || entry?.content || "command");
+  const duration = traceDuration(payload.duration_ms);
+  const exit = payload.exit_code !== null && payload.exit_code !== undefined ? `exit ${payload.exit_code}` : "";
+  const status = String(payload.status || (entry?.streaming ? "running" : "completed"));
+  const liveClass = status === "running" || entry?.streaming ? " is-live" : "";
+  const meta = traceMetaRow([payload.cwd ? `cwd ${payload.cwd}` : "", duration, exit]);
+  return `
+    <article class="transcript-message command is-compact" data-transcript-id="${escapeHtml(id)}">
+      <details class="tool-event command-card"${traceDetailsAttrs(key)}>
+        <summary>
+          <span>Command</span>
+          <code>${escapeHtml(command)}</code>
+          ${traceStatusPill(status)}
+        </summary>
+        ${meta}
+        <pre class="command-output${liveClass}" data-live-tail>${escapeHtml(payload.output || "")}</pre>
+      </details>
+    </article>
+  `;
+}
+
+function toolCallCardHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  const key = `tool-${id}`;
+  const tool = String(payload.tool || "tool");
+  const args = stableJsonStringify(payload.args || {});
+  const result = String(payload.result || "");
+  const status = String(payload.status || (entry?.streaming ? "running" : "succeeded"));
+  return `
+    <article class="transcript-message tool is-compact" data-transcript-id="${escapeHtml(id)}">
+      <details class="tool-event tool-call-card"${traceDetailsAttrs(key)}>
+        <summary>
+          <span>${escapeHtml(payload.server || "Tool")}</span>
+          <code>${escapeHtml(tool)}${args && args !== "{}" ? ` ${escapeHtml(compactText(args, 120))}` : ""}</code>
+          ${traceStatusPill(status)}
+        </summary>
+        <div class="trace-block-grid">
+          <section>
+            <h4>Args</h4>
+            <pre>${escapeHtml(args || "{}")}</pre>
+          </section>
+          ${result ? `
+            <section class="${payload.is_error ? "is-error" : ""}">
+              <h4>Result</h4>
+              <pre>${escapeHtml(result)}</pre>
+            </section>
+          ` : ""}
+          ${traceMetaRow([traceDuration(payload.duration_ms)])}
+        </div>
+      </details>
+    </article>
+  `;
+}
+
+function diffLineClass(line) {
+  if (/^@@/.test(line)) return "diff-hunk";
+  if (/^(---|\+\+\+)/.test(line)) return "diff-meta";
+  if (/^\+/.test(line)) return "diff-add";
+  if (/^-/.test(line)) return "diff-del";
+  return "diff-ctx";
+}
+
+function diffLinesHtml(lines) {
+  return lines.map((line) => `<span class="diff-line ${diffLineClass(line)}">${escapeHtml(line || " ")}</span>`).join("");
+}
+
+function diffHtml(change) {
+  const diff = String(change?.diff || "");
+  if (!diff.trim()) return `<div class="trace-empty">No inline diff available.</div>`;
+  const lines = diff.split("\n");
+  const visible = lines.length > 80 ? lines.slice(0, 60) : lines;
+  const hidden = lines.length > 80 ? lines.slice(60) : [];
+  return `
+    <pre class="diff-view">${diffLinesHtml(visible)}</pre>
+    ${hidden.length ? `
+      <details class="diff-more">
+        <summary>${escapeHtml(`${hidden.length} more diff lines`)}</summary>
+        <pre class="diff-view">${diffLinesHtml(hidden)}</pre>
+      </details>
+    ` : ""}
+    ${change?.truncated ? `<div class="trace-truncated">Diff truncated in trace payload.</div>` : ""}
+  `;
+}
+
+function fileChangeCardHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  const changes = Array.isArray(payload.changes) ? payload.changes : [];
+  const first = changes[0] || {};
+  const key = `file-${id}`;
+  const status = String(payload.status || (entry?.streaming ? "in_progress" : "completed"));
+  const title = changes.length === 1 ? basename(first.path || "file") : `${changes.length} files`;
+  return `
+    <article class="transcript-message tool is-file-change" data-transcript-id="${escapeHtml(id)}">
+      <details class="file-change-event trace-file-change"${traceDetailsAttrs(key)}>
+        <summary>
+          <span>Files</span>
+          <strong>${escapeHtml(title)}</strong>
+          <em>${escapeHtml(status.replace(/_/g, " "))}</em>
+          <code>${escapeHtml(changes.map((change) => change.path).filter(Boolean).slice(0, 3).join(", "))}</code>
+        </summary>
+        <div class="trace-file-change-body">
+          ${changes.map((change, index) => {
+            const plus = Number(change.plus_lines || 0);
+            const minus = Number(change.minus_lines || 0);
+            return `
+              <section class="trace-file-change-item">
+                <header>
+                  <span>${escapeHtml(change.action || "update")}</span>
+                  <strong>${escapeHtml(basename(change.path || `change-${index + 1}`))}</strong>
+                  <em>${escapeHtml(`+${plus} -${minus}`)}</em>
+                  <code>${escapeHtml(change.path || "")}</code>
+                </header>
+                ${diffHtml(change)}
+                ${change.path ? `<div class="inline-file" data-inline-file="${escapeHtml(change.path)}"><div class="tree-empty">Open file snapshot.</div></div>` : ""}
+              </section>
+            `;
+          }).join("") || `<div class="trace-empty">File change details are not available.</div>`}
+        </div>
+      </details>
+    </article>
+  `;
+}
+
+function checklistCardHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  const steps = Array.isArray(payload.steps) ? payload.steps : [];
+  const done = steps.filter((step) => String(step.status || "") === "completed").length;
+  const active = steps.findIndex((step) => String(step.status || "") === "in_progress");
+  return `
+    <article class="transcript-message assistant is-checklist" data-transcript-id="${escapeHtml(id)}">
+      <details class="tool-event checklist-card"${traceDetailsAttrs(`checklist-${id}`)} open>
+        <summary>
+          <span>Checklist</span>
+          <code>${escapeHtml(`${done}/${steps.length} complete`)}</code>
+          ${traceStatusPill(active >= 0 ? "running" : "completed", active >= 0 ? "running" : "updated")}
+        </summary>
+        ${payload.explanation ? `<p class="trace-note">${escapeHtml(payload.explanation)}</p>` : ""}
+        <ul class="trace-checklist">
+          ${steps.map((step) => {
+            const status = String(step.status || "pending");
+            const label = status === "completed" ? "Done" : status === "in_progress" ? "Now" : "Todo";
+            return `<li class="is-${escapeHtml(status)}"><span>${escapeHtml(label)}</span><p>${escapeHtml(step.step || "")}</p></li>`;
+          }).join("") || `<li class="is-pending"><span>Todo</span><p>Plan update received.</p></li>`}
+        </ul>
+      </details>
+    </article>
+  `;
+}
+
+function approvalRequestHtml(request) {
+  if (!request || typeof request !== "object") return "";
+  if (request.type === "command") {
+    return `<pre class="command-output">${escapeHtml(request.command || "")}</pre>`;
+  }
+  if (request.type === "file_change") {
+    const changes = Array.isArray(request.changes) ? request.changes : [];
+    return changes.map(diffHtml).join("") || `<div class="trace-empty">No file preview available.</div>`;
+  }
+  return `<pre>${escapeHtml(stableJsonStringify(request))}</pre>`;
+}
+
+function approvalCardHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  const decision = String(payload.decision || "").trim();
+  const label = decision ? decision.replace(/_/g, " ") : "pending";
+  return `
+    <article class="transcript-message tool is-approval" data-transcript-id="${escapeHtml(id)}">
+      <details class="tool-event approval-card"${traceDetailsAttrs(`approval-${id}`)} open>
+        <summary>
+          <span>Approval</span>
+          <code>${escapeHtml(payload.approval_kind || "request")}</code>
+          ${traceStatusPill(decision ? "completed" : "running", decision ? label : "pending")}
+        </summary>
+        ${payload.decided_by ? `<p class="trace-note">${escapeHtml(`Resolved by ${payload.decided_by}`)}</p>` : ""}
+        ${approvalRequestHtml(payload.request)}
+      </details>
+    </article>
+  `;
+}
+
+function usageSummaryHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  const cells = [
+    ["Input", payload.input_tokens],
+    ["Cached", payload.cached_input_tokens],
+    ["Output", payload.output_tokens],
+    ["Total", payload.total_tokens],
+    ["Cost", payload.cost_usd === null || payload.cost_usd === undefined ? "" : `$${Number(payload.cost_usd).toFixed(4)}`],
+    ["Duration", traceDuration(payload.duration_ms)],
+    ["Turns", payload.num_turns],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+  return `
+    <article class="transcript-message tool is-usage" data-transcript-id="${escapeHtml(id)}">
+      <div class="usage-summary trace-summary">
+        ${payload.model ? `<strong>${escapeHtml(payload.model)}</strong>` : `<strong>Usage</strong>`}
+        ${cells.map(([label, value]) => `<span><em>${escapeHtml(label)}</em>${escapeHtml(String(value))}</span>`).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function webSearchCardHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  const status = String(payload.status || (entry?.streaming ? "running" : "completed"));
+  return `
+    <article class="transcript-message tool is-compact" data-transcript-id="${escapeHtml(id)}">
+      <details class="tool-event web-search-card"${traceDetailsAttrs(`web-${id}`)}>
+        <summary>
+          <span>Web search</span>
+          <code>${escapeHtml(compactText(payload.query || "Searching the web", 180))}</code>
+          ${traceStatusPill(status)}
+        </summary>
+        <pre>${escapeHtml(payload.query || "")}</pre>
+      </details>
+    </article>
+  `;
+}
+
+function traceErrorCardHtml(entry, payload) {
+  const id = String(entry?.id || "");
+  return `
+    <article class="transcript-message tool is-compact" data-transcript-id="${escapeHtml(id)}">
+      <details class="tool-event trace-error-card" open>
+        <summary>
+          <span>Error</span>
+          <code>${escapeHtml(payload.source || "agent")}</code>
+          ${traceStatusPill("failed")}
+        </summary>
+        <pre>${escapeHtml(payload.message || entry?.content || "")}</pre>
+      </details>
+    </article>
+  `;
+}
+
+function transcriptPayloadHtml(entry) {
+  const payload = tracePayload(entry);
+  if (!payload) return "";
+  switch (payload.type) {
+    case "command":
+      return commandCardHtml(entry, payload);
+    case "tool_call":
+      return toolCallCardHtml(entry, payload);
+    case "file_change":
+      return fileChangeCardHtml(entry, payload);
+    case "plan_update":
+      return checklistCardHtml(entry, payload);
+    case "approval":
+      return approvalCardHtml(entry, payload);
+    case "usage":
+      return usageSummaryHtml(entry, payload);
+    case "web_search":
+      return webSearchCardHtml(entry, payload);
+    case "error":
+      return traceErrorCardHtml(entry, payload);
+    default:
+      return "";
+  }
+}
+
+function reasoningEventHtml(entry) {
+  const id = String(entry?.id || "");
+  const content = String(entry?.content || "");
+  if (!content.trim()) return "";
+  return `
+    <article class="transcript-message assistant is-reasoning" data-transcript-id="${escapeHtml(id)}">
+      <details class="reasoning-event"${traceDetailsAttrs(`reasoning-${id}`)}>
+        <summary>
+          <span>Thinking summary</span>
+          <code>${escapeHtml(compactText(content, 120))}</code>
+        </summary>
+        <div class="transcript-body">${transcriptContentHtml(content, { markdown: true })}</div>
+      </details>
+    </article>
+  `;
+}
+
 function repoRelativePath(path) {
   const raw = String(path || "").trim();
   if (!raw) return "";
@@ -7883,6 +8268,13 @@ function sessionTranscriptEntries() {
   const entries = [];
   const seenAdjacent = new Set();
   let previousIncludedWasUserCommand = false;
+  const latestPlanUpdateByRun = new Map();
+  transcript.forEach((entry) => {
+    const payload = tracePayload(entry);
+    if (payload?.type !== "plan_update") return;
+    const key = String(entry?.run_id || sessionState().id || "run");
+    latestPlanUpdateByRun.set(key, String(entry?.id || ""));
+  });
   const completedFileChanges = new Set(
     transcript
       .map((entry) => parseFileChangeInfo(entry?.content))
@@ -7890,11 +8282,16 @@ function sessionTranscriptEntries() {
       .map(fileChangeKey)
   );
   transcript.forEach((entry) => {
+    const payload = tracePayload(entry);
     const content = String(entry?.content || "").trim();
-    if (!content) return;
+    if (!content && !payload) return;
     const originalRawType = String(entry?.raw_type || "");
     if (isNoisyAgentLifecycleEntry(entry)) return;
     if (isHiddenUiTranscript(entry)) return;
+    if (payload?.type === "plan_update") {
+      const key = String(entry?.run_id || sessionState().id || "run");
+      if (latestPlanUpdateByRun.get(key) !== String(entry?.id || "")) return;
+    }
     if (isLegacySyntheticUiCommand(entry)) {
       previousIncludedWasUserCommand = false;
       return;
@@ -7904,13 +8301,17 @@ function sessionTranscriptEntries() {
       return;
     }
     const fileChange = parseFileChangeInfo(content);
-    if (fileChange && fileChange.status !== "completed" && completedFileChanges.has(fileChangeKey(fileChange))) return;
+    if (!payload && fileChange && fileChange.status !== "completed" && completedFileChanges.has(fileChangeKey(fileChange))) return;
     const role = transcriptRole(entry);
     const rawType = originalRawType.replace(/item\.(started|completed)/, "item");
     const key = `${role}\n${entry?.kind || ""}\n${rawType}\n${content}`;
-    if (seenAdjacent.has(key)) return;
-    seenAdjacent.clear();
-    seenAdjacent.add(key);
+    if (!payload) {
+      if (seenAdjacent.has(key)) return;
+      seenAdjacent.clear();
+      seenAdjacent.add(key);
+    } else {
+      seenAdjacent.clear();
+    }
     entries.push(entry);
     previousIncludedWasUserCommand = isRealUserUiCommand(entry);
   });
@@ -9008,11 +9409,26 @@ function persistentAutoresearchPanelHtml(entries, options = {}) {
 }
 
 function isCollapsibleToolEntry(entry) {
+  const payload = tracePayload(entry);
+  if (payload) return payload.type === "command" || payload.type === "tool_call" || payload.type === "web_search";
   const role = transcriptRole(entry);
   return (role === "tool" || role === "command") && !parseFileChangeInfo(String(entry?.content || ""));
 }
 
 function toolGroupKind(entry) {
+  const payload = tracePayload(entry);
+  if (payload?.type === "web_search") return "search";
+  if (payload?.type === "tool_call") {
+    const tool = String(payload.tool || "");
+    if (/search|fetch|read|glob|grep|rg/i.test(tool)) return "search";
+    return "run";
+  }
+  if (payload?.type === "command") {
+    const command = compactCommandText(payload.command || "");
+    if (/\b(rg|grep|find|fd)\b/.test(command)) return "search";
+    if (/\b(sed|cat|head|tail|nl|wc|ls)\b/.test(command)) return "read";
+    return "run";
+  }
   if (webSearchActivityInfo(entry)) return "search";
   const content = compactCommandText(String(entry?.content || ""));
   if (/\b(rg|grep|find|fd)\b/.test(content)) return "search";
@@ -9038,7 +9454,13 @@ function toolGroupSummary(entries) {
 function toolGroupPreview(entries) {
   return entries
     .slice(0, 3)
-    .map((entry) => compactText(compactCommandText(entry?.content || ""), 56))
+    .map((entry) => {
+      const payload = tracePayload(entry);
+      if (payload?.type === "command") return compactText(compactCommandText(payload.command || ""), 56);
+      if (payload?.type === "tool_call") return compactText(payload.tool || "tool", 56);
+      if (payload?.type === "web_search") return compactText(payload.query || "web search", 56);
+      return compactText(compactCommandText(entry?.content || ""), 56);
+    })
     .filter(Boolean)
     .join(" · ");
 }
@@ -9095,6 +9517,12 @@ function transcriptEntryHtml(entry) {
   const content = String(entry?.content || "");
   const rawType = String(entry?.raw_type || "");
   const meta = transcriptMeta(entry);
+  const payloadHtml = transcriptPayloadHtml(entry);
+  if (payloadHtml) return payloadHtml;
+  if (String(entry?.kind || "") === "reasoning") {
+    const reasoningHtml = reasoningEventHtml(entry);
+    if (reasoningHtml) return reasoningHtml;
+  }
   const fileChange = parseFileChangeInfo(content);
   const statusPayload = isUiCommandResult(entry) ? parseStatusCardPayload(content) : null;
   const webSearch = webSearchActivityInfo(entry);

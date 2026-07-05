@@ -2897,6 +2897,82 @@ function testTranscriptEntriesDoNotExposeEdit() {
   assert.equal(html.includes("transcript-edit-form"), false, "transcript/activity entries should not render resend forms");
 }
 
+function testStructuredTracePayloadCards() {
+  const app = loadAppContext();
+  const html = app.run(`({
+    command: transcriptEntryHtml({
+      id: "cmd1",
+      role: "command",
+      kind: "command",
+      content: "running: pytest -q",
+      payload: { v: 1, type: "command", command: "pytest -q", status: "running", exit_code: null, output: "collecting\\n", duration_ms: 1200 }
+    }),
+    file: transcriptEntryHtml({
+      id: "file1",
+      role: "tool",
+      kind: "tool",
+      content: "file change",
+      payload: { v: 1, type: "file_change", status: "completed", changes: [{ path: "src/app.py", action: "update", diff: "--- a/src/app.py\\n+++ b/src/app.py\\n@@ -1 +1 @@\\n-old\\n+new", plus_lines: 1, minus_lines: 1 }] }
+    }),
+    checklist: transcriptEntryHtml({
+      id: "plan1",
+      role: "assistant",
+      kind: "reasoning",
+      content: "Checklist 1/2",
+      payload: { v: 1, type: "plan_update", source: "todo_write", steps: [{ step: "Inspect", status: "completed" }, { step: "Patch", status: "in_progress" }] }
+    }),
+    usage: transcriptEntryHtml({
+      id: "usage1",
+      role: "tool",
+      kind: "tool",
+      content: "Usage summary",
+      payload: { v: 1, type: "usage", input_tokens: 10, cached_input_tokens: 2, output_tokens: 4, total_tokens: 14, cost_usd: 0.01, duration_ms: 1000, num_turns: 1 }
+    }),
+    fallback: transcriptEntryHtml({ id: "unknown1", role: "tool", kind: "tool", content: "legacy fallback", payload: { v: 1, type: "future_type" } })
+  })`);
+  assert.equal(html.command.includes("command-card"), true, "command payload should render command card");
+  assert.equal(html.command.includes("is-live"), true, "running command should mark live output");
+  assert.equal(html.file.includes("diff-add"), true, "file payload should render classified diff lines");
+  assert.equal(html.file.includes("src/app.py"), true, "file payload should include path");
+  assert.equal(html.checklist.includes("trace-checklist"), true, "plan_update payload should render checklist");
+  assert.equal(html.usage.includes("usage-summary"), true, "usage payload should render compact usage row");
+  assert.equal(html.fallback.includes("legacy fallback"), true, "unknown payload type should fall through to legacy rendering");
+}
+
+function testStructuredTracePayloadUpsertAndChecklistSupersede() {
+  const app = loadAppContext();
+  const state = app.run(`
+    __setSession({
+      id: "run1",
+      status: "running",
+      mode: "chat",
+      transcript: [
+        { id: "plan-old", run_id: "run1", role: "assistant", kind: "reasoning", content: "old", payload: { v: 1, type: "plan_update", steps: [{ step: "Old", status: "pending" }] } },
+        { id: "plan-new", run_id: "run1", role: "assistant", kind: "reasoning", content: "new", payload: { v: 1, type: "plan_update", steps: [{ step: "New", status: "completed" }] } },
+        { id: "cmd1", role: "command", kind: "command", content: "running", payload: { v: 1, type: "command", command: "pytest -q", status: "running", output: "" } }
+      ]
+    });
+    const before = sessionTranscriptEntries().map((entry) => entry.id);
+    applyResearchEventPayload({
+      event_id: 11,
+      run_id: "run1",
+      transcript_entry: {
+        id: "cmd1",
+        role: "command",
+        kind: "command",
+        content: "completed",
+        payload: { v: 1, type: "command", command: "pytest -q", status: "completed", exit_code: 0, output: "ok" }
+      }
+    });
+    const command = appState.research_session.transcript.find((entry) => entry.id === "cmd1");
+    ({ before, status: command.payload.status, output: command.payload.output, html: transcriptEntryHtml(command) });
+  `);
+  assert.equal(JSON.stringify(state.before), JSON.stringify(["plan-new", "cmd1"]), "only latest plan_update should remain visible per run");
+  assert.equal(state.status, "completed", "SSE transcript payload should upsert by id");
+  assert.equal(state.output, "ok");
+  assert.equal(state.html.includes("command-card"), true, "upserted command should render structured card");
+}
+
 async function testEditTruncatesLaterConversationBeforeResend() {
   const app = loadAppContext();
   app.run(`
@@ -7810,6 +7886,8 @@ await testResearchEventStreamUpsertsTranscriptAndCompletes();
 testResearchEventStreamSyncsPlanArtifact();
 testResearchEventStreamProjectSwitchAndErrorFallback();
 testTranscriptEntriesDoNotExposeEdit();
+testStructuredTracePayloadCards();
+testStructuredTracePayloadUpsertAndChecklistSupersede();
 await testEditTruncatesLaterConversationBeforeResend();
 await testEditAfterAutoresearchFirstMessageUsesChat();
 await testSteeringResendStartsVisibleNormalChatRun();

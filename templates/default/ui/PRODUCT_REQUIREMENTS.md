@@ -44,6 +44,28 @@ The main screen is a centered conversation with the active agent session.
 - Chat is disabled until the first agent session exists.
 - The UI must not fake assistant work. The session log should show what the real agent process is doing.
 
+### 2.1 Structured Agent Trace
+
+Agent runs should render as a progressively disclosed service trace while
+preserving the chat transcript fallback. Backend parsers may attach an optional
+`payload` object to transcript entries; entries without payload must render
+exactly as legacy transcript items.
+
+Supported payload types are:
+
+- `command`: command, cwd, status, exit code, output tail, duration.
+- `tool_call`: tool name, call id, args, result, status, error flag.
+- `file_change`: one or more path/action/diff summaries with plus/minus counts.
+- `plan_update`: live checklist steps from Codex plan updates or Claude TodoWrite.
+- `approval`: display-only approval request/resolution cards, ready for future user decisions.
+- `usage`: token, cost, duration, model, and turn summary.
+- `web_search` and `error`: compact activity/error cards.
+
+The trace never exposes hidden chain-of-thought. Reasoning entries may display
+only official reasoning summaries emitted by the agent. Every payload entry must
+also include readable `content` so copy/export and legacy clients still have a
+text fallback.
+
 ### 3. Session Controls
 
 Session controls are shown in Step 2 before launch, not in Step 1.
@@ -55,6 +77,8 @@ The user can adjust:
 - backend (`codex` or `claude`);
 - provider-specific permissions;
 - live web search;
+- structured trace cards;
+- experimental Codex app-server chat/framing, default off;
 - advanced Codex `-c key=value` config overrides.
 
 Settings store the per-project default backend. Launch controls can override it

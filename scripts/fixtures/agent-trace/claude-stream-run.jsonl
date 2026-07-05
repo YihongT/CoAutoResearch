@@ -1,0 +1,5 @@
+{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"toolu_todo","name":"TodoWrite","input":{"todos":[{"content":"Inspect files","status":"completed"},{"content":"Patch bug","status":"in_progress"}]}},{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"pytest -q"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"2 passed\n"}]}}
+{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"toolu_edit","name":"Edit","input":{"file_path":"src/app.py","old_string":"old\n","new_string":"new\n"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_edit","content":"Updated src/app.py"}]}}
+{"type":"result","result":"Done","usage":{"input_tokens":20,"output_tokens":7,"cache_read_input_tokens":3},"total_cost_usd":0.012,"duration_ms":1200,"num_turns":2}

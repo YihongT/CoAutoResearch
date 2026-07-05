@@ -34,7 +34,9 @@ import xml.etree.ElementTree as ET
 UI_DIR = Path(__file__).resolve().parent
 if str(UI_DIR) not in sys.path:
     sys.path.insert(0, str(UI_DIR))
+from agent_trace import make_trace_normalizer
 from aux_sessions import AuxSessionManager
+import codex_app_server as codex_app_server_rpc
 
 
 DEFAULT_PROJECT_ROOT = UI_DIR.parent
@@ -327,6 +329,9 @@ def new_research_session() -> dict[str, Any]:
         "plan_id": "",
         "plan_thread_id": "",
         "plan_turn_id": "",
+        "app_thread_id": "",
+        "app_turn_id": "",
+        "session_id_source": "",
         "process": None,
     }
 
@@ -1354,6 +1359,9 @@ class ProjectContext:
                 "plan_id",
                 "plan_thread_id",
                 "plan_turn_id",
+                "app_thread_id",
+                "app_turn_id",
+                "session_id_source",
             ):
                 if key in payload:
                     self.session[key] = payload[key]
@@ -1801,6 +1809,8 @@ DEFAULT_CODEX_SETTINGS = {
     "extraConfig": "",
     "preExecScript": "",
     "reviewCheckpointInterval": DEFAULT_REVIEW_CHECKPOINT_INTERVAL,
+    "richTrace": True,
+    "codexAppServerChat": False,
 }
 DEFAULT_CLAUDE_SETTINGS = {
     "model": "sonnet",
@@ -1813,6 +1823,7 @@ DEFAULT_CLAUDE_SETTINGS = {
     "extraConfig": "",
     "preExecScript": "",
     "reviewCheckpointInterval": DEFAULT_REVIEW_CHECKPOINT_INTERVAL,
+    "richTrace": True,
 }
 DEFAULT_AGENT_SETTINGS = {"backend": "codex"}
 ALLOWED_AGENT_BACKENDS = {"codex", "claude"}
@@ -2119,9 +2130,7 @@ def normalize_codex_settings(payload: Any, base: dict[str, Any] | None = None) -
             settings[key] = normalize_reasoning_effort(values[key], "codex", settings.get("model"))
         elif key == "reviewCheckpointInterval":
             settings[key] = normalize_review_checkpoint_interval(values[key])
-        elif key == "webSearch":
-            settings[key] = bool(values[key])
-        elif key == "fastMode":
+        elif key in {"webSearch", "fastMode", "richTrace", "codexAppServerChat"}:
             settings[key] = bool(values[key])
         elif key == "extraConfig":
             settings[key] = str(values[key] or "").strip()[:4000]
@@ -2161,9 +2170,7 @@ def normalize_claude_settings(payload: Any, base: dict[str, Any] | None = None) 
             settings[key] = normalize_reasoning_effort(values[key], "claude", settings.get("model"))
         elif key == "reviewCheckpointInterval":
             settings[key] = normalize_review_checkpoint_interval(values[key])
-        elif key == "webSearch":
-            settings[key] = bool(values[key])
-        elif key == "fastMode":
+        elif key in {"webSearch", "fastMode", "richTrace"}:
             settings[key] = bool(values[key])
         elif key == "extraConfig":
             settings[key] = str(values[key] or "").strip()[:4000]
@@ -2416,6 +2423,9 @@ def load_research_session_runtime() -> None:
             "last_event_at",
             "last_event_summary",
             "agent_notice",
+            "app_thread_id",
+            "app_turn_id",
+            "session_id_source",
         ):
             if key in payload:
                 RESEARCH_SESSION[key] = payload[key]
@@ -3565,7 +3575,7 @@ def append_transcript(role: str, kind: str, title: str, content: str, raw_type: 
         return
     with RESEARCH_LOCK:
         RESEARCH_SESSION["transcript"].append(transcript_entry(role, kind, title, text, raw_type, editable))
-        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        trim_transcript_locked()
     persist_research_session()
 
 
@@ -4238,11 +4248,139 @@ def parsed_transcript_entry(parsed: dict[str, Any], entry_id: str = "", streamin
     return entry
 
 
+def compact_trace_payload_for_persistence(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    compacted = dict(payload)
+    ptype = str(compacted.get("type") or "")
+    if ptype == "command":
+        output = str(compacted.get("output") or "")
+        if len(output) > 1200:
+            compacted["output"] = "[trimmed persisted command output]\n" + output[-1200:]
+    elif ptype == "tool_call":
+        result = str(compacted.get("result") or "")
+        if len(result) > 1200:
+            compacted["result"] = "[trimmed persisted tool result]\n" + result[-1200:]
+        args = compacted.get("args")
+        if isinstance(args, str) and len(args) > 1200:
+            compacted["args"] = args[:1200] + "\n[trimmed persisted args]"
+    elif ptype == "file_change":
+        changes = []
+        for change in compacted.get("changes") if isinstance(compacted.get("changes"), list) else []:
+            if not isinstance(change, dict):
+                continue
+            next_change = dict(change)
+            diff = str(next_change.get("diff") or "")
+            if diff:
+                next_change["diff"] = ""
+                next_change["truncated"] = True
+                next_change["persisted_diff_trimmed"] = True
+            changes.append(next_change)
+        compacted["changes"] = changes
+    return compacted
+
+
+def trim_transcript_entries(entries: list[Any], cap: int = 600) -> list[Any]:
+    kept = [entry for entry in entries[-cap:] if isinstance(entry, dict)]
+    if len(kept) <= 360:
+        return kept
+    compact_count = max(0, len(kept) - 240)
+    compacted: list[dict[str, Any]] = []
+    for index, entry in enumerate(kept):
+        if index >= compact_count or not isinstance(entry.get("payload"), dict):
+            compacted.append(entry)
+            continue
+        next_entry = dict(entry)
+        next_entry["payload"] = compact_trace_payload_for_persistence(next_entry.get("payload"))
+        compacted.append(next_entry)
+    return compacted
+
+
+def trim_transcript_locked(cap: int = 600) -> None:
+    RESEARCH_SESSION["transcript"] = trim_transcript_entries(list(RESEARCH_SESSION.get("transcript", [])), cap)
+
+
+def trace_transcript_entry(update: dict[str, Any], run_id: str = "", entry_count: int = 0) -> dict[str, Any]:
+    key = str(update.get("entry_key") or update.get("raw_type") or "trace")
+    session_run_id = str(run_id or RESEARCH_SESSION.get("id") or "run")
+    id_base = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{session_run_id}_{key}").strip("._-")[:90] or "trace"
+    digest = hashlib.sha1(f"{session_run_id}:{key}".encode("utf-8", "replace")).hexdigest()[:10]
+    entry = parsed_transcript_entry(
+        update,
+        entry_id=f"T{id_base}_{digest}",
+        streaming=bool(update.get("streaming")),
+    )
+    payload = update.get("payload")
+    if isinstance(payload, dict):
+        entry["payload"] = payload
+    if update.get("streaming") is False:
+        entry["streaming"] = False
+    if not entry.get("content") and isinstance(payload, dict):
+        entry["content"] = str(payload.get("type") or "trace")
+    if not entry.get("content"):
+        entry["content"] = f"Trace update {entry_count + 1}"
+    return entry
+
+
+def rich_trace_enabled(settings: Any) -> bool:
+    if not isinstance(settings, dict):
+        return True
+    return settings.get("richTrace") is not False
+
+
+def trace_read_repo_file(path: str) -> str | None:
+    try:
+        resolved = repo_path(path)
+        if not resolved.exists() or not resolved.is_file():
+            return None
+        if resolved.stat().st_size > MAX_TEXT_BYTES:
+            return None
+        return resolved.read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return None
+
+
+def make_research_trace_normalizer(backend: str, flavor: str, settings: dict[str, Any] | None = None) -> Any:
+    if not rich_trace_enabled(settings):
+        return None
+    return make_trace_normalizer(backend, flavor, read_file=trace_read_repo_file)
+
+
+def upsert_trace_updates_locked(updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for update in updates:
+        if not isinstance(update, dict):
+            continue
+        entry = trace_transcript_entry(update, entry_count=len(RESEARCH_SESSION.get("transcript", [])))
+        entries.append(upsert_transcript_entry_locked(entry))
+    return entries
+
+
+def emit_trace_transcript_entries(entries: list[dict[str, Any]], session_patch: dict[str, Any], display: str = "") -> None:
+    for index, entry in enumerate(entries):
+        payload: dict[str, Any] = {"session_patch": session_patch, "transcript_entry": entry}
+        if display and index == 0:
+            payload["log"] = display
+        emit_research_event("transcript", payload)
+
+
+def append_trace_updates(updates: list[dict[str, Any]], display: str = "") -> list[dict[str, Any]]:
+    if not updates:
+        return []
+    with RESEARCH_LOCK:
+        entries = upsert_trace_updates_locked(updates)
+        session_patch = research_event_session_patch()
+    if entries:
+        persist_research_session()
+        emit_trace_transcript_entries(entries, session_patch, display)
+    return entries
+
+
 def upsert_transcript_entry_locked(entry: dict[str, Any]) -> dict[str, Any]:
     entry_id = str(entry.get("id") or "").strip()
     if not entry_id:
         RESEARCH_SESSION["transcript"].append(entry)
-        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        trim_transcript_locked()
         return entry
     for index, existing in enumerate(RESEARCH_SESSION.get("transcript", [])):
         if str(existing.get("id") or "") == entry_id:
@@ -4252,10 +4390,10 @@ def upsert_transcript_entry_locked(entry: dict[str, Any]) -> dict[str, Any]:
             if entry.get("streaming") is False:
                 merged.pop("streaming", None)
             RESEARCH_SESSION["transcript"][index] = merged
-            RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+            trim_transcript_locked()
             return merged
     RESEARCH_SESSION["transcript"].append(entry)
-    RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+    trim_transcript_locked()
     return entry
 
 
@@ -4329,24 +4467,43 @@ def finalize_streaming_transcript_locked(parsed: dict[str, Any]) -> dict[str, An
         return upsert_transcript_entry_locked(entry)
     entry = parsed_transcript_entry(parsed)
     RESEARCH_SESSION["transcript"].append(entry)
-    RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+    trim_transcript_locked()
     return entry
 
 
-def finalize_active_streaming_transcripts_locked() -> list[dict[str, Any]]:
+def finalize_active_streaming_transcripts_locked(interrupted: bool = False) -> list[dict[str, Any]]:
     state = RESEARCH_SESSION.get("streaming_transcript")
-    if not isinstance(state, dict) or not state:
-        RESEARCH_SESSION["streaming_transcript"] = {}
-        return []
     finalized: list[dict[str, Any]] = []
-    ids = {str(item.get("id") or "") for item in state.values() if isinstance(item, dict)}
+    if isinstance(state, dict) and state:
+        ids = {str(item.get("id") or "") for item in state.values() if isinstance(item, dict)}
+        for index, entry in enumerate(RESEARCH_SESSION.get("transcript", [])):
+            if str(entry.get("id") or "") in ids and entry.get("streaming"):
+                next_entry = dict(entry)
+                next_entry.pop("streaming", None)
+                RESEARCH_SESSION["transcript"][index] = next_entry
+                finalized.append(next_entry)
     for index, entry in enumerate(RESEARCH_SESSION.get("transcript", [])):
-        if str(entry.get("id") or "") in ids and entry.get("streaming"):
-            next_entry = dict(entry)
-            next_entry.pop("streaming", None)
-            RESEARCH_SESSION["transcript"][index] = next_entry
-            finalized.append(next_entry)
+        if not isinstance(entry, dict) or not entry.get("streaming") or not isinstance(entry.get("payload"), dict):
+            continue
+        payload = dict(entry.get("payload") or {})
+        status = str(payload.get("status") or "")
+        if status in {"running", "in_progress"}:
+            ptype = str(payload.get("type") or "")
+            if ptype == "command":
+                payload["status"] = "failed" if interrupted else "completed"
+                if interrupted and not str(payload.get("output") or "").strip():
+                    payload["output"] = "Interrupted by user."
+            elif ptype == "tool_call":
+                payload["status"] = "failed" if interrupted else "succeeded"
+            elif ptype in {"file_change", "web_search"}:
+                payload["status"] = "failed" if interrupted else "completed"
+        next_entry = dict(entry)
+        next_entry["payload"] = payload
+        next_entry.pop("streaming", None)
+        RESEARCH_SESSION["transcript"][index] = next_entry
+        finalized.append(next_entry)
     RESEARCH_SESSION["streaming_transcript"] = {}
+    trim_transcript_locked()
     return finalized
 
 
@@ -4376,10 +4533,52 @@ def backfill_claude_result_transcript_from_raw_logs() -> bool:
             if key in existing:
                 continue
             RESEARCH_SESSION["transcript"].append(transcript_entry(**parsed))
-            RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+            trim_transcript_locked()
             existing.add(key)
             added = True
         return added
+
+
+def backfill_trace_transcript_from_raw_logs() -> bool:
+    with RESEARCH_LOCK:
+        settings = RESEARCH_SESSION.get("settings") if isinstance(RESEARCH_SESSION.get("settings"), dict) else {}
+        if not rich_trace_enabled(settings):
+            return False
+        status = str(RESEARCH_SESSION.get("status") or "").strip().lower()
+        if status in {"running", "stopping"}:
+            return False
+        backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or settings.get("backend") or "")
+        mode = str(RESEARCH_SESSION.get("mode") or "")
+        returncode = RESEARCH_SESSION.get("returncode")
+        raw_logs = list(RESEARCH_SESSION.get("raw_logs") or [])
+        existing_ids = {str(entry.get("id") or "") for entry in RESEARCH_SESSION.get("transcript", []) if isinstance(entry, dict)}
+    if not raw_logs:
+        return False
+    normalizer = make_research_trace_normalizer(backend, "app-server" if mode == "plan" else "exec", settings)
+    if normalizer is None:
+        return False
+    updates: list[dict[str, Any]] = []
+    for line in raw_logs:
+        try:
+            updates.extend(update for update in normalizer.feed(str(line or "")) if isinstance(update, dict) and isinstance(update.get("payload"), dict))
+        except Exception:
+            continue
+    try:
+        updates.extend(update for update in normalizer.finish(returncode) if isinstance(update, dict) and isinstance(update.get("payload"), dict))
+    except Exception:
+        pass
+    if not updates:
+        return False
+    added = False
+    with RESEARCH_LOCK:
+        for update in updates:
+            entry = trace_transcript_entry(update, entry_count=len(RESEARCH_SESSION.get("transcript", [])))
+            if str(entry.get("id") or "") in existing_ids:
+                continue
+            upsert_transcript_entry_locked(entry)
+            existing_ids.add(str(entry.get("id") or ""))
+            added = True
+    return added
 
 
 def slugify(value: str, fallback: str = "item") -> str:
@@ -11113,7 +11312,9 @@ def ensure_autoresearch_gate_for_loop() -> None:
 
 def research_session_snapshot() -> dict[str, Any]:
     reconcile_research_process_state()
-    if backfill_claude_result_transcript_from_raw_logs():
+    trace_backfilled = backfill_trace_transcript_from_raw_logs()
+    claude_backfilled = backfill_claude_result_transcript_from_raw_logs()
+    if trace_backfilled or claude_backfilled:
         persist_research_session()
     with RESEARCH_LOCK:
         current_mode = str(RESEARCH_SESSION.get("mode", "") or "")
@@ -11247,7 +11448,7 @@ def research_session_snapshot() -> dict[str, Any]:
         }
 
 
-def append_research_log(line: str) -> None:
+def append_research_log(line: str, normalizer: Any = None) -> None:
     with RESEARCH_LOCK:
         backend = normalize_agent_backend(
             RESEARCH_SESSION.get("backend")
@@ -11255,12 +11456,30 @@ def append_research_log(line: str) -> None:
             or load_ui_settings().get("agent", {}).get("backend")
         )
     display = format_agent_event(line, backend)
-    transcript = transcript_from_agent_line(line, backend)
-    streaming_update = None if transcript else streaming_update_from_agent_line(line, backend)
+    trace_updates: list[dict[str, Any]] = []
+    if normalizer is not None:
+        try:
+            trace_updates = [item for item in normalizer.feed(line) if isinstance(item, dict)]
+        except Exception as exc:  # pragma: no cover - defensive trace parsing
+            trace_updates = [
+                {
+                    "entry_key": f"trace_error:{hashlib.sha1(str(exc).encode('utf-8', 'replace')).hexdigest()[:10]}",
+                    "role": "tool",
+                    "kind": "error",
+                    "title": "Trace parser",
+                    "content": f"Structured trace parser error: {exc}",
+                    "raw_type": "trace.parser_error",
+                    "payload": {"v": 1, "type": "error", "message": str(exc), "source": "process", "code": "trace_parser"},
+                    "streaming": False,
+                }
+            ]
+    transcript = None if trace_updates else transcript_from_agent_line(line, backend)
+    streaming_update = None if trace_updates or transcript else streaming_update_from_agent_line(line, backend)
     event_at = now_iso()
     notice = agent_notice_from_event(line, display)
     suppress_summary = should_suppress_agent_event_summary(line, backend)
     transcript_update: dict[str, Any] | None = None
+    transcript_updates: list[dict[str, Any]] = []
     event_kind = "agent_event" if display or line.strip() else "session"
     with RESEARCH_LOCK:
         if line.strip():
@@ -11282,7 +11501,12 @@ def append_research_log(line: str) -> None:
                 age = seconds_since_iso(existing.get("detected_at"))
                 if age is None or age >= AGENT_RATE_LIMIT_CLEAR_SECONDS:
                     RESEARCH_SESSION["agent_notice"] = {}
-        if transcript and transcript.get("content"):
+        if trace_updates:
+            transcript_updates = upsert_trace_updates_locked(trace_updates)
+            if transcript_updates:
+                transcript_update = transcript_updates[-1]
+                event_kind = "transcript"
+        elif transcript and transcript.get("content"):
             transcript_update = finalize_streaming_transcript_locked(transcript)
             event_kind = "transcript"
         elif streaming_update:
@@ -11296,12 +11520,16 @@ def append_research_log(line: str) -> None:
             session_id = find_session_identifier(line)
         if session_id and str(RESEARCH_SESSION.get("mode") or "").strip().lower() != "plan":
             RESEARCH_SESSION["session_id"] = session_id
+            if backend == "codex":
+                RESEARCH_SESSION["session_id_source"] = "app_server" if session_id == str(RESEARCH_SESSION.get("app_thread_id") or "") else "exec"
         RESEARCH_SESSION["raw_logs"] = RESEARCH_SESSION["raw_logs"][-2000:]
         RESEARCH_SESSION["logs"] = RESEARCH_SESSION["logs"][-2000:]
-        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        trim_transcript_locked()
         session_patch = research_event_session_patch()
     persist_research_session()
-    if line.strip() or display or transcript_update:
+    if transcript_updates:
+        emit_trace_transcript_entries(transcript_updates, session_patch, display)
+    elif line.strip() or display or transcript_update:
         payload: dict[str, Any] = {"session_patch": session_patch}
         if display:
             payload["log"] = display
@@ -11318,7 +11546,7 @@ def finish_research_run(returncode: int | None) -> None:
         RESEARCH_SESSION["ended_at"] = now_iso()
         RESEARCH_SESSION["process"] = None
         RESEARCH_SESSION["process_thread"] = None
-        finalize_active_streaming_transcripts_locked()
+        finalize_active_streaming_transcripts_locked(stopped_by_user or returncode != 0)
         session_patch = research_event_session_patch({"returncode": returncode})
     persist_research_session()
     emit_research_event("completed" if returncode == 0 else "error", {"session_patch": session_patch, "returncode": returncode})
@@ -11590,11 +11818,11 @@ def maybe_start_queued_chat_after_run(previous_mode: str, returncode: int | None
     return bool(result.get("started") or result.get("reason") in {"error", "not_running"})
 
 
-def process_research_run(proc: subprocess.Popen[str]) -> None:
+def process_research_run(proc: subprocess.Popen[str], normalizer: Any = None) -> None:
     try:
         assert proc.stdout is not None
         for line in proc.stdout:
-            append_research_log(line)
+            append_research_log(line, normalizer)
         returncode = proc.wait()
     except Exception as exc:  # pragma: no cover - defensive process handling
         append_research_log(f"UI session error: {exc}")
@@ -11611,6 +11839,11 @@ def process_research_run(proc: subprocess.Popen[str]) -> None:
             return
         mode = str(RESEARCH_SESSION.get("mode") or "")
         protected_snapshot = RESEARCH_SESSION.get("protected_snapshot")
+    if normalizer is not None:
+        try:
+            append_trace_updates(normalizer.finish(returncode))
+        except Exception as exc:  # pragma: no cover - defensive trace finalization
+            append_research_log(f"Structured trace finalization warning: {exc}")
     finish_research_run(returncode)
     if mode == "chat":
         restored_paths = restore_chat_protected_snapshot(protected_snapshot if isinstance(protected_snapshot, dict) else None)
@@ -12137,7 +12370,14 @@ def start_research_run(
         if resume and not should_resume_research_session(settings):
             resume = False
         previous_session_id = str(RESEARCH_SESSION.get("session_id") or "")
-        command = agent_command_for_prompt(resume, settings)
+        use_codex_app_server = mode in {"chat", "framing"} and backend == "codex" and bool(settings.get("codexAppServerChat"))
+        previous_session_source = str(RESEARCH_SESSION.get("session_id_source") or "")
+        if resume and backend == "codex":
+            if use_codex_app_server and previous_session_source == "exec":
+                resume = False
+            if not use_codex_app_server and previous_session_source == "app_server":
+                resume = False
+        command = codex_app_server_command(settings) if use_codex_app_server else agent_command_for_prompt(resume, settings)
         protected_snapshot = create_chat_protected_snapshot() if mode == "chat" else None
         if mode == "goal":
             record_project_scope_hash_at_launch(sync_trajectory_state("start_goal_run"))
@@ -12190,6 +12430,9 @@ def start_research_run(
                 "last_event_summary": "Starting selected agent.",
                 "agent_notice": {},
                 "protected_snapshot": protected_snapshot,
+                "app_thread_id": "",
+                "app_turn_id": "",
+                "session_id_source": RESEARCH_SESSION.get("session_id_source", "") if resume else "",
             }
         )
         display_text = prompt if display_prompt is None else str(display_prompt).strip()
@@ -12198,7 +12441,7 @@ def start_research_run(
         else:
             title = "Cold start request" if mode == "cold_start" else "User"
             RESEARCH_SESSION["transcript"].append(transcript_entry("user", "user", title, display_text, f"ui.{mode}", mode in {"chat", "research"}))
-        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        trim_transcript_locked()
         session_patch = research_event_session_patch()
     persist_research_session()
     emit_research_event("session", {"session_patch": session_patch})
@@ -12221,10 +12464,11 @@ def start_research_run(
         )
         if wrapper_path:
             setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
-        assert proc.stdin is not None
-        proc.stdin.write(prompt)
-        proc.stdin.write("\n")
-        proc.stdin.close()
+        if not use_codex_app_server:
+            assert proc.stdin is not None
+            proc.stdin.write(prompt)
+            proc.stdin.write("\n")
+            proc.stdin.close()
     except (OSError, ValueError) as exc:
         if wrapper_path:
             try:
@@ -12245,7 +12489,11 @@ def start_research_run(
     if wrapper_path:
         append_research_log(f"Applied shell setup before starting {agent_display_name(backend)}.")
     context = current_project_context()
-    thread = threading.Thread(target=run_in_project, args=(context, process_research_run, proc), daemon=True)
+    if use_codex_app_server:
+        thread = threading.Thread(target=run_in_project, args=(context, process_codex_app_server_interactive_run, proc, prompt, settings, resume), daemon=True)
+    else:
+        normalizer = make_research_trace_normalizer(backend, "exec", settings)
+        thread = threading.Thread(target=run_in_project, args=(context, process_research_run, proc, normalizer), daemon=True)
     with RESEARCH_LOCK:
         RESEARCH_SESSION["process_thread"] = thread
     thread.start()
@@ -12263,39 +12511,15 @@ def codex_app_server_command(settings: dict[str, Any]) -> list[str]:
 
 
 def json_rpc_write(proc: subprocess.Popen[str], message: dict[str, Any]) -> None:
-    if proc.stdin is None:
-        raise RuntimeError("Agent app-server stdin is closed.")
-    proc.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
-    proc.stdin.flush()
+    codex_app_server_rpc.json_rpc_write(proc, message)
 
 
 def extract_nested_id(payload: Any, names: tuple[str, ...]) -> str:
-    if isinstance(payload, dict):
-        for name in names:
-            value = payload.get(name)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        for key in ("thread", "turn", "result", "params", "item"):
-            nested = payload.get(key)
-            found = extract_nested_id(nested, names)
-            if found:
-                return found
-        for nested in payload.values():
-            found = extract_nested_id(nested, names)
-            if found:
-                return found
-    if isinstance(payload, list):
-        for item in payload:
-            found = extract_nested_id(item, names)
-            if found:
-                return found
-    return ""
+    return codex_app_server_rpc.extract_nested_id(payload, names)
 
 
 def codex_plan_event_parts(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    method = str(event.get("method") or event.get("type") or event.get("event") or "").strip()
-    params = event.get("params") if isinstance(event.get("params"), dict) else event
-    return method, params if isinstance(params, dict) else {}
+    return codex_app_server_rpc.event_parts(event)
 
 
 def plan_steps_from_payload(value: Any) -> list[dict[str, str]]:
@@ -12353,7 +12577,7 @@ def initialize_plan_research_session(
             }
         )
         RESEARCH_SESSION["transcript"].append(transcript_entry("user", "user", "User", display_message, "ui.plan", True))
-        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        trim_transcript_locked()
         session_patch = research_event_session_patch()
     persist_research_session()
     emit_research_event("session", {"session_patch": session_patch})
@@ -12425,6 +12649,7 @@ def process_codex_app_server_plan_run(
     sent_thread_start = False
     sent_turn_start = False
     next_request_id = 1
+    normalizer = make_research_trace_normalizer("codex", "app-server", settings)
 
     def request(method: str, params: dict[str, Any] | None = None) -> int:
         nonlocal next_request_id
@@ -12443,7 +12668,7 @@ def process_codex_app_server_plan_run(
             },
         )
         for line in proc.stdout:
-            append_research_log(line)
+            append_research_log(line, normalizer)
             stripped = line.strip()
             if not stripped:
                 continue
@@ -12591,6 +12816,11 @@ def process_codex_app_server_plan_run(
     with RESEARCH_LOCK:
         if RESEARCH_SESSION.get("process") is not proc:
             return
+    if normalizer is not None:
+        try:
+            append_trace_updates(normalizer.finish(returncode))
+        except Exception as exc:  # pragma: no cover - defensive trace finalization
+            append_research_log(f"Structured trace finalization warning: {exc}")
     artifact = read_plan_artifact(plan_id)
     if str(artifact.get("status") or "") != "ready":
         text = str(artifact.get("plan_text") or final_plan_text or "").strip()
@@ -12605,6 +12835,195 @@ def process_codex_app_server_plan_run(
             )
             returncode = returncode if returncode not in {0, None} else 1
     finish_research_run(0 if str(read_plan_artifact(plan_id).get("status") or "") == "ready" else returncode)
+
+
+def codex_app_server_sandbox_policy(settings: dict[str, Any]) -> dict[str, Any]:
+    sandbox = str(settings.get("sandbox") or "workspace-write").strip()
+    policy_type = {
+        "read-only": "readOnly",
+        "workspace-write": "workspaceWrite",
+        "danger-full-access": "dangerFullAccess",
+    }.get(sandbox, "workspaceWrite")
+    return {"type": policy_type, "networkAccess": bool(settings.get("webSearch"))}
+
+
+def process_codex_app_server_interactive_run(
+    proc: subprocess.Popen[str],
+    prompt: str,
+    settings: dict[str, Any],
+    resume: bool,
+) -> None:
+    returncode: int | None = None
+    thread_id = ""
+    turn_id = ""
+    sent_initialized = False
+    sent_turn_start = False
+    thread_request_id = 0
+    resume_requested = bool(resume and str(RESEARCH_SESSION.get("session_id") or "").strip())
+    next_request_id = 1
+    normalizer = make_research_trace_normalizer("codex", "app-server", settings)
+
+    def request(method: str, params: dict[str, Any] | None = None) -> int:
+        nonlocal next_request_id
+        request_id = next_request_id
+        next_request_id += 1
+        json_rpc_write(proc, {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}})
+        return request_id
+
+    def request_thread_start() -> int:
+        return request(
+            "thread/start",
+            {
+                "cwd": str(REPO_ROOT),
+                "model": normalize_codex_model(settings.get("model")),
+                "sandbox": str(settings.get("sandbox") or "workspace-write"),
+                "approvalPolicy": "never",
+            },
+        )
+
+    def request_thread_resume(session_id: str) -> int:
+        return request("thread/resume", {"threadId": session_id, "cwd": str(REPO_ROOT)})
+
+    def start_turn() -> None:
+        nonlocal sent_turn_start
+        if sent_turn_start or not thread_id:
+            return
+        model = normalize_codex_model(settings.get("model"))
+        request(
+            "turn/start",
+            {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": prompt, "text_elements": []}],
+                "cwd": str(REPO_ROOT),
+                "model": model,
+                "approvalPolicy": "never",
+                "sandboxPolicy": codex_app_server_sandbox_policy(settings),
+            },
+        )
+        sent_turn_start = True
+
+    try:
+        assert proc.stdout is not None
+        request(
+            "initialize",
+            {
+                "clientInfo": {"name": "co-auto-research-ui", "version": "1.0", "title": "CoAutoResearch UI"},
+                "capabilities": {"experimentalApi": True},
+            },
+        )
+        for line in proc.stdout:
+            append_research_log(line, normalizer)
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                event = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+
+            method, params = codex_plan_event_parts(event)
+            request_id = int(event.get("id") or 0) if str(event.get("id") or "").isdigit() else 0
+            if request_id and method and "approval" in method.lower():
+                try:
+                    json_rpc_write(proc, {"jsonrpc": "2.0", "id": request_id, "result": {"decision": "decline"}})
+                    if normalizer is not None:
+                        resolved = normalizer.resolve_approval(str(request_id), "declined", "auto_policy")
+                        if resolved:
+                            append_trace_updates([resolved])
+                except Exception:
+                    pass
+                continue
+
+            if event.get("error"):
+                if request_id == thread_request_id and resume_requested:
+                    resume_requested = False
+                    thread_request_id = request_thread_start()
+                    continue
+                error_text = event_payload_text(event.get("error")) or "Codex app-server returned an error."
+                raise RuntimeError(error_text)
+
+            if request_id == 1 and not sent_initialized:
+                json_rpc_write(proc, {"jsonrpc": "2.0", "method": "initialized", "params": {}})
+                session_id = str(RESEARCH_SESSION.get("session_id") or "").strip()
+                thread_request_id = request_thread_resume(session_id) if resume_requested and session_id else request_thread_start()
+                sent_initialized = True
+                continue
+
+            if method in {"thread/started", "thread.started"}:
+                thread_id = extract_nested_id(params, ("threadId", "thread_id", "id")) or thread_id
+            if request_id == thread_request_id and not thread_id:
+                thread_id = extract_nested_id(event, ("threadId", "thread_id", "id")) or thread_id
+            if thread_id:
+                with RESEARCH_LOCK:
+                    RESEARCH_SESSION["app_thread_id"] = thread_id
+                    RESEARCH_SESSION["session_id"] = thread_id
+                    RESEARCH_SESSION["session_id_source"] = "app_server"
+                start_turn()
+
+            if method in {"turn/started", "turn.started"}:
+                turn_id = extract_nested_id(params, ("turnId", "turn_id", "id")) or turn_id
+                if turn_id:
+                    with RESEARCH_LOCK:
+                        RESEARCH_SESSION["app_turn_id"] = turn_id
+
+            if method in {"turn/completed", "turn.completed", "turn/failed", "turn.failed"}:
+                break
+
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            returncode = proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            signal_research_process(proc)
+            try:
+                returncode = proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                signal_research_process(proc, force=True)
+                returncode = proc.wait(timeout=1)
+    except Exception as exc:  # pragma: no cover - defensive adapter handling
+        append_research_log(f"Codex app-server chat error: {exc}")
+        returncode = proc.poll()
+    finally:
+        wrapper_path = getattr(proc, "_coauto_pre_exec_wrapper", None)
+        if wrapper_path:
+            try:
+                Path(wrapper_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except OSError:
+            pass
+
+    with RESEARCH_LOCK:
+        if RESEARCH_SESSION.get("process") is not proc:
+            return
+        mode = str(RESEARCH_SESSION.get("mode") or "")
+        protected_snapshot = RESEARCH_SESSION.get("protected_snapshot")
+    if normalizer is not None:
+        try:
+            append_trace_updates(normalizer.finish(returncode))
+        except Exception as exc:  # pragma: no cover - defensive trace finalization
+            append_research_log(f"Structured trace finalization warning: {exc}")
+    finish_research_run(returncode)
+    if mode == "chat":
+        restored_paths = restore_chat_protected_snapshot(protected_snapshot if isinstance(protected_snapshot, dict) else None)
+        if restored_paths:
+            append_research_log(
+                "Chat mode guard restored protected autoresearch artifacts; use the Start/Resume autoresearch controls to create trials: "
+                + ", ".join(restored_paths)
+            )
+        sync_human_intervention_indexes("chat_completed")
+        with RESEARCH_LOCK:
+            RESEARCH_SESSION["protected_snapshot"] = None
+        persist_research_session()
+    maybe_start_queued_chat_after_run(mode, returncode)
 
 
 def extract_claude_exit_plan(event: Any) -> str:
@@ -14417,7 +14836,7 @@ def append_plan_transcript(artifact: dict[str, Any]) -> None:
         else:
             RESEARCH_SESSION["transcript"].append(entry)
             event_entry = dict(entry)
-        RESEARCH_SESSION["transcript"] = RESEARCH_SESSION["transcript"][-600:]
+        trim_transcript_locked()
         session_patch = research_event_session_patch()
     persist_research_session()
     if event_entry:
@@ -14991,11 +15410,15 @@ def stop_research_session() -> dict[str, Any]:
         backend = normalize_agent_backend(RESEARCH_SESSION.get("backend") or (RESEARCH_SESSION.get("settings") or {}).get("backend"))
         plan_thread_id = str(RESEARCH_SESSION.get("plan_thread_id") or "")
         plan_turn_id = str(RESEARCH_SESSION.get("plan_turn_id") or "")
+        app_thread_id = str(RESEARCH_SESSION.get("app_thread_id") or "")
+        app_turn_id = str(RESEARCH_SESSION.get("app_turn_id") or "")
         if live:
             RESEARCH_SESSION["status"] = "stopping"
     if live and proc:
         sent_plan_interrupt = False
-        if mode == "plan" and backend == "codex" and plan_thread_id and plan_turn_id:
+        interrupt_thread_id = plan_thread_id if mode == "plan" else app_thread_id
+        interrupt_turn_id = plan_turn_id if mode == "plan" else app_turn_id
+        if backend == "codex" and interrupt_thread_id and interrupt_turn_id:
             try:
                 json_rpc_write(
                     proc,
@@ -15003,7 +15426,7 @@ def stop_research_session() -> dict[str, Any]:
                         "jsonrpc": "2.0",
                         "id": int(time.time() * 1000),
                         "method": "turn/interrupt",
-                        "params": {"threadId": plan_thread_id, "turnId": plan_turn_id},
+                        "params": {"threadId": interrupt_thread_id, "turnId": interrupt_turn_id},
                     },
                 )
                 sent_plan_interrupt = True
