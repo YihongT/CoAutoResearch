@@ -34,6 +34,7 @@
     loadedProjectId: "",
     openMenuId: "",
     attachments: [],
+    attachmentLoad: Promise.resolve(),
     planModeArmed: {},
     clearNotices: {},
     composerSelections: {},
@@ -958,6 +959,29 @@
     fitSessionComposerSelects();
   }
 
+  function storedComposerSelection(key) {
+    if (state.composerSelections[key]) return state.composerSelections[key];
+    try {
+      var value = JSON.parse(localStorage.getItem("coauto:sessions:selection:" + key) || "null");
+      if (value && typeof value.model === "string" && typeof value.reasoningEffort === "string") {
+        state.composerSelections[key] = value;
+        return value;
+      }
+    } catch { /* Fall back to this session's saved runner settings. */ }
+    return null;
+  }
+
+  function saveComposerSelection(key, value) {
+    if (value) state.composerSelections[key] = value;
+    else delete state.composerSelections[key];
+    try {
+      if (value) localStorage.setItem("coauto:sessions:selection:" + key, JSON.stringify(value));
+      else localStorage.removeItem("coauto:sessions:selection:" + key);
+    } catch {
+      notify("Chat model selection could not be saved. Check it before sending after a refresh.", true);
+    }
+  }
+
   function composerBaseSettings(session) {
     var form = document.getElementById("session-settings-form");
     var base = {
@@ -966,7 +990,7 @@
       reasoningEffort: document.getElementById("composer-reasoning")?.value || form?.elements?.reasoningEffort?.value || "",
     };
     session = session || activeSessionForView();
-    var selected = state.composerSelections[projectId() + "/" + (session?.id || "")] || session?.settings;
+    var selected = storedComposerSelection(projectId() + "/" + (session?.id || "")) || session?.settings;
     if (selected?.model && normalizeSessionBackend(selected.backend) === normalizeSessionBackend(base.backend)) {
       base.model = selected.model;
       base.reasoningEffort = selected.reasoningEffort;
@@ -975,11 +999,11 @@
   }
 
   function rememberComposerSelection() {
-    state.composerSelections[projectId() + "/" + state.activeId] = {
+    saveComposerSelection(projectId() + "/" + state.activeId, {
       backend: activeComposerBackend(),
       model: document.getElementById("sv-composer-model")?.value || "",
       reasoningEffort: document.getElementById("sv-composer-reasoning")?.value || "",
-    };
+    });
   }
 
   function normalizeSessionBackend(value) {
@@ -1095,8 +1119,60 @@
     });
   }
 
-  function addAttachmentFiles(files) {
-    Array.from(files || []).forEach(function (file) {
+  function attachmentDraftKey(id, pid) {
+    return (pid || projectId()) + "/chat/" + (id || state.activeId);
+  }
+
+  function textDraftKey(key) {
+    return "coauto:sessions:draft:" + (key || attachmentDraftKey());
+  }
+
+  function saveTextDraft() {
+    if (!state.activeId || !state.surfaceActive) return;
+    var text = document.getElementById("sv-chat-input")?.value || "";
+    try {
+      if (text) localStorage.setItem(textDraftKey(), text);
+      else localStorage.removeItem(textDraftKey());
+    } catch {
+      notify("Chat draft could not be saved. Keep this page open or copy your message before leaving.", true);
+    }
+  }
+
+  function restoreTextDraft() {
+    var input = document.getElementById("sv-chat-input");
+    if (!input) return;
+    try {
+      input.value = localStorage.getItem(textDraftKey()) || "";
+    } catch {
+      input.value = "";
+      notify("Chat draft could not be loaded.", true);
+    }
+    autoResizeSessionInput(input);
+  }
+
+  function saveAttachmentDraft() {
+    return ui().saveUploadDraft(attachmentDraftKey(), state.attachments);
+  }
+
+  function restoreSessionAttachments() {
+    var key = attachmentDraftKey();
+    state.attachmentLoad = ui().loadUploadDraft(key).then(function (items) {
+      if (key !== attachmentDraftKey()) return;
+      state.attachments = Array.isArray(items) ? items : [];
+      renderAttachmentTray();
+      renderSessionComposer(activeSessionForView() || {});
+    }).catch(function () {
+      if (key === attachmentDraftKey()) notify("Saved attachments could not be loaded. Check them before sending.", true);
+    });
+    return state.attachmentLoad;
+  }
+
+  async function addAttachmentFiles(files) {
+    var key = attachmentDraftKey();
+    var selectedFiles = Array.from(files || []);
+    await state.attachmentLoad;
+    if (key !== attachmentDraftKey()) return;
+    selectedFiles.forEach(function (file) {
       state.attachments.push({
         id: String(Date.now()) + "-" + Math.random().toString(16).slice(2),
         file: file,
@@ -1105,6 +1181,7 @@
         type: file.type || "",
       });
     });
+    saveAttachmentDraft();
     renderAttachmentTray();
     renderSessionComposer(activeSessionForView() || {});
   }
@@ -1278,6 +1355,8 @@
     state.surfaceActive = true;
     state.openMenuId = "";
     state.attachments = [];
+    restoreTextDraft();
+    await restoreSessionAttachments();
     state.editingMessageIndex = null;
     delete state.planModeArmed[DRAFT_CHAT_ID];
     state.wsPath = "";
@@ -1295,8 +1374,12 @@
   async function deleteSession(id) {
     if (!confirm("Delete this chat session? Its workspace and context will be permanently removed.")) return;
     var deletedActive = state.activeId === id;
+    var deletedAttachmentKey = attachmentDraftKey(id);
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" });
+      await ui().saveUploadDraft(deletedAttachmentKey, []);
+      localStorage.removeItem(textDraftKey(deletedAttachmentKey));
+      saveComposerSelection(projectId() + "/" + id, null);
       state.sessions = mergeSessionList(r.result.sessions || []);
       delete state.eventLastIds[id];
       if (!deletedActive) {
@@ -1382,6 +1465,10 @@
       return;
     }
 
+    restoreTextDraft();
+    await restoreSessionAttachments();
+    if (pid !== projectId() || state.activeId !== id) return;
+
     renderAll();
     connectEvents(id);
     loadWorkspace(id, "");
@@ -1452,6 +1539,8 @@
 
   async function submitSessionMessage(id, text, options) {
     var pid = projectId();
+    await state.attachmentLoad;
+    if (pid !== projectId() || state.activeId !== id) return;
     options = options || {};
     var editIndex = Number.isInteger(options.editIndex) ? options.editIndex : null;
     var isEdit = editIndex !== null;
@@ -1477,9 +1566,11 @@
       var input = document.getElementById("sv-chat-input");
       if (input) {
         input.value = "";
+        saveTextDraft();
         autoResizeSessionInput(input);
       }
       state.attachments = [];
+      saveAttachmentDraft();
     }
     if (draftSend) {
       try {
@@ -1499,8 +1590,8 @@
         if (draftStillSelected) {
           var selectionKey = pid + "/" + DRAFT_CHAT_ID;
           if (state.composerSelections[selectionKey]) {
-            state.composerSelections[pid + "/" + createdId] = state.composerSelections[selectionKey];
-            delete state.composerSelections[selectionKey];
+            saveComposerSelection(pid + "/" + createdId, state.composerSelections[selectionKey]);
+            saveComposerSelection(selectionKey, null);
           }
           state.draftSession = null;
           state.activeId = createdId;
@@ -1521,9 +1612,11 @@
         if (isPlanSend) setSessionPlanModeState(DRAFT_CHAT_ID, previousPlanState);
         if (!isEdit) {
           state.attachments = attachmentSnapshot;
+          saveAttachmentDraft();
           var draftInput = document.getElementById("sv-chat-input");
           if (draftInput && !draftInput.value) {
             draftInput.value = text;
+            saveTextDraft();
             autoResizeSessionInput(draftInput);
           }
           renderAttachmentTray();
@@ -1612,9 +1705,11 @@
         state.editingMessageIndex = editIndex;
       } else if (!isEdit && state.activeId === id) {
         state.attachments = attachmentSnapshot;
+        saveAttachmentDraft();
         var input = document.getElementById("sv-chat-input");
         if (input && !input.value) {
           input.value = text;
+          saveTextDraft();
           autoResizeSessionInput(input);
         }
         renderAttachmentTray();
@@ -1636,6 +1731,7 @@
       if (!input) return;
       if (controller?.setValue) controller.setValue(String(r.prompt || "").trim());
       else input.value = String(r.prompt || "").trim();
+      saveTextDraft();
       autoResizeSessionInput(input);
       renderSessionComposer(activeSessionForView() || {});
       if (controller?.focus) controller.focus();
@@ -2011,6 +2107,7 @@
     var input = document.getElementById("sv-chat-input");
     if (input) {
       input.addEventListener("input", function () {
+        saveTextDraft();
         autoResizeSessionInput(input);
         renderSessionComposer(activeSessionForView() || {});
       });
@@ -2194,6 +2291,7 @@
       if (remove) {
         event.preventDefault();
         state.attachments = state.attachments.filter(function (item) { return item.id !== remove.dataset.sessionRemoveAttachment; });
+        saveAttachmentDraft();
         renderAttachmentTray();
         renderSessionComposer(activeSessionForView() || {});
         return;

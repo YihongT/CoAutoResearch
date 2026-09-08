@@ -126,6 +126,23 @@ Gate states are distinct: `continue`, `pass`, `needs_human`, `blocked`,
 approved plan, plausible venue fit, coherent manuscript architecture, or
 targeted revision-ready draft is progress, not final pass.
 
+## Record validation and repair
+
+Agents write authoritative structured JSON. After the phase write-boundary audit,
+the service validates the required bundle and generates missing or inconsistent
+registered Markdown views before plan approval or stage freezing. Valid richer
+views are retained, and JSON bytes are not rewritten just to format a companion.
+Manuscript prose remains a writing task. Approved plans, prior reviews, and
+committed stage material remain immutable.
+
+Candidate card destinations and declared conflict resolutions are checked before
+review as well as at final merge. An invalid proposal that has not been frozen can
+be corrected in the same stage; changed reviewed material still requires a new
+stage. Complete current validation findings are passed to the correcting agent,
+so a long error list is not silently cut into successive repair attempts. These
+checks reduce mechanical repair work; they do not replace scientific review or
+guarantee that an agent will produce a correct proposal on its first attempt.
+
 ## Compatibility
 
 V1 projects remain readable without pretending their Markdown history is a v2

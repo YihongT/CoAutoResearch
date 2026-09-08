@@ -3297,11 +3297,13 @@ html[data-theme] #material-view[data-panel="manuscript"] .material-header > div 
   opacity: 0;
   pointer-events: none;
   transform: translateY(8px);
+  visibility: hidden;
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
 .toast.is-visible {
   opacity: 1;
+  visibility: visible;
   transform: translateY(0);
 }
 
@@ -12370,7 +12372,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 .tree-file,
 .tree-file-node > summary,
 .tree-folder > summary {
-  grid-template-columns: 18px minmax(0, 1fr) minmax(0, clamp(120px, 38%, 360px));
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   overflow: hidden;
 }
 
@@ -12387,6 +12389,53 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 .tree-file-node > .inline-file {
   width: calc(100% - 28px);
   max-width: calc(100% - 28px);
+}
+
+@media (max-width: 768px) {
+  .tree-children {
+    margin-left: 4px;
+    padding-left: 4px;
+  }
+
+  .tree-children .tree-children .tree-children .tree-children {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .tree-file,
+  .tree-file-node > summary,
+  .tree-folder > summary {
+    min-height: 44px;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 6px;
+    padding-inline: 4px;
+  }
+
+  .tree-file span,
+  .tree-file-node > summary span,
+  .tree-folder > summary span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .tree-folder:not(.is-symlink) > summary small {
+    display: none;
+  }
+
+  .tree-folder.is-symlink > summary small,
+  .tree-file small,
+  .tree-file-node > summary small {
+    display: block;
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .tree-file-node > .inline-file {
+    margin-left: 0;
+    width: 100%;
+    max-width: 100%;
+  }
 }
 
 .inline-file,
@@ -20620,3 +20669,15 @@ html[data-theme] .paper-generation > h3 { font-family: var(--display); font-size
 /* Keep actionable recovery messages available until handled or dismissed. */
 .toast.is-actionable.is-visible { pointer-events: auto; max-width: min(420px, calc(100vw - 36px)); }
 .toast-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+
+.markdown-math-block {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.4em 0;
+}
+
+.markdown-math-inline math,
+.markdown-math-block math {
+  font-size: 1em;
+}

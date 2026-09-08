@@ -95,6 +95,25 @@ If a later user message clarifies the same pending intervention, update the same
 
 Do not rewrite interventions whose `INDEX.json` status is `applied` or `superseded`; create a new intervention if the user changes an already-applied direction.
 
+## Intervention Index Contract
+
+`INDEX.json` uses `{"schema_version": 1, "interventions": [...]}`. Preserve all
+existing entries. Each new entry must include `id`, `path`, `status: "pending"`,
+`created_at`, `source: "ui.chat"`, `client_message_id`, and a short `summary`.
+Use a project-relative `path`, for example
+`research_trajectory/human_interventions/I0001_topic.md`; the existing `pending/`
+subdirectory is also supported. Do not use an absolute path. Leave
+`applied_in_trial`, `applied_trial_path`, `applied_at`, and `superseded_by` empty.
+Only the service records application at a completed Trial boundary.
+
+For v2 main chat, the service restores direct writes, validates the pending
+intervention candidate and its index, and commits them only after a successful
+turn. It renders the final `INDEX.md` from the accepted index. Do not modify
+unrelated project files while recording guidance. A failed or stopped turn does
+not commit a candidate; check the dashboard's saved-state notice before relying
+on it. Auxiliary discussion chats remain read-only; suggestions must first be
+sent through the main research draft.
+
 ## Autoresearch-Stage Application
 
 When Start/Resume autoresearch is clicked, the execution agent must read every pending intervention before selecting or executing the next objective.

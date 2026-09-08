@@ -44,7 +44,14 @@ When the response suggests a useful change, choose **Add to research draft**.
 The main input is filled for review. Edit the wording to state the intended
 scope, then send it. A draft alone has not instructed the main research. If the
 agent is busy, the message can wait in the queue; review the queued item before
-it is processed.
+it is processed. During autoresearch, queued messages are answered after a trial
+has been reviewed and recorded. Review the reply, then choose **Resume
+autoresearch** to start the next trial. Pausing an unfinished trial leaves its
+messages queued until that trial finishes; stopping a run does not send them.
+You can also queue a follow-up while a trial is paused. Use **New chat** for an
+immediate discussion. **Stop and Send** is available during ordinary chat turns;
+unfinished autoresearch trials keep follow-ups queued to preserve their recovery
+state.
 
 ## 3. Pause, inspect and continue
 

@@ -4666,7 +4666,8 @@ def replace_framing_messages(
 
 
 def project_has_placeholders(text: str) -> bool:
-    return bool(re.search(r"<[^>\n]+>", text or ""))
+    without_autolinks = re.sub(r"<(?:https?://|mailto:)[^<>\s]+>", "", text or "", flags=re.IGNORECASE)
+    return bool(re.search(r"<[^>\n]+>", without_autolinks))
 
 
 def update_framing_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -6163,7 +6164,7 @@ def transcript_with_review_context(entries: list[Any], contexts: Any = None) -> 
 def transcript_entry(role: str, kind: str, title: str, content: str, raw_type: str = "", editable: bool = False, *, run_id: str = "") -> dict[str, Any]:
     run_id = run_id or str(RESEARCH_SESSION.get("id") or "")
     entry = {
-        "id": f"T{now_id()}_{len(RESEARCH_SESSION.get('transcript', [])) + 1:04d}",
+        "id": f"T{now_id()}_{uuid.uuid4().hex}",
         "role": role,
         "kind": kind,
         "title": title,
@@ -6404,6 +6405,11 @@ def transcript_from_codex_line(line: str) -> dict[str, Any] | None:
 
     content_source: Any = item or event
     content = event_payload_text(content_source)
+    if item_type == "reasoning":
+        content = event_payload_text(item.get("summary") if "summary" in item else item.get("text"))
+        if not content:
+            return None
+        return {"role": "assistant", "kind": "reasoning", "title": "Thinking summary", "content": content[:8000], "raw_type": raw_type, "editable": False}
     if not content or content in {raw_type, item_type}:
         return None
 
@@ -7092,7 +7098,7 @@ def upsert_streaming_transcript_locked(update: dict[str, Any]) -> dict[str, Any]
     content = content[:STREAMING_TRANSCRIPT_MAX_CHARS]
     if not content.strip():
         return None
-    entry_id = str(existing.get("id") or "") if existing else f"T{now_id()}_stream_{len(RESEARCH_SESSION.get('transcript', [])) + 1:04d}"
+    entry_id = str(existing.get("id") or "") if existing else f"T{now_id()}_stream_{uuid.uuid4().hex}"
     created_at = str(existing.get("created_at") or "") if existing else now_iso()
     parsed = {
         "role": update.get("role") or "assistant",
@@ -8270,6 +8276,9 @@ def is_resources_relative_path(relative_path: str) -> bool:
     return normalized == "resources" or normalized.startswith("resources/")
 
 
+WORKSPACE_TREE_EXCLUDES = {"node_modules", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".git", ".runtime", ".staging", ".transactions", "secrets"}
+
+
 def iter_tree_paths(
     root_path: Path,
     relative_dir: str,
@@ -8298,10 +8307,8 @@ def iter_tree_paths(
                 is_dir = child.is_dir()
             except OSError:
                 continue
-            if max_depth is not None and depth + 1 == max_depth and is_dir:
-                continue
             yield child, child_virtual, depth + 1
-            if not recursive or not is_dir:
+            if not recursive or not is_dir or (max_depth is not None and depth + 1 >= max_depth):
                 continue
             if child.is_symlink() and not follow_symlink_dirs:
                 continue
@@ -8391,6 +8398,8 @@ def directory_tree(relative_dir: str, max_depth: int | None = None, exclude_name
             continue
         node_type = "directory" if path.is_dir() else "file"
         node = tree_node(path.name, relative, node_type, path.is_symlink())
+        if node_type == "directory" and not path.is_symlink() and max_depth is not None and _depth >= max_depth:
+            node["children_deferred"] = True
         if path.is_file():
             try:
                 # Tree entries are opened through /api/file on demand.  Embedding
@@ -8573,12 +8582,12 @@ def parse_reference_table(references_text: str) -> list[dict[str, str]]:
     list_entry: dict[str, str] | None = None
     for line in references_text.splitlines():
         stripped = line.strip()
-        list_match = re.match(r"^(?:[-*+]\s+|\d+[.)]\s+)(.+)$", stripped)
+        list_match = re.match(r"^(?:[-*+]\s+|\d+[.)]\s+|\[(\d+)\]\s+)(.+)$", stripped)
         if list_match:
-            reference = list_match.group(1).strip()
+            reference = list_match.group(2).strip()
             list_entry = None
             if meaningful_summary_value(reference) and reference.strip("`* .").lower() not in {"none", "n/a", "not applicable"}:
-                list_entry = {"key": "", "reference": reference, "locator": ""}
+                list_entry = {"key": list_match.group(1) or "", "reference": reference, "locator": ""}
                 entries.append(list_entry)
             continue
         if list_entry and line[:1].isspace() and stripped and not stripped.startswith("|"):
@@ -8609,6 +8618,31 @@ def parse_reference_table(references_text: str) -> list[dict[str, str]]:
     return entries
 
 
+def blueprint_artifact_kind(title: str, body: str = "") -> str:
+    value = str(title or "").strip().lower()
+    if re.match(r"^(figure|fig\.?|f\d{3,})\b", value):
+        return "figure"
+    if re.match(r"^(table|tbl\.?|t\d{3,})\b", value):
+        return "table"
+    if re.match(r"^(algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:))\b", value):
+        return "algorithm"
+    if re.match(r"^(dataset|data set|benchmark|metric)\b", value):
+        explicit_block = re.match(r"^(dataset|data set|benchmark|metric)\s*(?:\d|:|\bblock\b)", value)
+        section_fields = all(re.search(rf"^\s*{re.escape(label)}\s*:", body, re.IGNORECASE | re.MULTILINE)
+                             for label in ("Target-venue role", "Local thesis / purpose"))
+        if section_fields and not explicit_block:
+            return ""
+        return "result"
+    if re.match(r"^(rslt\d{3,}|(?:historical\s+)?result\s+(?:rslt?\d+|\d+|block|:))\b", value):
+        return "result"
+    if re.search(r"\bresult block$", value) and all(
+        re.search(rf"^\s*{re.escape(label)}\s*:", body, re.IGNORECASE | re.MULTILINE)
+        for label in ("Metric or result summary", "Source artifact path")
+    ):
+        return "result"
+    return ""
+
+
 def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     sections = extract_sections(blueprint_text)
     stub = blueprint_is_stub(blueprint_text)
@@ -8624,18 +8658,6 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     def title_starts(section: dict[str, Any], prefix: str) -> bool:
         return str(section.get("title", "")).strip().lower().startswith(prefix)
 
-    def artifact_kind(title: str) -> str:
-        value = str(title or "").strip().lower()
-        if re.match(r"^(figure|fig\.?|f\d{3,})\b", value):
-            return "figure"
-        if re.match(r"^(table|tbl\.?|t\d{3,})\b", value):
-            return "table"
-        if re.match(r"^(algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:))\b", value):
-            return "algorithm"
-        if re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d|\d|block|:))\b", value):
-            return "result"
-        return ""
-
     def architecture_heading_blocks(section_text: str) -> list[dict[str, Any]]:
         matches = list(re.finditer(r"^(#{3,6})\s+(.+?)\s*$", section_text, re.MULTILINE))
         blocks: list[dict[str, Any]] = []
@@ -8648,7 +8670,7 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
             while stack and int(stack[-1]["level"]) >= level:
                 stack.pop()
             parents = [str(item["title"]) for item in stack]
-            kind = artifact_kind(title)
+            kind = blueprint_artifact_kind(title, body)
             block = {
                 "level": level,
                 "title": title,
@@ -9278,7 +9300,7 @@ def active_trial_dirs() -> list[Path]:
     archived_ids = set(read_trajectory_state().get("archived_trial_ids") or [])
     dirs: list[Path] = []
     for path in root.iterdir():
-        if not path.is_dir():
+        if not path.is_dir() or path.name == "_TEMPLATE":
             continue
         if path.name in archived_ids:
             continue
@@ -9941,6 +9963,17 @@ def read_human_intervention_index() -> dict[str, Any]:
     return payload
 
 
+def human_intervention_index_markdown(entries: list[dict[str, Any]]) -> str:
+    lines = ["# Human Interventions", ""]
+    for entry in entries:
+        summary = str(entry.get("summary") or "").strip()
+        suffix = f" — {summary}" if summary else ""
+        applied = str(entry.get("applied_in_trial") or "").strip()
+        trial = f" in `{applied}`" if entry.get("status") == "applied" and applied else ""
+        lines.append(f"- `{entry['id']}` `{entry['status']}`{trial}: `{entry['path']}`{suffix}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def write_human_intervention_index(payload: dict[str, Any]) -> None:
     path = human_intervention_index_json_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -9953,6 +9986,9 @@ def write_human_intervention_index(payload: dict[str, Any]) -> None:
         ],
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.with_suffix(".md").write_text(
+        human_intervention_index_markdown(payload["interventions"]), encoding="utf-8"
+    )
 
 
 def record_pending_human_intervention(
@@ -10059,6 +10095,15 @@ def mark_pending_interventions_applied(marker: dict[str, Any], trial_id: str, tr
     ids = [str(item or "").strip() for item in marker.get("pending_intervention_ids", []) if str(item or "").strip()]
     if not ids:
         return
+    receipt_path = REPO_ROOT / trial_path / "PUBLISH_RECEIPT.json"
+    if receipt_path.is_file():
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        published_at = parse_iso_datetime(receipt.get("published_at"))
+        assigned_at = parse_iso_datetime(marker.get("created_at"))
+        # A stale counter may bind newly submitted guidance to an older trial.
+        # Closing that marker must never claim the old trial used future input.
+        if not published_at or not assigned_at or assigned_at > published_at:
+            return
     payload = read_human_intervention_index()
     changed = False
     for entry in payload.get("interventions", []):
@@ -10092,7 +10137,6 @@ def sync_human_intervention_indexes(reason: str = "intervention_index_sync") -> 
     payload = read_human_intervention_index()
     entries = payload["interventions"]
     by_id = {str(item.get("id") or ""): item for item in entries}
-    changed = False
     for path in sorted(root.glob("I*.md")):
         intervention_id = intervention_id_from_path(path.name)
         if not intervention_id:
@@ -10116,33 +10160,17 @@ def sync_human_intervention_indexes(reason: str = "intervention_index_sync") -> 
             }
             entries.append(existing)
             by_id[intervention_id] = existing
-            changed = True
             continue
         if existing.get("path") != relative:
             existing["path"] = relative
-            changed = True
         status = str(existing.get("status") or "").strip().lower()
         if status not in {"applied", "superseded"}:
             if status != "pending":
                 existing["status"] = "pending"
-                changed = True
             if summary and existing.get("summary") != summary:
                 existing["summary"] = summary
-                changed = True
-    if changed:
-        write_human_intervention_index(payload)
-    else:
-        # Re-write through the normalizer so hand-edited JSON is kept canonical.
-        write_human_intervention_index(payload)
+    write_human_intervention_index(payload)
     payload = read_human_intervention_index()
-    index_path = root / "INDEX.md"
-    lines = ["# Human Interventions", ""]
-    for item in payload.get("interventions", []):
-        status = str(item.get("status") or "pending").strip()
-        summary = str(item.get("summary") or "").strip()
-        suffix = f" — {summary}" if summary else ""
-        lines.append(f"- `{item.get('id')}` `{status}`: `{item.get('path')}`{suffix}")
-    index_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     sync_expected_trial_pending_interventions(reason)
     return payload
 
@@ -10239,11 +10267,6 @@ def write_resume_intervention(
         lines.append("- No later active trials were present.")
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
-    index_path = root / "INDEX.md"
-    existing = safe_read(index_path) if index_path.exists() else "# Human Interventions\n"
-    entry = f"- `{intervention_id}` Resume from `{trial.get('id', '')}`: `{rel_path(path)}`"
-    if entry not in existing:
-        index_path.write_text(existing.rstrip() + "\n" + entry + "\n", encoding="utf-8")
     record_pending_human_intervention(intervention_id, rel_path(path), user_instruction, source="ui.resume_from_trial")
     return rel_path(path)
 
@@ -11111,10 +11134,10 @@ def active_result_blocks_with_sources() -> list[str]:
     results: list[str] = []
     for index, match in enumerate(matches):
         title = match.group(2).strip()
-        if not re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d+|\d+|block|:))\b", title, re.IGNORECASE):
-            continue
         end = matches[index + 1].start() if index + 1 < len(matches) else len(architecture_body)
         body = blueprint_metadata_lines(architecture_body[match.end():end])
+        if blueprint_artifact_kind(title, body) != "result":
+            continue
         if re.search(r"Inclusion status:\s*(candidate|supplement|deprecated)\b", body, re.IGNORECASE):
             continue
         summary = value_after_label(body, "Metric or result summary")
@@ -11341,6 +11364,10 @@ def blueprint_reference_paths() -> list[str]:
     for text in texts:
         for match in pattern.findall(text):
             normalized = normalize_export_relative(match)
+            # A sentence-ending period is not part of a referenced filename.
+            # Retain an actual on-disk name ending in a period when it exists.
+            if normalized and not (REPO_ROOT / normalized).exists():
+                normalized = normalized.rstrip(".")
             if normalized and normalized not in matches:
                 matches.append(normalized)
     return matches
@@ -11401,6 +11428,8 @@ def build_export_plan(kind: str) -> dict[str, Any]:
             if source.exists() or source.is_symlink():
                 bundle_path = f"assets/{Path(relative).name or 'asset'}"
                 add_file_export_entry(entries, missing, skipped, used, source, bundle_path, relative, kind)
+            else:
+                missing.append({"path": relative, "target": "", "reason": "missing referenced source"})
     elif kind == "research_status":
         add_existing_relative(entries, missing, skipped, used, "manuscript/PAPER_PLAN.md", "PAPER_PLAN.md", kind)
         add_existing_relative(entries, missing, skipped, used, "manuscript/BLUEPRINT.md", "BLUEPRINT.md", kind)
@@ -11956,7 +11985,7 @@ def build_overview() -> dict[str, Any]:
         "interventions": collect_interventions(),
         "resources": collect_resources(),
         "trees": {
-            "workspace": directory_tree(".", max_depth=4, exclude_names={"node_modules", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".git", ".runtime", ".staging", ".transactions", "secrets"}),
+            "workspace": directory_tree(".", max_depth=4, exclude_names=WORKSPACE_TREE_EXCLUDES),
             "resources": directory_tree("resources"),
             "trials": directory_tree("research_trajectory"),
         },
@@ -14025,10 +14054,19 @@ def paragraph_plan_complete(section_body: str) -> bool:
         "artifact paths or source links", "display / method / result block",
         "citation posture", "required qualification", "transition job",
     ]
+    header_aliases = {
+        "content": "content to cover",
+        "local claim/evidence": "local claim/evidence/result",
+        "artifact paths": "artifact paths or source links",
+    }
+    def normalized_header(value: str) -> str:
+        normalized = re.sub(r"\s*/\s*", "/", value.strip().lower())
+        return header_aliases.get(normalized, normalized)
+    expected_headers = [normalized_header(header) for header in headers]
     lines = section_body.splitlines()
     for index, line in enumerate(lines[:-2]):
-        cells = [cell.strip().lower() for cell in line.strip().strip("|").split("|")]
-        if cells != headers:
+        cells = [normalized_header(cell) for cell in line.strip().strip("|").split("|")]
+        if cells != expected_headers:
             continue
         divider = [cell.strip() for cell in lines[index + 1].strip().strip("|").split("|")]
         if len(divider) != len(headers) or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in divider):
@@ -14226,14 +14264,14 @@ def final_blueprint_consistency_blockers() -> list[str]:
     if not architecture_matches:
         blockers.append("BLUEPRINT.md must include target-venue entries under `Manuscript Architecture`.")
 
-    artifact_title_re = re.compile(r"^(figure|fig\.?|f\d{3,}|table|tbl\.?|t\d{3,}|algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:)|dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d+|\d+|block|:))\b", re.IGNORECASE)
     inline_artifacts: list[tuple[str, str, str]] = []
     for index, match in enumerate(architecture_matches):
         title = match.group(2).strip()
         end = architecture_matches[index + 1].start() if index + 1 < len(architecture_matches) else len(architecture_body)
         body = blueprint_metadata_lines(architecture_body[match.end():end])
-        if artifact_title_re.search(title):
-            inline_artifacts.append((title, body, title.lower()))
+        kind = blueprint_artifact_kind(title, body)
+        if kind:
+            inline_artifacts.append((title, body, kind))
             continue
         for label in (
             "Target-venue role:",
@@ -14252,7 +14290,17 @@ def final_blueprint_consistency_blockers() -> list[str]:
         return bool(re.search(r"Inclusion status:\s*active\b", body, re.IGNORECASE)) or not re.search(r"Inclusion status:\s*(candidate|deprecated|supplement)\b", body, re.IGNORECASE)
 
     def block_has_label(body: str, label: str) -> bool:
-        return bool(re.search(rf"^\s*{re.escape(label.rstrip(':'))}\s*:", body, re.IGNORECASE | re.MULTILINE))
+        label = label.rstrip(":")
+        aliases = {
+            "Caption draft or current caption": ("Exact caption draft or current caption",),
+            "Table notes / definitions / abbreviations": ("Table notes, definitions, or abbreviations when needed", "Table notes, definitions, or abbreviations"),
+            "Source artifact or spec path": ("Source artifact path or source specification path", "Source artifact path"),
+            "Provenance links": ("Provenance links to findings, trials, or source files",),
+            "Inputs": ("Inputs and outputs",),
+            "Outputs": ("Inputs and outputs",),
+        }
+        return any(re.search(rf"^\s*{re.escape(candidate)}\s*:", body, re.IGNORECASE | re.MULTILINE)
+                   for candidate in (label, *aliases.get(label, ())))
 
     def planned_placeholder_value(value: str) -> bool:
         normalized = str(value or "").strip().lower()
@@ -14280,10 +14328,10 @@ def final_blueprint_consistency_blockers() -> list[str]:
             and usable_result_value(value_after_label(body, "Source artifact path"))
         )
 
-    figure_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(figure|fig\.?|f\d{3,})\b", lower, re.IGNORECASE)]
-    table_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(table|tbl\.?|t\d{3,})\b", lower, re.IGNORECASE)]
-    algorithm_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(algorithm|protocol|procedure|a\d{3,}|method\s+(?:m?\d|block|spec|:))\b", lower, re.IGNORECASE)]
-    result_blocks = [(title, body) for title, body, lower in inline_artifacts if re.match(r"^(dataset|data set|benchmark|metric|rslt\d{3,}|result\s+(?:rslt?\d+|\d+|block|:))\b", lower, re.IGNORECASE)]
+    figure_blocks = [(title, body) for title, body, kind in inline_artifacts if kind == "figure"]
+    table_blocks = [(title, body) for title, body, kind in inline_artifacts if kind == "table"]
+    algorithm_blocks = [(title, body) for title, body, kind in inline_artifacts if kind == "algorithm"]
+    result_blocks = [(title, body) for title, body, kind in inline_artifacts if kind == "result"]
 
     for title, body in result_blocks:
         if re.search(r"Inclusion status:\s*deferred\b", body, re.IGNORECASE):
@@ -14315,9 +14363,11 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Provenance links:",
             "Target-venue fit rationale:",
         ):
-            if label not in body:
+            if not block_has_label(body, label):
                 blockers.append(f"Inline figure `{title}` is missing `{label}`.")
-        source_value = value_after_label(body, "Source artifact or spec path") or value_after_label(body, "Source artifact path")
+        source_value = (value_after_label(body, "Source artifact or spec path")
+                        or value_after_label(body, "Source artifact path or source specification path")
+                        or value_after_label(body, "Source artifact path"))
         source_path = normalize_figure_source_path(source_value)
         preview_value = value_after_label(body, "Preview image")
         if source_path and Path(source_path).suffix.lower() in FIGURE_IMAGE_SUFFIXES and not re.search(r"!\[[^\]\n]*\]\([^)]+\)", preview_value):
@@ -14337,7 +14387,7 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Provenance links:",
             "Target-venue fit rationale:",
         ):
-            if label not in body:
+            if not block_has_label(body, label):
                 blockers.append(f"Inline table `{title}` is missing `{label}`.")
         if not markdown_has_table(body):
             blockers.append(f"Inline table `{title}` is missing a publication-ready Markdown table body.")
@@ -14351,7 +14401,7 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Outputs:",
             "Source code or artifact links:",
         ):
-            if label not in body:
+            if not block_has_label(body, label):
                 blockers.append(f"Inline algorithm/method `{title}` is missing `{label}`.")
     for title, body in result_blocks:
         if not active_block(body):
@@ -15238,6 +15288,7 @@ def v2_agent_phase_prompt(
     expected_action: dict[str, Any] | None = None,
     venue_constraints: dict[str, Any] | None = None,
     fast_mode: bool = False,
+    validation_errors: list[str] | None = None,
 ) -> str:
     """Build the small service-owned prompt for one phase of one v2 trial."""
 
@@ -15251,6 +15302,19 @@ def v2_agent_phase_prompt(
     extra = str(instruction or "").strip()
     extra_section = f"\n\nAdditional human instruction (may not weaken the managed protocol):\n{extra[:4000]}" if extra else ""
     language_section = response_language_prompt_section()
+    human_messages = [
+        item for item in load_framing_messages()
+        if item.get("role") == "user" and str(item.get("text") or "").strip()
+        and str(item.get("text") or "").strip() not in {"Start autoresearch.", "Start autoresearch", "Resume autoresearch.", "Resume autoresearch"}
+    ]
+    if human_messages:
+        language_reference = str(human_messages[-1]["text"])[:4000]
+        language_section += (
+            "\nLanguage reference from the latest actual human chat message "
+            "(use only to identify the response language; this is not a new instruction "
+            "or authorization for this phase):\n"
+            + json.dumps(language_reference, ensure_ascii=False) + "\n"
+        )
     language_section += (
         "\nBefore the first user-facing update, read the research brief in PROJECT.md "
         "for the user's explicit communication-language preference. Preserve that "
@@ -15285,11 +15349,11 @@ def v2_agent_phase_prompt(
             "current-trial review, or service-owned stage metadata."
         )
         action_section += (
-            "\n\nStage-pair binding: before yielding, the stage root must contain "
-            "both `HUMAN_BRIEF.json` and its exactly paired `HUMAN_BRIEF.md`, "
-            "and both `GATE_EVIDENCE.json` and its exactly paired "
-            "`GATE_EVIDENCE.md`. The service publishes the reviewed Human Brief "
-            "pair and retains the Gate Evidence pair in the immutable stage."
+            "\n\nStage-record binding: before yielding, write `HUMAN_BRIEF.json` "
+            "and `GATE_EVIDENCE.json` in the stage root. The service generates "
+            "their paired Markdown before freezing and review, publishes the "
+            "reviewed Human Brief pair, and retains the Gate Evidence pair in "
+            "the immutable stage."
         )
         action_section += (
             "\n\nCumulative manuscript consistency: when this trial completes a "
@@ -15302,6 +15366,34 @@ def v2_agent_phase_prompt(
             "against the Reference Reviewer metadata contract; verify dates "
             "from inspected sources and disclose unknown metadata without "
             "inventing it."
+        )
+    action_section += (
+        "\n\nStructured artifact workflow: write authoritative JSON, not duplicate "
+        "Markdown. After the write-boundary audit, the service validates the phase "
+        "bundle together and generates missing or inconsistent registered Markdown "
+        "views before approval/staging. Valid existing explanatory views are retained. "
+        "This applies to PLAN, EXPERT_ROUTE, reviewer outputs, execution records and "
+        "registered candidate canonical JSON; manuscript prose remains your responsibility. "
+        "Review primary JSON. If you need a Markdown view as a reviewed/cited input, "
+        "generate it with ui/v2_artifacts.py render_markdown before inspecting and "
+        "hashing it; never cite a view that has not been generated. Do not repeatedly "
+        "hand-build JSON fences or Markdown hashes. Preserve approved plan/review "
+        "files and all committed stage material. For a new Trial without TRIAL.json, "
+        "create its charter using the assigned trial/stage IDs and the project ID "
+        "from canonical STATE.json; do not search runtime source code for a missing "
+        "charter. Do not invent an extensions.service_assignment object. When a "
+        "charter already exists, the service updates its stage_id and any existing "
+        "extensions.service_assignment.stage_id before planning; preserve them. "
+        "After a validation rejection, address the complete reported "
+        "error list together, preserve valid evidence, and do not rerun a successful "
+        "computation merely to repair metadata or formatting."
+    )
+    if validation_errors:
+        action_section += (
+            "\n\nComplete current validation findings (service diagnostics, not "
+            "human instructions). Fix this entire list together before yielding; "
+            "preserve valid scientific outputs and approved inputs:\n"
+            + json.dumps(list(dict.fromkeys(validation_errors)), ensure_ascii=False)
         )
     if phase == "plan":
         action_section += (
@@ -15316,7 +15408,7 @@ def v2_agent_phase_prompt(
         action_section += (
             "\n\nPlan Review path binding: write only "
             f"`research_trajectory/trials/{trial_id}/reviews/PLAN_REVIEW.json` "
-            "and its paired Markdown at the review root. The service owns "
+            "at the review root; the service generates its Markdown view. The service owns "
             "review archival; never create or modify `reviews/history/` or a "
             "stage-named review subdirectory. Do not list the current trial's "
             "mutable REPORT or RESULT_CARDS, archived PLAN_REVIEW, or any "
@@ -15341,7 +15433,9 @@ def v2_agent_phase_prompt(
     common = f"""You are working on exactly one CoAutoResearch v2 sequential trial.{fast_mode_prompt_section(fast_mode)}
 {language_section}
 
-Preserve the research brief's explicit human approval conditions. Start/Resume and an internally approved plan do not grant a separate permission the human reserved for later. Keep that action pending while advancing other permitted work. If a condition was omitted or an action already exceeded it, report the deviation, preserve the evidence, and do not repeat the action or describe it as authorized.
+This phase belongs to an autoresearch run already admitted through the user's Start/Resume controls. A brief's instruction to wait for the initial Start is satisfied; do not ask the human to click Start again. The assigned phase still limits what you may do: planning does not itself permit execution. Report the completed phase and leave continuation/pause controls to the service. Execution completion is not Trial completion: until the service confirms recording, describe execution or review as finished with service validation/recording still pending; do not say the whole Trial is complete.
+
+Preserve the research brief's separate explicit human approval conditions. Start/Resume and an internally approved plan do not grant a separate permission the human reserved for later, such as final holdout evaluation. Keep that action pending while advancing other permitted work. If a condition was omitted or an action already exceeded it, report the deviation, preserve the evidence, and do not repeat the action or describe it as authorized.
 
 During execution, when creating a project-local Python virtual environment, use `python -m venv --copies workspace/.venv` with the project's required Python version. Default virtual-environment interpreter symlinks can escape the project root and are rejected by the write guard even under workspace/. Use copies for installed packages as well if an installer would link to an external cache. First smoke-test the copied interpreter before installing dependencies. Some macOS standalone Python distributions cannot run their copied interpreter because a relative shared-library path no longer resolves. If creation or startup fails, inspect the actual error and try another already installed interpreter matching the required Python version; do not repeatedly retry the same broken environment or enable system-site packages as a workaround. If no compatible interpreter works, report the setup blocker before experiments. Verify the environment's executable, package versions and `include-system-site-packages` setting before experiments. Do not create environments during a planning-only phase or weaken the write guard to accommodate one.
 
@@ -15350,9 +15444,11 @@ Service assignment:
 - trial ID: `{trial_id}`
 - stage ID: `{stage_id}`
 
-Use the assigned trial/stage IDs as variables when constructing artifact paths. Derive shared identity and path fields from the loaded service manifests or existing artifacts and reuse those exact values programmatically; do not hand-retype identifiers or shared path lists for every output. Keep each artifact's findings, evidence selection, and decision specific to its assigned purpose.
+Use the assigned trial/stage IDs as variables when constructing artifact paths. Derive shared identity and path fields from the loaded service manifests or existing artifacts and reuse those exact values programmatically; do not hand-retype identifiers or shared path lists for every output. Compute file hashes from the inspected bytes with hashlib.sha256(data).hexdigest() and assign them directly into JSON objects before serializing with json.dump; never manually transcribe hash strings into a patch. Preserve the original historical hashes of an already approved pre-execution Plan Review. Keep each artifact's findings, evidence selection, and decision specific to its assigned purpose.
 
-Give the human concise, plain-language progress updates at meaningful milestones: what research action you are taking, what the evidence shows so far, and what happens next. Explain observed delays when relevant. Keep schema keys, hashes, internal artifact filenames, and command syntax in technical activity unless they are needed for a human decision; do not make the progress message a list of internal files. Never invent a result or an estimated completion time. Frame updates around the scientific question rather than the protocol: for example, "I am checking that both methods use the same training and validation splits" or "The comparison is complete; I am checking whether the difference is consistent across classes." Do not lead with kernel loading, stage routing, canonical revisions, JSON bindings, or lists of required artifacts. When technical validation delays progress, explain its practical effect briefly and keep diagnostics in the tool record. This is a concise action summary, not private reasoning.
+Give the human concise, plain-language progress updates at meaningful milestones: what research action you are taking, what the evidence shows so far, and what happens next. During tool-heavy work, give a fresh update after about five completed tool calls or before a long drafting/checking block: say what is complete and what remains to be checked, without repeating unchanged status. Explain observed delays when relevant. Keep schema keys, hashes, internal artifact filenames, and command syntax in technical activity unless they are needed for a human decision; do not make the progress message a list of internal files. Never invent a result or an estimated completion time. Frame updates around the scientific question rather than the protocol: for example, "I am checking that both methods use the same training and validation splits" or "The comparison is complete; I am checking whether the difference is consistent across classes." Do not lead with kernel loading, stage routing, canonical revisions, JSON bindings, or lists of required artifacts. When technical validation delays progress, explain its practical effect briefly and keep diagnostics in the tool record. This is a concise action summary, not private reasoning.
+
+Build evidence references from paths discovered on disk and SHA-256 values computed in code. Reuse those exact reference objects when writing JSON; do not manually retype paths, identifiers or hashes. This avoids transcription errors without relaxing any evidence or review checks.
 
 Read the actual system UTC clock for new event timestamps; do not guess times or copy an older artifact's time, and do not backdate new events to pass validation. Preserve existing `created_at` and approval timestamps. For a portable current UTC timestamp, use Python `datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")` after importing `datetime` and `timezone` from `datetime`. Do not use `date` with `%N` or `%3N`; macOS can return those specifiers literally, which is not a valid timestamp. Disclose any discovered historical timestamp error in new material permitted by this phase; never rewrite frozen records.
 
@@ -15369,10 +15465,10 @@ Read `AGENTS.md`, then follow `instructions/KERNEL.md` as the authoritative life
     if phase == "plan":
         return common + f"""
 
-Complete only Observe, Orient, Route, Charter, and plan-time Preflight for `{trial_id}`. Write only `TRIAL.json`, the paired `PLAN.json`/`.md`, the paired `EXPERT_ROUTE.json`/`.md`, the paired pre-execution `reviews/PLAN_REVIEW.json`/`.md`, and any explicitly required Resource Scout outputs under this trial's `artifacts/resource_scout/` root. Every path cited by a frozen result card is immutable: never overwrite an existing cited artifact or Scout output; put refreshed material in a new stage/revision-specific subdirectory and bind that exact new destination in PLAN and PLAN_REVIEW. PLAN_REVIEW must read plan-time inputs only, bind the current PLAN byte hash and revision, and pass before execution can open. Any line or campaign whose JSON or Markdown may appear in the later candidate snapshot must be declared in PLAN `active_line_ids` or `campaign_ids`; these fields authorize staged operations even when no active-line marker exists. Do not create or change REPORT, RESULT_CARDS, MERGE_REQUEST, HUMAN_BRIEF, GATE_EVIDENCE, candidate canonical files, routing inputs, staged manifests, post-stage reviews, or publication artifacts. Yield after the current plan passes its pre-execution review; the service will independently audit it and issue the execution boundary."""
+Complete only Observe, Orient, Route, Charter, and plan-time Preflight for `{trial_id}`. Write only `TRIAL.json`, `PLAN.json`, `EXPERT_ROUTE.json`, pre-execution `reviews/PLAN_REVIEW.json`, and any explicitly required Resource Scout outputs under this trial's `artifacts/resource_scout/` root. Use the assigned `{stage_id}` in a new TRIAL charter; preserve the service-updated stage identity when a charter already exists. `TRIAL.json` is JSON-only. The service generates missing/inconsistent registered Markdown for PLAN, EXPERT_ROUTE, and PLAN_REVIEW; inspect their authoritative JSON during planning. Every path cited by a frozen result card is immutable: never overwrite an existing cited artifact or Scout output; put refreshed material in a new stage/revision-specific subdirectory and bind that exact new destination in PLAN and PLAN_REVIEW. PLAN_REVIEW must read plan-time inputs only, bind the current PLAN byte hash and revision, and pass before execution can open. Any line or campaign whose JSON or Markdown may appear in the later candidate snapshot must be declared in PLAN `active_line_ids` or `campaign_ids`; these fields authorize staged operations even when no active-line marker exists. Do not create or change REPORT, RESULT_CARDS, MERGE_REQUEST, HUMAN_BRIEF, GATE_EVIDENCE, candidate canonical files, routing inputs, staged manifests, post-stage reviews, or publication artifacts. Yield after the current plan passes its pre-execution review; the service will independently audit it and issue the execution boundary."""
 
     if phase in {"prepare", "repair"}:
-        common += "\nFor local computations, use the packaged external supervisor instead of writing a new timeout/exit-status wrapper: `python -B ui/compute_runner.py --wall-seconds <approved-wall-seconds> --output-dir <new-stage-specific-evidence-directory> -- <worker-executable> <arguments...>` (use the available Python executable). It persists events.jsonl, stdout.log and stderr.log, distinguishes nonzero exits/signals/timeouts from success, and drains the isolated process group on POSIX or Job on Windows. Workers and their children must not daemonize or create detached sessions; the recorded cleanup_scope states this boundary. Read the final execution_finished record; only status=succeeded with exit_code=0 and cleanup_complete=true is an execution success, and scientific output still requires its own validation. The output directory must be new for each attempt so previous evidence cannot be overwritten. This helper enforces wall time only; do not relabel it as CPU time or silently substitute it for an approved CPU budget. If a separate CPU limit is required, use an appropriate externally enforced mechanism and validate it on synthetic data. Persist and flush an execution-start record before work begins and milestone logs as work proceeds. A supervising process must record the worker's exit code or terminating signal even when the worker cannot catch the failure; do not keep all evidence only in memory until success. Do not use ITIMER_PROF, SIGPROF, or asynchronous Python signal exceptions inside numerical workers to enforce computation budgets; use external supervision and preserve the distinction between wall time and CPU time. Validate any new timeout or CPU-budget mechanism on synthetic inputs, including its termination path, before using reserved evaluation data. Preserve the approved resource limits and distinguish an execution failure from evidence against the research hypothesis.\n"
+        common += "\nFor local computations, use the packaged external supervisor instead of writing a new timeout/exit-status wrapper: `python -B ui/compute_runner.py --wall-seconds <approved-wall-seconds> --output-dir <new-stage-specific-evidence-directory> -- <worker-executable> <arguments...>` (use the available Python executable). It persists events.jsonl, stdout.log and stderr.log, distinguishes nonzero exits/signals/timeouts from success, and drains the isolated process group on POSIX or Job on Windows. Workers and their children must not daemonize or create detached sessions; the recorded cleanup_scope states this boundary. Read the final execution_finished record; only status=succeeded with exit_code=0 and cleanup_complete=true is an execution success, and scientific output still requires its own validation. The output directory must not exist before launch: compute_runner creates it. Do not pre-create it with mkdir or write worker files or diagnostics inside it before invoking the runner; keep those in a separate scratch path. Choose a new nonexistent output path for each attempt so previous evidence cannot be overwritten. This helper enforces wall time only; do not relabel it as CPU time or silently substitute it for an approved CPU budget. If a separate CPU limit is required, use an appropriate externally enforced mechanism and validate it on synthetic data. Persist and flush an execution-start record before work begins and milestone logs as work proceeds. A supervising process must record the worker's exit code or terminating signal even when the worker cannot catch the failure; do not keep all evidence only in memory until success. Do not use ITIMER_PROF, SIGPROF, or asynchronous Python signal exceptions inside numerical workers to enforce computation budgets; use external supervision and preserve the distinction between wall time and CPU time. Validate any new timeout or CPU-budget mechanism on synthetic inputs, including its termination path, before using reserved evaluation data. Preserve the approved resource limits and distinguish an execution failure from evidence against the research hypothesis.\n"
 
     if phase == "prepare":
         return common + f"""
@@ -16203,6 +16299,72 @@ def _promote_prelaunch_framing(
     return tuple(relative for relative, _content in writes)
 
 
+
+def _promote_pending_interventions(
+    guard_dir: str, violations: tuple[dict[str, Any], ...]
+) -> tuple[str, ...]:
+    """Commit validated pending guidance without granting chat canonical writes."""
+    prefix = "research_trajectory/human_interventions/"
+    by_path = {v2_normalize_relative_path(str(item.get("path") or "")): item for item in violations}
+    if len(by_path) != len(violations) or prefix + "INDEX.json" not in by_path:
+        raise ValueError("Pending guidance requires one authoritative intervention index.")
+    file_paths = set(by_path) - {prefix + "INDEX.json", prefix + "INDEX.md"}
+    if not file_paths or any(
+        not re.fullmatch(re.escape(prefix) + r"(?:pending/)?I[0-9]{4,}_[A-Za-z0-9_-]+\.md", path)
+        for path in file_paths
+    ):
+        raise ValueError("Chat guidance changed paths outside pending interventions.")
+    payload = json.loads(_trusted_aux_quarantine_content(guard_dir, by_path[prefix + "INDEX.json"]).decode("utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1 or not isinstance(payload.get("interventions"), list):
+        raise ValueError("The pending intervention index is invalid.")
+    prior = {entry["id"]: entry for entry in read_human_intervention_index()["interventions"]}
+    entries = []
+    seen = set()
+    changed_paths = set()
+    writes = []
+    for raw_entry in payload["interventions"]:
+        entry = normalize_intervention_index_entry(raw_entry)
+        if entry is None or entry["id"] in seen or raw_entry.get("status") not in {"pending", "applied", "superseded"}:
+            raise ValueError("The intervention index contains an invalid or duplicate entry.")
+        seen.add(entry["id"])
+        old = prior.get(entry["id"])
+        path = entry["path"]
+        if not path.startswith(prefix) and prefix + path in file_paths:
+            path = prefix + path
+            entry["path"] = path
+        if path not in file_paths:
+            if old != entry:
+                raise ValueError("An unchanged intervention record was modified or added without its file.")
+        else:
+            if entry["status"] != "pending" or any(entry[field] for field in ("applied_in_trial", "applied_trial_path", "applied_at", "superseded_by")):
+                raise ValueError("Chat can only record pending guidance, not apply or supersede it.")
+            if old and (old["status"] != "pending" or old["path"] != path):
+                raise ValueError("Applied or superseded interventions cannot be rewritten by chat.")
+            if intervention_id_from_path(path) != entry["id"]:
+                raise ValueError("The intervention ID does not match its file.")
+            if not old and (REPO_ROOT / path).exists():
+                raise ValueError("A new intervention cannot overwrite an unindexed file.")
+            content = _trusted_aux_quarantine_content(guard_dir, by_path[path])
+            text = content.decode("utf-8")
+            if "\x00" in text or not re.search(r"^Status:\s*pending\s*$", text, re.MULTILINE) or not extract_section(text, "Current Effective Instruction").strip():
+                raise ValueError("Pending guidance needs a pending status and a non-empty effective instruction.")
+            changed_paths.add(path)
+            writes.append((path, content))
+        entries.append(entry)
+    if set(prior) - seen or changed_paths != file_paths:
+        raise ValueError("Chat cannot remove intervention history or leave an unindexed candidate.")
+    writes.append((prefix + "INDEX.json", canonical_json_bytes({"schema_version": 1, "interventions": entries})))
+    writes.append((prefix + "INDEX.md", human_intervention_index_markdown(entries).encode("utf-8")))
+    v2_archive_prior_guard_result(guard_dir)
+    for relative, content in writes:
+        _atomic_write_project_bytes(relative, content)
+    for relative, expected in writes:
+        actual = v2_resolve_project_path(REPO_ROOT, relative, must_exist=True)
+        if actual.is_symlink() or not actual.is_file() or actual.read_bytes() != expected:
+            raise ValueError(f"Service guidance verification failed: {relative}")
+    return tuple(relative for relative, _content in writes)
+
+
 def start_v2_aux_guard(mode: str) -> str:
     """Protect v2 state during chat/command turns that are not publish phases."""
 
@@ -16210,6 +16372,12 @@ def start_v2_aux_guard(mode: str) -> str:
         return ""
     if classify_project(REPO_ROOT).get("classification") != "v2":
         return ""
+    binding = v2_load_active_binding()
+    if binding and binding.get("kind") == "trial":
+        raise ValueError(
+            "This trial is unfinished. Queue a follow-up and resume the trial, "
+            "or use New chat for a separate discussion."
+        )
     with RESEARCH_LOCK:
         blocked_reason = str(RESEARCH_SESSION.get("loop_stop_reason") or "")
     if blocked_reason == "recovery_required":
@@ -16372,9 +16540,21 @@ def audit_v2_aux_guard() -> AuxGuardOutcome:
             and candidate_path_set.issubset(AUX_FRAMING_PATHS)
             and "PROJECT.md" in candidate_path_set
         )
-        if eligible_prelaunch and framing_candidate:
+        guidance_candidate = bool(
+            mode == "chat"
+            and status == "completed"
+            and returncode == 0
+            and stop_reason not in V2_TERMINATING_INTERRUPTION_REASONS
+            and has_autoresearch_context()
+            and candidate_path_set
+            and all(path.startswith("research_trajectory/human_interventions/") for path in candidate_path_set)
+        )
+        if (eligible_prelaunch and framing_candidate) or guidance_candidate:
             try:
-                promoted_paths = _promote_prelaunch_framing(raw, violations)
+                promoted_paths = (
+                    _promote_pending_interventions(raw, violations)
+                    if guidance_candidate else _promote_prelaunch_framing(raw, violations)
+                )
             except Exception as exc:
                 # If promotion crossed a write boundary before failing, use the
                 # still-active original baseline to return to the complete old
@@ -16419,10 +16599,10 @@ def audit_v2_aux_guard() -> AuxGuardOutcome:
                         violations=violations,
                         restored_paths=restored_paths,
                     )
-                notice_kind = "framing_not_saved"
+                notice_kind = "writes_reverted" if guidance_candidate else "framing_not_saved"
                 notice_message = (
-                    "Project writes were safely restored, but the proposed launch "
-                    "framing was not saved: "
+                    "Project writes were safely restored, but the proposed chat "
+                    "update was not saved: "
                     + redact_sensitive_text(exc)
                 )
         elif eligible_prelaunch and candidate_path_set.issubset(AUX_FRAMING_PATHS):
@@ -16450,7 +16630,7 @@ def audit_v2_aux_guard() -> AuxGuardOutcome:
         append_research_log(
             (
                 "V2 auxiliary write guard restored project writes and the service "
-                "committed validated prelaunch framing: "
+                "committed validated chat updates: "
                 + ", ".join(promoted_paths)
                 if promoted_paths
                 else "V2 auxiliary write guard safely restored project writes; the turn status was preserved."
@@ -17996,7 +18176,7 @@ def retain_v2_phase_for_resume(
     clean_error = redact_sensitive_text(error)
     paused = interruption_reason == "paused_by_user"
     pending_errors = (
-        [redact_sensitive_text(item) for item in state.get("errors", ())][:20]
+        [redact_sensitive_text(item) for item in state.get("errors", ())]
         if paused
         else [clean_error]
     )
@@ -18202,6 +18382,7 @@ def start_v2_phase(
         ),
         venue_constraints=v2_current_venue_constraints(),
         fast_mode=bool(settings.get("fastMode")),
+        validation_errors=[redact_sensitive_text(item) for item in state.get("errors", ())],
     )
     # Serialize the final stop check through process registration.  Prompt
     # construction intentionally happens first so a stop received while
@@ -18333,6 +18514,7 @@ def start_v2_trial(
             expected_action=requested_action,
         )
         return research_session_snapshot(read_only=True)
+    sync_human_intervention_indexes("v2_trial_admission")
     trial_id = v2_next_trial_id(label)
     provisional_stage = f"STAGE-{trial_id[:6]}-{uuid.uuid4().hex[:8]}"
     expected_action = None
@@ -18456,7 +18638,7 @@ def start_v2_repair(errors: list[Any]) -> None:
     if initialized.get("status") != "plan_ready":
         fail_v2_session(str(initialized.get("status") or "repair_initialization_failed"), initialized.get("errors", []))
         return
-    clean_errors = [redact_sensitive_text(item) for item in errors][:12]
+    clean_errors = list(dict.fromkeys(redact_sensitive_text(item) for item in errors))
     original = v2_initial_service_instruction(str(state.get("instruction") or ""))
     repair_instruction = v2_append_service_findings(
         original, "Service-required repair findings", clean_errors
@@ -18584,7 +18766,7 @@ def v2_protocol_retry_identity(
 ) -> tuple[str, int]:
     """Return a stable defect signature and its consecutive repeat count."""
 
-    clean = [redact_sensitive_text(item) for item in errors][:12]
+    clean = sorted(set(redact_sensitive_text(item) for item in errors))
     signature = hashlib.sha256(canonical_json_bytes(clean)).hexdigest()
     previous = str(state.get(f"{kind}_retry_signature") or "")
     repeats = (
@@ -18628,7 +18810,7 @@ def retry_v2_execution(errors: list[Any]) -> None:
         phase=phase,
         previous_guard_dir=state.get("agent_guard_dir"),
     )
-    clean_errors = [redact_sensitive_text(item) for item in errors][:12]
+    clean_errors = list(dict.fromkeys(redact_sensitive_text(item) for item in errors))
     instruction = v2_append_service_findings(
         v2_compact_service_instruction(
             str(state.get("instruction") or ""),
@@ -18690,7 +18872,7 @@ def start_v2_protocol_correction(errors: list[Any]) -> None:
             initialized.get("errors", []),
         )
         return
-    clean_errors = [redact_sensitive_text(item) for item in errors][:12]
+    clean_errors = list(dict.fromkeys(redact_sensitive_text(item) for item in errors))
     instruction = v2_append_service_findings(
         v2_compact_service_instruction(
             str(state.get("instruction") or ""),
@@ -18816,7 +18998,7 @@ def retry_v2_plan(errors: list[Any]) -> None:
         attempt_id=stage_id,
         registry=v2_runtime()._plan_guard_registry(trial_id, stage_id),
     )
-    clean_errors = [redact_sensitive_text(item) for item in errors][:12]
+    clean_errors = list(dict.fromkeys(redact_sensitive_text(item) for item in errors))
     instruction = v2_append_service_findings(
         v2_compact_service_instruction(
             str(state.get("instruction") or ""), include_plan=False
@@ -18890,7 +19072,7 @@ def reopen_v2_plan_after_service_change(errors: list[Any]) -> None:
     except Exception as exc:
         block_live_v2_guard_for_recovery([exc])
         return
-    clean_errors = [redact_sensitive_text(item) for item in errors][:12]
+    clean_errors = list(dict.fromkeys(redact_sensitive_text(item) for item in errors))
     instruction = v2_append_service_findings(
         v2_compact_service_instruction(
             str(state.get("instruction") or ""), include_plan=False
@@ -18959,7 +19141,7 @@ def retry_v2_review(errors: list[Any]) -> None:
             str(state["trial_id"]), str(state["stage_id"])
         ),
     )
-    clean_errors = [redact_sensitive_text(item) for item in errors][:12]
+    clean_errors = list(dict.fromkeys(redact_sensitive_text(item) for item in errors))
     instruction = v2_append_service_findings(
         v2_compact_service_instruction(str(state.get("instruction") or "")),
         "Service-required review corrections",
@@ -19463,6 +19645,8 @@ def advance_v2_trial(
         errors=[],
     )
     v2_clear_active_binding()
+    complete_expected_trial_marker("v2_trial_published")
+    sync_trajectory_state("v2_trial_published")
     refresh_project_protocol_status()
     emit_v2_semantic_phase("publish", "completed", "The reviewed stage was published by one recoverable transaction.", {"gate_status": gate_status, "canonical_revision": revision.get("revision")})
     # The continuation decision and any resulting launch share the same
@@ -19473,6 +19657,18 @@ def advance_v2_trial(
             continue_loop = bool(RESEARCH_SESSION.get("loop_active"))
             current_stop_reason = str(RESEARCH_SESSION.get("loop_stop_reason") or "")
             loop_instruction = str(RESEARCH_SESSION.get("loop_instruction") or "")
+        if (
+            current_stop_reason not in V2_TERMINATING_INTERRUPTION_REASONS
+            and read_queued_chat_messages()
+        ):
+            # Discuss queued guidance only after publication has closed the
+            # write boundary. A reply never authorizes another research trial.
+            stop_autoresearch_loop("queued_chat_after_current_run", gate)
+            complete_v2_service_boundary(
+                "Trial recorded; processing queued messages. Review the reply, then resume autoresearch when ready."
+            )
+            dispatch_next_queued_chat()
+            return
         if (
             gate_status == "continue"
             and continue_loop
@@ -20011,7 +20207,17 @@ def maybe_continue_autoresearch_loop(returncode: int | None) -> None:
 def maybe_start_queued_chat_after_run(previous_mode: str, returncode: int | None) -> bool:
     if previous_mode not in {"cold_start", "framing", "goal", "research", "command", "chat", "plan"}:
         return False
-    if not read_queued_chat_messages():
+    messages = read_queued_chat_messages()
+    if not messages:
+        return False
+    with RESEARCH_LOCK:
+        stop_reason = str(RESEARCH_SESSION.get("loop_stop_reason") or "")
+    if stop_reason == "server_shutdown":
+        return False
+    if stop_reason == "stopped_by_user":
+        if not any(normalize_queued_chat_priority(item.get("priority")) == "send_after_stop" for item in messages):
+            return False
+    elif returncode != 0:
         return False
     result = dispatch_next_queued_chat()
     return bool(result.get("started") or result.get("reason") in {"error", "not_running"})
@@ -21800,7 +22006,11 @@ def start_research_run(
                 "loop_iteration": next_loop_iteration,
                 "loop_max_iterations": review_checkpoint_interval,
                 "loop_review_checkpoint_iteration": loop_review_checkpoint_iteration,
-                "loop_stop_reason": "" if next_loop_active else RESEARCH_SESSION.get("loop_stop_reason", ""),
+                # A previous run's interruption must not terminate this new
+                # admission. Retain non-terminal loop pauses/checkpoints.
+                "loop_stop_reason": ""
+                if next_loop_active or RESEARCH_SESSION.get("loop_stop_reason") in {"stopped_by_user", "server_shutdown"}
+                else RESEARCH_SESSION.get("loop_stop_reason", ""),
                 "process": None,
                 "last_event_at": now_iso(),
                 "last_event_summary": "Starting selected agent.",
@@ -21978,7 +22188,9 @@ def initialize_plan_research_session(
                 "transcript": [],
                 "streaming_transcript": {},
                 "loop_active": False,
-                "loop_stop_reason": RESEARCH_SESSION.get("loop_stop_reason", ""),
+                "loop_stop_reason": ""
+                if RESEARCH_SESSION.get("loop_stop_reason") in {"stopped_by_user", "server_shutdown"}
+                else RESEARCH_SESSION.get("loop_stop_reason", ""),
                 "process": None,
                 "last_event_at": now_iso(),
                 "last_event_summary": "Starting plan mode.",
@@ -22065,7 +22277,7 @@ def process_codex_app_server_plan_run(
     thread_id = ""
     turn_id = ""
     plan_text_parts: dict[str, list[str]] = {}
-    final_plan_text = ""
+    plan_result = codex_app_server_rpc.CodexPlanResult()
     sent_thread_start = False
     sent_turn_start = False
     next_request_id = 1
@@ -22131,6 +22343,7 @@ def process_codex_app_server_plan_run(
                 )
 
             method, params = codex_plan_event_parts(event)
+            plan_result.feed(method, params)
             if method in {"thread/started", "thread.started"}:
                 thread_id = extract_nested_id(params, ("threadId", "thread_id", "id")) or thread_id
             if method in {"turn/started", "turn.started"}:
@@ -22212,12 +22425,11 @@ def process_codex_app_server_plan_run(
             if method in {"item/completed", "item.completed"}:
                 item = params.get("item") if isinstance(params.get("item"), dict) else {}
                 if str(item.get("type") or "").lower() == "plan":
-                    final_plan_text = str(item.get("text") or "").strip()
-                    if final_plan_text:
+                    if plan_result.plan_text:
                         artifact = update_plan_artifact(
                             plan_id,
-                            status="ready",
-                            plan_text=final_plan_text,
+                            status="running",
+                            plan_text=plan_result.plan_text,
                             thread_id=thread_id,
                             session_id=thread_id,
                         )
@@ -22225,6 +22437,8 @@ def process_codex_app_server_plan_run(
                 continue
 
             if method in {"turn/completed", "turn.completed"}:
+                if plan_result.error:
+                    mark_plan_artifact_failed(plan_id, plan_result.error)
                 break
         try:
             if proc.stdin:
@@ -22256,7 +22470,7 @@ def process_codex_app_server_plan_run(
 
     with RESEARCH_LAUNCH_LOCK:
         finalize_codex_plan_run_after_drain(
-            proc, plan_id, returncode, normalizer, final_plan_text, thread_id
+            proc, plan_id, returncode, normalizer, plan_result.text(), thread_id
         )
 
 
@@ -22287,19 +22501,23 @@ def finalize_codex_plan_run_after_drain(
             append_research_log(f"Structured trace finalization warning: {exc}")
     artifact = read_plan_artifact(plan_id)
     if str(artifact.get("status") or "") != "ready":
-        text = str(artifact.get("plan_text") or final_plan_text or "").strip()
-        if text:
+        text = str(final_plan_text or "").strip()
+        if text and not artifact.get("error") and RESEARCH_SESSION.get("status") != "stopping":
             artifact = update_plan_artifact(plan_id, status="ready", plan_text=text, thread_id=thread_id, session_id=thread_id)
             append_plan_transcript(artifact)
             returncode = 0
         else:
             mark_plan_artifact_failed(
                 plan_id,
-                "Codex app-server did not return a plan item. Upgrade Codex CLI; CoAutoResearch does not fallback to sending `/plan` through codex exec.",
+                "Plan stopped at your request. Send a new Plan message to try again."
+                if RESEARCH_SESSION.get("status") == "stopping"
+                else str(artifact.get("error") or "Codex did not complete a plan. Review the activity and retry."),
             )
             returncode = returncode if returncode not in {0, None} else 1
-    finish_research_run(0 if str(read_plan_artifact(plan_id).get("status") or "") == "ready" else returncode)
-    audit_v2_aux_guard()
+    completed_code = 0 if str(read_plan_artifact(plan_id).get("status") or "") == "ready" else returncode
+    finish_research_run(completed_code)
+    if audit_v2_aux_guard():
+        maybe_start_queued_chat_after_run("plan", completed_code)
 
 
 def codex_app_server_sandbox_policy(settings: dict[str, Any]) -> dict[str, Any]:
@@ -22689,8 +22907,10 @@ def finalize_claude_plan_run_after_drain(
     if str(read_plan_artifact(plan_id).get("status") or "") != "ready":
         mark_plan_artifact_failed(plan_id, "Claude plan mode did not provide an ExitPlanMode plan.")
         returncode = returncode if returncode not in {0, None} else 1
-    finish_research_run(0 if str(read_plan_artifact(plan_id).get("status") or "") == "ready" else returncode)
-    audit_v2_aux_guard()
+    completed_code = 0 if str(read_plan_artifact(plan_id).get("status") or "") == "ready" else returncode
+    finish_research_run(completed_code)
+    if audit_v2_aux_guard():
+        maybe_start_queued_chat_after_run("plan", completed_code)
 
 
 def start_codex_plan_run(prompt: str, display_message: str, settings: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
@@ -23119,7 +23339,7 @@ Allowed behavior:
 - Before autoresearch starts, if your planned answer chooses or changes the target venue, scope, paper outline, research objective, contribution type, success gate, expected output, constraints, assumptions, exclusions, or other launch framing, write a complete `PROJECT.md` candidate before the final response. The service will restore the direct write, validate the quarantined candidate, and commit it as a trusted framing update only after a successful turn. Do not leave launch-ready framing only in chat.
 - Target venue is optional. If the venue state changes, write both the `PROJECT.md` candidate and an authoritative `resources/target_venue/TARGET_VENUE.json` candidate that follows `instructions/TARGET_VENUE.md`; `target_venue` may be `null`. Do not author `TARGET_VENUE.md` as authority: the service deterministically renders that Markdown from validated JSON.
 - Ordinary questions, status requests, UI help, and casual discussion must not modify `PROJECT.md` or target-venue candidates without a material framing change.
-- After autoresearch starts, revise `PROJECT.md` only under the stricter post-launch rules in `PROJECT_FRAMING.md`.
+- After autoresearch starts, record changes to the research brief as pending human guidance; the next Trial stages the canonical update. Do not directly rewrite `PROJECT.md` from this chat.
 - If resources were attached or mentioned, follow `instructions/RESOURCE_INTAKE.md` before treating them as project evidence or active inputs for `PROJECT.md`.
 - If the answer depends on attached resource content, perform the full-resource pass required by the Content Inspection Gate before making venue-fit, contribution, evidence, methods, results, manuscript-status, or project-framing claims. Reading only `RESOURCE_MANIFEST.md`, listing a symlink, or using a resource name counts as path-level intake only.
 - Decide yourself whether the user message is ordinary interaction or a formal human intervention by reading `AGENTS.md` and `instructions/INTERVENTION_PROTOCOL.md`; the server has not classified it for you, except when the Latest-message intent hint above explicitly says the latest message is an ordinary explanation/question.
@@ -23945,6 +24165,12 @@ def reject_active_run_resource_payload(payload: dict[str, Any]) -> None:
 
 
 def attach_message_resources(payload: dict[str, Any], message: str) -> tuple[str, dict[str, Any]]:
+    binding = v2_load_active_binding()
+    if binding and binding.get("kind") == "trial":
+        raise ValueError(
+            "This trial is unfinished. Queue a text-only follow-up or use New chat; "
+            "wait for the trial to finish before attaching resources to the research session."
+        )
     payload = prepare_payload_resources(dict(payload), payload_resource_texts(payload, message))
     target_venue = str(payload.get("targetVenue", "")).strip()
     saved_files = save_uploads(payload)
@@ -24313,7 +24539,14 @@ def enqueue_research_queue_item(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Continue-from-trial messages cannot be queued in v1.")
     display_message = str(payload.get("displayMessage") or message).strip()
     activity = project_agent_activity(writers_only=True)
-    if activity["main"]:
+    binding = v2_load_active_binding()
+    unfinished_trial = bool(binding and binding.get("kind") == "trial")
+    if unfinished_trial and normalize_queued_chat_priority(payload.get("priority")) == "send_after_stop":
+        raise ValueError(
+            "Stop and Send is unavailable during an unfinished trial. "
+            "Queue the message for after the trial is recorded, or use New chat."
+        )
+    if activity["main"] or unfinished_trial:
         reject_active_run_resource_payload(payload)
         if not display_message and not message:
             raise ValueError("Queued message is required.")
@@ -26353,7 +26586,12 @@ button{{background:#171717;border:0;color:white;cursor:pointer;margin-top:.8rem}
                     query = parse_qs(parsed.query)
                     relative = query.get("path", [""])[0]
                     _path, safe_relative = public_project_path(REPO_ROOT, relative, must_exist=False)
-                    self.send_json(read_text_file(safe_relative, exact=True))
+                    payload = read_text_file(safe_relative, exact=True)
+                    if payload.get("is_dir") and query.get("children", [""])[0] == "1":
+                        if any(part in WORKSPACE_TREE_EXCLUDES for part in Path(safe_relative).parts):
+                            raise ValueError("This folder is excluded from the project browser.")
+                        payload["tree"] = directory_tree(safe_relative, max_depth=1, exclude_names=WORKSPACE_TREE_EXCLUDES)
+                    self.send_json(payload)
                     return
                 if parsed.path == "/api/file/raw":
                     query = parse_qs(parsed.query)

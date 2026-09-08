@@ -77,9 +77,11 @@ let framingReplyPending = false;
 let stopRequestPending = false;
 let pendingFramingUserMessageId = "";
 let framingPendingSince = 0;
+let framingPendingPreviousRunId = "";
 let editingFramingId = "";
 let editingQueuedChatId = "";
 const pendingQueueEditSaves = new Set();
+const pendingQueueSends = new Set();
 let draggingQueuedChatId = "";
 let queueActionMenuOpen = false;
 const editAttachmentDrafts = new Map();
@@ -155,6 +157,89 @@ const activityPanelSources = new Map();
 let activeResourceCategory = "ongoing_work";
 const selectedResourceItems = [];
 const selectedUploadItems = [];
+let uploadDraftDatabase;
+let uploadDraftWrites = Promise.resolve();
+let uploadDraftEpoch = 0;
+let uploadDraftPendingWrites = 0;
+const unsavedUploadDrafts = new Set();
+
+function uploadDraftStore(mode, operation) {
+  if (!uploadDraftDatabase) {
+    uploadDraftDatabase = new Promise((resolve, reject) => {
+      const request = indexedDB.open("coautoresearch-drafts", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("uploads");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error("Attachment draft storage is blocked by another tab."));
+    });
+  }
+  return uploadDraftDatabase.then((database) => new Promise((resolve, reject) => {
+    const transaction = database.transaction("uploads", mode);
+    const request = operation(transaction.objectStore("uploads"));
+    transaction.oncomplete = () => resolve(request.result);
+    transaction.onerror = transaction.onabort = () => reject(transaction.error || request.error);
+  }));
+}
+
+function saveUploadDraft(projectId = activeProjectId, items = selectedUploadItems) {
+  const key = String(projectId || "");
+  if (!key) return uploadDraftWrites;
+  const snapshot = items.map((item) => ({ ...item }));
+  uploadDraftPendingWrites += 1;
+  uploadDraftWrites = uploadDraftWrites.then(() => uploadDraftStore("readwrite", (store) =>
+    snapshot.length ? store.put(snapshot, key) : store.delete(key)
+  )).then(() => unsavedUploadDrafts.delete(key)).catch(() => {
+    unsavedUploadDrafts.add(key);
+    showToast("Attachment draft could not be saved in this browser. Send it or remove the files before leaving.", true);
+  }).finally(() => { uploadDraftPendingWrites -= 1; });
+  return uploadDraftWrites;
+}
+
+async function restoreUploadDraft() {
+  const key = String(activeProjectId || "");
+  const epoch = ++uploadDraftEpoch;
+  if (!key) return;
+  try {
+    const items = await loadUploadDraft(key);
+    if (epoch !== uploadDraftEpoch || key !== String(activeProjectId || "")) return;
+    selectedUploadItems.splice(0, selectedUploadItems.length, ...(Array.isArray(items) ? items : []));
+  } catch {
+    if (key === String(activeProjectId || "")) showToast("Saved attachments could not be loaded. Check them before sending.", true);
+  }
+}
+
+async function loadUploadDraft(key) {
+  await uploadDraftWrites;
+  return await uploadDraftStore("readonly", (store) => store.get(key)) || [];
+}
+
+async function deleteProjectUploadDrafts(projectId) {
+  await uploadDraftWrites;
+  try {
+    await uploadDraftStore("readwrite", (store) => {
+      const request = store.openCursor(IDBKeyRange.bound(projectId, `${projectId}\uffff`));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        cursor.delete();
+        unsavedUploadDrafts.delete(String(cursor.key));
+        cursor.continue();
+      };
+      return request;
+    });
+    for (const key of unsavedUploadDrafts) {
+      if (key === projectId || key.startsWith(`${projectId}/`)) unsavedUploadDrafts.delete(key);
+    }
+  } catch {
+    showToast("Project deleted, but cached attachment drafts could not be removed from this browser.", true);
+  }
+}
+
+window.addEventListener("beforeunload", (event) => {
+  if (!uploadDraftPendingWrites && !unsavedUploadDrafts.size) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 const pendingResourceImports = [];
 const coldFiles = {};
 const inlineFiles = {};
@@ -522,7 +607,8 @@ function isDefaultBriefTemplate(text) {
 
 function isPlaceholderProject(text) {
   const value = String(text || "");
-  return !value.trim() || /<[^>\n]+>/.test(value);
+  const withoutAutolinks = value.replace(/<(?:https?:\/\/|mailto:)[^<>\s]+>/gi, "");
+  return !value.trim() || /<[^>\n]+>/.test(withoutAutolinks);
 }
 
 function buildProjectDraft(brief, targetVenue) {
@@ -804,7 +890,8 @@ function markdownFilePath(target, options = {}) {
 
 function markdownImageHtml(label, href, options = {}) {
   const text = String(label || "").trim() || "Image";
-  const target = String(href || "").trim();
+  if (options.renderImages === false) return escapeHtml(text);
+  const target = String(href || "").trim().replace(/^<([^<>\r\n]+)>$/, "$1");
   if (!target) return escapeHtml(text);
   if (/^https?:\/\//i.test(target)) {
     return `<img class="markdown-image-preview" src="${escapeHtml(target)}" alt="${escapeHtml(text)}" loading="lazy">`;
@@ -817,8 +904,8 @@ function markdownImageHtml(label, href, options = {}) {
 }
 
 function markdownLinkHtml(label, href, options = {}) {
-  const text = String(label || "").trim();
-  const target = String(href || "").trim();
+  const text = String(label || "").trim().replace(/^`([^`]+)`$/, "$1");
+  const target = String(href || "").trim().replace(/^<([^<>\r\n]+)>$/, "$1");
   if (!text || !target) return escapeHtml(text || target);
   if (/^(https?:\/\/|mailto:)/i.test(target)) {
     return `<a href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
@@ -843,6 +930,7 @@ function resolveReviewReference(path, context) {
 }
 
 function markdownFileButtonHtml(path, label = path, options = {}) {
+  if (options.linkFiles === false) return `<code>${escapeHtml(label)}</code>`;
   let value = repoRelativePath(path);
   if (!value || value.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(value)) return `<code>${escapeHtml(label)}</code>`;
   let reviewAttrs = "";
@@ -868,9 +956,21 @@ function markdownCodeHtml(value, options = {}) {
   return `<code>${escapeHtml(text)}</code>`;
 }
 
+function markdownMathHtml(formula, display, source) {
+  try {
+    const math = window.katex.renderToString(formula, {
+      displayMode: display, output: "mathml", trust: false, strict: "ignore",
+      throwOnError: true, maxExpand: 1000, maxSize: 20,
+    });
+    return `<span class="markdown-math-${display ? "block" : "inline"}">${math}</span>`;
+  } catch (_error) {
+    return escapeHtml(source);
+  }
+}
+
 function inlineMarkup(text, options = {}) {
   const source = String(text ?? "");
-  const tokens = /`([^`]+)`|!\[([^\]\n]*)\]\(([^)\n]+)\)|\[([^\]\n]+)\]\(([^)\n]+)\)|\*\*([^*]+)\*\*/g;
+  const tokens = /`([^`]+)`|!\[([^\]\n]*)\]\(([^)\n]+)\)|\[([^\]\n]+)\]\(([^)\n]+)\)|\*\*([^*]+)\*\*|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<![\\\w$])\$([^\s$](?:[^$\n]*[^\s$])?)\$(?![\w$])/g;
   const html = [];
   let cursor = 0;
   for (const match of source.matchAll(tokens)) {
@@ -878,7 +978,8 @@ function inlineMarkup(text, options = {}) {
     if (match[1] !== undefined) html.push(markdownCodeHtml(match[1], options));
     else if (match[2] !== undefined) html.push(markdownImageHtml(match[2], match[3], options));
     else if (match[4] !== undefined) html.push(markdownLinkHtml(match[4], match[5], options));
-    else html.push(`<strong>${inlineMarkup(match[6], options)}</strong>`);
+    else if (match[6] !== undefined) html.push(`<strong>${inlineMarkup(match[6], options)}</strong>`);
+    else html.push(markdownMathHtml(match[7] ?? match[8] ?? match[9] ?? match[10], match[7] !== undefined || match[8] !== undefined, match[0]));
     cursor = match.index + match[0].length;
   }
   html.push(escapeHtml(source.slice(cursor)));
@@ -2377,10 +2478,23 @@ function upsertSessionTranscriptEntry(session, entry) {
   const entryId = String(entry.id || "").trim();
   let updated = false;
   if (entryId) {
-    const index = transcript.findIndex((item) => String(item?.id || "") === entryId);
+    // Older capped transcripts reused counter IDs within the same second.
+    // Preserve those distinct completed events when merging an overview or SSE update.
+    const legacyCounterId = /^T\d{8}_\d{6}_\d+$/.test(entryId);
+    const index = transcript.findIndex((item) => String(item?.id || "") === entryId && (
+      !legacyCounterId || (item.role === entry.role && item.raw_type === entry.raw_type && item.content === entry.content)
+    ));
     if (index >= 0) {
       transcript[index] = { ...transcript[index], ...entry };
       updated = true;
+    } else if (legacyCounterId) {
+      // Restore a previously overwritten user before its already retained reply.
+      const createdAt = Date.parse(entry.created_at || "");
+      const laterIndex = transcript.findIndex((item) => Date.parse(item?.created_at || "") > createdAt);
+      if (laterIndex >= 0) {
+        transcript.splice(laterIndex, 0, entry);
+        updated = true;
+      }
     }
   }
   if (!updated) transcript.push(entry);
@@ -2554,6 +2668,19 @@ function nextOptimisticTrialIteration() {
   return Math.max(1, latest + (latest ? 1 : 0));
 }
 
+function researchSessionControlRevision(session) {
+  return JSON.stringify([session?.id, session?.started_at, session?.ended_at, session?.status]);
+}
+
+function reconcileOptimisticResearchSession(session) {
+  if (!optimisticResearchSession || !session) return;
+  const running = ["running", "stopping"].includes(String(session.status || ""));
+  if (
+    (running && session.active_run?.running === true) ||
+    researchSessionControlRevision(session) !== optimisticResearchSession.optimistic_base_revision
+  ) optimisticResearchSession = null;
+}
+
 function optimisticAutoresearchSession(settings) {
   const startedAt = new Date().toISOString();
   const backend = normalizeAgentBackend(settings?.backend || activeSettingsBackend());
@@ -2562,6 +2689,7 @@ function optimisticAutoresearchSession(settings) {
   return {
     ...(clonePlainObject(appState?.research_session) || {}),
     id: `optimistic_goal_${Date.now()}`,
+    optimistic_base_revision: researchSessionControlRevision(appState?.research_session),
     session_id: "",
     backend,
     backend_label: agentLabel(backend),
@@ -2613,18 +2741,28 @@ function startOptimisticAutoresearchSession(settings) {
   renderComposerSuggestions();
 }
 
-function startOptimisticV2RetrySession(settings) {
+function startOptimisticV2RetrySession(settings, action = "Resume") {
+  const startedAt = new Date().toISOString();
   const current = clonePlainObject(appState?.research_session) || {};
   optimisticResearchSession = {
     ...current,
+    optimistic_base_revision: researchSessionControlRevision(current),
     status: "running",
+    started_at: startedAt,
     settings: normalizeSessionSettings(settings || {}),
     ended_at: "",
     returncode: null,
     loop_active: true,
     loop_stop_reason: "",
-    last_event_at: new Date().toISOString(),
-    last_event_summary: "Starting Retry Restart…",
+    last_event_at: startedAt,
+    last_event_summary: `${action} requested; preparing autoresearch…`,
+    active_run: {
+      ...(current.active_run || {}),
+      running: true,
+      started_at: startedAt,
+      status_label: `Preparing autoresearch ${action.toLowerCase()}`,
+      trajectory_mismatch: false,
+    },
     v2: current.v2 && typeof current.v2 === "object"
       ? { ...current.v2, status: "agent_running", errors: [] }
       : current.v2,
@@ -3000,6 +3138,7 @@ function resetProjectClientState() {
   framingReplyPending = false;
   pendingFramingUserMessageId = "";
   framingPendingSince = 0;
+  framingPendingPreviousRunId = "";
   selectedTrialIndex = 0;
   selectedV2TrialId = "";
   v2ResearchBoard = null;
@@ -3034,7 +3173,8 @@ function resetProjectClientState() {
   paperPollTimer = null;
   paperStatusLoading = false;
   paperRequestPending = false;
-  paperTargetDraft = paperModelDraft = paperEffortDraft = paperStatusError = paperSyncError = "";
+  restorePaperDraft();
+  paperStatusError = paperSyncError = "";
   updatePaperNavigation();
   clearTimeout(figureImageAutoTimer);
   figureImageAutoTimer = null;
@@ -3047,6 +3187,11 @@ function resetProjectClientState() {
 async function switchProject(projectId) {
   const next = String(projectId || "").trim();
   if (!next || next === activeProjectId) return;
+  await uploadDraftWrites;
+  if (unsavedUploadDrafts.has(String(activeProjectId || ""))) {
+    showToast("Send or remove the unsaved attachments before switching projects.", true);
+    return;
+  }
   clearOverviewPoll();
   persistActiveViewScrollPosition();
   persistNavigationState();
@@ -3062,7 +3207,7 @@ async function switchProject(projectId) {
   restoreNavigationState();
   hydrateTargetVenueField({ force: true });
   restoreSessionSettings();
-  restoreResourceSelections();
+  await restoreResourceSelections();
   restorePendingResourceImports();
   await loadUiSettings();
   if (activeProjectId !== next) return;
@@ -3198,7 +3343,6 @@ async function renameProjectFromDialog(event) {
   const submit = form.querySelector('button[type="submit"]');
   const data = new FormData(form);
   const name = String(data.get("projectName") || "").trim();
-  const agentBackend = normalizeAgentBackend(data.get("agentBackend") || activeSettingsBackend());
   if (!name) {
     showToast("Project name is required.", true);
     return;
@@ -3209,10 +3353,6 @@ async function renameProjectFromDialog(event) {
       method: "POST",
       body: JSON.stringify({ project: pendingRenameProject.id, name }),
     });
-    activeProjectId = String(payload.active_project_id || payload.project?.id || activeProjectId || "");
-    window.activeProjectId = activeProjectId;
-    window.CoAutoSessions?.syncProject?.();
-    if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
     appState = {
       ...(appState || {}),
       projects: Array.isArray(payload.projects) ? payload.projects : [],
@@ -3291,6 +3431,7 @@ async function deleteProjectFromDialog(event) {
   }
   submit.disabled = true;
   const deletingActive = String(pendingDeleteProject.id || "") === String(activeProjectId || "");
+  const deletedProjectId = String(pendingDeleteProject.id || "");
   if (deletingActive) {
     clearOverviewPoll();
     stopResearchEventStream({ resetLastId: true });
@@ -3303,11 +3444,19 @@ async function deleteProjectFromDialog(event) {
       method: "POST",
       body: JSON.stringify({ project: pendingDeleteProject.id, confirm }),
     });
-    activeProjectId = String(payload.active_project_id || "");
-    window.activeProjectId = activeProjectId;
-    if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
-    else localStorage.removeItem("coAutoResearchActiveProject");
-    if (deletingActive) resetProjectClientState();
+    await deleteProjectUploadDrafts(deletedProjectId);
+    const chatDraftPrefix = "coauto:sessions:draft:" + deletedProjectId + "/chat/";
+    const chatSelectionPrefix = "coauto:sessions:selection:" + deletedProjectId + "/";
+    Object.keys(localStorage).filter((key) => key.startsWith(chatDraftPrefix) || key.startsWith(chatSelectionPrefix)).forEach((key) => localStorage.removeItem(key));
+    if (deletingActive) {
+      activeProjectId = String(payload.active_project_id || "");
+      window.activeProjectId = activeProjectId;
+      if (activeProjectId) localStorage.setItem("coAutoResearchActiveProject", activeProjectId);
+      else localStorage.removeItem("coAutoResearchActiveProject");
+      resetProjectClientState();
+      restoreNavigationState();
+      updateNavigationUrl();
+    }
     window.CoAutoSessions?.syncProject?.();
     appState = {
       ...(appState || {}),
@@ -3319,6 +3468,7 @@ async function deleteProjectFromDialog(event) {
     renderProjectList();
     if (activeProjectId) {
       setProjectLoadPhase("overview");
+      await restoreResourceSelections();
       await loadUiSettings();
       await loadOverview(true);
       scheduleOverviewPoll(1000);
@@ -3380,7 +3530,7 @@ async function createProjectFromDialog(event) {
     renderProjectList();
     setProjectLoadPhase("overview");
     hydrateTargetVenueField({ force: true });
-    restoreResourceSelections();
+    await restoreResourceSelections();
     await loadUiSettings();
     restoreSessionSettings();
     await loadOverview(true);
@@ -3416,6 +3566,18 @@ async function loadOverview(silent = false) {
     if (requestedProjectId && activeProjectId && requestedProjectId !== String(activeProjectId || "")) {
       return;
     }
+    const previousSession = appState?.research_session;
+    const incomingSession = overviewPayload.research_session;
+    if (
+      incomingSession?.transcript_partial && previousSession?.id
+      && previousSession.id === incomingSession.id
+      && appState.active_project_id === overviewPayload.active_project_id
+    ) {
+      const entries = incomingSession.transcript || [];
+      incomingSession.transcript = previousSession.transcript || [];
+      entries.forEach((entry) => upsertSessionTranscriptEntry(incomingSession, entry));
+    }
+    reconcileOptimisticResearchSession(incomingSession);
     appState = overviewPayload;
     materialOverviewCheckedAt = Date.now();
     syncServerClockOffset(appState.generated_at);
@@ -3427,7 +3589,7 @@ async function loadOverview(silent = false) {
       resetProjectClientState();
       window.CoAutoSessions?.syncProject?.();
       restoreNavigationState();
-      restoreResourceSelections();
+      await restoreResourceSelections();
       restorePendingResourceImports();
     }
     syncV2OverviewState(overviewPayload);
@@ -3980,6 +4142,8 @@ function gateHumanResponseLooksActionable(value) {
 }
 
 function gateRequiresHumanResponse() {
+  const gate = sessionState().gate || {};
+  if (gate.protocol_version === "2.0") return Boolean(gateAttentionStatus());
   const response = gateHumanResponse();
   return gateHumanResponseLooksActionable(response) || Boolean(gateAttentionStatus());
 }
@@ -4197,8 +4361,13 @@ function queuedChatItems() {
   return Array.isArray(items) ? items.filter((item) => item && typeof item === "object") : [];
 }
 
+function hasUnfinishedV2Trial() {
+  const trial = sessionState().v2;
+  return Boolean(trial?.trial_id && trial.phase && trial.phase !== "terminal");
+}
+
 function canQueueComposerWhileRunning() {
-  return isSessionRunning() && hasActiveProject();
+  return (isSessionRunning() || hasUnfinishedV2Trial()) && hasActiveProject() && !isPlanComposerMode();
 }
 
 function queuedChatAttachmentCount(item) {
@@ -4391,7 +4560,7 @@ function renderProjectLaunchFallbackPanel(show) {
 function renderQueueActionMenu() {
   const controls = ensureQueueActionMenu();
   if (!controls) return;
-  const show = canQueueComposerWhileRunning() && coldComposerHasSendableContent();
+  const show = canQueueComposerWhileRunning() && !hasUnfinishedV2Trial() && coldComposerHasSendableContent();
   controls.button.hidden = !show;
   controls.menu.hidden = !show || !queueActionMenuOpen;
   controls.button.setAttribute("aria-expanded", show && queueActionMenuOpen ? "true" : "false");
@@ -4773,6 +4942,13 @@ function visibleActivityEntries(entries, options = {}) {
     const rawType = String(entry?.raw_type || "").toLowerCase();
     const content = String(entry?.content || "").trim();
     if (!content) return false;
+    if (framingProgressTitle(entry) === "Reasoning" && !framingProgressContent(entry)) return false;
+    if (!entry.streaming && rawType === "item/agentmessage/delta" && entries.some((other) =>
+      String(other?.raw_type || "").toLowerCase() === "item/completed"
+      && transcriptRole(other) === role
+      && String(other?.content || "").trim() === content
+      && Math.abs(entryTimeValue(other) - entryTimeValue(entry)) < 30000
+    )) return false;
     if (!includeUser && role === "user") return false;
     if (isNoisyAgentLifecycleEntry(entry)) return false;
     if (rawType.startsWith("session.")) return false;
@@ -4794,6 +4970,7 @@ function activityTimelineHtml(entries, options = {}) {
     (humanUpdate ? readable : technical).push(entry);
   }
   return `
+    ${options.historyLimited ? '<p class="activity-panel-empty">Showing recent activity. This count is not a lifetime total.</p>' : ""}
     <div class="activity-timeline" aria-label="${escapeHtml(options.label || "Activity timeline")}">
       ${readable.length ? readable.map((entry, index) => activityTimelineItemHtml(entry, index)).join("") : '<p class="activity-panel-empty">Waiting for a progress update.</p>'}
     </div>
@@ -4849,7 +5026,9 @@ function activityTimelineHasRichDetail(entry, role) {
 }
 
 function activityTimelineDetailHtml(entry, title, role) {
-  const content = String(entry?.content || "").trim();
+  const content = title === "Reasoning"
+    ? readableReasoningContent(entry?.content)
+    : String(entry?.content || "").trim();
   if (!content) return "";
   if (activityTimelineHasRichDetail(entry, role)) {
     return `<div class="activity-event-card">${transcriptEntryHtml(entry)}</div>`;
@@ -4976,40 +5155,43 @@ function chatComposerHasSendableContent() {
 
 function renderComposerActionButtons() {
   window.CoAutoSessions?.syncResearchSession?.(activeProjectId, sessionState(), isSessionRunning());
+  updatePaperStartAvailability();
   renderComposerModeControls();
   const queueMode = canQueueComposerWhileRunning();
+  const queuePending = pendingQueueSends.has(String(activeProjectId || ""));
+  const sendLabel = queuePending ? "Adding to queue..." : queueMode ? "Queue follow-up" : "Send";
   const resourceBlocked = hasBlockingResourceImports();
   const blockedMessage = blockingResourceImportMessage();
   const loading = isProjectLoading();
   const coldEditor = $("#cold-file-editor");
   if (coldEditor) coldEditor.placeholder = coldComposerPlaceholder(localMessages.length > 0 || framingDraftPending || framingReplyPending);
-  const coldStopMode = canStopCurrentRun() && !coldComposerHasSendableContent();
+  const coldStopMode = canStopCurrentRun() && (isPlanComposerMode() || !coldComposerHasSendableContent());
   syncComposerActionButton($("#prepare-cold-start"), {
     stopMode: coldStopMode,
-    disabled: hasNoProject() || resourceBlocked || loading,
+    disabled: hasNoProject() || resourceBlocked || loading || queuePending,
     sendHtml: composerSendIconHtml(),
-    sendLabel: queueMode ? "Queue follow-up" : "Send",
+    sendLabel,
   });
   const coldButton = $("#prepare-cold-start");
   if (coldButton && !coldStopMode) {
     if (resourceBlocked) coldButton.title = blockedMessage;
-    else if (queueMode) coldButton.title = "Queue follow-up";
+    else coldButton.title = sendLabel;
     coldButton.dataset.queueMode = queueMode ? "true" : "false";
   }
 
   const send = $("#chat-form .send-button");
-  const chatStopMode = canStopCurrentRun() && !chatComposerHasSendableContent();
+  const chatStopMode = canStopCurrentRun() && (isPlanComposerMode() || !chatComposerHasSendableContent());
   syncComposerActionButton(send, {
     stopMode: chatStopMode,
-    disabled: !(canMessage() || queueMode) || resourceBlocked || hasNoProject() || loading,
+    disabled: !(canMessage() || queueMode) || resourceBlocked || hasNoProject() || loading || queuePending,
     sendHtml: queueMode ? "Queue" : "Send",
-    sendLabel: queueMode ? "Queue follow-up" : "Send",
+    sendLabel,
   });
   if (send) {
     send.type = "submit";
     if (!chatStopMode) {
       if (resourceBlocked) send.title = blockedMessage;
-      else if (queueMode) send.title = "Queue follow-up";
+      else send.title = sendLabel;
     }
   }
   renderQueuedChatPanel();
@@ -5067,7 +5249,7 @@ function canSendLocalSlashControl(text) {
 
 function canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial) {
   return (
-    isSessionRunning() &&
+    (isSessionRunning() || hasUnfinishedV2Trial()) &&
     !resumeFromTrial &&
     !String(text || "").trim().startsWith("/") &&
     Array.isArray(attachments) &&
@@ -5300,6 +5482,7 @@ function framingMessageTime(message, fallback) {
 }
 
 function beginFramingPending(messageId = "") {
+  framingPendingPreviousRunId = String(sessionState().id || "");
   framingPendingSince = Date.now();
   if (messageId) pendingFramingUserMessageId = messageId;
 }
@@ -5348,7 +5531,9 @@ function reconcileFramingPending(messages = localMessages) {
   const running = isSessionRunning();
   const pendingMessageNeedsReply = pendingFramingMessageNeedsReply(messages);
   const unansweredUser = latestUnansweredUserMessage(messages);
-  if (!running && terminalStatus && !pendingMessageNeedsReply) {
+  const pendingRunFinished = Boolean(session.ended_at && session.id
+    && String(session.id) !== framingPendingPreviousRunId);
+  if (!running && terminalStatus && (!pendingMessageNeedsReply || !unansweredUser || pendingRunFinished)) {
     framingDraftPending = false;
     framingReplyPending = false;
     pendingFramingUserMessageId = "";
@@ -5441,7 +5626,10 @@ function hasAssistantReplyBetweenTimes(start, end, messages, transcript, cutWind
   const upper = Math.max(start, end);
   const messageReply = messages.some((message) => {
     if (!isAssistantFramingMessage(message)) return false;
-    const value = framingMessageTime(message, 0);
+    if (message.kind === "plan" && !["ready", "approved", "implemented"].includes(message.artifact?.status)) return false;
+    const value = message.kind === "plan"
+      ? Date.parse(String(message.artifact?.updated_at || message.created_at || ""))
+      : framingMessageTime(message, 0);
     return value > lower && value < upper;
   });
   if (messageReply) return true;
@@ -5474,7 +5662,9 @@ function transcriptReplyWindows(cutWindows) {
     if (!isFramingThreadUserTranscript(entry)) return [];
     const nextUserIndex = runStarts[itemIndex + 1]?.index ?? transcript.length;
     const completed = nextUserIndex < transcript.length || !isSessionRunning();
-    const candidates = transcript.slice(index + 1, nextUserIndex).filter((candidate) => isAssistantReplyCandidate(candidate, cutWindows));
+    const runEntries = transcript.slice(index + 1, nextUserIndex);
+    const planCard = runEntries.some((candidate) => candidate.kind === "plan" && candidate.artifact?.id);
+    const candidates = planCard ? [] : runEntries.filter((candidate) => isAssistantReplyCandidate(candidate, cutWindows));
     return [{
       entry,
       index,
@@ -5623,9 +5813,17 @@ function upsertLatestPlanMessage(messages, planArtifact = null) {
   const latestPlan = planArtifact || appState?.research_session?.latest_plan || appState?.latest_plan || {};
   const message = planMessageFromArtifact(latestPlan);
   if (!message) return false;
+  const request = normalizedTranscriptText(latestPlan.request?.display_message || latestPlan.request?.message);
+  const created = framingMessageTime(message, 0);
+  const user = request ? messages.filter((item) => item.role === "user"
+    && normalizedTranscriptText(item.text) === request
+    && framingMessageTime(item, 0) <= created + 1000).at(-1) : null;
+  // Server timestamps have second precision; the requesting user message may
+  // carry milliseconds within that same second and must precede its Plan.
+  if (user && framingMessageTime(user, 0) >= created) message.created_at = new Date(framingMessageTime(user, 0) + 1).toISOString();
   const index = latestPlanMessageIndex(messages, message.artifact?.id || "");
   if (index >= 0) {
-    if (JSON.stringify(messages[index].artifact || {}) !== JSON.stringify(message.artifact || {})) {
+    if (messages[index].created_at !== message.created_at || JSON.stringify(messages[index].artifact || {}) !== JSON.stringify(message.artifact || {})) {
       messages[index] = { ...messages[index], ...message };
       return true;
     }
@@ -6145,8 +6343,7 @@ function progressEntriesFromTranscript(transcript = [], options = {}) {
         items.entries.unshift(entry);
       }
       return items;
-    }, { seen: new Set(), entries: [] }).entries
-    .slice(-6);
+    }, { seen: new Set(), entries: [] }).entries;
 }
 
 function sessionRunMetaHtml(session = {}) {
@@ -6227,7 +6424,7 @@ function framingProgressContent(entry) {
     const state = lines.includes("completed") ? "completed" : lines.includes("in_progress") ? "in progress" : "";
     return compactText(`${file ? basename(file) : "file"} ${action}${state ? `, ${state}` : ""}`, 180);
   }
-  return compactText(content.replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, ""), 220);
+  return compactText(plainMarkdownSummary(content).replace(/^\/bin\/(?:zsh|bash|sh)\s+-lc\s+/, ""), 220);
 }
 
 function readableReasoningContent(value) {
@@ -6375,12 +6572,11 @@ function currentProgressEntries() {
         items.entries.unshift(entry);
       }
       return items;
-    }, { seen: new Set(), entries: [] }).entries
-    .slice(-6);
+    }, { seen: new Set(), entries: [] }).entries;
 }
 
-function currentRunActivityEventLabel(count) {
-  return count ? `${count} event${count === 1 ? "" : "s"}` : "waiting";
+function currentRunActivityEventLabel(count, recent = false) {
+  return count ? `${count}${recent ? " recent" : ""} event${count === 1 ? "" : "s"}` : "waiting";
 }
 
 function isPrimaryProgressEntry(entry) {
@@ -6479,15 +6675,11 @@ function parseSubagentUpdateLine(line) {
 function subagentUpdatesFromEntries(entries = currentProgressEntries()) {
   const updates = [];
   (entries || []).forEach((entry) => {
-    const texts = [String(entry?.content || "").trim(), framingProgressContent(entry)]
-      .filter(Boolean)
-      .filter((text, index, list) => list.indexOf(text) === index);
-    texts.forEach((text) => {
-      text.split(/\r?\n/).forEach((line) => {
-        const update = parseSubagentUpdateLine(line);
-        if (update) updates.push(update);
-      });
-    });
+    const parsed = String(entry?.content || "").trim().split(/\r?\n/)
+      .map(parseSubagentUpdateLine).filter(Boolean);
+    // A shortened display summary must not overwrite the complete output path.
+    updates.push(...(parsed.length ? parsed : framingProgressContent(entry).split(/\r?\n/)
+      .map(parseSubagentUpdateLine).filter(Boolean)));
   });
   return updates;
 }
@@ -6577,16 +6769,22 @@ function subagentOutputLinkHtml(output) {
   `;
 }
 
-function liveStatusIdleHintHtml(waitState, subagents = []) {
+function liveStatusIdleHintHtml(waitState) {
   const wait = waitState && typeof waitState === "object" ? waitState : {};
   if (String(wait.kind || "").toLowerCase() !== "idle") return "";
   const age = Number(wait.last_event_age_seconds);
   const ageText = Number.isFinite(age) ? formatWorkedDuration(age) : "";
-  const waiting = subagents.find((item) => ["waiting", "starting"].includes(String(item.status || "").toLowerCase()));
-  const text = waiting
-    ? `Waiting on ${waiting.agent}${ageText ? ` · ${ageText} since last top-level update` : ""}`
-    : `Still running${ageText ? ` · no new top-level update for ${ageText}` : ""} · open Activity for details`;
+  const text = `Still running${ageText ? ` · no new activity for ${ageText}` : ""} · open Activity for details`;
   return `<p class="trial-live-status-block-hint">${escapeHtml(text)}</p>`;
+}
+
+function liveConnectionRetryText(entries, waitState) {
+  if (!["active", "idle"].includes(String(waitState?.kind || ""))) return "";
+  const latest = (entries || []).at(-1);
+  const content = String(latest?.content || "");
+  if (!content.includes("codex_core::responses_retry") || !/retrying request/i.test(content)) return "";
+  const context = /compaction/i.test(content) ? " while preparing context" : "";
+  return `Model connection interrupted${context}. Codex reported an automatic retry. Open Activity for details.`;
 }
 
 function liveStatusHtml(entries = currentProgressEntries(), progress = {}, waitState = activeRunWaitState()) {
@@ -6595,7 +6793,10 @@ function liveStatusHtml(entries = currentProgressEntries(), progress = {}, waitS
     ? visibleProcessUpdateText(update)
     : trialProgressSummaryText(progress, "");
   const subagents = latestSubagentUpdates(entries, 3);
-  const hint = liveStatusIdleHintHtml(waitState, subagents);
+  const retryText = liveConnectionRetryText(entries, waitState);
+  const hint = retryText
+    ? `<p class="trial-live-status-block-hint" role="status">${escapeHtml(retryText)}</p>`
+    : liveStatusIdleHintHtml(waitState);
   if (!mainText && !subagents.length && !hint) return "";
   return `
     <section class="trial-live-status-block" aria-label="Live status">
@@ -6603,7 +6804,7 @@ function liveStatusHtml(entries = currentProgressEntries(), progress = {}, waitS
       ${mainText ? `
         <div class="trial-live-status-block-row is-main">
           ${liveStatusIconHtml("agent")}
-          <p>${escapeHtml(compactText(mainText, 300))}</p>
+          <p>${escapeHtml(compactText(plainMarkdownSummary(mainText), 300))}</p>
         </div>
       ` : ""}
       ${subagents.map((update) => `
@@ -6703,31 +6904,32 @@ function framingProgressDetailsHtml() {
   return currentRunActivityDetailsHtml(currentProgressEntries());
 }
 
-function terminalRunNoResponseHtml(unansweredUser) {
-  if (!unansweredUser) return "";
+function terminalChatRunStatusHtml(unansweredUser) {
   const session = sessionState();
   const status = String(session.status || "").toLowerCase();
   if (isSessionRunning() || !["completed", "failed", "interrupted"].includes(status)) return "";
   const mode = String(session.mode || activeRunMode() || "").toLowerCase();
   if (!["chat", "framing"].includes(mode)) return "";
+  if (!unansweredUser && status === "completed") return "";
   const statusText = status === "failed"
-    ? "The run failed before a response was saved."
+    ? "The response did not finish. Any text above may be incomplete."
     : status === "interrupted"
-      ? "The run stopped before a response was saved."
+      ? "Response stopped. Any text above may be incomplete."
       : "The run completed without a saved response.";
   const hasReturncode = session.returncode !== null && session.returncode !== undefined && String(session.returncode).trim() !== "";
   const returncode = hasReturncode ? Number(session.returncode) : NaN;
   const detailParts = [];
-  if (Number.isFinite(returncode)) detailParts.push(`Exit code ${returncode}.`);
-  const lastSummary = String(session.last_event_summary || "").trim();
+  if (status !== "interrupted" && Number.isFinite(returncode)) detailParts.push(`Exit code ${returncode}.`);
+  const lastSummary = status === "interrupted" ? "" : String(session.last_event_summary || "").trim();
   if (lastSummary) detailParts.push(compactText(lastSummary, 220));
   const entries = currentProgressEntries();
   return `
     <article class="framing-message assistant is-run-ended" aria-live="polite">
       <div class="transcript-meta">CoAutoResearch</div>
       <div class="transcript-body thinking-bubble">
-        <section class="run-ended-status" aria-label="Run ended without a saved response">
+        <section class="run-ended-status" aria-label="Run ended">
           <p>${escapeHtml(statusText)}</p>
+          <p>Send a new message, or edit and resend your previous message to continue.</p>
           ${detailParts.length ? `<p class="run-ended-detail">${escapeHtml(detailParts.join(" "))}</p>` : ""}
           ${entries.length ? currentRunActivityDetailsHtml(entries) : ""}
         </section>
@@ -6829,7 +7031,7 @@ function renderFramingConversation() {
     : "";
   const shouldShowPending = localPending || (isSessionRunning() && !transcriptTrialPanel);
   const pendingHtml = shouldShowPending ? framingThinkingHtml() : "";
-  const terminalNoResponseHtml = !shouldShowPending ? terminalRunNoResponseHtml(unansweredUser) : "";
+  const terminalNoResponseHtml = !shouldShowPending ? terminalChatRunStatusHtml(unansweredUser) : "";
   const pendingShowsAutoresearch = shouldShowPending && isAutoresearchActiveRun();
   const footerAutoresearchPanel = pendingShowsAutoresearch
     ? ""
@@ -8331,6 +8533,8 @@ function renderChatState() {
 
 function coldComposerPlaceholder(hasFramingThread) {
   if (isProjectLoading()) return "Opening project...";
+  if (isSessionRunning() && isPlanComposerMode()) return "Draft your next plan while this run finishes...";
+  if (!isSessionRunning() && hasUnfinishedV2Trial()) return "Queue a follow-up; resume this trial to continue...";
   if (canQueueComposerWhileRunning()) {
     return "Queue a follow-up...";
   }
@@ -9358,6 +9562,9 @@ function inferredTrialIterationFromText(value) {
 
 function effectiveIteration(entry, currentIteration) {
   if (isUiLocalTranscript(entry)) return 0;
+  // Service run IDs end with their execution mode. Chat keeps the last loop
+  // counter for context; that does not make its events part of that Trial.
+  if (/^S\d{8}_\d{6}_(?:chat|framing|plan|command)$/.test(String(entry?.run_id || ""))) return 0;
   const explicit = Number(entry?.iteration || 0);
   // V2 assigns each event to a trial at execution time. Reading or discussing
   // another trial's artifacts does not move the event into that trial.
@@ -9459,14 +9666,19 @@ function trialActionIconHtml(kind) {
   return `<span class="trial-action-icon trial-action-icon-${escapeHtml(kind)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${icons[kind] || ""}</svg></span>`;
 }
 
+const RESEARCH_SESSION_BUSY_MESSAGE = "A run is active in the research session. Wait for it to finish or stop the current run.";
+
 function trialLifecycleActionButtonsHtml(iteration, report, running) {
   if (running || isLiveGoalSession() || !hasAutoresearchTrajectory()) return "";
   const v2 = currentV2TrialState(iteration, report);
   if (v2 && ["recovery_required", "stage_resolution_required"].includes(v2.status)) return "";
   const actions = [];
+  const busyAttrs = isSessionRunning()
+    ? ` disabled aria-disabled="true" title="${escapeHtml(RESEARCH_SESSION_BUSY_MESSAGE)}"`
+    : "";
   const resumeFromTrial = selectedResumeTrialPayload();
   if (resumeFromTrial) {
-    actions.push(`<button class="primary-button small-button trial-flow-button" type="button" data-resume-trial-submit>Continue from ${escapeHtml(resumeTrialLabel(resumeFromTrial))}</button>`);
+    actions.push(`<button class="primary-button small-button trial-flow-button" type="button" data-resume-trial-submit${busyAttrs}>Continue from ${escapeHtml(resumeTrialLabel(resumeFromTrial))}</button>`);
     actions.push('<button class="secondary-button small-button trial-flow-button" type="button" data-resume-trial-remove>Cancel</button>');
   } else if (!isGoalPassed()) {
     const reportPath = String(report?.report_path || "").trim();
@@ -9478,9 +9690,9 @@ function trialLifecycleActionButtonsHtml(iteration, report, running) {
       && ["plan", "prepare", "repair", "review"].includes(v2.phase)
       && ["agent_failed", "interrupted"].includes(v2.status);
     if (v2 ? resumeCurrentStage : (report && report?.is_closed !== true && !reportPath) || latestBoundary) {
-      actions.push(`<button class="primary-button small-button trial-flow-button" type="button" data-resume-autoresearch aria-label="Resume">${trialActionIconHtml("resume")}<span>Resume</span></button>`);
+      actions.push(`<button class="primary-button small-button trial-flow-button" type="button" data-resume-autoresearch aria-label="Resume"${busyAttrs}>${trialActionIconHtml("resume")}<span>Resume</span></button>`);
     } else if (!v2 && resumeTrialContextFromReport(iteration, report)) {
-      actions.push(`<button class="secondary-button small-button trial-flow-button" type="button" data-trial-continue="${escapeHtml(iteration)}" aria-label="Continue from this trial">${trialActionIconHtml("continue")}<span>Continue from this trial</span></button>`);
+      actions.push(`<button class="secondary-button small-button trial-flow-button" type="button" data-trial-continue="${escapeHtml(iteration)}" aria-label="Continue from this trial"${busyAttrs}>${trialActionIconHtml("continue")}<span>Continue from this trial</span></button>`);
     }
   }
   const activeV2 = sessionState().v2;
@@ -9492,7 +9704,7 @@ function trialLifecycleActionButtonsHtml(iteration, report, running) {
   // The backend resumes this unfinished reset; it does not archive it again.
   // Resume already exposes that action without promising another full reset.
   if (!unfinishedRestart) {
-    actions.push(`<button class="secondary-button small-button trial-danger-button" type="button" data-restart-autoresearch aria-label="Restart">${trialActionIconHtml("restart")}<span>Restart</span></button>`);
+    actions.push(`<button class="secondary-button small-button trial-danger-button" type="button" data-restart-autoresearch aria-label="Restart"${busyAttrs}>${trialActionIconHtml("restart")}<span>Restart</span></button>`);
   }
   return actions.join("");
 }
@@ -9522,8 +9734,16 @@ function trialOpenActionButtonsHtml(report, options = {}) {
   ].filter(Boolean).join("");
 }
 
+function plainMarkdownSummary(value) {
+  return String(value ?? "")
+    .replace(/!?\[([^\]\n]+)\]\((?:<[^>\n]+>|[^)\n]+)\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+)/gm, "");
+}
+
 function cleanTrialReportSummaryText(value) {
-  const text = cleanText(value, "");
+  const text = cleanText(plainMarkdownSummary(value), "");
   if (!text) return "";
   if (!/[A-Za-z0-9\u00c0-\uffff]/.test(text)) return "";
   if (/^Created\s+Trial\s+[`'"]?0*\d{1,6}_[a-z0-9_ -]+[`'"]?(?:\.|\s+as\s+the\s+next\b.*)?$/i.test(text)) return "";
@@ -9532,7 +9752,7 @@ function cleanTrialReportSummaryText(value) {
 
 function trialActivityPanelEntryHtml(key, label, iteration, activity, options = {}) {
   if (!activity.length) return "";
-  const eventLabel = options.eventLabel || currentRunActivityEventLabel(activity.length);
+  const eventLabel = options.eventLabel || currentRunActivityEventLabel(activity.length, true);
   registerActivityPanelSource(key, {
     title: "Activity",
     subtitle: `Trial ${iteration}${options.running ? `, ${agentLabel(sessionBackend())} running` : ""}`,
@@ -9542,6 +9762,7 @@ function trialActivityPanelEntryHtml(key, label, iteration, activity, options = 
     options: {
       label: `Trial ${iteration} activity timeline`,
       emptyText: "No activity for this trial yet.",
+      historyLimited: Number(sessionState().history_counts?.transcript || 0) > (sessionState().transcript || []).length,
     },
   });
   return `
@@ -9595,7 +9816,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
     && ["final", "assistant"].includes(transcriptRole(entry))
     && cleanTrialReportSummaryText(entry?.content)
   ));
-  const fallback = finalEntry ? compactText(finalEntry.content, 260) : "";
+  const fallback = finalEntry ? compactText(plainMarkdownSummary(finalEntry.content), 260) : "";
   const reportSummary = cleanText(report?.report_summary, "");
   const objective = trialObjectiveText(report);
   const rawSummary = reportSummary || fallback || objective || (report ? "Summary is not available yet." : "Report is not available yet. Agent activity for this trial is shown below.");
@@ -9659,12 +9880,12 @@ function latestTrialUpdateText(activeTrialData, runningTrialData = null) {
   const entries = runningTrialData ? currentRunScopedEntries(rawEntries) : rawEntries;
   const latestEntry = latestTrialProgressEntry(trialActivityEntries(entries));
   if (!latestEntry) return "";
-  return compactText(`${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`, 180);
+  return compactText(plainMarkdownSummary(`${framingProgressTitle(latestEntry)}: ${framingProgressContent(latestEntry)}`), 180);
 }
 
 function trialHistoryActivityButtonHtml(iteration, entries = [], options = {}) {
   const activity = Array.isArray(entries) ? entries : [];
-  const eventLabel = options.eventLabel || (!options.running && !activity.length ? "0 events" : currentRunActivityEventLabel(activity.length));
+  const eventLabel = options.eventLabel || (!options.running && !activity.length ? "0 events" : currentRunActivityEventLabel(activity.length, true));
   const activityKey = [
     "trial-history",
     activeProjectId || appState?.active_project_id || "",
@@ -9682,6 +9903,7 @@ function trialHistoryActivityButtonHtml(iteration, entries = [], options = {}) {
     options: {
       label: iteration ? `Trial ${iteration} activity timeline` : "Autoresearch activity timeline",
       emptyText: options.emptyText || "Waiting for agent update.",
+      historyLimited: Number(sessionState().history_counts?.transcript || 0) > (sessionState().transcript || []).length,
     },
   });
   return activityOpenButtonHtml({
@@ -9705,7 +9927,7 @@ function runningTrialStatusHtml(trial) {
   const progressDetail = trialProgressDetailText(progress);
   const waitState = activeRunWaitState();
   const liveStatus = liveStatusHtml(liveEntries, progress, waitState);
-  const eventLabel = activity.length ? `${activity.length} event${activity.length === 1 ? "" : "s"}` : "waiting";
+  const eventLabel = currentRunActivityEventLabel(activity.length, true);
   const waitNotice = agentWaitStateHtml(waitState, { suppressIdle: true });
   const showWaitNotice = Boolean(waitNotice);
   return `
@@ -9779,6 +10001,7 @@ function isHistoricalReportedTrial(iteration, trial) {
 
 function isDisplayIncompleteTrial(iteration, trial, running = false) {
   if (autoresearchFailureInfo()?.iteration === Number(iteration)) return false;
+  if (isPendingExpectedTrialReport(trial)) return false;
   if (!trial || running || trial?.is_closed === true) return false;
   if (isTrialClosingDuringLiveHandoff(iteration, trial)) return false;
   if (isHistoricalReportedTrial(iteration, trial)) return false;
@@ -9793,9 +10016,14 @@ function isTrialClosingDuringLiveHandoff(iteration, trial) {
   return Boolean(String(trial?.report_path || "").trim() || trialProgressForIteration(target, trial)?.report_exists);
 }
 
+function isPendingExpectedTrialReport(trial) {
+  return /^\d{6}_pending_autoresearch$/.test(String(trial?.id || ""));
+}
+
 function trialStatusLabel(iteration, trial) {
   if (autoresearchFailureInfo()?.iteration === Number(iteration)) return "Failed";
   if (isTrialLive(iteration, trial)) return "Running";
+  if (isPendingExpectedTrialReport(trial)) return "Pending";
   const reportStatus = cleanText(trial?.status, "");
   if (isContinuedTrial(iteration, trial)) return "Continued";
   const currentV2 = currentV2TrialState(iteration, trial);
@@ -9815,7 +10043,7 @@ function trialStatusLabel(iteration, trial) {
 function trialHeaderStatusLabel(iteration, trial) {
   const target = Number(iteration || trialIterationValue(trial) || 0);
   const lifecycleLabel = trialStatusLabel(target, trial);
-  if (["Blocked", "Closing", "Continued", "Done", "Reported", "Paused", "Interrupted"].includes(lifecycleLabel)) {
+  if (["Blocked", "Closing", "Continued", "Done", "Reported", "Paused", "Interrupted", "Pending"].includes(lifecycleLabel)) {
     return lifecycleLabel;
   }
   const progress = target ? trialProgressForIteration(target, trial) : {};
@@ -9872,7 +10100,8 @@ function markTrialStripManual(strip, options = {}) {
 
 function trialStripManualActive() {
   if (trialStripScrollState.mode !== "manual") return false;
-  if (Date.now() - Number(trialStripScrollState.touchedAt || 0) > TRIAL_STRIP_MANUAL_EXPIRE_MS) {
+  if (!trialStripScrollState.selectedIteration
+    && Date.now() - Number(trialStripScrollState.touchedAt || 0) > TRIAL_STRIP_MANUAL_EXPIRE_MS) {
     resetTrialStripToAuto();
     return false;
   }
@@ -10761,6 +10990,8 @@ function messageCopyButton(text, label = "Copy message", message = "Message copi
 }
 
 window.CoAutoChatUi = {
+  loadUploadDraft,
+  saveUploadDraft,
   activeNavigationPanel,
   currentV2ResearchBoard,
   insertComposerPrompt,
@@ -10798,6 +11029,36 @@ function inlineOpenButton(path, label = "Open source") {
   return `<button class="secondary-button small-button" type="button" data-inline-fullscreen="${escapeHtml(value)}" title="${escapeHtml(raw)}">${escapeHtml(adjustedLabel)}</button>`;
 }
 
+const folderTreeCache = new Map();
+
+async function loadTreeFolder(details) {
+  if (details.dataset.folderLoading === "true") return;
+  const projectId = activeProjectId;
+  const path = details.dataset.folderPath;
+  const body = details.querySelector(":scope > .tree-children");
+  details.dataset.folderLoading = "true";
+  if (!folderTreeCache.has(`${projectId}:${path}`)) body.innerHTML = `<div class="tree-empty">Loading folder…</div>`;
+  try {
+    const payload = await api(`/api/file?path=${encodeURIComponent(path)}&children=1`);
+    if (!payload.exists || !payload.tree) throw new Error("Folder is no longer available.");
+    if (activeProjectId !== projectId || !details.isConnected) return;
+    folderTreeCache.set(`${projectId}:${path}`, payload.tree.children || []);
+    if (folderTreeCache.size > 200) folderTreeCache.delete(folderTreeCache.keys().next().value);
+    const expanded = new Set([...body.querySelectorAll("details[open]")].map((node) => node.dataset.folderPath || node.dataset.fileDetails));
+    const previews = new Map([...body.querySelectorAll("[data-inline-file]")].map((node) => [node.dataset.inlineFile, node]));
+    body.innerHTML = payload.tree.children.length
+      ? payload.tree.children.map((child) => renderTree(child, Number(details.dataset.folderDepth) + 1)).join("")
+      : `<div class="tree-empty">Empty</div>`;
+    body.querySelectorAll("details").forEach((node) => { if (expanded.has(node.dataset.folderPath || node.dataset.fileDetails)) node.open = true; });
+    body.querySelectorAll("[data-inline-file]").forEach((node) => { const retained = previews.get(node.dataset.inlineFile); if (retained) node.replaceWith(retained); });
+    details.querySelector(":scope > summary > small").textContent = `${payload.tree.children.length} ${payload.tree.children.length === 1 ? "item" : "items"}`;
+  } catch (error) {
+    if (activeProjectId === projectId && details.isConnected) body.innerHTML = `<div class="tree-empty">${escapeHtml(error.message)} Close and reopen this folder to retry.</div>`;
+  } finally {
+    delete details.dataset.folderLoading;
+  }
+}
+
 function renderTree(node, depth = 0) {
   if (!node) return empty("No files here yet.");
   if (node.type === "file") {
@@ -10828,12 +11089,14 @@ function renderTree(node, depth = 0) {
       </details>
     `;
   }
-  const children = node.children || [];
-  const body = children.length ? children.map((child) => renderTree(child, depth + 1)).join("") : `<div class="tree-empty">Empty</div>`;
+  const cached = node.children_deferred ? folderTreeCache.get(`${activeProjectId}:${node.path || node.name}`) : null;
+  const children = cached || node.children || [];
+  const deferred = node.children_deferred && !cached;
+  const body = children.length ? children.map((child) => renderTree(child, depth + 1)).join("") : `<div class="tree-empty">${deferred ? "Open to load folder." : "Empty"}</div>`;
   const itemLabel = children.length === 1 ? "item" : "items";
-  const folderMeta = `${children.length} ${itemLabel}${node.is_symlink ? " · linked folder" : ""}`;
+  const folderMeta = deferred ? "Open to browse" : `${children.length} ${itemLabel}${node.is_symlink ? " · linked folder" : ""}`;
   return `
-    <details class="tree-folder ${node.is_symlink ? "is-symlink" : ""}" data-folder-path="${escapeHtml(node.path || node.name)}" ${depth <= 1 ? "open" : ""}>
+    <details class="tree-folder ${node.is_symlink ? "is-symlink" : ""}" data-folder-path="${escapeHtml(node.path || node.name)}" data-folder-depth="${depth}" ${node.children_deferred ? 'data-folder-deferred="true"' : ""} ${depth <= 1 ? "open" : ""}>
       <summary>
         <span>${escapeHtml(node.name)}</span>
         <small>${escapeHtml(folderMeta)}</small>
@@ -11015,6 +11278,16 @@ function v2StatusLabel(value) {
   return v2Plain(value, "unknown").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function v2TrialDisplayStatus(trial) {
+  const id = String(trial?.trial_id || "");
+  if (!trial?.legacy && trial?.lifecycle_state !== "published" && id
+      && activeRunMode() === "v2_trial" && id === sessionState().v2?.trial_id) {
+    const iteration = Number.parseInt(id, 10);
+    return trialStatusLabel(iteration, reportForIteration(iteration));
+  }
+  return trial?.lifecycle_state;
+}
+
 function v2GatePresentation(status) {
   const presentations = {
     continue: ["Continue", "Proceed with the next high-value move."],
@@ -11050,7 +11323,7 @@ function v2ProgressBlockReason(board) {
 function v2ItemText(item) {
   if (typeof item === "string" || typeof item === "number") return String(item);
   if (!item || typeof item !== "object") return "";
-  return v2Plain(item.text || item.summary || item.description || item.title || item.question || item.id || item.path);
+  return v2Plain(item.text || item.summary || item.statement || item.description || item.title || item.question || item.id || item.path);
 }
 
 function v2TextListHtml(items, emptyText, className = "") {
@@ -11143,7 +11416,7 @@ function v2ResultCardHtml(card, trial) {
 function v2EvidenceHtml(items, emptyText) {
   const cards = v2Array(items);
   if (!cards.length) return `<p class="v2-empty">${escapeHtml(emptyText)}</p>`;
-  return `<ul class="v2-evidence-list">${cards.slice(0, 6).map((card) => `<li><strong>${escapeHtml(v2Plain(card?.summary || card?.text, v2Plain(card?.id, "Evidence")))}</strong>${card?.scope ? `<small>${escapeHtml(card.scope)}</small>` : ""}</li>`).join("")}</ul>`;
+  return `<ul class="v2-evidence-list">${cards.map((card) => `<li><strong>${escapeHtml(v2Plain(card?.summary || card?.text, v2Plain(card?.id, "Evidence")))}</strong>${card?.scope ? `<small>${escapeHtml(card.scope)}</small>` : ""}${v2Array(card?.caveats).length ? `<details><summary>Caveats</summary>${v2TextListHtml(card.caveats, "")}</details>` : ""}</li>`).join("")}</ul>`;
 }
 
 function v2PackLabel(value) {
@@ -11169,13 +11442,16 @@ function v2ExpertStripHtml(route) {
 
 function v2ReviewProgressHtml(trial) {
   const required = v2Array(trial?.required_reviewers);
+  if (!trial?.legacy && !required.length) {
+    return `<section class="v2-trial-section v2-review-progress"><header><h4>Review progress</h4><span>Awaiting reviews</span></header><p class="v2-empty">Reviewers will be assigned after the current candidate is ready. Earlier review findings remain available in Reviews.</p></section>`;
+  }
   const omitted = v2Array(trial?.omitted_reviewers);
   const specialized = v2Array(trial?.specialized_reviewers);
   const statuses = trial?.reviewer_statuses && typeof trial.reviewer_statuses === "object" ? trial.reviewer_statuses : {};
   const passed = required.filter((reviewer) => statuses[reviewer] === "pass").length;
   return `
     <section class="v2-trial-section v2-review-progress">
-      <header><h4>Review progress</h4><span>${passed}/${required.length} passed</span></header>
+      <header><h4>Review progress</h4><span>${required.length ? `${passed}/${required.length} passed` : "Awaiting reviews"}</span></header>
       ${trial?.legacy ? `<p class="v2-legacy-note">Legacy fixed-eight closure rule</p>` : `<p class="v2-review-level">${escapeHtml(v2StatusLabel(trial?.review_level || "unknown"))} manifest</p>`}
       ${required.length ? `<ul>${required.map((reviewer) => `<li><span>${escapeHtml(String(reviewer).replaceAll("_", " "))}</span><strong class="is-${escapeHtml(v2StatusKey(statuses[reviewer] || "missing"))}">${escapeHtml(v2StatusLabel(statuses[reviewer] || "missing"))}</strong></li>`).join("")}</ul>` : `<p class="v2-empty">No required reviewers are recorded.</p>`}
       ${trial?.legacy ? "" : specialized.length
@@ -11190,6 +11466,7 @@ function v2ReviewProgressHtml(trial) {
 
 function v2TrialDetailHtml(trial, options = {}) {
   if (!trial) return `<div class="v2-empty-state">Select a trial to inspect its findings, reviews and supporting evidence.</div>`;
+  const displayStatus = v2TrialDisplayStatus(trial);
   const cards = v2Array(trial.result_cards);
   const effects = [
     ["Line effects", v2Array(trial.line_effects).map((item) => `${v2Plain(item.line_id)} · ${v2StatusLabel(item.effect)}: ${v2Plain(item.rationale)}`)],
@@ -11199,7 +11476,7 @@ function v2TrialDetailHtml(trial, options = {}) {
     <article class="v2-trial-detail ${trial.legacy ? "is-legacy" : ""}" data-v2-trial-detail="${escapeHtml(v2Plain(trial.trial_id))}">
       <header class="v2-trial-detail-head">
         <div><p>${trial.legacy ? "Legacy-derived trial" : Number.isInteger(trial.published_revision) ? `Recorded in project · Revision ${trial.published_revision}` : "Not recorded yet"}</p><h3>${escapeHtml(v2Plain(trial.trial_id, "Trial"))}</h3></div>
-        <div class="v2-chip-row"><span class="is-${escapeHtml(v2StatusKey(trial.lifecycle_state))}">${escapeHtml(v2StatusLabel(trial.lifecycle_state))}</span><span>${escapeHtml(v2StatusLabel(trial.merge_status))} merge</span></div>
+        <div class="v2-chip-row"><span class="is-${escapeHtml(v2StatusKey(displayStatus))}">${escapeHtml(v2StatusLabel(displayStatus))}</span><span>${escapeHtml(v2StatusLabel(trial.merge_status))} merge</span></div>
       </header>
       ${options.pending ? `<p class="v2-inline-state" role="status">Loading validated trial detail…</p>` : ""}
       ${options.error ? `<p class="v2-inline-state is-error" role="alert">${escapeHtml(options.error)}</p>` : ""}
@@ -11239,11 +11516,12 @@ function v2ResearchBoardHtml(board, trials, selectedTrialId, trialDetail, option
   return `
     <section class="v2-research-board ${board?.legacy ? "is-legacy" : ""}" aria-labelledby="v2-board-title" data-v2-research-board data-receipt-backed="${receiptBacked}">
       <header class="v2-board-head">
-        <div><p>Research Board ${board?.legacy ? "· read-only legacy" : "· current overview"}</p><h2 id="v2-board-title">Where the research stands</h2></div>
+        <div><p>Research Board ${board?.legacy ? "· read-only legacy" : "· recorded overview"}</p><h2 id="v2-board-title">Where the research stands</h2></div>
         <div class="v2-board-head-actions"><span class="v2-gate-badge is-${escapeHtml(v2StatusKey(gate.key))}">${escapeHtml(gate.label)}</span><button class="secondary-button small-button" type="button" data-v2-board-refresh ${options.pending ? "disabled" : ""}>${options.pending ? "Refreshing…" : "Refresh board"}</button></div>
       </header>
       ${options.error ? `<p class="v2-inline-state is-error" role="alert">${escapeHtml(options.error)}</p>` : ""}
       ${v2BoardBannerHtml(board)}
+      ${latest ? `<p class="v2-inline-state">Based on recorded Trial ${escapeHtml(v2Plain(latest.trial_id).slice(0, 6))}. Later discussion and ongoing trials appear here after their results are recorded.</p>` : ""}
       <div class="v2-board-stats" aria-label="Recorded research counts">
         <div><strong>${campaigns.length}</strong><span>campaigns</span></div>
         <div><strong>${canonicalCards.length}</strong><span>recorded results</span></div>
@@ -11253,15 +11531,15 @@ function v2ResearchBoardHtml(board, trials, selectedTrialId, trialDetail, option
       <details class="v2-receipt-note"><summary>Technical details</summary><p>${receiptBacked ? `Receipt-backed canonical revision ${escapeHtml(board.canonical_revision)}` : board?.legacy ? "Legacy-derived counts; no v2 publication receipt." : "Canonical claims remain unpublished until a Publish Receipt is present."}</p></details>
       <div class="v2-board-grid">
         <article class="v2-board-card is-line">
-          <header><p>Current direction</p>${activeLine?.status ? `<span>${escapeHtml(v2StatusLabel(activeLine.status))}</span>` : ""}</header>
-          <h3>${escapeHtml(v2Plain(activeLine?.title, "Direction not yet selected"))}</h3>
-          <p>${escapeHtml(v2Plain(activeLine?.thesis, "The next research plan will establish a direction to explore."))}</p>
-          <h4>Current claim</h4>${v2TextListHtml(board?.current_claims, "Reviewed claims will appear here with their supporting evidence.")}
+          <header><p>${activeLine ? "Current direction" : "Recorded findings"}</p>${activeLine?.status ? `<span>${escapeHtml(v2StatusLabel(activeLine.status))}</span>` : ""}</header>
+          ${activeLine ? `<h3>${escapeHtml(v2Plain(activeLine.title, "Research direction"))}</h3><p>${escapeHtml(v2Plain(activeLine.thesis))}</p>` : ""}
+          <h4>Current claims</h4>${v2TextListHtml(board?.current_claims, "Reviewed claims will appear here with their supporting evidence.")}
           <h4>Bottleneck</h4><p>${escapeHtml(v2Plain(board?.current_bottleneck, "No bottleneck recorded."))}</p>
         </article>
         <article class="v2-board-card is-evidence">
           <header><p>Evidence</p><span>${evidenceKeys.size} recorded</span></header>
-          <h4>Supporting</h4>${v2EvidenceHtml(board?.supporting_evidence, "Supporting evidence will appear after results are reviewed and recorded.")}
+          <h4>Supporting</h4>${v2EvidenceHtml(board?.supporting_evidence, "No unqualified supporting evidence is recorded.")}
+          ${v2Array(board?.qualified_evidence).length ? `<details><summary>Qualified evidence · ${board.qualified_evidence.length}</summary>${v2EvidenceHtml(board.qualified_evidence, "")}</details>` : ""}
           <h4>Limiting / negative</h4>${v2EvidenceHtml([...v2Array(board?.limiting_evidence), ...v2Array(board?.negative_evidence)], "No limiting evidence is recorded.")}
         </article>
         <article class="v2-board-card is-campaigns">
@@ -11290,7 +11568,7 @@ function v2ResearchBoardHtml(board, trials, selectedTrialId, trialDetail, option
       </div>
       <section class="v2-trials-browser" aria-labelledby="v2-trials-title">
         <header><div><p>Research iterations</p><h2 id="v2-trials-title">Trials</h2></div><span>${trials.length}</span></header>
-        ${trials.length ? `<nav class="v2-trial-tabs" aria-label="V2 trials">${trials.map((trial) => { const id = v2Plain(trial.trial_id); const selected = id === selectedTrialId; return `<button type="button" data-v2-trial-select="${escapeHtml(id)}" aria-pressed="${selected}" class="${selected ? "is-active" : ""}"><strong>${escapeHtml(id.slice(0, 6))}</strong><span>${escapeHtml(v2StatusLabel(trial.lifecycle_state))}</span>${trial.legacy ? "<em>legacy</em>" : ""}</button>`; }).join("")}</nav>` : `<p class="v2-empty">No trials are recorded yet. Review your research brief in the research session, then choose Start autoresearch.</p>`}
+        ${trials.length ? `<nav class="v2-trial-tabs" aria-label="V2 trials">${trials.map((trial) => { const id = v2Plain(trial.trial_id); const selected = id === selectedTrialId; return `<button type="button" data-v2-trial-select="${escapeHtml(id)}" aria-pressed="${selected}" class="${selected ? "is-active" : ""}"><strong>${escapeHtml(id.slice(0, 6))}</strong><span>${escapeHtml(v2StatusLabel(v2TrialDisplayStatus(trial)))}</span>${trial.legacy ? "<em>legacy</em>" : ""}</button>`; }).join("")}</nav>` : `<p class="v2-empty">No trials are recorded yet. Review your research brief in the research session, then choose Start autoresearch.</p>`}
         ${v2TrialDetailHtml(trialDetail, { pending: options.trialPending, error: options.trialError })}
       </section>
     </section>
@@ -11458,11 +11736,23 @@ function groupedReviews(reviews) {
     });
 }
 
+function reviewGroupCompletion(group) {
+  if (group.archived || !group.trialId) return null;
+  const trial = v2TrialSummary(group.trialId);
+  if (!trial || trial.legacy) return null;
+  const required = v2Array(trial.required_reviewers);
+  const statuses = trial.reviewer_statuses || {};
+  return { total: required.length, passed: required.filter((id) => statuses[id] === "pass").length };
+}
+
 function reviewGroupStatusLabel(group) {
   const counts = reviewDecisionCounts(group.reviews);
+  const completion = reviewGroupCompletion(group);
   return [
-    `${group.reviews.length} review${group.reviews.length === 1 ? "" : "s"}`,
-    counts.pass ? `${counts.pass} pass` : "",
+    completion
+      ? completion.total ? `${completion.passed}/${completion.total} required reviews passed` : "Awaiting review manifest"
+      : `${group.reviews.length} review${group.reviews.length === 1 ? "" : "s"}`,
+    !completion && counts.pass ? `${counts.pass} pass` : "",
     counts.revise ? `${counts.revise} revise` : "",
     counts.continue ? `${counts.continue} continue` : "",
     counts.other ? `${counts.other} other` : "",
@@ -11474,6 +11764,8 @@ function reviewGroupShortStatus(group) {
   if (counts.revise) return "revise";
   if (counts.continue) return "continue";
   if (counts.other) return "mixed";
+  const completion = reviewGroupCompletion(group);
+  if (completion && (!completion.total || completion.passed < completion.total)) return "pending";
   if (counts.pass && counts.pass === group.reviews.length) return "pass";
   return `${group.reviews.length}`;
 }
@@ -11768,7 +12060,7 @@ const manuscriptArtifactFieldLabels = new Set([
   "Placement", "Table number/title", "Table title", "Publication-ready table",
   "Purpose or result role", "Reader takeaway", "Metric or result summary",
   "Exact caption draft or current caption",
-  "Table notes / definitions / abbreviations", "Table notes, definitions, or abbreviations", "Table notes",
+  "Table notes / definitions / abbreviations", "Table notes, definitions, or abbreviations", "Table notes, definitions, or abbreviations when needed", "Table notes",
   "Source artifact path or source specification path", "Source code or artifact links",
   "Comparison or baseline logic", "Limitations and uncertainty",
   "Manuscript claim supported in plain language", "Key result or conceptual contrast shown",
@@ -12469,7 +12761,7 @@ function artifactTakeawayHtml(block) {
   ].filter(Boolean).join("\n"));
   const description = !isTable ? figureDescriptionPayload(block) : "";
   const tableBody = isTable ? publicationReadyTableMarkdown(block) : "";
-  const notes = isTable ? manuscriptFieldValue(block, ["Table notes / definitions / abbreviations", "Table notes, definitions, or abbreviations", "Table notes", "Notes"]) : "";
+  const notes = isTable ? manuscriptFieldValue(block, ["Table notes / definitions / abbreviations", "Table notes, definitions, or abbreviations", "Table notes, definitions, or abbreviations when needed", "Table notes", "Notes"]) : "";
   return `
     <article id="${escapeHtml(blueprintAnchorForTitle(block.title))}" class="manuscript-artifact-card story-artifact-card ${isTable ? "manuscript-table-card " : ""}artifact-${kindSlug}">
       <header class="figure-spec-head story-artifact-head">
@@ -12698,7 +12990,7 @@ function manuscriptTableCardHtml(block) {
   const tableTitle = manuscriptFieldValue(block, ["Table number/title", "Table title", "Title"]) || cleanText(block.title, "Untitled table");
   const tableBody = publicationReadyTableMarkdown(block);
   const caption = manuscriptFieldValue(block, ["Caption draft or current caption", "Exact caption draft or current caption", "Caption draft", "Caption"]);
-  const notes = manuscriptFieldValue(block, ["Table notes / definitions / abbreviations", "Table notes, definitions, or abbreviations", "Table notes", "Notes"]);
+  const notes = manuscriptFieldValue(block, ["Table notes / definitions / abbreviations", "Table notes, definitions, or abbreviations", "Table notes, definitions, or abbreviations when needed", "Table notes", "Notes"]);
   const sourcePath = firstArtifactPath([
     manuscriptFieldValue(block, ["Source artifact or spec path", "Source artifact path", "Source artifact"]),
     block.body,
@@ -12707,7 +12999,7 @@ function manuscriptTableCardHtml(block) {
     ["Placement", placement],
     ["Purpose / role", role],
     ["Key result / contrast", manuscriptFieldValue(block, ["Key result or conceptual contrast shown"])],
-    ["Provenance", manuscriptFieldValue(block, ["Provenance links", "Source links"])],
+    ["Provenance", manuscriptFieldValue(block, ["Provenance links", "Provenance links to findings, trials, or source files", "Source links"])],
     ["Target-venue fit", manuscriptFieldValue(block, ["Target-venue fit rationale"])],
   ].filter(([, value]) => hasRealText(value));
   return `
@@ -13051,9 +13343,37 @@ let paperStatusError = "";
 let paperSyncError = "";
 let paperClientEpoch = 0;
 const paperActiveStatuses = new Set(["queued", "preparing", "writing", "checking", "stopping"]);
+restorePaperDraft();
+
+function restorePaperDraft() {
+  paperTargetDraft = projectScopedGet(activeProjectId, "paperTargetDraft");
+  paperModelDraft = projectScopedGet(activeProjectId, "paperModelDraft");
+  paperEffortDraft = projectScopedGet(activeProjectId, "paperEffortDraft");
+}
+
+function persistPaperDraft() {
+  paperTargetDraft = $("#paper-target")?.value ?? paperTargetDraft;
+  paperModelDraft = $("#paper-model")?.value ?? paperModelDraft;
+  paperEffortDraft = $("#paper-effort")?.value ?? paperEffortDraft;
+  scopedSet("paperTargetDraft", paperTargetDraft);
+  scopedSet("paperModelDraft", paperModelDraft);
+  scopedSet("paperEffortDraft", paperEffortDraft);
+}
 
 function paperBusy() {
   return paperRequestPending || paperActiveStatuses.has(paperJob?.status);
+}
+
+const PAPER_RESEARCH_BUSY_MESSAGE = "Wait for the research session to finish, or pause it before generating a paper.";
+
+function updatePaperStartAvailability() {
+  const start = $("[data-paper-start]");
+  if (!start) return;
+  const researchRunning = isSessionRunning();
+  start.disabled = paperBusy() || researchRunning;
+  start.title = researchRunning ? PAPER_RESEARCH_BUSY_MESSAGE : "";
+  const note = $("[data-paper-research-busy]");
+  if (note) note.hidden = !researchRunning;
 }
 
 function readablePaper() {
@@ -13096,8 +13416,8 @@ function renderPaperStatus() {
   return `${paperRequestPending ? '<p class="paper-state" role="status">Sending request…</p>' : job ? `<p class="paper-state" role="status"><strong>${escapeHtml(labels[job.status] || job.status)}</strong>${job.model ? ` · ${escapeHtml(job.model)}${job.reasoning_effort ? ` · ${escapeHtml(job.reasoning_effort)}` : ""}` : ""}</p>` : ""}
     ${error ? `<p class="paper-error" role="alert" title="${escapeHtml(error)}">${escapeHtml(researchDiagnosticText(error))}</p>${/package-managed project files are out of date/i.test(error) ? `<button class="secondary-button small-button" type="button" data-project-upgrade-reviewers="${escapeHtml(activeProjectId)}">Update project template</button>` : ""}` : ""}
     ${readablePaper() && job?.status !== "ready" ? `<p class="paper-help">${paperBusy() ? "A new draft is being generated." : "The new draft was not completed."} Your previous PDF remains available below.</p>` : ""}
-    ${last ? `<p class="paper-update">${escapeHtml(last)}</p>` : ""}
-    ${updates.length > 1 ? `<details class="paper-updates"><summary>Generation activity · ${updates.length} updates</summary><ol>${updates.map((u) => `<li><time>${escapeHtml(new Date(u.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</time><p>${escapeHtml(u.text)}</p></li>`).join("")}</ol></details>` : ""}`;
+    ${last ? `<p class="paper-update">${inlineMarkup(last, { linkFiles: false, renderImages: false })}</p>` : ""}
+    ${updates.length > 1 ? `<details class="paper-updates"><summary>Generation activity · ${updates.length} updates</summary><ol>${updates.map((u) => `<li><time>${escapeHtml(new Date(u.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</time><p>${inlineMarkup(u.text, { linkFiles: false, renderImages: false })}</p></li>`).join("")}</ol></details>` : ""}`;
 }
 
 function renderPaperResult() {
@@ -13110,7 +13430,7 @@ function renderPaperResult() {
     <div class="paper-downloads"><a class="secondary-button small-button" href="${escapeHtml(paperArtifactUrl("paper.pdf"))}" target="_blank" rel="noopener">Open PDF</a><a class="primary-button small-button" href="${escapeHtml(paperArtifactUrl("paper.pdf", true))}" download>Download PDF</a><a class="secondary-button small-button" href="${escapeHtml(paperArtifactUrl("source.zip", true))}" download>Download source</a><a class="secondary-button small-button" href="${escapeHtml(paperArtifactUrl("QA.md", true))}" download>Review notes</a></div>
     <p class="paper-help">Generated from evidence recorded in this project. Review the claims, figures, references and venue requirements before submitting.</p>
     <details class="paper-venue-notes"><summary>Template and review requirements${paper.venue?.actual_template_year ? ` · ${escapeHtml(String(paper.venue.actual_template_year))}` : ""}</summary><p class="paper-help">${escapeHtml(caveats)}</p></details>
-    <iframe class="paper-pdf-viewer" src="${escapeHtml(paperArtifactUrl("paper.pdf"))}" title="Paper PDF viewer"></iframe>`;
+    <iframe class="paper-pdf-viewer" src="${escapeHtml(paperArtifactUrl("paper.pdf"))}#view=FitH" title="Paper PDF viewer"></iframe>`;
 }
 
 function renderPaperGeneration() {
@@ -13131,7 +13451,8 @@ function renderPaperGeneration() {
     <div class="paper-controls"><label>Target venue<input id="paper-target" type="text" maxlength="160" placeholder="e.g. AISTATS 2026, or General research article" value="${escapeHtml(paperTargetDraft || paperJob?.target || "")}"${disabled}></label>
     <label>Model<select id="paper-model"${disabled}>${options.map(([value, label]) => `<option value="${escapeHtml(value)}"${value === model ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
     <label>Reasoning<select id="paper-effort"${disabled}>${efforts.map(([value, label]) => `<option value="${escapeHtml(value)}"${value === effort ? " selected" : ""}>${label}</option>`).join("")}</select></label></div>
-    <div class="paper-actions"><button class="${ready ? "secondary-button" : "primary-button"} paper-generate-button" type="button" data-paper-start${disabled}>${ready ? "Generate new draft" : "Generate paper"}</button></div>
+    <div class="paper-actions"><button class="${ready ? "secondary-button" : "primary-button"} paper-generate-button" type="button" data-paper-start${paperBusy() || isSessionRunning() ? " disabled" : ""}${isSessionRunning() ? ` title="${escapeHtml(PAPER_RESEARCH_BUSY_MESSAGE)}"` : ""}>${ready ? "Generate new draft" : "Generate paper"}</button></div>
+    <p class="paper-help" data-paper-research-busy${isSessionRunning() ? "" : " hidden"}>${PAPER_RESEARCH_BUSY_MESSAGE}</p>
     <p class="paper-help">Writing and repair share a 3-hour limit; you can cancel at any time. Follow progress in Manuscript; Paper appears in the sidebar once a draft is ready.</p></details>
     <div class="paper-actions"><button class="secondary-button small-button" type="button" data-paper-cancel${!paperBusy() ? " hidden" : ""}${paperJob?.status === "stopping" || paperRequestPending ? " disabled" : ""}>${paperJob?.status === "stopping" ? "Cancelling…" : "Cancel generation"}</button></div>
     <div id="paper-status">${renderPaperStatus()}</div><div id="paper-result" data-result-key="${escapeHtml(JSON.stringify([readablePaper()?.id, paperOutdated()]))}">${renderPaperResult()}</div></section>`;
@@ -13174,7 +13495,8 @@ function updatePaperStatus() {
     if (settings) settings.open = !ready;
   }
   if (settings?.querySelector("summary")) settings.querySelector("summary").textContent = ready ? "Generate new draft" : "Generation settings";
-  $("#paper-generation")?.querySelectorAll(".paper-controls input, .paper-controls select, [data-paper-start]").forEach((control) => { control.disabled = paperBusy(); });
+  $("#paper-generation")?.querySelectorAll(".paper-controls input, .paper-controls select").forEach((control) => { control.disabled = paperBusy(); });
+  updatePaperStartAvailability();
   const start = $("[data-paper-start]");
   if (start) {
     start.textContent = ready ? "Generate new draft" : "Generate paper";
@@ -13212,6 +13534,7 @@ async function pollPaperStatus() {
 
 async function startPaperGeneration() {
   if (paperBusy()) return;
+  if (isSessionRunning()) { updatePaperStartAvailability(); showToast(PAPER_RESEARCH_BUSY_MESSAGE, true); return; }
   const target = $("#paper-target");
   paperTargetDraft = target?.value.trim() || "";
   if (!paperTargetDraft) { target?.focus(); showToast("Enter a target venue or General research article.", true); return; }
@@ -13309,7 +13632,7 @@ function manuscriptReadinessStripHtml(manuscript) {
     `${references.length} reference${references.length === 1 ? "" : "s"}`,
   ].filter(Boolean);
   const action = blueprintBlockers.length
-    ? `${blueprintBlockerCount} manuscript-map issue${blueprintBlockerCount === 1 ? "" : "s"} before paper writing`
+    ? `${blueprintBlockerCount} manuscript-map issue${blueprintBlockerCount === 1 ? "" : "s"} to review`
     : missingEvidence.length
       ? `${missingEvidence.length} evidence gap${missingEvidence.length === 1 ? "" : "s"} recorded`
       : sections.length
@@ -13443,7 +13766,8 @@ function saveResourceSelections() {
   scopedSet("autoResearchResourcePaths", JSON.stringify(selectedResourceItems));
 }
 
-function restoreResourceSelections() {
+async function restoreResourceSelections() {
+  await restoreUploadDraft();
   selectedResourceItems.splice(0);
   try {
     const values = JSON.parse(scopedGet("autoResearchResourcePaths", "[]") || "[]");
@@ -13658,27 +13982,27 @@ function renderExportPanel() {
   const blockers = Array.isArray(readiness.blockers) ? readiness.blockers : [];
   const blockerItems = blockers.length
     ? blockers.slice(0, 3)
-    : ["The manuscript needs more work before paper writing."];
+    : ["The writing package has checks that need attention."];
   const hiddenBlockerCount = Math.max(0, blockers.length - blockerItems.length);
   const readinessCallout = paperReady
     ? ""
     : `
       <div class="export-readiness-callout">
         <div>
-          <strong>Not paper-ready yet</strong>
+          <strong>Writing package needs review</strong>
           <span>${blockers.length ? `${blockers.length} readiness issue${blockers.length === 1 ? "" : "s"}` : "Paper pack gate is closed"}</span>
         </div>
         <ul>
           ${blockerItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          ${hiddenBlockerCount ? `<li>${hiddenBlockerCount} more issue${hiddenBlockerCount === 1 ? "" : "s"} in the readiness check.</li>` : ""}
         </ul>
+        ${hiddenBlockerCount ? `<details><summary>Show ${hiddenBlockerCount} more issue${hiddenBlockerCount === 1 ? "" : "s"}</summary><ul>${blockers.slice(blockerItems.length).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></details>` : ""}
       </div>
     `;
   return `
     <div class="export-panel">
       <div class="export-panel-intro">
         <strong>Writing materials</strong>
-        <p>${paperReady ? "A clean manuscript package for GPT, Claude, or human co-writing." : "Download the current writing package anytime; readiness only says whether it is paper-ready."}</p>
+        <p>${paperReady ? "Manuscript sources for paper generation or further writing." : "Download the current writing package with its checks and open issues. Paper generation checks its own draft separately."}</p>
       </div>
       ${readinessCallout}
       <div class="export-actions export-package-list">
@@ -14620,6 +14944,7 @@ function addUploadFile(file, options = {}) {
     lastModified: file.lastModified || 0,
     category: resourceCategories[category] ? category : "ongoing_work",
   });
+  saveUploadDraft();
   renderSelectedResources();
   if (notify) showToast(`${name} attached.`);
   return { accepted: true, error: false, message: `${name} attached.` };
@@ -14629,6 +14954,7 @@ function removeUploadFile(id) {
   const index = selectedUploadItems.findIndex((item) => item.id === id);
   if (index >= 0) {
     selectedUploadItems.splice(index, 1);
+    saveUploadDraft();
     renderSelectedResources();
   }
 }
@@ -14637,6 +14963,7 @@ function updateSelectedUploadCategory(index, category) {
   const item = selectedUploadItems[Number(index)];
   if (!item || !resourceCategories[category]) return;
   item.category = category;
+  saveUploadDraft();
   renderSelectedResources();
 }
 
@@ -16244,7 +16571,9 @@ async function notifyResourceHandlingFromResponse(payload) {
     framingReplyPending = false;
     pendingFramingUserMessageId = "";
     framingPendingSince = 0;
-    showToast("Queued; CoAutoResearch will reply after the current run finishes.");
+    showToast(hasUnfinishedV2Trial()
+      ? "Queued for after this trial is recorded. Review the reply before resuming autoresearch."
+      : "Queued; CoAutoResearch will reply after the current run finishes.");
     return;
   }
   const savedFiles = Array.isArray(files.saved_files) ? files.saved_files : [];
@@ -16371,6 +16700,7 @@ function clearFramingComposerAttachments() {
   sentFramingUploadItems.push(...selectedUploadItems.map((item) => ({ ...item })));
   selectedResourceItems.splice(0);
   selectedUploadItems.splice(0);
+  saveUploadDraft();
   saveResourceSelections();
   renderSelectedResources();
 }
@@ -16408,6 +16738,7 @@ function restoreFramingComposerState(snapshot) {
   }
   replaceComposerItems(selectedResourceItems, snapshot.selectedResources);
   replaceComposerItems(selectedUploadItems, snapshot.selectedUploads);
+  saveUploadDraft();
   replaceComposerItems(sentFramingResourceItems, snapshot.sentResources);
   replaceComposerItems(sentFramingUploadItems, snapshot.sentUploads);
   selectedResumeTrialContext = normalizeResumeTrialContext(snapshot.resumeContext);
@@ -16526,7 +16857,9 @@ function resumeAutoresearchSummaryHtml() {
   const v2 = activeRunMode() === "v2_trial" ? session.v2 : null;
   const nextTrial = v2
     ? (v2.phase === "terminal" && v2.status === "published" && activeRunTrialIteration() > 0 ? activeRunTrialIteration() + 1 : 0)
-    : expected || Number(trajectory.next_trial_number || 0) || 0;
+    : v2Trials().length
+      ? Math.max(...v2Trials().map((trial) => Number.parseInt(trial.trial_id, 10) || 0)) + 1
+      : expected || Number(trajectory.next_trial_number || 0) || 0;
   const resumesCurrentStage = Boolean(v2?.stage_id && v2.phase && v2.phase !== "terminal");
   if (resumesCurrentStage) {
     boundaryParts.push(`current trial ${breakableCodeHtml(v2.trial_id)} · ${escapeHtml(activeRunProgress().stage_label)} · ${escapeHtml(session.loop_stop_reason === "paused_by_user" && !isSessionRunning() ? "Paused" : v2StatusLabel(v2.status || session.status))}`);
@@ -16592,7 +16925,7 @@ function openResumeAutoresearchDialog() {
     return false;
   }
   if (isSessionRunning()) {
-    showToast("Autoresearch is already running.", true);
+    showToast(RESEARCH_SESSION_BUSY_MESSAGE, true);
     return false;
   }
   const dialog = $("#resume-autoresearch-dialog");
@@ -16720,7 +17053,7 @@ async function handleRestartAutoresearch(reason = "", options = {}) {
   const settings = settingsFromForm();
   const previousSession = clonePlainObject(appState?.research_session);
   showToast("Starting Restart…");
-  startOptimisticV2RetrySession(settings);
+  startOptimisticV2RetrySession(settings, "Restart");
   try {
     const response = await api("/api/research/restart", {
       method: "POST",
@@ -16756,7 +17089,7 @@ async function handleResumeAutoresearch(options = {}) {
     return false;
   }
   if (isSessionRunning()) {
-    showToast("Autoresearch is already running.", true);
+    showToast(RESEARCH_SESSION_BUSY_MESSAGE, true);
     return false;
   }
   const resumeInstruction = String(options?.resumeInstruction || "").trim();
@@ -16888,7 +17221,7 @@ async function launchAutoresearch() {
     return;
   }
   if (isSessionRunning()) {
-    showToast("Autoresearch is already running.", true);
+    showToast(RESEARCH_SESSION_BUSY_MESSAGE, true);
     return;
   }
   if (!hasProjectDraftReady()) {
@@ -16963,6 +17296,7 @@ async function launchAutoresearch() {
 
 async function sendSessionComposerMessage(message, options = {}) {
   const requestedProjectId = String(activeProjectId || "");
+  if (pendingQueueSends.has(requestedProjectId)) return false;
   if (!ensureResourceImportsReady()) return false;
   if (!hasActiveProject()) {
     openProjectCreateDialog();
@@ -16980,6 +17314,10 @@ async function sendSessionComposerMessage(message, options = {}) {
   let resumeFromTrial = selectedResumeTrialPayload();
   if (!text && !attachments.length && !resumeFromTrial) return false;
   const localControl = canSendLocalSlashControl(text);
+  if (hasUnfinishedV2Trial() && (isPlanRequest || (isCommand && !localControl))) {
+    showToast("This trial is unfinished. Queue a follow-up or use New chat for a separate discussion.", true);
+    return false;
+  }
   if (isPlanRequest && isSessionRunning()) {
     showToast("Wait for the current agent run to finish before starting a plan.", true);
     return false;
@@ -16988,8 +17326,8 @@ async function sendSessionComposerMessage(message, options = {}) {
     showToast("Only ordinary chat messages can be queued in this version.", true);
     return false;
   }
-  if (isSessionRunning() && !isPlanRequest && !isCommand && !resumeFromTrial && attachments.length) {
-    showToast("Wait for the current run to finish before attaching resources; text-only messages can be queued.", true);
+  if ((isSessionRunning() || hasUnfinishedV2Trial()) && !isPlanRequest && !isCommand && !resumeFromTrial && attachments.length) {
+    showToast("Wait for the current trial or chat to finish before attaching resources; text-only messages can be queued.", true);
     return false;
   }
   const queueChatDuringRun = !isPlanRequest && !isCommand && canQueueChatDuringAutoresearchRun(text, attachments, resumeFromTrial);
@@ -17019,8 +17357,10 @@ async function sendSessionComposerMessage(message, options = {}) {
   const composerSnapshot = snapshotFramingComposerState();
   const displayText = isCommand ? text : messageText || attachmentOnlyMessage(attachments) || resumeTrialOnlyMessage(resumeFromTrial);
   if (queueChatDuringRun || options.forceQueue) {
+    pendingQueueSends.add(requestedProjectId);
+    renderComposerActionButtons();
     try {
-      const queueDuringActiveRun = isSessionRunning();
+      const queueDuringActiveRun = isSessionRunning() || hasUnfinishedV2Trial();
       const files = queueDuringActiveRun ? [] : await collectUploadFiles(uploadItemsForRequest);
       if (requestedProjectId !== String(activeProjectId || "")) return false;
       const body = {
@@ -17057,6 +17397,9 @@ async function sendSessionComposerMessage(message, options = {}) {
       if (requestedProjectId !== String(activeProjectId || "")) return false;
       restoreFramingComposerState(composerSnapshot);
       throw error;
+    } finally {
+      pendingQueueSends.delete(requestedProjectId);
+      if (requestedProjectId === String(activeProjectId || "")) renderComposerActionButtons();
     }
   }
   clearTimeout(coldAutosaveTimer);
@@ -17547,7 +17890,7 @@ function bindMobileNavigation() {
 
 function bindEvents() {
 document.addEventListener("input", (event) => {
-  if (event.target.id === "paper-target") paperTargetDraft = event.target.value;
+  if (event.target.id === "paper-target") persistPaperDraft();
 });
 document.addEventListener("change", (event) => {
   if (event.target.id === "paper-model") {
@@ -17557,7 +17900,7 @@ document.addEventListener("change", (event) => {
     const control = $("#paper-effort");
     if (control) control.innerHTML = reasoningOptionsForBackendModel(backend, paperModelDraft).map(([value, label]) => `<option value="${escapeHtml(value)}"${value === paperEffortDraft ? " selected" : ""}>${escapeHtml(label)}</option>`).join("");
   }
-  if (event.target.id === "paper-effort") paperEffortDraft = event.target.value;
+  if (["paper-model", "paper-effort"].includes(event.target.id)) persistPaperDraft();
 });
 
   bindMobileNavigation();
@@ -18526,6 +18869,8 @@ document.addEventListener("change", (event) => {
       if (activityDetails === event.target) {
         rememberRunActivityDetailsState(activityDetails);
       }
+      const folder = event.target.closest?.("[data-folder-deferred]");
+      if (folder === event.target && folder.open) loadTreeFolder(folder);
       const details = event.target.closest?.("[data-file-details]");
       if (!details || !details.open) return;
       const path = details.dataset.fileDetails;
@@ -18558,7 +18903,7 @@ async function init() {
   }
   hydrateTargetVenueField({ force: true });
   restoreSessionSettings();
-  restoreResourceSelections();
+  await restoreResourceSelections();
   restorePendingResourceImports();
   resizeComposer();
   resizeColdEditor();

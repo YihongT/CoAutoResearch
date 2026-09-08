@@ -216,7 +216,7 @@ def main() -> int:
     parser.add_argument("--wall-seconds", type=positive_seconds, required=True,
                         help="External wall deadline; does not enforce an aggregate CPU budget.")
     parser.add_argument("--output-dir", type=Path, required=True,
-                        help="New evidence directory; existing directories are never overwritten.")
+                        help="Nonexistent evidence directory, created by this runner. Do not pre-create it; existing directories are never overwritten.")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="-- executable arguments...")
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -224,6 +224,10 @@ def main() -> int:
         parser.error("provide a worker command after --")
     try:
         result = run(command, args.output_dir, args.wall_seconds)
+    except FileExistsError as exc:
+        parser.exit(1, f"Cannot create execution evidence: {exc}\n"
+                    "The evidence directory already exists. The runner creates --output-dir; "
+                    "choose a new path and do not create it beforehand. The worker was not started.\n")
     except OSError as exc:
         parser.exit(1, f"Cannot create execution evidence: {exc}\n")
     print(json.dumps(result, ensure_ascii=False), flush=True)

@@ -522,6 +522,9 @@ class CodexExecNormalizer(TraceNormalizer):
         item_type = _event_name({"type": item.get("type") or item.get("kind") or item.get("role")})
         if not item_type:
             return []
+        if item_type in {"usermessage", "user/message"}:
+            text = _payload_text(item.get("content"))
+            return [self._text_update(f"message:{_item_id(event, item)}", "user", "user", "User", method, text)] if text else []
         if any(token in item_type for token in ("commandexecution", "command/execution", "command", "exec")):
             return [self._command_item(event, method, item)]
         if any(token in item_type for token in ("filechange", "file/change", "patch")):
@@ -535,11 +538,13 @@ class CodexExecNormalizer(TraceNormalizer):
             update = self._plan_update(event, method, item)
             return [update] if update else []
         if "reasoning" in item_type:
-            text = _payload_text(item)
+            text = _payload_text(item.get("summary"))
+            if not text and "summary" not in item:
+                text = _payload_text(item.get("text"))
             if text:
                 return [self._text_update(f"reasoning:{_item_id(event, item)}", "assistant", "reasoning", "Thinking summary", method, text)]
         if any(token in item_type for token in ("agentmessage", "agent/message", "message")):
-            text = _payload_text(item)
+            text = _payload_text(item.get("text") or item.get("content"))
             if text:
                 return [self._text_update(f"message:{_item_id(event, item)}", "assistant", "assistant", "Assistant", method, text)]
         return []
@@ -727,6 +732,11 @@ class CodexAppServerNormalizer(CodexExecNormalizer):
         method = _event_name(event)
         if not method:
             return []
+        if method == "item/agentmessage/delta":
+            params = _params(event)
+            key = f"message:{params.get('itemId') or params.get('item_id') or 'message'}"
+            content = str(self.items.get(key, {}).get("content") or "") + str(params.get("delta") or "")
+            return [self._upsert_state(key, role="assistant", kind="assistant", title="Assistant", raw_type=method, content=content, streaming=True)]
         if method in {"item/filechange/patchupdated", "item/file/change/patchupdated", "turn/diff/updated"}:
             params = _params(event)
             item_id = str(params.get("itemId") or params.get("item_id") or "patch")

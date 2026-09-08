@@ -44,6 +44,31 @@ def event_parts(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return method, params if isinstance(params, dict) else {}
 
 
+class CodexPlanResult:
+    """Accept authoritative plan output only after a successful turn."""
+
+    def __init__(self) -> None:
+        self.plan_text = ""
+        self.final_answer = ""
+        self.status = ""
+        self.error = ""
+
+    def feed(self, method: str, params: dict[str, Any]) -> None:
+        if method in {"item/completed", "item.completed"}:
+            item = params.get("item") or {}
+            if item.get("type") == "plan":
+                self.plan_text = str(item.get("text") or "").strip()
+            elif item.get("type") == "agentMessage" and item.get("phase") == "final_answer":
+                self.final_answer = str(item.get("text") or "").strip()
+        elif method in {"turn/completed", "turn.completed"}:
+            turn = params.get("turn") or {}
+            self.status = str(turn.get("status") or "")
+            self.error = str((turn.get("error") or {}).get("message") or "")
+
+    def text(self) -> str:
+        return (self.plan_text or self.final_answer) if self.status == "completed" and not self.error else ""
+
+
 class CodexAppServerClient:
     """Minimal request/response helper for app-server stdio integrations."""
 

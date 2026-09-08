@@ -86,7 +86,7 @@ Use `blocked` only for a non-human operational dependency with a concrete recove
 
 ## Required machine output
 
-Write JSON first and validate it against `schemas/reviewer-output.schema.json`. Write the checked Markdown view beside it.
+Write JSON and validate it against `schemas/reviewer-output.schema.json`. After the review write guard passes, the service generates its registered Markdown view. Preserve already approved Plan Review files; do not regenerate those during post-stage review.
 
 Required machine fields include:
 
@@ -115,7 +115,13 @@ Every path in `reviewed_inputs` and every non-external path in
 underscores), resolve to a regular project file, and use the SHA-256 of those
 exact bytes where a hash is required.
 
-## Markdown rendering order
+## Optional explanatory Markdown view
+
+The service provides the paired view from JSON. If a richer view is needed before
+review, the following structure may be used with the deterministic JSON block;
+it is not an additional writing requirement.
+
+### Rendering order
 
 ```markdown
 # <Reviewer Name> Review

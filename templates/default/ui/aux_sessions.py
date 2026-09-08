@@ -488,7 +488,7 @@ class AuxSession:
         content = content[: getattr(self.manager.engine, "STREAMING_TRANSCRIPT_MAX_CHARS", 12000)]
         if not content.strip():
             return None
-        entry_id = str(existing.get("id") or "") if existing else f"{self.id}_stream_{len(self.transcript) + 1:04d}"
+        entry_id = str(existing.get("id") or "") if existing else f"{self.id}_stream_{uuid.uuid4().hex}"
         created_at = str(existing.get("created_at") or "") if existing else _now_iso()
         parsed = {
             "role": update.get("role") or "assistant",
@@ -879,7 +879,7 @@ class AuxSession:
         thread_id = ""
         turn_id = ""
         plan_text_parts: dict[str, list[str]] = {}
-        final_plan_text = ""
+        plan_result = engine.codex_app_server_rpc.CodexPlanResult()
         startup_errors: list[str] = []
         sent_thread_start = False
         sent_turn_start = False
@@ -984,6 +984,7 @@ class AuxSession:
                     raise RuntimeError(error_text)
 
                 method, params = engine.codex_plan_event_parts(event)
+                plan_result.feed(method, params)
                 if method in {"thread/started", "thread.started"}:
                     thread_id = engine.extract_nested_id(params, ("threadId", "thread_id", "id")) or thread_id
                 if method in {"turn/started", "turn.started"}:
@@ -1059,9 +1060,8 @@ class AuxSession:
                 if method in {"item/completed", "item.completed"}:
                     item = params.get("item") if isinstance(params.get("item"), dict) else {}
                     if str(item.get("type") or "").lower() == "plan":
-                        final_plan_text = str(item.get("text") or "").strip()
-                        if final_plan_text:
-                            update_artifact(status="ready", plan_text=final_plan_text, thread_id=thread_id, session_id=thread_id)
+                        if plan_result.plan_text:
+                            update_artifact(status="running", plan_text=plan_result.plan_text, thread_id=thread_id, session_id=thread_id)
                     continue
 
                 if method in {"turn/completed", "turn.completed"}:
@@ -1106,14 +1106,16 @@ class AuxSession:
             artifact_after = engine.read_plan_artifact(self.plan_id)
         except Exception:
             artifact_after = {}
-        if str(artifact_after.get("status") or "") != "ready":
-            text = str(artifact_after.get("plan_text") or final_plan_text or "").strip()
-            if text:
-                update_artifact(status="ready", plan_text=text, thread_id=thread_id, session_id=thread_id)
-                returncode = 0
-            else:
-                fail_plan(str(artifact_after.get("error") or "\n".join(startup_errors)[-1800:] or "Codex app-server did not return a plan item. Check the activity log and your Codex CLI version, then retry."))
-                returncode = returncode if returncode not in {0, None} else 1
+        text = plan_result.text()
+        if text and not artifact_after.get("error") and not self._stop_requested:
+            update_artifact(status="ready", plan_text=text, thread_id=thread_id, session_id=thread_id)
+            returncode = 0
+        elif self._stop_requested:
+            fail_plan("Plan stopped at your request. Send a new Plan message to try again.")
+            returncode = 130
+        else:
+            fail_plan(str(artifact_after.get("error") or plan_result.error or "\n".join(startup_errors)[-1800:] or "Codex did not complete a plan. Review the activity and retry."))
+            returncode = returncode if returncode not in {0, None} else 1
         return returncode
 
     def _run_claude_plan(

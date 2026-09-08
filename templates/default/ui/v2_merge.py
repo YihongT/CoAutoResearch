@@ -482,6 +482,155 @@ def build_effective_projection(
     return _decoded_projection(projection)
 
 
+def prepare_card_decisions(*, merge_request, result_cards, operations, candidate_files,
+                           base_projection, trial_id, project_id):
+    """Check proposal structure before review and again at final merge.
+
+    This does not approve evidence or derive a publishable Merge Decision.
+    """
+    errors: list[str] = []
+    cards = _result_card_list(result_cards)
+    card_by_id: dict[str, Mapping[str, Any]] = {}
+    card_position: dict[str, int] = {}
+    duplicate_cards: set[str] = set()
+    for position, card in enumerate(cards):
+        card_id = str(card.get("id", ""))
+        if card_id in card_by_id:
+            duplicate_cards.add(card_id)
+        else:
+            card_position[card_id] = position
+        card_by_id[card_id] = card
+        if card.get("proposed_status") != "proposed":
+            errors.append(f"result card {card_id} self-assigns canonical status")
+        if card.get("source_trial_id") != trial_id:
+            errors.append(f"result card {card_id} belongs to another trial")
+        if card_id in card.get("supersedes", ()):
+            errors.append(f"result card {card_id} cannot supersede itself")
+    if duplicate_cards:
+        errors.append(f"duplicate result cards: {sorted(duplicate_cards)}")
+    if isinstance(result_cards, Mapping):
+        if result_cards.get("project_id") not in {None, project_id}:
+            errors.append("Result Cards project_id differs from the staged update")
+        if result_cards.get("trial_id") not in {None, trial_id}:
+            errors.append("Result Cards trial_id differs from the staged update")
+
+    requests = list(merge_request.get("requested_card_decisions", ()))
+    request_by_id: dict[str, Mapping[str, Any]] = {}
+    duplicate_requests: set[str] = set()
+    for request in requests:
+        card_id = str(request.get("card_id", ""))
+        requested_decision = request.get("decision")
+        if card_id in request_by_id:
+            duplicate_requests.add(card_id)
+        else:
+            request_by_id[card_id] = request
+        if card_id not in card_by_id:
+            errors.append(f"Merge Request references unknown card {card_id}")
+        if requested_decision not in _CARD_DECISIONS:
+            errors.append(f"Merge Request uses an unknown decision for {card_id}")
+        if (
+            requested_decision == "accept_with_qualification"
+            and not str(request.get("qualification", "")).strip()
+        ):
+            errors.append(
+                f"qualified acceptance for {card_id} lacks a qualification"
+            )
+    if duplicate_requests:
+        errors.append(
+            f"Merge Request repeats card decisions: {sorted(duplicate_requests)}"
+        )
+    try:
+        old_card_ids = _all_card_ids(_decoded_projection(base_projection))
+    except (TypeError, ValueError) as exc:
+        old_card_ids = set()
+        errors.append(str(exc))
+    preliminary: list[dict[str, Any]] = []
+    requested_superseded = {
+        str(prior_id)
+        for card_id, request in request_by_id.items()
+        if request.get("decision") in {"accept", "accept_with_qualification", "supersede"}
+        for prior_id in card_by_id.get(card_id, {}).get("supersedes", ())
+    }
+    needs_human = any(
+        item.get("decision") == "needs_human" for item in request_by_id.values()
+    )
+    if not needs_human:
+        for card_id, request in request_by_id.items():
+            requested = str(request.get("decision", ""))
+            card = card_by_id.get(card_id, {})
+            destinations: list[str] = []
+            if requested in {"accept", "accept_with_qualification", "supersede"}:
+                try:
+                    destinations = _card_destinations(
+                        card_id, operations, candidate_files
+                    )
+                except (KeyError, TypeError, ValueError) as exc:
+                    errors.append(str(exc))
+                if not destinations:
+                    errors.append(
+                        f"requested {requested} card {card_id} has no canonical destination"
+                    )
+            elif requested in {"reject", "defer"}:
+                try:
+                    # A corrected card may retain its frozen predecessor as
+                    # history. The effective projection below verifies that
+                    # it is superseded and never referenced as active evidence.
+                    if card_id not in requested_superseded and _card_destinations(card_id, operations, candidate_files):
+                        errors.append(
+                            f"non-accepted card {card_id} appears in the candidate canonical snapshot"
+                        )
+                except (KeyError, TypeError, ValueError) as exc:
+                    errors.append(str(exc))
+            if requested == "supersede":
+                supersedes = set(card.get("supersedes", ()))
+                if not supersedes:
+                    errors.append(f"supersede card {card_id} names no prior card")
+                if unknown := supersedes - old_card_ids - set(card_by_id):
+                    errors.append(
+                        f"supersede card {card_id} references unknown prior cards: {sorted(unknown)}"
+                    )
+                nonprior_frozen = {
+                    prior_id
+                    for prior_id in supersedes - old_card_ids
+                    if prior_id in card_position
+                    and card_position[prior_id] >= card_position.get(card_id, -1)
+                }
+                if nonprior_frozen:
+                    errors.append(
+                        f"supersede card {card_id} references non-prior frozen cards: "
+                        f"{sorted(nonprior_frozen)}"
+                    )
+            preliminary.append(
+                {
+                    "card_id": card_id,
+                    "decision": requested,
+                    "qualification": str(request.get("qualification", "")),
+                    "canonical_destinations": destinations,
+                }
+            )
+
+    explicitly_qualified = any(
+        item.get("decision") in {"accept_with_qualification", "supersede"}
+        and str(item.get("qualification", "")).strip()
+        for item in preliminary
+    )
+    if merge_request.get("conflicts") and not (
+        needs_human or explicitly_qualified
+    ):
+        errors.append(
+            "declared conflicts lack an explicit qualified resolution: "
+            "MERGE_REQUEST.json conflicts must be resolved by a human decision "
+            "or a requested_card_decisions entry using accept_with_qualification "
+            "or supersede with a non-empty qualification. Keep ordinary limitations "
+            "in the result's qualifications rather than declaring them as conflicts."
+        )
+
+    return {
+        "errors": errors, "requests": request_by_id,
+        "decisions": preliminary, "needs_human": needs_human,
+    }
+
+
 class MergeEvaluator:
     """Derive one service Merge Decision from validated exact-stage inputs."""
 
@@ -566,56 +715,6 @@ class MergeEvaluator:
         if not closure["closed"]:
             errors.extend(closure["errors"])
 
-        cards = _result_card_list(result_cards)
-        card_by_id: dict[str, Mapping[str, Any]] = {}
-        card_position: dict[str, int] = {}
-        duplicate_cards: set[str] = set()
-        for position, card in enumerate(cards):
-            card_id = str(card.get("id", ""))
-            if card_id in card_by_id:
-                duplicate_cards.add(card_id)
-            else:
-                card_position[card_id] = position
-            card_by_id[card_id] = card
-            if card.get("proposed_status") != "proposed":
-                errors.append(f"result card {card_id} self-assigns canonical status")
-            if card.get("source_trial_id") != trial_id:
-                errors.append(f"result card {card_id} belongs to another trial")
-            if card_id in card.get("supersedes", ()):
-                errors.append(f"result card {card_id} cannot supersede itself")
-        if duplicate_cards:
-            errors.append(f"duplicate result cards: {sorted(duplicate_cards)}")
-        if isinstance(result_cards, Mapping):
-            if result_cards.get("project_id") not in {None, project_id}:
-                errors.append("Result Cards project_id differs from the staged update")
-            if result_cards.get("trial_id") not in {None, trial_id}:
-                errors.append("Result Cards trial_id differs from the staged update")
-
-        requests = list(merge_request.get("requested_card_decisions", ()))
-        request_by_id: dict[str, Mapping[str, Any]] = {}
-        duplicate_requests: set[str] = set()
-        for request in requests:
-            card_id = str(request.get("card_id", ""))
-            requested_decision = request.get("decision")
-            if card_id in request_by_id:
-                duplicate_requests.add(card_id)
-            else:
-                request_by_id[card_id] = request
-            if card_id not in card_by_id:
-                errors.append(f"Merge Request references unknown card {card_id}")
-            if requested_decision not in _CARD_DECISIONS:
-                errors.append(f"Merge Request uses an unknown decision for {card_id}")
-            if (
-                requested_decision == "accept_with_qualification"
-                and not str(request.get("qualification", "")).strip()
-            ):
-                errors.append(
-                    f"qualified acceptance for {card_id} lacks a qualification"
-                )
-        if duplicate_requests:
-            errors.append(
-                f"Merge Request repeats card decisions: {sorted(duplicate_requests)}"
-            )
         errors.extend(
             reviewer_card_eligibility_errors(reviewer_output_values, merge_request)
         )
@@ -672,85 +771,15 @@ class MergeEvaluator:
             except (KeyError, TypeError, ValueError) as exc:
                 errors.append(str(exc))
 
-        try:
-            old_card_ids = _all_card_ids(_decoded_projection(base_projection))
-        except (TypeError, ValueError) as exc:
-            old_card_ids = set()
-            errors.append(str(exc))
-        preliminary: list[dict[str, Any]] = []
-        requested_superseded = {
-            str(prior_id)
-            for card_id, request in request_by_id.items()
-            if request.get("decision") in {"accept", "accept_with_qualification", "supersede"}
-            for prior_id in card_by_id.get(card_id, {}).get("supersedes", ())
-        }
-        needs_human = any(
-            item.get("decision") == "needs_human" for item in request_by_id.values()
+        proposal = prepare_card_decisions(
+            merge_request=merge_request, result_cards=result_cards,
+            operations=operations, candidate_files=candidate_files,
+            base_projection=base_projection, trial_id=trial_id, project_id=project_id,
         )
-        if not needs_human:
-            for card_id, request in request_by_id.items():
-                requested = str(request.get("decision", ""))
-                card = card_by_id.get(card_id, {})
-                destinations: list[str] = []
-                if requested in {"accept", "accept_with_qualification", "supersede"}:
-                    try:
-                        destinations = _card_destinations(
-                            card_id, operations, candidate_files
-                        )
-                    except (KeyError, TypeError, ValueError) as exc:
-                        errors.append(str(exc))
-                    if not destinations:
-                        errors.append(
-                            f"requested {requested} card {card_id} has no canonical destination"
-                        )
-                elif requested in {"reject", "defer"}:
-                    try:
-                        # A corrected card may retain its frozen predecessor as
-                        # history. The effective projection below verifies that
-                        # it is superseded and never referenced as active evidence.
-                        if card_id not in requested_superseded and _card_destinations(card_id, operations, candidate_files):
-                            errors.append(
-                                f"non-accepted card {card_id} appears in the candidate canonical snapshot"
-                            )
-                    except (KeyError, TypeError, ValueError) as exc:
-                        errors.append(str(exc))
-                if requested == "supersede":
-                    supersedes = set(card.get("supersedes", ()))
-                    if not supersedes:
-                        errors.append(f"supersede card {card_id} names no prior card")
-                    if unknown := supersedes - old_card_ids - set(card_by_id):
-                        errors.append(
-                            f"supersede card {card_id} references unknown prior cards: {sorted(unknown)}"
-                        )
-                    nonprior_frozen = {
-                        prior_id
-                        for prior_id in supersedes - old_card_ids
-                        if prior_id in card_position
-                        and card_position[prior_id] >= card_position.get(card_id, -1)
-                    }
-                    if nonprior_frozen:
-                        errors.append(
-                            f"supersede card {card_id} references non-prior frozen cards: "
-                            f"{sorted(nonprior_frozen)}"
-                        )
-                preliminary.append(
-                    {
-                        "card_id": card_id,
-                        "decision": requested,
-                        "qualification": str(request.get("qualification", "")),
-                        "canonical_destinations": destinations,
-                    }
-                )
-
-        explicitly_qualified = any(
-            item.get("decision") in {"accept_with_qualification", "supersede"}
-            and str(item.get("qualification", "")).strip()
-            for item in preliminary
-        )
-        if merge_request.get("conflicts") and not (
-            needs_human or explicitly_qualified
-        ):
-            errors.append("declared conflicts lack an explicit qualified resolution")
+        errors.extend(proposal["errors"])
+        request_by_id = proposal["requests"]
+        preliminary = proposal["decisions"]
+        needs_human = proposal["needs_human"]
 
         timestamp = created_at or utc_z_timestamp()
         common = {

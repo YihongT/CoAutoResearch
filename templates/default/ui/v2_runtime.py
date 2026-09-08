@@ -10,6 +10,7 @@ server needs: ``initialize_trial``, ``approve_plan``, ``stage_trial``, and
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 import json
@@ -22,6 +23,7 @@ try:
     from . import v2_transaction as _transaction
     from .v2_artifacts import (
         ARTIFACT_REGISTRY,
+        artifact_path_matches,
         build_result_card_lock,
         cross_artifact_errors,
         human_brief_goal_gate_errors,
@@ -50,7 +52,7 @@ try:
         capture_agent_baseline,
         load_agent_baseline,
     )
-    from .v2_merge import MergeEvaluator
+    from .v2_merge import MergeEvaluator, prepare_card_decisions
     from .v2_paths import PathRegistry
     from .v2_review_router import REVIEW_STEMS, compute_review_route
     from .v2_stage import (
@@ -66,6 +68,7 @@ except ImportError:  # Direct imports from templates/default/ui.
     import v2_transaction as _transaction  # type: ignore
     from v2_artifacts import (  # type: ignore
         ARTIFACT_REGISTRY,
+        artifact_path_matches,
         build_result_card_lock,
         cross_artifact_errors,
         human_brief_goal_gate_errors,
@@ -94,7 +97,7 @@ except ImportError:  # Direct imports from templates/default/ui.
         capture_agent_baseline,
         load_agent_baseline,
     )
-    from v2_merge import MergeEvaluator  # type: ignore
+    from v2_merge import MergeEvaluator, prepare_card_decisions  # type: ignore
     from v2_paths import PathRegistry  # type: ignore
     from v2_review_router import REVIEW_STEMS, compute_review_route  # type: ignore
     from v2_stage import (  # type: ignore
@@ -169,6 +172,23 @@ class V2RuntimeError(RuntimeError):
 
 class V2RecoveryError(V2RuntimeError):
     """Service state cannot be reconstructed from trustworthy retained bytes."""
+
+
+class InvalidTrialStageError(V2RuntimeError):
+    """A Trial cannot enter execution with a different stage assignment."""
+
+
+def validate_trial_stage_binding(trial: Mapping[str, Any], stage_id: str) -> None:
+    assignment = trial.get("extensions", {}).get("service_assignment")
+    if trial.get("stage_id") not in {None, stage_id} or (
+        isinstance(assignment, Mapping)
+        and assignment.get("stage_id") not in {None, stage_id}
+    ):
+        raise InvalidTrialStageError(
+            "TRIAL.json stage_id or extensions.service_assignment.stage_id "
+            f"does not match {stage_id}. Correct the assignment during planning "
+            "and obtain a fresh Plan Review before execution; retain existing evidence."
+        )
 
 
 class StalePlanApprovalError(V2RuntimeError):
@@ -689,20 +709,58 @@ class V2Runtime:
     def _write_bytes(self, relative: str, data: bytes) -> None:
         _transaction._atomic_write(self._path(relative), data, 0o600)
 
-    def _project_report_pair(self, trial_id: str, stage_id: str) -> None:
-        """Create the service-owned readable Report before stage bytes freeze.
+    def _prepare_artifact_pairs(self, specs: Mapping[str, tuple[str, bool]]) -> list[str]:
+        """Validate the whole mutable bundle, then repair its derived views.
 
-        A committed stage binds both Report files and is immutable.  Before that
-        boundary, REPORT.json is the machine authority and the service replaces
-        the agent-authored Markdown with the deterministic human projection.
+        Call only after the phase write guard passes and before these bytes are
+        frozen. JSON stays byte-for-byte unchanged; valid richer Markdown stays.
         """
+        errors: list[str] = []
+        loaded = {}
+        for relative, (artifact_type, paired) in specs.items():
+            try:
+                candidate_marker = "/candidate/"
+                if candidate_marker in relative:
+                    canonical = relative.split(candidate_marker, 1)[1]
+                    value = self._load_candidate_artifact(relative, canonical, artifact_type)
+                else:
+                    value = self._load_artifact(relative, artifact_type)
+                loaded[relative] = (value, paired)
+            except (OSError, ValueError, V2RuntimeError, _transaction.TransactionError) as exc:
+                errors.append(str(exc))
+        if errors:
+            return errors
+        for relative, (value, paired) in loaded.items():
+            if not paired:
+                continue
+            markdown_relative = relative[:-5] + ".md"
+            try:
+                path = self._path(markdown_relative)
+                if path.is_symlink():
+                    raise V2RuntimeError(f"paired Markdown is a symlink: {markdown_relative}")
+                markdown = path.read_text(encoding="utf-8") if path.is_file() else ""
+                if paired_markdown_errors(value, markdown):
+                    self._write_bytes(markdown_relative, render_markdown(value).encode("utf-8"))
+            except (OSError, ValueError, V2RuntimeError, _transaction.TransactionError) as exc:
+                errors.append(f"{markdown_relative}: {exc}")
+        return errors
 
-        manifest = self._path(stage_manifest_path(trial_id, stage_id))
-        if manifest.exists() or manifest.is_symlink():
-            return
-        relative = f"research_trajectory/trials/{trial_id}/REPORT.json"
-        report = self._load_artifact(relative, "report", paired=False)
-        self._write_pair(relative, report)
+    def _execution_artifact_specs(self, trial_id: str, stage_id: str) -> dict:
+        trial_root = f"research_trajectory/trials/{trial_id}"
+        stage_root = f"research_trajectory/.staging/{trial_id}/{stage_id}"
+        specs = {f"{trial_root}/{name}": _TRIAL_INPUTS[name]
+                 for name in ("REPORT.json", "RESULT_CARDS.json", "MERGE_REQUEST.json")}
+        specs.update({f"{stage_root}/{name}": spec for name, spec in _STAGE_INPUTS.items()})
+        candidate = self._path(f"{stage_root}/candidate")
+        for path in sorted(candidate.rglob("*.json")):
+            relative = path.relative_to(self.root).as_posix()
+            canonical = path.relative_to(candidate).as_posix()
+            metadata = next((entry for entry in ARTIFACT_REGISTRY.values()
+                             if artifact_path_matches(entry["artifact_type"], canonical)), None)
+            if metadata:
+                specs[relative] = (metadata["artifact_type"], bool(
+                    metadata.get("paired_markdown") or metadata.get("paired_markdown_pattern")))
+        return specs
 
     @staticmethod
     def _markdown_section_span(text: str, title: str) -> tuple[int, int] | None:
@@ -1698,6 +1756,14 @@ class V2Runtime:
                 trial_id, allocated, prior_stage_id=prior_stage_id
             )
             _transaction._ensure_directory(candidate, 0o700)
+            trial_relative = f"research_trajectory/trials/{trial_id}/TRIAL.json"
+            if self._path(trial_relative).is_file():
+                trial = self._load_artifact(trial_relative, "trial")
+                trial["stage_id"] = allocated
+                assignment = trial.get("extensions", {}).get("service_assignment")
+                if isinstance(assignment, dict):
+                    assignment["stage_id"] = allocated
+                self._write_artifact(trial_relative, trial)
             capture_agent_baseline(
                 self.root,
                 agent_guard_dir,
@@ -1905,7 +1971,7 @@ class V2Runtime:
     @staticmethod
     def _stage_material_input_id(relative: str, trial_id: str) -> str | None:
         match = re.fullmatch(
-            rf"research_trajectory/(?:trials/{re.escape(trial_id)}/artifacts/(?:execution|repair)|"
+            rf"research_trajectory/(?:trials/{re.escape(trial_id)}/artifacts/(?!resource_scout/)[a-zA-Z0-9_-]+|"
             rf"\.staging/{re.escape(trial_id)})/(STAGE-{trial_id[:6]}-[a-f0-9]{{8}})/(.+)",
             relative,
         )
@@ -1938,8 +2004,8 @@ class V2Runtime:
                 and stage_id is not None
                 and history[2] != stage_id
                 and history[2].startswith(f"STAGE-{trial_id[:6]}-")
-                and history[3].endswith(".json")
-                and history[3] != "PLAN_REVIEW.json"
+                and history[3].endswith((".json", ".md"))
+                and history[3] not in {"PLAN_REVIEW.json", "PLAN_REVIEW.md"}
             ):
                 return True
             return child in {
@@ -1955,6 +2021,7 @@ class V2Runtime:
                 "archive/v2_restarts/",
                 "instructions/",
                 "manuscript/",
+                "requirements/",
                 "research_trajectory/",
                 "resources/",
                 "schemas/",
@@ -2009,6 +2076,9 @@ class V2Runtime:
                 f"PLAN_REVIEW contains an invalid archived review input: {relative}"
             )
         prior_stage_id, name = remainder
+        if name.endswith(".md"):
+            name = name[:-3] + ".json"
+        json_relative = f"{prefix}{prior_stage_id}/{name}"
         require_id("stage", prior_stage_id)
         if prior_stage_id == stage_id:
             raise V2RuntimeError(
@@ -2024,6 +2094,7 @@ class V2Runtime:
             or stage.get("trial_id") != trial_id
             or stage.get("stage_id") != prior_stage_id
             or not stage_hash
+            or stage_hash != compute_stage_content_hash(stage)
         ):
             raise V2RuntimeError(
                 f"PLAN_REVIEW archived review stage is not trustworthy: {relative}"
@@ -2031,14 +2102,14 @@ class V2Runtime:
         artifact_type = (
             "review_manifest" if name == "REVIEW_MANIFEST.json" else "reviewer_output"
         )
-        archived = _json(self._path(relative, must_exist=True).read_bytes(), relative)
+        archived = _json(self._path(json_relative, must_exist=True).read_bytes(), json_relative)
         errors = validate_artifact(
             archived,
             expected_type=artifact_type,
             path=f"{trial_root}/reviews/{name}",
             schema_dir=self.schema_dir,
         )
-        markdown_relative = relative[:-5] + ".md"
+        markdown_relative = json_relative[:-5] + ".md"
         markdown_path = self._path(markdown_relative, must_exist=True)
         try:
             markdown = markdown_path.read_text(encoding="utf-8")
@@ -2136,6 +2207,7 @@ class V2Runtime:
     ) -> dict[str, Any]:
         trial_root = f"research_trajectory/trials/{trial_id}"
         trial = self._load_artifact(f"{trial_root}/TRIAL.json", "trial")
+        validate_trial_stage_binding(trial, stage_id)
         plan_relative = f"{trial_root}/PLAN.json"
         route_relative = f"{trial_root}/EXPERT_ROUTE.json"
         review_relative = f"{trial_root}/reviews/PLAN_REVIEW.json"
@@ -2481,6 +2553,7 @@ class V2Runtime:
         if approved_trial_hash != entry.sha256:
             return ["PLAN_APPROVAL is not bound to the execution guard TRIAL baseline"]
         baseline_trial = _json(data, str(backup))
+        validate_trial_stage_binding(baseline_trial, str(approval["stage_id"]))
 
         immutable = {
             "schema_version",
@@ -3037,6 +3110,17 @@ class V2Runtime:
                 raise V2RuntimeError(
                     f"execution outputs exist before plan approval: {premature}"
                 )
+            trial_root = f"research_trajectory/trials/{trial_id}"
+            pair_errors = self._prepare_artifact_pairs({
+                f"{trial_root}/TRIAL.json": ("trial", False),
+                f"{trial_root}/PLAN.json": ("plan", True),
+                f"{trial_root}/EXPERT_ROUTE.json": ("expert_route", True),
+                f"{trial_root}/reviews/PLAN_REVIEW.json": ("reviewer_output", True),
+            }) if not (self._path(self._plan_approval_path(trial_id, stage_id)).exists()
+                       or self._path(self._plan_approval_path(trial_id, stage_id)).is_symlink()) else []
+            if pair_errors:
+                return _status("plan_rejected", errors=pair_errors,
+                               retry_same_stage=True, publishable=False, guard=guard)
             context = self._plan_context(
                 trial_id, stage_id, plan_guard_dir=plan_guard_dir
             )
@@ -3477,12 +3561,29 @@ class V2Runtime:
                     guard=guard,
                     publishable=False,
                 )
-            self._project_report_pair(trial_id, stage_id)
+            existing_manifest = self._path(stage_manifest_path(trial_id, stage_id))
+            if not (existing_manifest.exists() or existing_manifest.is_symlink()):
+                pair_errors = self._prepare_artifact_pairs(
+                    self._execution_artifact_specs(trial_id, stage_id))
+                if pair_errors:
+                    return _status("repair", trial_id=trial_id, stage_id=stage_id,
+                                   errors=pair_errors, retry_same_stage=True,
+                                   new_stage_required=False, publishable=False, guard=guard)
             approval = self._current_plan_approval(
                 trial_id,
                 stage_id,
                 execution_guard_dir=agent_guard_dir,
             )
+            candidate_preimages = {}
+            for name in ("STATE", "CURRENT_FINDINGS"):
+                for suffix in ("json", "md"):
+                    relative = (
+                        f"research_trajectory/.staging/{trial_id}/{stage_id}"
+                        f"/candidate/research_trajectory/{name}.{suffix}"
+                    )
+                    path = self._path(relative)
+                    if path.is_file() and not path.is_symlink():
+                        candidate_preimages[relative] = path.read_bytes()
             derived_critical_path = self._derive_candidate_critical_path(
                 trial_id, stage_id
             )
@@ -3541,6 +3642,9 @@ class V2Runtime:
             else:
                 self._prepare_revision_candidates(
                     trial_id, stage_id, base_revision
+                )
+                self._rebind_candidate_projection_references(
+                    trial_id, stage_id, candidate_preimages
                 )
                 trial_root = f"research_trajectory/trials/{trial_id}"
                 cards = self._load_artifact(
@@ -3605,9 +3709,17 @@ class V2Runtime:
             candidate_errors = self._candidate_contract_errors(
                 stage, self._candidate_files(stage)
             )
+            candidate_errors.extend(cross_artifact_errors(
+                list(self._load_material(trial_id, stage_id).values())))
+            proposal = prepare_card_decisions(
+                merge_request=request,
+                result_cards=self._load_artifact(f"{trial_root}/RESULT_CARDS.json", "result_cards"),
+                operations=stage.get("operations", ()), candidate_files=self._candidate_files(stage),
+                base_projection=self._base_projection(stage), trial_id=trial_id,
+                project_id=self.project_id,
+            )
+            candidate_errors.extend(proposal["errors"])
             if candidate_errors:
-                if not recovered_stage:
-                    self._commit_stage_manifest(manifest_relative, stage)
                 self._restore_unstaged_result_card_lock(
                     trial_id, stage_id, agent_guard_dir
                 )
@@ -3615,9 +3727,10 @@ class V2Runtime:
                     "repair",
                     trial_id=trial_id,
                     stage_id=stage_id,
-                    errors=candidate_errors,
-                    new_stage_required=True,
-                    old_stage_retained=True,
+                    errors=list(dict.fromkeys(candidate_errors)),
+                    new_stage_required=recovered_stage,
+                    retry_same_stage=not recovered_stage,
+                    old_stage_retained=recovered_stage,
                     guard=guard,
                     publishable=False,
                 )
@@ -3700,6 +3813,16 @@ class V2Runtime:
                 derived_critical_path=derived_critical_path,
                 guard=guard,
                 recovered=recovered_stage,
+                publishable=False,
+            )
+        except InvalidTrialStageError as exc:
+            return _status(
+                "repair",
+                trial_id=trial_id,
+                stage_id=stage_id,
+                errors=[str(exc)],
+                retry_same_stage=False,
+                new_stage_required=True,
                 publishable=False,
             )
         except StalePlanApprovalError as exc:
@@ -3967,6 +4090,75 @@ class V2Runtime:
                     + "; ".join(errors)
                 )
             self._write_pair(candidate_relative, value)
+
+    def _rebind_candidate_projection_references(
+        self, trial_id: str, stage_id: str, preimages: Mapping[str, bytes]
+    ) -> None:
+        """Keep valid references bound after service-owned candidate derivation.
+
+        Only Report and Human Brief citations may change here. Result cards,
+        scientific evidence, plans and committed stages remain immutable.
+        Never replace a hash that matched neither the preimage nor the result.
+        """
+
+        manifest = self._path(stage_manifest_path(trial_id, stage_id))
+        if manifest.exists() or manifest.is_symlink():
+            return
+        changes = {}
+        for relative, before in preimages.items():
+            after = self._path(relative, must_exist=True).read_bytes()
+            if before != after:
+                changes[relative] = (_digest(before), _digest(after))
+        if not changes:
+            return
+        documents = {}
+        for relative, artifact_type, field in (
+            (f"research_trajectory/trials/{trial_id}/REPORT.json", "report", "artifacts"),
+            (f"research_trajectory/.staging/{trial_id}/{stage_id}/HUMAN_BRIEF.json", "human_brief", "evidence"),
+        ):
+            value = self._load_artifact(relative, artifact_type, paired=True)
+            documents[relative] = (value, field)
+        originals = {
+            path: self._path(path, must_exist=True).read_bytes()
+            for relative in documents
+            for path in (relative, relative[:-5] + ".md")
+        }
+        outputs = dict(originals)
+        # Resolve the two documents' references to each other as well. A cycle
+        # cannot have stable byte hashes and must fail instead of being blessed.
+        for _ in range(len(documents) + 1):
+            next_outputs = dict(originals)
+            for relative, (original, field) in documents.items():
+                value = deepcopy(original)
+                changed = False
+                for reference in value.get(field, ()):
+                    binding = changes.get(
+                        normalize_relative_path(str(reference.get("path") or ""))
+                    )
+                    declared = reference.get("sha256")
+                    if binding is None or declared is None:
+                        continue
+                    before_hash, after_hash = binding
+                    if declared not in {before_hash, after_hash}:
+                        raise V2RuntimeError(
+                            f"referenced evidence hash mismatch: {reference['path']}"
+                        )
+                    if declared != after_hash:
+                        reference["sha256"] = after_hash
+                        changed = True
+                if changed:
+                    next_outputs[relative] = canonical_json_bytes(value)
+                    next_outputs[relative[:-5] + ".md"] = render_markdown(value).encode("utf-8")
+            if next_outputs == outputs:
+                for relative, data in outputs.items():
+                    if data != originals[relative]:
+                        self._write_bytes(relative, data)
+                return
+            outputs = next_outputs
+            for relative, data in outputs.items():
+                if data != originals[relative]:
+                    changes[relative] = (_digest(originals[relative]), _digest(data))
+        raise V2RuntimeError("cyclic evidence references in Report and Human Brief")
 
     def _candidate_contract_errors(
         self, stage: Mapping[str, Any], candidates: Mapping[str, bytes]
@@ -4736,6 +4928,13 @@ class V2Runtime:
                     errors=["Review Manifest is stale for the exact staged bytes"],
                     publishable=False,
                 )
+            pair_errors = self._prepare_artifact_pairs({
+                relative: ("reviewer_output", True)
+                for relative in review_output_paths(trial_id, review, review_paths).values()
+                if not relative.endswith("/PLAN_REVIEW.json")
+            })
+            if pair_errors:
+                return _status("needs_review", errors=pair_errors, publishable=False)
             outputs, missing, review_errors = self._load_reviews(
                 trial_id,
                 review,

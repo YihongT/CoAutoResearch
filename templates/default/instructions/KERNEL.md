@@ -150,13 +150,13 @@ Follow `EXPERT_ROUTER.md`.
 
 Every trial requires `domains/general_research/DOMAIN.md`. Also select each installed pack whose registry trigger matches the project, active venue, local question, or proposed claim. Select exactly one primary move playbook. Include a venue profile when configured. Record unavailable specialized packs honestly. A final candidate cannot pass while required specialized coverage or official venue evidence is missing.
 
-Write `EXPERT_ROUTE.json` and its Markdown view before finalizing the plan.
+Write `EXPERT_ROUTE.json` before finalizing the plan. The service generates its registered Markdown view before approval.
 
 Emit semantic trace phase `route`.
 
 ## 7. Phase 4: Trial Charter
 
-Create or continue exactly the server-designated trial ID. Write `PLAN.json` and `PLAN.md` before execution.
+Create or continue exactly the server-designated trial ID. Write `PLAN.json`; the service generates its registered Markdown view before plan approval and execution.
 
 The plan must define:
 
@@ -246,11 +246,19 @@ Emit semantic trace phase `execute`.
 
 ## 10. Phase 7: Distill
 
-Write the machine JSON first. For `REPORT`, write only `REPORT.json`; after the
-execution write guard passes, the service generates the deterministic,
-human-readable `REPORT.md` projection before it freezes the stage. For the
-other agent-authored paired artifacts, write the checked Markdown view after
-the JSON.
+Write authoritative machine JSON. After the phase write guard passes, the service
+checks all required JSON artifacts and generates missing or inconsistent registered
+Markdown views before plan approval or stage freezing. This includes PLAN,
+EXPERT_ROUTE, REPORT, RESULT_CARDS, MERGE_REQUEST, HUMAN_BRIEF, GATE_EVIDENCE,
+reviewer outputs, and paired candidate canonical records. Valid richer Markdown
+is retained. Do not hand-maintain duplicate JSON fences or hashes. Manuscript prose
+and other Markdown-only research artifacts still require substantive writing.
+
+Review and cite the authoritative JSON. If a Markdown view is needed as an input,
+generate it with `ui/v2_artifacts.py`'s `render_markdown` before reviewing or hashing
+it. Never alter an approved plan pair, prior review, or committed stage to refresh
+formatting. Schema errors are returned together; fix the reported batch without
+rerunning successful computations merely to repair record formatting.
 
 ### REPORT
 
@@ -305,7 +313,8 @@ Prepare one candidate bundle under the current staging directory. Do not touch
 canonical files or service-owned manifests. The service turns these inputs into
 the hash-bound staged bundle before review.
 
-The staged bundle must contain:
+Write the required JSON inputs below. The service generates their registered
+Markdown views after the write guard passes. The resulting staged bundle must contain:
 
 - the candidate canonical snapshot under `candidate/`;
 - the final-form `HUMAN_BRIEF.json` and exactly paired `HUMAN_BRIEF.md`, both
@@ -354,8 +363,8 @@ that service-owned manifest. After preparing the inputs, yield to the service;
 review resumes only after the service supplies the exact stage ID/hash and
 Review Manifest.
 
-Both stage-root Markdown views are mandatory execution outputs. The service
-publishes the reviewed Human Brief pair with the Trial and retains the Gate
+Both stage-root Markdown views are required before staging; the service derives
+them from validated JSON after the execution guard passes. The service publishes the reviewed Human Brief pair with the Trial and retains the Gate
 Evidence pair in the immutable stage as review material.
 
 `HUMAN_BRIEF` does not own the global gate status. The service publishes `GOAL_GATE.json` separately, and the UI joins both artifacts. The brief must nevertheless be consistent with the recommended gate evidence and must contain an actionable human request when a blocking human dependency is claimed.
