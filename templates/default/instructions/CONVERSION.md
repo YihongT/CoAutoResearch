@@ -1,5 +1,8 @@
 # Conversion Protocol
 
+> **V2 control-plane override.** Conversion preserves source material and creates a staged or initialization-service candidate state. Do not silently treat converted notes, prior claims, or old results as accepted v2 result cards. Mark derived lines/findings tentative with migration provenance until reviewed.
+
+
 ## Purpose
 
 Use this protocol to convert raw materials into the canonical project state.

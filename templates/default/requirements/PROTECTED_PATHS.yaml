@@ -1,0 +1,46 @@
+spec_version: 2.0.0
+canonical_paths:
+- PROJECT.md
+- research_trajectory/STATE.json
+- research_trajectory/STATE.md
+- research_trajectory/CURRENT_FINDINGS.json
+- research_trajectory/CURRENT_FINDINGS.md
+- research_trajectory/HUMAN_TASKS.json
+- research_trajectory/HUMAN_TASKS.md
+- research_trajectory/TRAJECTORY.json
+- research_trajectory/CANONICAL_REVISION.json
+- research_trajectory/lines/**
+- research_trajectory/campaigns/**
+- resources/target_venue/TARGET_VENUE.json
+- resources/target_venue/TARGET_VENUE.md
+- resources/target_venue/VENUE_PROFILE.json
+- resources/target_venue/VENUE_PROFILE.md
+- manuscript/BLUEPRINT.md
+- manuscript/PAPER_PLAN.md
+- manuscript/reviews/**
+- research_trajectory/trials/<current_trial_id>/TRIAL.json
+- instructions/**
+allowed_agent_write_roots:
+- research_trajectory/trials/<current_trial_id>/**
+- research_trajectory/.staging/<current_trial_id>/<attempt_id>/**
+- workspace/**
+- resources/autoresearch_discovered/**
+- research_trajectory/notes/proposals/**
+- research_trajectory/instruction_patches/**
+service_only_outputs:
+- research_trajectory/CANONICAL_REVISION.json
+- research_trajectory/trials/<current_trial_id>/DISTILLED_RESULT_CARDS.json
+- research_trajectory/.staging/<current_trial_id>/<attempt_id>/STAGED_UPDATE_MANIFEST.json
+- research_trajectory/trials/<current_trial_id>/reviews/REVIEW_MANIFEST.json
+- research_trajectory/trials/<current_trial_id>/reviews/REVIEW_MANIFEST.md
+- research_trajectory/trials/<current_trial_id>/MERGE_DECISION.json
+- research_trajectory/trials/<current_trial_id>/MERGE_DECISION.md
+- research_trajectory/trials/<current_trial_id>/GOAL_GATE.json
+- research_trajectory/trials/<current_trial_id>/GOAL_GATE.md
+- research_trajectory/trials/<current_trial_id>/PUBLISH_RECEIPT.json
+- research_trajectory/trials/<current_trial_id>/PUBLISH_RECEIPT.md
+- research_trajectory/.transactions/**
+service_finalized_outputs:
+- research_trajectory/trials/<current_trial_id>/TRIAL.json
+policy: Agent modifications outside allowed roots are protocol violations. Protected changes are quarantined and restored
+  before proposed outputs are evaluated.

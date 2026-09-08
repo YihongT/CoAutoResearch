@@ -2,82 +2,140 @@
 
 ## Purpose
 
-Review a trial `PLAN.md` before execution.
+Review the current trial Plan before substantive execution. This is a pre-execution review; it does not read outputs that do not yet exist.
 
-## Required Reading
+## Phase and output
 
-- `instructions/reviewers/REVIEW_TAXONOMY.md`
-- `PROJECT.md`
-- `research_trajectory/STATE.md`
-- `research_trajectory/CURRENT_FINDINGS.md`
-- `instructions/RESOURCE_SCOUT.md`
-- current trial `PLAN.md`
-- recent relevant trial `REPORT.md` files if needed
+- Phase: `pre_execution`.
+- Reviewer key/scope: `plan` / `plan`.
+- `stage_id` and `stage_manifest_hash`: null.
+- Bind the review to the exact structured Plan bytes. Set
+  `extensions.plan_binding.plan_revision` to the integer
+  `PLAN.json.plan_revision`, and set
+  `extensions.plan_binding.plan_sha256` to the lowercase SHA-256 of the exact
+  `PLAN.json` file bytes. These field names are literal; a generic `sha256`
+  field does not satisfy the service contract. The required shape is:
 
-## Output Location
+  ```json
+  {
+    "extensions": {
+      "plan_binding": {
+        "plan_revision": 1,
+        "plan_sha256": "<64 lowercase hexadecimal characters>"
+      }
+    }
+  }
+  ```
 
-Write the canonical current-trial plan review to:
+  Correcting this review-only binding does not change the Plan. Do not edit
+  `PLAN.json`, increment `plan_revision`, or rerun Resource Scout merely to fix
+  a missing/misnamed `plan_binding` field; recompute the hash from the unchanged
+  current `PLAN.json` and issue the fresh paired review.
 
-`research_trajectory/trials/<trial_id>/reviews/PLAN_REVIEW.md`
+- Write the validated pair only as `reviews/PLAN_REVIEW.json` and
+  `reviews/PLAN_REVIEW.md` under the current trial. The service archives a prior
+  pair under `reviews/history/<stage_id>/` before opening a new planning stage.
+  The agent must never create, copy, or modify review-history or stage-named
+  subdirectories.
 
-## Review Criteria
+## Required reading
 
-Check whether the plan:
+- `instructions/reviewers/REVIEW_TAXONOMY.md`;
+- `PROJECT.md`;
+- published `STATE`, `CURRENT_FINDINGS`, active/candidate lines, and affected campaigns;
+- current target venue/profile when configured;
+- current `PLAN.json/.md` and `EXPERT_ROUTE.json/.md`;
+- Resource Scout brief/report and v2 manifest when required or already run;
+- relevant accepted result cards and only the prior reports needed for feasibility/provenance;
+- relevant formal interventions and reusable notes.
 
-- fits the project scope and current state;
-- has a complete research objective for the declared deliverable;
-- is scoped to a complete research attempt rather than a partial task;
-- covers the full research attempt needed for submission-readiness when a target
-  venue is provided, or deliverable-readiness under `PROJECT.md` when no target
-  venue is provided;
-- declares `Critical path target: CP<n>` and targets the current Critical Path
-  bottleneck; only a conversion trial may use
-  `Critical path target: CP0 - seed Critical Path from provided materials`;
-- declares `Empirical work: yes | no - <...>` and explains what real
-  data/model/result/resource/blueprint work will or will not occur;
-- identifies required resources and compute;
-- avoids naive or invalid operationalization;
-- needs method grounding or literature grounding;
-- has interpretable success criteria;
-- records what outputs should update `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/`, or knowledge notes;
-- includes the required `Resource Scout Brief`;
-- includes `Criticality: research-critical | contextual` in the Resource Scout
-  Brief, and aligns `research-critical` with a named Critical Path item;
-- uses `Scout: required` by default for trials;
-- gives a concrete `Decision reason:` grounded in the overall research goal and
-  current trial objective;
-- gives a concrete `Skip reason:` if `Scout: skipped`;
-- does not skip Resource Scout merely because the trial is small, search may
-  take time, the resource type is unclear, or current resources look probably
-  sufficient;
-- gives enough search scope, resource types, disciplines/domains, download
-  policy, known resource clues, freshness/date sensitivity, expected
-  destinations, and stop criteria for the scout step to be auditable;
-- declares possible knowledge-capture outputs when the plan may produce reusable
-  resource, method, negative-result, manuscript, process, or preference lessons.
+Do not require `REPORT`, `RESULT_CARDS`, `HUMAN_BRIEF`, staged candidate files, or post-stage reviews.
 
-## Decisions
+In v2, a required Scout must finish before this review passes. Read its report
+and manifest from the same stage/revision-specific Scout subdirectory, and list
+every file in the Plan's exact Scout destinations in `reviewed_inputs`. A plan
+that postpones required Scout until execution is not ready for approval.
 
-Use the shared decisions from `instructions/reviewers/REVIEW_TAXONOMY.md`.
-A trial plan can be executable while the plan gate remains `continue` for final
-autoresearch completion; record those positives under
-`Qualified / Partial Passes` instead of using non-canonical decisions such as
-`approved`.
+## Review criteria
+
+### Research choice
+
+- Does the plan address the highest-leverage current Critical Path bottleneck?
+- Is the “why now” rationale grounded in current line/campaign/venue state?
+- Is the local question capable of changing the project belief state, not merely creating bookkeeping?
+- Is the selected move preferable to plausible alternatives given expected research value, cost, risk, and human dependency?
+
+### Boundedness and local completeness
+
+- Is there exactly one primary local question?
+- Is the trial a coherent research move rather than a trivial ticket?
+- Is it smaller than an entire framing, empirical, or manuscript module unless final packaging is explicitly the local objective?
+- Are minimum useful output, success conditions, stop conditions, and must-not-do boundaries concrete and testable?
+- Will scope expansion become a later trial rather than silently expanding this one?
+
+### Working set and research integrity
+
+- The plan declares possible knowledge-capture outputs when reusable
+  resource, method, negative-result, manuscript, process, or preference lessons
+  may result?
+- Are included trials/cards relevant and compatible?
+- Are materially relevant exclusions listed with reasons?
+- Does the combination avoid cherry-picking favorable outcomes?
+- Are negative, limiting, or superseding results treated honestly?
+- Does the plan distinguish proposal, accepted evidence, and uncertainty?
+
+### Method and evidence feasibility
+
+- Are operationalization, comparison, controls, baseline, metric, data, resources, and compute credible for this local question?
+- Is a smoke test planned before expensive work?
+- Are expected artifacts and provenance sufficient for later evidence review?
+- Are method/literature/venue standards routed through the available expert packs?
+- Are missing expert packs reported rather than simulated?
+
+### Resource Scout
+
+- Is `required` versus `skipped` justified by current resource availability, freshness, date sensitivity, and research criticality?
+- The plan includes the required `Resource Scout Brief`.
+- It gives a concrete `Decision reason:` grounded in the overall goal and local question.
+- It gives a concrete `Skip reason:` when Scout is skipped.
+- It does not skip Resource Scout merely because the trial is small, search may take time, the resource type is unclear, or current resources look probably sufficient.
+- If required, are resource types, search scope, known clues, destinations, download policy, and stop criteria auditable?
+- If skipped, is the reason substantive rather than convenience?
+- If Scout findings materially changed assumptions, was `plan_revision` incremented and is this a rereview?
+
+### Human and venue authority
+
+- Does the trial avoid silently changing a locked venue, human constraint, project identity, or central ambition?
+- Is any human-only dependency recognized early?
+- If useful work can continue, is the human request non-blocking rather than incorrectly gating the trial?
+
+### Review level request
+
+- Is the requested level at least the likely service minimum?
+- Are external-source, venue, manuscript, figure/table, central-line, campaign-pass, final-candidate, and specialized-review triggers declared?
+- The agent may request escalation but never downgrade.
+
+### Preserved legacy field checks
+
+For a v1 Markdown plan, also verify the explicit field ownership that existing
+projects rely on: `Critical path target: CP<n>`, `Empirical work: yes | no`, and
+resource rows using `Criticality: research-critical | contextual`. In v2 these
+meanings must be represented by the structured critical-path target, execution
+method, Resource Scout decision, and expected evidence fields; migration must
+not make them disappear merely because the storage format changed.
 
 ## Pass Standard
 
-Use `Decision: pass` for the plan gate only when there is no unresolved planning
-or feasibility issue for the declared autoresearch goal, not merely because the
-next trial plan is executable. If the current trial plan is approved but later
-planning, scope, method, resource, or success-criteria work remains, use
-`Gate impact: continue`.
+The shared strict pass rule in
+`instructions/reviewers/REVIEW_TAXONOMY.md` applies. A plan passes only when it
+is executable and no planning blocker, required action, or critical unassessed
+area remains.
 
-A plan that only creates scaffolding, schemas, harnesses, audits, package
-contracts, or manuscript placeholders without a complete research attempt or a
-documented first blocker requires `Decision: continue`.
+## Decision rules
 
-## Output Schema
+- `pass`: the plan is executable and no planning blocker/action remains.
+- `revise`: any criterion above requires correction before execution.
+- `blocked`: a non-human operational dependency prevents execution and all useful substitutes are exhausted.
+- `needs_human`: one human-only dependency prevents execution and every useful alternative.
 
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
-input paths for `PROJECT.md`, `STATE.md`, `CURRENT_FINDINGS.md`, the current
-trial `PLAN.md`, and any prior reports used to assess feasibility.
+Pass means the trial may execute; it does not mean the global autoresearch goal is complete.

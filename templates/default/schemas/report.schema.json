@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "report.schema.json",
+  "title": "Trial Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "local_question_outcome",
+    "trial_outcome",
+    "summary",
+    "work_performed",
+    "procedures",
+    "artifacts",
+    "deviations",
+    "findings",
+    "negative_results",
+    "limitations",
+    "interpretation",
+    "line_effects",
+    "campaign_effects",
+    "venue_impact",
+    "knowledge_capture",
+    "recommended_next_moves"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "report"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "scope_boundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stopped",
+            "reason",
+            "proposed_new_trial"
+          ],
+          "properties": {
+            "stopped": {
+              "const": true
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "proposed_new_trial": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "move",
+                "question",
+                "expected_value"
+              ],
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "move": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "question": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expected_value": {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "local_question_outcome": {
+      "enum": [
+        "answered",
+        "partially_answered",
+        "failed_diagnosed",
+        "unresolved",
+        "not_attempted"
+      ]
+    },
+    "trial_outcome": {
+      "enum": [
+        "advanced",
+        "informative_negative",
+        "no_state_change",
+        "blocked",
+        "needs_human",
+        "invalidated",
+        "aborted"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "work_performed": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "procedures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "description",
+          "command_or_method",
+          "result"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "command_or_method": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/artifact_ref"
+      }
+    },
+    "deviations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_results": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "line_effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "line_id",
+          "effect",
+          "rationale"
+        ],
+        "properties": {
+          "line_id": {
+            "$ref": "common.schema.json#/$defs/line_id"
+          },
+          "effect": {
+            "$ref": "common.schema.json#/$defs/line_effect"
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "campaign_effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "campaign_id",
+          "component_id",
+          "proposed_status",
+          "rationale"
+        ],
+        "properties": {
+          "campaign_id": {
+            "$ref": "common.schema.json#/$defs/campaign_id"
+          },
+          "component_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "proposed_status": {
+            "enum": [
+              "not_started",
+              "in_progress",
+              "partial",
+              "tentative",
+              "passed",
+              "waived_with_rationale",
+              "not_applicable",
+              "blocked"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "venue_impact": {
+      "type": "string"
+    },
+    "knowledge_capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition",
+        "reason",
+        "path"
+      ],
+      "properties": {
+        "disposition": {
+          "enum": [
+            "note_updated",
+            "no_note",
+            "promoted_elsewhere",
+            "instruction_patch_proposed"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/relative_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "recommended_next_moves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "move",
+          "question",
+          "expected_value"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "move": {
+            "type": "string",
+            "minLength": 1
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expected_value": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

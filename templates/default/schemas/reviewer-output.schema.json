@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reviewer-output.schema.json",
+  "title": "Reviewer Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "review_id",
+    "reviewer",
+    "scope",
+    "phase",
+    "decision",
+    "confidence",
+    "summary",
+    "context_summary",
+    "instruction_file",
+    "reviewed_inputs",
+    "strengths",
+    "blockers",
+    "required_actions",
+    "qualified_partial_passes",
+    "unassessed_areas",
+    "human_task_candidates",
+    "response_to_human",
+    "migration_source",
+    "evidence_checked",
+    "stage_id",
+    "stage_manifest_hash",
+    "gate_effect"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "reviewer_output"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "review_id": {
+      "$ref": "common.schema.json#/$defs/review_id"
+    },
+    "reviewer": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/reviewer_key"
+        },
+        {
+          "type": "string",
+          "pattern": "^specialized:[a-z0-9][a-z0-9._-]{2,63}$"
+        }
+      ]
+    },
+    "phase": {
+      "enum": [
+        "pre_execution",
+        "post_stage",
+        "final"
+      ]
+    },
+    "decision": {
+      "enum": [
+        "pass",
+        "revise",
+        "blocked",
+        "needs_human"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "strengths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_checked": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/evidence_ref"
+      }
+    },
+    "stage_id": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/stage_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stage_manifest_hash": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gate_effect": {
+      "enum": [
+        "none",
+        "trial_block",
+        "human_block",
+        "operational_block",
+        "final_pass_block"
+      ]
+    },
+    "scope": {
+      "enum": [
+        "plan",
+        "process",
+        "evidence",
+        "venue",
+        "manuscript",
+        "figure_table",
+        "reference",
+        "final_gate",
+        "specialized"
+      ]
+    },
+    "confidence": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "context_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instruction_file": {
+      "$ref": "common.schema.json#/$defs/relative_path"
+    },
+    "reviewed_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/relative_path"
+      }
+    },
+    "qualified_partial_passes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unassessed_areas": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "human_task_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priority",
+          "blocks",
+          "question_or_request",
+          "why_needed",
+          "continue_meanwhile",
+          "source"
+        ],
+        "properties": {
+          "priority": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "blocks": {
+            "type": "boolean"
+          },
+          "question_or_request": {
+            "type": "string",
+            "minLength": 1
+          },
+          "why_needed": {
+            "type": "string",
+            "minLength": 1
+          },
+          "continue_meanwhile": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "response_to_human": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "migration_source": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "post_stage",
+              "final"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stage_id": {
+            "$ref": "common.schema.json#/$defs/stage_id"
+          },
+          "stage_manifest_hash": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "pre_execution"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stage_id": {
+            "type": "null"
+          },
+          "stage_manifest_hash": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "blocked",
+              "needs_human"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "response_to_human": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "pass",
+              "revise"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "response_to_human": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

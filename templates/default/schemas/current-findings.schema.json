@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "current-findings.schema.json",
+  "title": "Current Findings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "canonical_revision",
+    "accepted_card_ids",
+    "qualified_card_ids",
+    "superseded_card_ids",
+    "synthesis"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "current_findings"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "canonical_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "accepted_card_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/result_card_id"
+      },
+      "uniqueItems": true
+    },
+    "qualified_card_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/result_card_id"
+      },
+      "uniqueItems": true
+    },
+    "superseded_card_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/result_card_id"
+      },
+      "uniqueItems": true
+    },
+    "synthesis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "statement",
+          "status",
+          "card_ids"
+        ],
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "pattern": "^F[0-9]{4}$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "accepted_with_qualification",
+              "rejected",
+              "superseded"
+            ]
+          },
+          "card_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/result_card_id"
+            },
+            "minItems": 1
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,74 +1,75 @@
-# Reviewer Scope Analyst Protocol
+# Reviewer Scope Analyst
 
 ## Purpose
 
-The Reviewer Scope Analyst is a required trial-local subagent that decides
-whether the eight core reviewers cover the current trial's review risks.
+Validate the deterministic service ReviewRouter result and determine whether enabled expert registries add specialized reviewers. This role may escalate coverage but may not weaken the service minimum and does not create a ninth global gate.
 
-It is not a core reviewer and does not add a ninth gate line. It produces a
-decision artifact before the core reviewer refresh. If specialized review is
-needed, it either reuses an existing reviewer instruction or creates a new one
-under `instructions/reviewers/`, then ensures the specialized review output is
-written before the eight core reviewers run.
+## Inputs
 
-## When To Use
+- Plan and Expert Route;
+- Report and proposed Result Cards;
+- Merge Request;
+- exact staged update manifest and candidate snapshot;
+- final-form Human Brief and Gate Evidence;
+- target venue state;
+- enabled expert-pack registries;
+- service-computed minimum review level and trigger set.
 
-After every trial `REPORT.md` is written and before refreshing the
-eight core reviewers, the main execution agent must:
+## Procedure
+
+1. Confirm the service minimum matches `requirements/REVIEW_ROUTING_TABLE.yaml`.
+2. Compare actual trial/stage impact with plan-time expectations.
+3. Request escalation when actual claim, line, campaign, venue, manuscript, visual, source, ethics, or final-gate risk is higher.
+4. Validate all deterministic trigger additions.
+5. Inspect enabled domain/method/risk registries for specialized reviewer triggers.
+6. Report unavailable specialist packs honestly; do not fabricate expertise or a pass.
+7. Return a scope analysis to the service.
+8. The service writes the authoritative `REVIEW_MANIFEST.json/.md` with exact stage ID/hash.
+
+## Invariants
+
+- selected level is at least the service minimum;
+- the agent and analyst may escalate but never downgrade;
+- central line effects force Full;
+- campaign component `passed` or `waived_with_rationale` forces Full;
+- a pass candidate forces Final;
+- required reviewers cannot be marked not applicable;
+- omissions require deterministic reasons in the manifest;
+- specialized outputs are closure-required when registered as such and feed the related core reviewers;
+- no specialized reviewer independently rewrites the global gate.
+
+At v2.0 launch, `general_research` may legitimately register no specialized reviewers. The manifest must show an empty specialized set rather than implying hidden coverage.
+
+## Legacy v1 orchestration fallback
+
+For a v1 trial without a valid v2 Review Manifest, preserve the established
+trial-local orchestration contract. After `REPORT.md` and before refreshing the
+eight legacy core reviewers, the main execution agent must:
 
 `spawn a Reviewer Scope Analyst subagent to decide whether the eight core reviewers cover the current trial's review risks`
 
-Prefer a real Reviewer Scope Analyst subagent when the runtime supports it. If
-subagent orchestration is unavailable, stalls, or fails, complete the same scope
-analysis inline as a clearly labeled `Reviewer Scope Analyst fallback`, write
-the decision file, disclose the fallback in `REPORT.md`, and continue. Do not
-set the gate to `blocked` or `needs_human` solely because Reviewer Scope Analyst
-orchestration failed. `blocked` and `needs_human` are whole-loop hard stops, not
-reviewer-scope-local outcomes.
+Prefer a real subagent. If orchestration is unavailable, stalls, or fails,
+perform the same analysis inline as a labeled `Reviewer Scope Analyst fallback`.
+That local failure alone is not a reason to set the global gate to `blocked` or
+`needs_human`.
 
-If a human answer would help reviewer coverage but useful review or execution
-work can continue, report it as a `Human Task Candidates` entry in the decision
-artifact for the main execution agent to merge, and keep the gate
-`Status: continue`. Do not edit `research_trajectory/HUMAN_TASKS.md` directly.
-Escalate only when the current critical-path bottleneck is human-gated under
-`instructions/EXECUTION_AGENT.md`.
+Wait for a delegated analyst or specialized reviewer at most once. If that wait
+returns without a completed result, classify the delegation as stalled
+immediately and complete the same work inline; never enter a repeated
+subagent-wait loop.
 
-## Visible Progress Line
-
-The main execution agent must emit these exact visible status formats for
-reviewer-scope work:
+Emit these visible progress lines:
 
 ```text
 Subagent update: Reviewer Scope Analyst | status: <starting | waiting | completed | fallback> | task: <short task> | output: <path or none>
 Subagent update: Specialized reviewer | status: <starting | waiting | completed | fallback> | task: <short task> | output: <path or none>
 ```
 
-Use `output: research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
-when the scope decision path is known.
-
-## Required Inputs
-
-The Reviewer Scope Analyst subagent must read:
-
-- `AGENTS.md`
-- `PROJECT.md`
-- `research_trajectory/STATE.md`
-- `research_trajectory/CURRENT_FINDINGS.md`
-- current trial `PLAN.md`
-- current trial `REPORT.md`
-- current trial artifacts
-- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when present
-- `instructions/reviewers/REVIEWER_SPAWNING.md`
-- `instructions/reviewers/REVIEW_TAXONOMY.md`
-- existing files under `instructions/reviewers/`
-
-## Required Output
-
-Write the decision artifact to:
+Write the legacy decision artifact to:
 
 `research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
 
-Use this exact decision skeleton:
+Use this decision skeleton:
 
 ```markdown
 # Reviewer Spawn Decision
@@ -86,52 +87,15 @@ Core reviewers that must read this decision: <list>
 - <none, or Priority; Blocks; Question/request; Why needed; Continue meanwhile; Source>
 ```
 
-## Decision Rules
+Use `yes` for material domain, statistical, causal, dataset, benchmark,
+theoretical, ethics, privacy, safety, reproducibility, environment, or repeated
+blind-spot risks not covered by the core reviewers. Reuse a fitting specialized
+reviewer before proposing a new one. A v1 project may add a project-local
+reviewer under `instructions/reviewers/`; v2 instead uses a registered expert
+pack or an instruction-patch proposal and never edits managed instructions
+directly. Process, Evidence, Reference, and Final Gate reviewers read the
+decision and any required specialized output. The analyst never replaces a
+core review, adds a ninth global gate, silently waives needed review, or edits
+`research_trajectory/HUMAN_TASKS.md` directly.
 
-Use `Spawn needed: yes` when the current trial has a clear quality risk that the
-eight core reviewers do not cover sufficiently, including:
-
-- domain-specific judgment;
-- statistics, causal inference, uncertainty, or power-analysis risk;
-- dataset, benchmark, annotation, or evaluation-validity risk;
-- theory, proof, or formal-methods risk;
-- ethics, safety, privacy, governance, or dual-use risk;
-- reproducibility, environment, dependency, or artifact-portability risk;
-- a repeated blind spot identified by process review;
-- an explicit human request for a specialized review perspective.
-
-Use `Spawn needed: no` only when the eight core reviewers are sufficient for the
-trial's actual risks. The reason must state why no specialized perspective is
-needed.
-
-## If Specialized Review Is Needed
-
-1. Check existing files under `instructions/reviewers/` first.
-2. Reuse an existing specialized reviewer when it fits.
-3. If no reviewer fits, create a project-specific reviewer instruction under
-   `instructions/reviewers/`, for example:
-   - `PROJECT_STATISTICS_REVIEWER.md`
-   - `PROJECT_ETHICS_PRIVACY_REVIEWER.md`
-   - `PROJECT_BENCHMARK_VALIDITY_REVIEWER.md`
-4. The spawned reviewer instruction must follow
-   `instructions/reviewers/REVIEWER_SPAWNING.md` and
-   `instructions/reviewers/REVIEW_TAXONOMY.md`.
-5. Run the specialized review before the eight core reviewers and write the
-   result to:
-
-`research_trajectory/trials/<trial_id>/reviews/<SPECIALIZED_REVIEW>.md`
-
-## Boundaries
-
-The Reviewer Scope Analyst must not:
-
-- replace any of the eight core reviewer files;
-- add a ninth Autoresearch Goal Gate line;
-- silently waive a needed specialized review;
-- mark the final gate pass;
-- edit `research_trajectory/HUMAN_TASKS.md` directly;
-- create broad generic reviewer instructions without a current-trial risk.
-
-Process, Evidence, Reference, and Final Gate reviewers must read the decision
-artifact. If `Spawn needed: yes`, they must also read the specialized review
-output before deciding pass.
+Do not edit `research_trajectory/HUMAN_TASKS.md` directly.

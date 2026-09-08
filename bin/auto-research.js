@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,31 +20,13 @@ const DEFAULT_PORT = "8765";
 const DEFAULT_PROJECTS_DIR = "co-autoresearch-projects";
 const LEGACY_PROJECTS_DIR = "local-projects";
 const DEFAULT_GRAFTCP_VERSION = "v0.8.1";
-const REVIEWER_BASELINE_VERSION = "2026-07-result-block-schema";
-const CORE_REVIEWER_FILES = [
-  "REVIEW_TAXONOMY.md",
-  "FINAL_GATE_REVIEWER.md",
-  "PLAN_REVIEWER.md",
-  "PROCESS_REVIEWER.md",
-  "EVIDENCE_REVIEWER.md",
-  "VENUE_FIT_REVIEWER.md",
-  "MANUSCRIPT_REVIEWER.md",
-  "FIGURE_TABLE_REVIEWER.md",
-  "REFERENCE_REVIEWER.md",
-  "REVIEWER_SPAWNING.md"
-];
-const CORE_PROTOCOL_FILES = [
-  "EXECUTION_AGENT.md",
-  "MANUSCRIPT.md",
-  "PROJECT_FRAMING.md",
-  "RESOURCE_INTAKE.md",
-  "RESOURCE_SCOUT.md",
-  "REVIEWER_SCOPE_ANALYST.md",
-  "sessions/evolution/ENTRY.md",
-  "sessions/evolution/general/AUTORESEARCH.md",
-  "sessions/chat/prompts/MONITOR_PROGRESS.md"
-];
+const TEMPLATE_MANIFEST = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
+const REVIEWER_BASELINE_VERSION = String(TEMPLATE_MANIFEST.reviewerBaselineVersion || "2.0.0");
+const CORE_REVIEWER_FILES = [...(TEMPLATE_MANIFEST.coreReviewerFiles || [])];
+const CORE_PROTOCOL_FILES = [...(TEMPLATE_MANIFEST.coreProtocolFiles || [])];
+const MANAGED_PATHS = [...(TEMPLATE_MANIFEST.managedPaths || [])];
 const REVIEWER_BASELINE_PATH = path.join("instructions", ".co-auto-research-instructions.json");
+const TEMPLATE_MANIFEST_RELATIVE_PATH = path.join(".co-auto-research-template", "manifest.json");
 const REVIEW_STORAGE_VERSION = "per-reviewer-files-v1";
 const REQUIRED_REVIEWER_OUTPUTS = {
   plan: { label: "Plan reviewer", file: "PLAN_REVIEW.md", scope: "plan", instruction: "instructions/reviewers/PLAN_REVIEWER.md" },
@@ -59,6 +41,7 @@ const REQUIRED_REVIEWER_OUTPUTS = {
 
 function usage() {
   return `CoAutoResearch
+An autonomous research partner you can question, guide, and build with.
 
 Usage:
   co-auto-research init <dir>
@@ -70,7 +53,10 @@ Usage:
   co-auto-research install-graftcp
   co-auto-research doctor [--host 127.0.0.1] [--port 8765]
   co-auto-research upgrade
-  co-auto-research upgrade-project [project-name-or-path] [--all] [--projects-dir <dir>] [--dry-run]
+  co-auto-research upgrade-project [project-name-or-path] [--all] [--projects-dir <dir>] [--dry-run] [--rollback]
+  co-auto-research backup [project-name-or-path] --output <backup-dir>
+  co-auto-research restore <backup-dir> <empty-project-dir> --expected-manifest-sha256 <sha256>
+  co-auto-research restore-acknowledge <restored-project-dir> --expected-manifest-sha256 <sha256> --operator <identifier>
   co-auto-research version
   co-auto-research help
 
@@ -84,7 +70,7 @@ function parseOptions(args) {
   const rest = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--host" || arg === "--port" || arg === "--projects-dir" || arg === "--project" || arg === "--proxy") {
+    if (arg === "--host" || arg === "--port" || arg === "--projects-dir" || arg === "--project" || arg === "--proxy" || arg === "--output" || arg === "--expected-manifest-sha256" || arg === "--operator") {
       const value = args[index + 1];
       if (!value || value.startsWith("--")) {
         throw new Error(`${arg} requires a value.`);
@@ -93,7 +79,7 @@ function parseOptions(args) {
       index += 1;
       continue;
     }
-    if (arg === "--open" || arg === "--no-open" || arg === "--remote" || arg === "--all" || arg === "--dry-run") {
+    if (arg === "--open" || arg === "--no-open" || arg === "--remote" || arg === "--all" || arg === "--dry-run" || arg === "--rollback") {
       options[arg.slice(2)] = true;
       continue;
     }
@@ -147,6 +133,123 @@ function sha256FileSync(target) {
   return createHash("sha256").update(fs.readFileSync(target)).digest("hex");
 }
 
+function sameFileBytesSync(left, right) {
+  return fs.existsSync(left) && fs.lstatSync(left).isFile() &&
+    fs.lstatSync(left).size === fs.statSync(right).size &&
+    sha256FileSync(left) === sha256FileSync(right);
+}
+
+function managedTemplateFilesSync() {
+  const files = [];
+  const visit = (source, relative) => {
+    const stats = fs.lstatSync(source);
+    if (stats.isSymbolicLink()) throw new Error(`Package-managed template path cannot be a symlink: ${relative}`);
+    if (stats.isDirectory()) {
+      for (const name of fs.readdirSync(source).sort()) {
+        if ([".DS_Store", "__pycache__", ".runtime"].includes(name)) continue;
+        visit(path.join(source, name), path.join(relative, name));
+      }
+      return;
+    }
+    if (stats.isFile() && relative !== REVIEWER_BASELINE_PATH) files.push(relative);
+  };
+  for (const declared of MANAGED_PATHS) {
+    const relative = String(declared || "").replace(/[\\/]+$/, "");
+    if (!relative || path.isAbsolute(relative) || relative.split(/[\\/]/).includes("..")) {
+      throw new Error(`Invalid package-managed template path: ${declared}`);
+    }
+    const source = path.join(TEMPLATE_ROOT, relative);
+    if (!fs.existsSync(source)) throw new Error(`Package-managed template path is missing: ${relative}`);
+    visit(source, relative);
+  }
+  return [...new Set(files)].sort();
+}
+
+function projectManagedTemplateStatusSync(projectRoot) {
+  const missing = [];
+  const changed = [];
+  for (const relative of managedTemplateFilesSync()) {
+    const source = path.join(TEMPLATE_ROOT, relative);
+    const target = path.join(projectRoot, relative);
+    if (!fs.existsSync(target) || !fs.lstatSync(target).isFile()) missing.push(relative.split(path.sep).join("/"));
+    else if (!sameFileBytesSync(target, source)) changed.push(relative.split(path.sep).join("/"));
+  }
+  const manifestPath = path.join(projectRoot, TEMPLATE_MANIFEST_RELATIVE_PATH);
+  let projectManifest = {};
+  if (fs.existsSync(manifestPath)) {
+    try {
+      projectManifest = readJsonSync(manifestPath);
+    } catch {
+      projectManifest = {};
+    }
+  }
+  const manifestChanged = Object.keys(TEMPLATE_MANIFEST).filter(
+    (key) => JSON.stringify(projectManifest[key]) !== JSON.stringify(TEMPLATE_MANIFEST[key])
+  );
+  return {
+    outdated: Boolean(missing.length || changed.length || manifestChanged.length),
+    missing,
+    changed,
+    manifestChanged
+  };
+}
+
+function syncProjectManagedTemplateFilesSync(projectRoot, migrationDir, { dryRun = false } = {}) {
+  const before = projectManagedTemplateStatusSync(projectRoot);
+  const required = new Set([...before.missing, ...before.changed]);
+  const copied = [];
+  const backedUp = [];
+  const backupRoot = path.join(migrationDir, "managed_files");
+  for (const relativePosix of required) {
+    const relative = relativePosix.split("/").join(path.sep);
+    const source = path.join(TEMPLATE_ROOT, relative);
+    const target = path.join(projectRoot, relative);
+    if (!dryRun) {
+      if (fs.existsSync(target) || fs.lstatSync(target, { throwIfNoEntry: false })) {
+        if (!fs.lstatSync(target).isFile()) throw new Error(`Package-managed project path is not a regular file: ${relativePosix}`);
+        const backup = path.join(backupRoot, relative);
+        fs.mkdirSync(path.dirname(backup), { recursive: true });
+        fs.copyFileSync(target, backup);
+        backedUp.push(relativePosix);
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(source, target);
+    }
+    copied.push(relativePosix);
+  }
+  if (before.manifestChanged.length) {
+    const target = path.join(projectRoot, TEMPLATE_MANIFEST_RELATIVE_PATH);
+    if (!dryRun) {
+      let existing = {};
+      if (fs.existsSync(target) || fs.lstatSync(target, { throwIfNoEntry: false })) {
+        if (!fs.lstatSync(target).isFile()) throw new Error("Project template manifest is not a regular file.");
+        try {
+          existing = readJsonSync(target);
+        } catch {
+          existing = {};
+        }
+        const backup = path.join(backupRoot, TEMPLATE_MANIFEST_RELATIVE_PATH);
+        fs.mkdirSync(path.dirname(backup), { recursive: true });
+        fs.copyFileSync(target, backup);
+        backedUp.push(TEMPLATE_MANIFEST_RELATIVE_PATH.split(path.sep).join("/"));
+      }
+      const merged = { ...existing, ...TEMPLATE_MANIFEST };
+      for (const key of ["migration_metadata", "v2ManagedPaths"]) {
+        if (Object.hasOwn(existing, key)) merged[key] = existing[key];
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+    }
+    copied.push(TEMPLATE_MANIFEST_RELATIVE_PATH.split(path.sep).join("/"));
+  }
+  return {
+    before,
+    after: dryRun ? before : projectManagedTemplateStatusSync(projectRoot),
+    copied,
+    backedUp
+  };
+}
+
 function reviewerTemplateDir() {
   return path.join(TEMPLATE_ROOT, "instructions", "reviewers");
 }
@@ -175,8 +278,18 @@ function protocolTemplateHashesSync() {
 
 function writeReviewerBaselineMetadataSync(projectRoot) {
   const metadataPath = path.join(projectRoot, REVIEWER_BASELINE_PATH);
+  let existing = {};
+  if (fs.existsSync(metadataPath)) {
+    try {
+      existing = readJsonSync(metadataPath);
+    } catch {
+      existing = {};
+    }
+  }
   const payload = {
-    schemaVersion: 1,
+    ...existing,
+    schemaVersion: 2,
+    protocol_version: "2.0",
     reviewerBaselineVersion: REVIEWER_BASELINE_VERSION,
     reviewStorageVersion: REVIEW_STORAGE_VERSION,
     syncedAt: new Date().toISOString(),
@@ -246,10 +359,36 @@ function activeTrialDirsSync(projectRoot) {
     .map((entry) => path.join(root, entry.name))
     .filter((trialDir) => {
       const name = path.basename(trialDir);
-      if (archived.has(name) || /^0*_?project_conversion/i.test(name)) return false;
+      if (name.startsWith("_") || archived.has(name) || /^0*_?project_conversion/i.test(name)) return false;
+      const trialJson = path.join(trialDir, "TRIAL.json");
+      if (fs.existsSync(trialJson)) {
+        try {
+          const trial = readJsonSync(trialJson);
+          if (
+            trial?.artifact_type === "trial" &&
+            String(trial?.schema_version || "").startsWith("2.") &&
+            trial?.trial_id === name
+          ) return false;
+        } catch {
+          // Invalid v2-looking files remain visible to protocol migration,
+          // but legacy review storage must not guess their meaning here.
+          return false;
+        }
+      }
       return ["PLAN.md", "REVIEW.md", "REPORT.md", "artifacts", "reviews"].some((entry) => fs.existsSync(path.join(trialDir, entry)));
     })
     .sort((a, b) => trialIterationFromId(path.basename(a)) - trialIterationFromId(path.basename(b)) || path.basename(a).localeCompare(path.basename(b)));
+}
+
+function projectUsesV2ReviewStateSync(projectRoot) {
+  const revisionPath = path.join(projectRoot, "research_trajectory", "CANONICAL_REVISION.json");
+  if (!fs.existsSync(revisionPath)) return false;
+  try {
+    const revision = readJsonSync(revisionPath);
+    return revision?.artifact_type === "canonical_revision" && String(revision?.schema_version || "").startsWith("2.");
+  } catch {
+    return false;
+  }
 }
 
 function reviewerOutputPath(trialDir, key) {
@@ -416,7 +555,7 @@ function reviewerFileStatusSync(target) {
 }
 
 function normalizeStateGateReferencesSync(projectRoot, latestTrial, migrationDir, backedUp, dryRun = false) {
-  if (!latestTrial) return "";
+  if (!latestTrial || projectUsesV2ReviewStateSync(projectRoot)) return "";
   const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
   if (!fs.existsSync(statePath)) return "";
   const text = fs.readFileSync(statePath, "utf8");
@@ -569,7 +708,7 @@ function projectReviewStorageStatusSync(projectRoot) {
   const stateStaleConsistencyBlockers = [];
   const statePath = path.join(projectRoot, "research_trajectory", "STATE.md");
   const stateText = fs.existsSync(statePath) ? fs.readFileSync(statePath, "utf8") : "";
-  if (latestTrial && stateText) {
+  if (latestTrial && stateText && !projectUsesV2ReviewStateSync(projectRoot)) {
     if (/(?:Reviewer|Core) instructions are outdated \(baseline is outdated\)\./i.test(stateText)) {
       stateStaleConsistencyBlockers.push("Core instructions are outdated (baseline is outdated).");
     }
@@ -657,6 +796,7 @@ function projectReviewerStatusSync(projectRoot) {
   const protocolMetadataMissing = CORE_PROTOCOL_FILES.filter((name) => protocolMetadataHashes[name] !== protocolTemplateHashes[name]);
   const baselineVersion = String(metadata.reviewerBaselineVersion || "");
   const reviewStorage = projectReviewStorageStatusSync(projectRoot);
+  const managedTemplate = projectManagedTemplateStatusSync(projectRoot);
   return {
     baselineVersion,
     latestBaselineVersion: REVIEWER_BASELINE_VERSION,
@@ -668,6 +808,7 @@ function projectReviewerStatusSync(projectRoot) {
       protocolChanged.length ||
       protocolMetadataMissing.length ||
       baselineVersion !== REVIEWER_BASELINE_VERSION ||
+      managedTemplate.outdated ||
       reviewStorage.outdated
     ),
     missing,
@@ -679,6 +820,9 @@ function projectReviewerStatusSync(projectRoot) {
     metadataPath: REVIEWER_BASELINE_PATH,
     hashes,
     protocolHashes,
+    managedMissing: managedTemplate.missing,
+    managedChanged: managedTemplate.changed,
+    manifestChanged: managedTemplate.manifestChanged,
     reviewStorage
   };
 }
@@ -690,8 +834,10 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
   const instructionDir = path.join(projectRoot, "instructions");
   const backupRoot = path.join(projectRoot, "archive", "template_migrations", migrationId, "instructions", "reviewers");
   const protocolBackupRoot = path.join(projectRoot, "archive", "template_migrations", migrationId, "instructions");
+  const migrationDir = path.join(projectRoot, "archive", "template_migrations", migrationId);
   if (dryRun) {
     const dryRunMigrationDir = path.join(projectRoot, "archive", "template_migrations", "DRY_RUN");
+    const managedTemplate = syncProjectManagedTemplateFilesSync(projectRoot, dryRunMigrationDir, { dryRun: true });
     return {
       ok: true,
       dryRun: true,
@@ -702,6 +848,7 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
       backedUp: [],
       protocolCopied: [],
       protocolBackedUp: [],
+      managedTemplate,
       backupPath: "",
       reviewStorage: migrateActiveReviewStorageSync(projectRoot, dryRunMigrationDir, { dryRun: true })
     };
@@ -738,8 +885,8 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
     fs.copyFileSync(source, target);
     protocolCopied.push(name);
   }
+  const managedTemplate = syncProjectManagedTemplateFilesSync(projectRoot, migrationDir);
   const metadata = writeReviewerBaselineMetadataSync(projectRoot);
-  const migrationDir = path.join(projectRoot, "archive", "template_migrations", migrationId);
   fs.mkdirSync(migrationDir, { recursive: true });
   const reviewStorage = migrateActiveReviewStorageSync(projectRoot, migrationDir);
   fs.writeFileSync(
@@ -753,6 +900,8 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
       `- Backed up previous core reviewers: ${backedUp.length}`,
       `- Copied core protocol instructions: ${protocolCopied.length}`,
       `- Backed up previous core protocol instructions: ${protocolBackedUp.length}`,
+      `- Synced other package-managed files: ${managedTemplate.copied.length}`,
+      `- Backed up other package-managed files: ${managedTemplate.backedUp.length}`,
       `- Metadata: \`${REVIEWER_BASELINE_PATH}\``,
       `- Review storage version: \`${REVIEW_STORAGE_VERSION}\``,
       `- Created per-reviewer files: ${reviewStorage.created.length}`,
@@ -776,6 +925,7 @@ function syncProjectReviewersSync(projectRoot, { dryRun = false } = {}) {
     backedUp,
     protocolCopied,
     protocolBackedUp,
+    managedTemplate,
     reviewStorage,
     before: status,
     after: projectReviewerStatusSync(projectRoot),
@@ -802,6 +952,44 @@ function readProjectMetadataSync(root) {
   } catch {
     return {};
   }
+}
+
+function activeV2GuardBindingPathSync(root) {
+  let resolved = path.resolve(root);
+  try {
+    resolved = fs.realpathSync.native(resolved);
+  } catch {
+    // The normal project validation reports missing roots separately.
+  }
+  const metadata = readProjectMetadataSync(resolved);
+  const projectId = String(metadata.projectId || "").trim() ||
+    createHash("sha1").update(resolved).digest("hex").slice(0, 12);
+  const contextKey = projectId.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 96) || "project";
+  const rootHash = createHash("sha256").update(resolved).digest("hex").slice(0, 12);
+  const configuredGuardRoot = String(process.env.COAUTO_GUARD_ROOT || "").trim();
+  const guardRoot = configuredGuardRoot
+    ? path.resolve(
+      configuredGuardRoot === "~" || configuredGuardRoot.startsWith(`~${path.sep}`)
+        ? path.join(os.homedir(), configuredGuardRoot.slice(2))
+        : configuredGuardRoot
+    )
+    : path.join(os.homedir(), ".co-auto-research", "guards");
+  return path.join(guardRoot, `${contextKey}-${rootHash}`, "ACTIVE.json");
+}
+
+function assertNoActiveV2GuardSync(project) {
+  const binding = activeV2GuardBindingPathSync(project.path);
+  try {
+    fs.lstatSync(binding);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(
+    `Refusing to modify ${project.name}: an active v2 write guard exists. ` +
+    "Use the running UI's Update project action so it can refresh the retained guard, " +
+    "or stop and resolve the active session before running the CLI upgrade."
+  );
 }
 
 function readProjectRuntimeStatusSync(root) {
@@ -1017,9 +1205,11 @@ async function commandInit(args) {
     preserveTimestamps: true
   });
   await finalizeGeneratedProject(target);
+  const protocol = runProjectProtocolMigrationSync(target);
   const manifest = await readJson(MANIFEST_PATH);
   console.log(`Created CoAutoResearch project at ${target}`);
   console.log(`Template version: ${manifest.templateVersion}`);
+  console.log(`Protocol version: ${protocol.protocol_version || "2.0"}`);
   console.log("");
   console.log("Next steps:");
   console.log(`  cd ${path.relative(process.cwd(), target) || "."}`);
@@ -1057,7 +1247,7 @@ async function ensureProjectMetadata(target) {
 }
 
 function commandAvailable(name, args = ["--version"]) {
-  const result = spawnSync(name, args, { encoding: "utf8" });
+  const result = spawnSyncArgv(name, args, { encoding: "utf8" });
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
   return {
     ok: result.status === 0 || Boolean(output),
@@ -1067,7 +1257,7 @@ function commandAvailable(name, args = ["--version"]) {
 }
 
 function executableNames(name) {
-  return process.platform === "win32" ? [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name] : [name];
+  return process.platform === "win32" ? [`${name}.exe`, `${name}.ps1`, `${name}.cmd`, `${name}.bat`, name] : [name];
 }
 
 function findOnPath(name, env = process.env) {
@@ -1080,6 +1270,27 @@ function findOnPath(name, env = process.env) {
     }
   }
   return "";
+}
+
+function argvCommand(command, args = [], env = process.env) {
+  if (process.platform !== "win32" || !/\.(cmd|bat|ps1)$/i.test(command)) {
+    return { command, args };
+  }
+  const shim = /\.ps1$/i.test(command) ? command : command.replace(/\.(cmd|bat)$/i, ".ps1");
+  if (!fs.existsSync(shim)) {
+    return { command, args };
+  }
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || "C:\\Windows";
+  const powershell = path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  return {
+    command: powershell,
+    args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", shim, ...args]
+  };
+}
+
+function spawnSyncArgv(command, args, options = {}, env = process.env) {
+  const prepared = argvCommand(command, args, env);
+  return spawnSync(prepared.command, prepared.args, { ...options, shell: false });
 }
 
 function invokedViaNpx(env = process.env) {
@@ -1188,8 +1399,7 @@ function claudeAvailable() {
 
 function agentAvailable(agent) {
   const command = agent === "claude" ? findClaudeCommand() : findCodexCommand();
-  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
-  const result = spawnSync(command, ["--version"], { encoding: "utf8", shell });
+  const result = spawnSyncArgv(command, ["--version"], { encoding: "utf8" });
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
   return {
     ok: result.status === 0,
@@ -1200,8 +1410,7 @@ function agentAvailable(agent) {
 
 function cloudflaredAvailable(env = process.env) {
   const command = findCloudflaredCommand(env);
-  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
-  const result = spawnSync(command, ["--version"], { encoding: "utf8", shell });
+  const result = spawnSyncArgv(command, ["--version"], { encoding: "utf8" }, env);
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
   return {
     ok: result.status === 0,
@@ -1213,8 +1422,7 @@ function cloudflaredAvailable(env = process.env) {
 
 function graftcpAvailable(env = process.env) {
   const command = findGraftcpCommand(env);
-  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
-  const result = spawnSync(command, ["--help"], { encoding: "utf8", shell });
+  const result = spawnSyncArgv(command, ["--help"], { encoding: "utf8" }, env);
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
   return {
     ok: result.status === 0 || Boolean(output),
@@ -1248,11 +1456,87 @@ function findPythonCommand() {
   for (const candidate of pythonCandidates()) {
     const result = spawnSync(candidate.command, [...candidate.args, "--version"], { encoding: "utf8" });
     const output = [result.stdout, result.stderr].filter(Boolean).join("").trim().split(/\r?\n/)[0] || "";
-    if (result.status === 0) {
+    const version = output.match(/Python\s+(\d+)\.(\d+)/i);
+    if (result.status === 0 && version && (Number(version[1]) > 3 || (Number(version[1]) === 3 && Number(version[2]) >= 10))) {
       return { ...candidate, output, ok: true };
     }
   }
-  return { command: "", args: [], label: "python3/python/py -3", output: "", ok: false };
+  return { command: "", args: [], label: "Python 3.10+", output: "", ok: false };
+}
+
+function runProjectProtocolMigrationSync(projectRoot, { dryRun = false, rollback = false } = {}) {
+  const python = findPythonCommand();
+  if (!python.ok) {
+    throw new Error("Python 3.10 or newer is required. Install a supported version or set COAUTO_PYTHON to its executable path.");
+  }
+  const script = [
+    "import json, pathlib, sys",
+    "sys.path.insert(0, sys.argv[1])",
+    "from v2_migration import migrate_project, rollback_migration",
+    "root = pathlib.Path(sys.argv[2]).resolve()",
+    "schema_dir = pathlib.Path(sys.argv[3]).resolve()",
+    "action = sys.argv[4]",
+    "metadata_path = root / '.co-auto-research' / 'project.json'",
+    "metadata = json.loads(metadata_path.read_text(encoding='utf-8')) if metadata_path.is_file() else {}",
+    "project_id = str(metadata.get('projectId') or '') or None",
+    "result = rollback_migration(root) if action == 'rollback' else migrate_project(root, project_id=project_id, schema_dir=schema_dir, dry_run=(action == 'plan'))",
+    "print(json.dumps(result, sort_keys=True, separators=(',', ':')))"
+  ].join("; ");
+  const action = rollback ? "rollback" : dryRun ? "plan" : "migrate";
+  const result = spawnSync(
+    python.command,
+    [...python.args, "-S", "-c", script, path.join(TEMPLATE_ROOT, "ui"), projectRoot, path.join(TEMPLATE_ROOT, "schemas"), action],
+    { cwd: projectRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }
+  );
+  if (result.status !== 0) {
+    const detail = [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(`Project protocol ${action} failed${detail ? `: ${detail}` : "."}`);
+  }
+  const lines = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean);
+  try {
+    return JSON.parse(lines.at(-1) || "{}");
+  } catch {
+    throw new Error(`Project protocol ${action} returned invalid output.`);
+  }
+}
+
+function runProjectBackupSync(action, source, destination = "", expectedManifestSha256 = "", operator = "") {
+  const python = findPythonCommand();
+  if (!python.ok) {
+    throw new Error("Project backup and restore require Python 3.10 or newer. Set COAUTO_PYTHON if it is not on PATH.");
+  }
+  const script = [
+    "import json, pathlib, sys",
+    "sys.path.insert(0, sys.argv[1])",
+    "from v2_operations import acknowledge_restored_project, create_project_backup, restore_project_backup",
+    "action = sys.argv[2]",
+    "source = pathlib.Path(sys.argv[3]).resolve()",
+    "destination = pathlib.Path(sys.argv[4]).resolve()",
+    "expected = sys.argv[5]",
+    "operator = sys.argv[6]",
+    "result = create_project_backup(source, destination) if action == 'backup' else (restore_project_backup(source, destination, expected_manifest_sha256=expected) if action == 'restore' else acknowledge_restored_project(source, expected_manifest_sha256=expected, operator=operator))",
+    "print(json.dumps(result, sort_keys=True, separators=(',', ':')))"
+  ].join("; ");
+  const result = spawnSync(
+    python.command,
+    [...python.args, "-S", "-c", script, path.join(TEMPLATE_ROOT, "ui"), action, source, destination, expectedManifestSha256, operator],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, COAUTO_SCHEMA_DIR: path.join(TEMPLATE_ROOT, "schemas") },
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024
+    }
+  );
+  if (result.status !== 0) {
+    const detail = [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(`Project ${action} failed${detail ? `: ${detail}` : "."}`);
+  }
+  const lines = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean);
+  try {
+    return JSON.parse(lines.at(-1) || "{}");
+  } catch {
+    throw new Error(`Project ${action} returned invalid output.`);
+  }
 }
 
 function checkPort(host, port) {
@@ -1359,10 +1643,6 @@ function remoteProxy(options = {}, env = process.env) {
 function shouldUseGraftcpProxy(options = {}, env = process.env) {
   const proxy = remoteProxy(options, env);
   return Boolean(proxy.ok && process.platform === "linux");
-}
-
-function remoteTunnelMockConfigured() {
-  return Boolean(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL);
 }
 
 function spinnerEnabled(stream = process.stderr) {
@@ -1517,11 +1797,6 @@ function cloudflaredStandaloneDownloadUrl(env = process.env) {
   return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cloudflaredLinuxAssetArch()}`;
 }
 
-async function writeMockCloudflared(target) {
-  const body = "#!/bin/sh\necho cloudflared fake installed 0.0.0\n";
-  await fsp.writeFile(target, body, "utf8");
-}
-
 function runDownloadTool(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
@@ -1593,11 +1868,6 @@ function graftcpStandaloneDownloadUrl(env = process.env) {
   return `https://github.com/hmgle/graftcp/releases/download/${DEFAULT_GRAFTCP_VERSION}/graftcp_${DEFAULT_GRAFTCP_VERSION}_linux-${graftcpLinuxAssetArch()}.tar.gz`;
 }
 
-async function writeMockGraftcp(target) {
-  const body = "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then echo graftcp fake installed 0.0.0; exit 0; fi\necho graftcp fake installed 0.0.0\n";
-  await fsp.writeFile(target, body, "utf8");
-}
-
 async function extractGraftcpArchive(archivePath, target) {
   const extractDir = `${archivePath}.extract`;
   await fsp.rm(extractDir, { recursive: true, force: true });
@@ -1623,25 +1893,21 @@ async function commandInstallCloudflared(args) {
   }
   const target = defaultCloudflaredPath();
   const installDir = path.dirname(target);
-  const url = process.env.COAUTO_CLOUDFLARED_INSTALL_MOCK ? "" : cloudflaredStandaloneDownloadUrl();
+  const url = cloudflaredStandaloneDownloadUrl();
   const tempTarget = `${target}.download`;
   await fsp.mkdir(installDir, { recursive: true });
   console.log(`Installing cloudflared to ${target}`);
-  if (process.env.COAUTO_CLOUDFLARED_INSTALL_MOCK) {
-    await writeMockCloudflared(target);
-  } else {
-    const spinner = startSpinner(`Downloading ${url}`);
-    await fsp.rm(tempTarget, { force: true });
-    try {
-      await downloadFile(tempTarget, url, "cloudflared");
-      await fsp.rename(tempTarget, target);
-    } catch (error) {
-      spinner.stop();
-      await fsp.rm(tempTarget, { force: true });
-      throw error;
-    }
+  const spinner = startSpinner(`Downloading ${url}`);
+  await fsp.rm(tempTarget, { force: true });
+  try {
+    await downloadFile(tempTarget, url, "cloudflared");
+    await fsp.rename(tempTarget, target);
+  } catch (error) {
     spinner.stop();
+    await fsp.rm(tempTarget, { force: true });
+    throw error;
   }
+  spinner.stop();
   await fsp.chmod(target, 0o755);
   const result = spawnSync(target, ["--version"], { encoding: "utf8" });
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim().split(/\r?\n/)[0] || "";
@@ -1667,26 +1933,22 @@ async function commandInstallGraftcp(args) {
   }
   const target = defaultGraftcpPath();
   const installDir = path.dirname(target);
-  const url = process.env.COAUTO_GRAFTCP_INSTALL_MOCK ? "" : graftcpStandaloneDownloadUrl();
+  const url = graftcpStandaloneDownloadUrl();
   const tempArchive = `${target}.tar.gz.download`;
   await fsp.mkdir(installDir, { recursive: true });
   console.log(`Installing graftcp to ${target}`);
-  if (process.env.COAUTO_GRAFTCP_INSTALL_MOCK) {
-    await writeMockGraftcp(target);
-  } else {
-    const spinner = startSpinner(`Downloading ${url}`);
-    await fsp.rm(tempArchive, { force: true });
-    try {
-      await downloadFile(tempArchive, url, "graftcp");
-      await extractGraftcpArchive(tempArchive, target);
-    } catch (error) {
-      spinner.stop();
-      await fsp.rm(tempArchive, { force: true });
-      throw error;
-    }
+  const spinner = startSpinner(`Downloading ${url}`);
+  await fsp.rm(tempArchive, { force: true });
+  try {
+    await downloadFile(tempArchive, url, "graftcp");
+    await extractGraftcpArchive(tempArchive, target);
+  } catch (error) {
     spinner.stop();
     await fsp.rm(tempArchive, { force: true });
+    throw error;
   }
+  spinner.stop();
+  await fsp.rm(tempArchive, { force: true });
   await fsp.chmod(target, 0o755);
   const result = spawnSync(target, ["--help"], { encoding: "utf8" });
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim().split(/\r?\n/)[0] || "";
@@ -1719,16 +1981,13 @@ function remoteTunnelCommand(localUrl, options = {}, env = process.env) {
         "tunnel", "--url", localUrl,
         "--protocol", "http2"
       ],
-      shell: false,
       viaProxy: true,
       proxy
     };
   }
-  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(cloudflared.command);
+  const prepared = argvCommand(cloudflared.command, ["tunnel", "--url", localUrl], env);
   return {
-    command: cloudflared.command,
-    args: ["tunnel", "--url", localUrl],
-    shell,
+    ...prepared,
     viaProxy: false,
     proxy
   };
@@ -1750,18 +2009,10 @@ function annotateRemoteTunnelError(error, commandInfo) {
 }
 
 async function startRemoteTunnel(localUrl, options = {}) {
-  const mockUrl = String(process.env.COAUTO_REMOTE_TUNNEL_MOCK_URL || "").trim();
-  if (mockUrl) {
-    return { url: mockUrl, close: async () => {} };
-  }
-  if (process.env.COAUTO_REMOTE_TUNNEL_MOCK_FAIL) {
-    throw remoteSetupError("cloudflared_failed", "Mock cloudflared failure.");
-  }
   const commandInfo = remoteTunnelCommand(localUrl, options);
   return new Promise((resolve, reject) => {
     const child = spawn(commandInfo.command, commandInfo.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      shell: commandInfo.shell,
       env: tunnelChildEnv(commandInfo)
     });
     let settled = false;
@@ -1824,6 +2075,7 @@ function printRemoteSshAccessHint(url, options) {
   console.log("");
   console.log("Then open this in your local browser:");
   console.log(`  ${localUrl}`);
+  console.log(`  Access key: ${options.remoteAuthToken}`);
   console.log("");
   if (!process.env.COAUTO_REMOTE_TARGET) {
     console.log("Replace <ssh-host> with the same host or alias you used to connect to this server.");
@@ -1869,6 +2121,7 @@ async function printRemoteAccessHint(url, options) {
       console.log("");
       console.log("Open:");
       console.log(`  ${tunnel.url}`);
+      console.log(`  Access key: ${options.remoteAuthToken}`);
       console.log("");
       console.log("Keep this terminal open. Press Ctrl+C to stop.");
       return tunnel;
@@ -1926,8 +2179,8 @@ function openBrowser(url) {
     command = "open";
     args = [url];
   } else if (process.platform === "win32") {
-    command = "cmd";
-    args = ["/c", "start", "", url];
+    command = "rundll32.exe";
+    args = ["url.dll,FileProtocolHandler", url];
   } else {
     command = "xdg-open";
     args = [url];
@@ -1998,7 +2251,7 @@ async function commandDoctor(args) {
   const claude = claudeAvailable();
   const anyAgent = codex.ok || claude.ok;
   const checks = [
-    ["node", { ok: Number(process.versions.node.split(".")[0]) >= 18, output: process.version }],
+    ["node", { ok: Number(process.versions.node.split(".")[0]) >= 20, output: process.version }],
     ["python", { ok: python.ok, output: python.output || python.label }],
     ["git", commandAvailable("git")],
     ["cloudflared", cloudflared],
@@ -2029,7 +2282,7 @@ async function commandDoctor(args) {
   const packageUi = path.join(TEMPLATE_ROOT, "ui", "server.py");
   console.log(`${fs.existsSync(packageUi) ? "ok" : "missing"}  package ui/server.py${fs.existsSync(packageUi) ? ` - package-managed runtime ${packageVersion()}` : ""}`);
   const currentIsProject = isProjectRootSync(process.cwd());
-  console.log(`${currentIsProject ? "ok" : "warn"}      current directory${currentIsProject ? " is a CoAutoResearch project" : " is not a CoAutoResearch project"}`);
+  console.log(`${currentIsProject ? "ok" : "optional"}      current directory${currentIsProject ? " is a CoAutoResearch project" : " is not a research project; create or open one in the dashboard"}`);
   if (currentIsProject) {
     const reviewerStatus = projectReviewerStatusSync(process.cwd());
     const storage = reviewerStatus.reviewStorage || {};
@@ -2048,15 +2301,23 @@ async function commandDoctor(args) {
     if (reviewerStatus.outdated) console.log("        run: co-auto-research upgrade-project");
   }
   const projectUi = path.join(process.cwd(), "ui", "server.py");
-  console.log(`${fs.existsSync(projectUi) ? "ok" : "warn"}      legacy project ui/server.py${fs.existsSync(projectUi) ? " present as fallback" : " not found in current directory"}`);
+  console.log(`${fs.existsSync(projectUi) ? "ok" : fs.existsSync(packageUi) ? "optional" : "warn"}      legacy project ui/server.py${fs.existsSync(projectUi) ? " present as fallback" : fs.existsSync(packageUi) ? " not needed; the package runtime is available" : " not found in current directory"}`);
 }
 
 async function commandUi(args) {
   const { options } = parseOptions(args);
   const host = options.host || DEFAULT_HOST;
   const port = options.port || DEFAULT_PORT;
+  const configuredRemoteAuthToken = String(process.env.COAUTO_REMOTE_AUTH_TOKEN || "").trim();
+  if (options.remote && configuredRemoteAuthToken && configuredRemoteAuthToken.length < 32) {
+    throw new Error("COAUTO_REMOTE_AUTH_TOKEN must contain at least 32 characters in remote mode.");
+  }
+  const remoteAuthToken = options.remote
+    ? configuredRemoteAuthToken || randomBytes(32).toString("base64url")
+    : configuredRemoteAuthToken;
+  const runtimeOptions = { ...options, remoteAuthToken };
   const useCloudflareRemote = Boolean(options.remote && remoteMode() !== "ssh");
-  if (useCloudflareRemote && !remoteTunnelMockConfigured()) {
+  if (useCloudflareRemote) {
     const cloudflared = cloudflaredAvailable();
     if (!cloudflared.ok) {
       printCloudflaredInstallInstructions(options);
@@ -2072,7 +2333,7 @@ async function commandUi(args) {
   }
   const python = findPythonCommand();
   if (!python.ok) {
-    throw new Error("No Python 3 executable found. Install Python 3 or set COAUTO_PYTHON to the Python executable path.");
+    throw new Error("Python 3.10 or newer is required. Install a supported version or set COAUTO_PYTHON to its executable path.");
   }
   let projectsDir = options["projects-dir"] ? path.resolve(process.cwd(), options["projects-dir"]) : "";
   const projectRoot = options.project ? path.resolve(process.cwd(), options.project) : process.cwd();
@@ -2081,8 +2342,8 @@ async function commandUi(args) {
   const projectMode = !projectsDir && (Boolean(options.project) || isProjectRootSync(projectRoot));
   if (!projectsDir && !projectMode) {
     projectsDir = path.resolve(process.cwd(), DEFAULT_PROJECTS_DIR);
-    fs.mkdirSync(projectsDir, { recursive: true });
   }
+  if (projectsDir) fs.mkdirSync(projectsDir, { recursive: true });
   let serverPath = packageServerPath;
   let usingPackageServer = fs.existsSync(packageServerPath);
   if (!usingPackageServer && projectMode && fs.existsSync(projectServerPath)) {
@@ -2096,6 +2357,8 @@ async function commandUi(args) {
   }
   if (options.remote) {
     console.log("Remote mode enabled.");
+    console.log("Temporary personal access only: --remote exposes a browser endpoint protected by a generated access key.");
+    console.log("Do not share the link or access key. Using --remote confirms this exposure.");
     if (localhostHost(host)) {
       if (useCloudflareRemote) {
         console.log("The UI stays on localhost; a Cloudflare browser link will appear after startup.");
@@ -2126,11 +2389,13 @@ async function commandUi(args) {
     cwd: projectsDir || projectRoot,
     env: {
       ...process.env,
-      COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT
+      COAUTO_TEMPLATE_ROOT: TEMPLATE_ROOT,
+      COAUTO_SCHEMA_DIR: path.join(TEMPLATE_ROOT, "schemas"),
+      ...(options.remote ? { COAUTO_REMOTE_AUTH_TOKEN: remoteAuthToken } : {})
     },
     stdio: ["inherit", "pipe", "inherit"]
   });
-  const remoteState = attachServerOutput(child, options);
+  const remoteState = attachServerOutput(child, runtimeOptions);
   let shuttingDown = false;
   let remoteTunnelClosed = false;
   async function closeRemoteTunnel() {
@@ -2208,12 +2473,14 @@ async function commandUpgrade() {
 async function commandUpgradeProject(args) {
   const { options, rest } = parseOptions(args);
   const dryRun = Boolean(options["dry-run"]);
+  const rollback = Boolean(options.rollback);
+  if (dryRun && rollback) throw new Error("--dry-run and --rollback cannot be used together.");
   let projects = [];
   if (options.all) {
-    if (rest.length > 0) throw new Error("Unexpected argument with --all. Usage: co-auto-research upgrade-project --all [--projects-dir <dir>] [--dry-run]");
+    if (rest.length > 0) throw new Error("Unexpected argument with --all. Usage: co-auto-research upgrade-project --all [--projects-dir <dir>] [--dry-run] [--rollback]");
     projects = collectProjectCandidates(options);
   } else {
-    if (rest.length > 1) throw new Error("Usage: co-auto-research upgrade-project [project-name-or-path] [--projects-dir <dir>] [--dry-run]");
+    if (rest.length > 1) throw new Error("Usage: co-auto-research upgrade-project [project-name-or-path] [--projects-dir <dir>] [--dry-run] [--rollback]");
     const target = rest[0] || options.project || "";
     if (!target && isProjectRootSync(process.cwd())) {
       const candidates = new Map();
@@ -2227,27 +2494,119 @@ async function commandUpgradeProject(args) {
     console.log("No CoAutoResearch projects found.");
     return;
   }
+  if (!dryRun) {
+    for (const project of projects) assertNoActiveV2GuardSync(project);
+  }
   let changedCount = 0;
   for (const project of projects) {
+    if (rollback) {
+      const result = runProjectProtocolMigrationSync(project.path, { rollback: true });
+      changedCount += result.changed ? 1 : 0;
+      console.log(`${project.name} (${project.relativePath}): ${result.status || result.reason || "rollback complete"}`);
+      if (result.backup_retained) console.log(`  backup retained: ${result.backup_retained}`);
+      continue;
+    }
     const before = projectReviewerStatusSync(project.path);
     const marker = before.outdated ? "outdated" : "current";
-    console.log(`${project.name} (${project.relativePath}): core instructions ${marker}`);
-    if (!before.outdated) continue;
-    const result = syncProjectReviewersSync(project.path, { dryRun });
-    changedCount += 1;
+    console.log(`${project.name} (${project.relativePath}): package-managed project files ${marker}`);
+    const reviewerResult = before.outdated ? syncProjectReviewersSync(project.path, { dryRun }) : null;
+    const protocolResult = runProjectProtocolMigrationSync(project.path, { dryRun });
+    const protocolChanged = Boolean(protocolResult.changed || protocolResult.status === "planned");
+    if (before.outdated || protocolChanged) changedCount += 1;
     if (dryRun) {
-      console.log("  dry run: would sync core reviewers, core protocol instructions, and write baseline metadata");
-      console.log(`  dry run: would create ${result.reviewStorage.created.length} per-reviewer files, backfill ${result.reviewStorage.backfilled.length}, and normalize ${result.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews`);
+      if (reviewerResult) {
+        console.log(`  dry run: would sync all package-managed project files (${reviewerResult.managedTemplate.copied.length} changed or missing file(s)) and write baseline metadata`);
+        console.log(`  dry run: would create ${reviewerResult.reviewStorage.created.length} per-reviewer files, backfill ${reviewerResult.reviewStorage.backfilled.length}, and normalize ${reviewerResult.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews`);
+      }
+      if (protocolResult.status === "planned") {
+        console.log(`  dry run: would add ${protocolResult.create_paths.length} v2 canonical path(s), replace ${protocolResult.replace_paths.length}, and preserve ${protocolResult.preserved_file_count} user-owned file(s)`);
+      } else {
+        console.log("  dry run: project protocol is already v2; no canonical migration is needed");
+      }
     } else {
-      console.log(`  synced ${result.copied.length} core reviewers`);
-      console.log(`  synced ${result.protocolCopied.length} core protocol instructions`);
-      console.log(`  review files: ${result.reviewStorage.created.length} created, ${result.reviewStorage.backfilled.length} backfilled, ${result.reviewStorage.placeholders.length} missing-review placeholders, ${result.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews normalized`);
-      console.log(`  backup: ${result.backupPath || "none"}`);
+      if (reviewerResult) {
+        console.log(`  synced ${reviewerResult.copied.length} core reviewers`);
+        console.log(`  synced ${reviewerResult.protocolCopied.length} core protocol instructions`);
+        console.log(`  synced ${reviewerResult.managedTemplate.copied.length} other package-managed project files`);
+        console.log(`  review files: ${reviewerResult.reviewStorage.created.length} created, ${reviewerResult.reviewStorage.backfilled.length} backfilled, ${reviewerResult.reviewStorage.placeholders.length} missing-review placeholders, ${reviewerResult.reviewStorage.normalizedManuscriptReviews.length} manuscript reviews normalized`);
+        console.log(`  instruction backup: ${reviewerResult.backupPath || "none"}`);
+      }
+      console.log(`  protocol: ${protocolResult.status || "v2"}`);
+      if (protocolResult.backup_path) console.log(`  migration backup: ${protocolResult.backup_path}`);
     }
   }
-  if (!changedCount) console.log("All project core instructions are current.");
+  if (!changedCount) console.log(rollback ? "No project migration was rolled back." : "All package-managed project files are current.");
   else if (dryRun) console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} would be updated.`);
-  else console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} updated to instruction baseline ${REVIEWER_BASELINE_VERSION}.`);
+  else if (rollback) console.log(`${changedCount} project migration${changedCount === 1 ? "" : "s"} rolled back.`);
+  else console.log(`${changedCount} project${changedCount === 1 ? "" : "s"} updated to protocol 2.0 and instruction baseline ${REVIEWER_BASELINE_VERSION}.`);
+}
+
+async function commandBackup(args) {
+  const { options, rest } = parseOptions(args);
+  if (rest.length > 1 || !options.output) {
+    throw new Error("Usage: co-auto-research backup [project-name-or-path] --output <backup-dir>");
+  }
+  let projectPath;
+  const requested = rest[0] || options.project || "";
+  if (requested) {
+    projectPath = resolveAttachProject(requested, options).path;
+  } else if (isProjectRootSync(process.cwd())) {
+    projectPath = process.cwd();
+  } else {
+    throw new Error("Run backup inside a project or provide a project name/path.");
+  }
+  const destination = path.resolve(String(options.output));
+  const result = runProjectBackupSync("backup", projectPath, destination);
+  console.log(`Project backup created: ${result.path}`);
+  console.log(`  backup id: ${result.backup_id}`);
+  console.log(`  files: ${result.file_count}`);
+  console.log(`  canonical revision: ${result.canonical_revision ?? "none"}`);
+  console.log(`  manifest sha256: ${result.manifest_sha256}`);
+}
+
+async function commandRestore(args) {
+  const { options, rest } = parseOptions(args);
+  if (Object.keys(options).some((key) => key !== "expected-manifest-sha256") || !options["expected-manifest-sha256"] || rest.length !== 2) {
+    throw new Error("Usage: co-auto-research restore <backup-dir> <empty-project-dir> --expected-manifest-sha256 <sha256>");
+  }
+  const source = path.resolve(rest[0]);
+  const destination = path.resolve(rest[1]);
+  const result = runProjectBackupSync("restore", source, destination, options["expected-manifest-sha256"]);
+  console.log(`Project backup restored: ${result.path}`);
+  console.log(`  backup id: ${result.backup_id}`);
+  console.log(`  status: ${result.status}`);
+  console.log(`  files: ${result.file_count}`);
+  console.log(`  canonical revision: ${result.canonical_revision ?? "none"}`);
+  console.log(`  manifest sha256: ${result.manifest_sha256}`);
+  console.log(`  recovery required: ${Boolean(result.recovery_required)}`);
+  console.log(`  read only: ${Boolean(result.read_only)}`);
+  console.log(`  run controls disabled: ${Boolean(result.run_controls_disabled)}`);
+}
+
+async function commandRestoreAcknowledge(args) {
+  const { options, rest } = parseOptions(args);
+  const allowed = new Set(["expected-manifest-sha256", "operator"]);
+  if (Object.keys(options).some((key) => !allowed.has(key)) || !options["expected-manifest-sha256"] || !options.operator || rest.length !== 1) {
+    throw new Error("Usage: co-auto-research restore-acknowledge <restored-project-dir> --expected-manifest-sha256 <sha256> --operator <identifier>");
+  }
+  const project = path.resolve(rest[0]);
+  const result = runProjectBackupSync(
+    "acknowledge",
+    project,
+    "",
+    options["expected-manifest-sha256"],
+    options.operator
+  );
+  console.log(`Restore acknowledged: ${result.path}`);
+  console.log(`  backup id: ${result.backup_id}`);
+  console.log(`  status: ${result.status}`);
+  console.log(`  operational status: ${result.operational_status}`);
+  console.log(`  canonical revision: ${result.canonical_revision ?? "none"}`);
+  console.log(`  manifest sha256: ${result.manifest_sha256}`);
+  console.log(`  operator: ${result.operator}`);
+  console.log(`  recovery required: ${Boolean(result.recovery_required)}`);
+  console.log(`  read only: ${Boolean(result.read_only)}`);
+  console.log(`  run controls disabled: ${Boolean(result.run_controls_disabled)}`);
 }
 
 function commandVersion() {
@@ -2257,6 +2616,10 @@ function commandVersion() {
 async function main() {
   const [command = "help", ...args] = process.argv.slice(2);
   if (command === "help" || command === "--help" || command === "-h") {
+    console.log(usage());
+    return;
+  }
+  if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
     console.log(usage());
     return;
   }
@@ -2270,6 +2633,9 @@ async function main() {
   if (command === "doctor") return commandDoctor(args);
   if (command === "upgrade") return commandUpgrade(args);
   if (command === "upgrade-project") return commandUpgradeProject(args);
+  if (command === "backup") return commandBackup(args);
+  if (command === "restore") return commandRestore(args);
+  if (command === "restore-acknowledge") return commandRestoreAcknowledge(args);
   throw new Error(`Unknown command: ${command}\n\n${usage()}`);
 }
 

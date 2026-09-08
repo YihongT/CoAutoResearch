@@ -1,0 +1,32 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "merge_request",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "base_revision": 0,
+  "stage_id": "STAGE-000001-aaaaaaaa",
+  "staged_update_manifest_path": "research_trajectory/.staging/000001_test-main-signal/STAGE-000001-aaaaaaaa/STAGED_UPDATE_MANIFEST.json",
+  "requested_card_decisions": [
+    {
+      "card_id": "RC-000001-01",
+      "decision": "accept_with_qualification",
+      "qualification": "Tentative until replicated."
+    }
+  ],
+  "requested_line_updates": [
+    {
+      "line_id": "L0001",
+      "effect": "strengthens",
+      "rationale": "Adds scoped evidence."
+    }
+  ],
+  "requested_campaign_updates": [
+    "C0001/main_signal -> tentative"
+  ],
+  "conflicts": [],
+  "human_implications": "No blocking human decision.",
+  "summary": "Accept the scoped result with qualification."
+}

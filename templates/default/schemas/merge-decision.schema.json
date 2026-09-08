@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "merge-decision.schema.json",
+  "title": "Merge Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "stage_id",
+    "base_revision",
+    "overall_status",
+    "card_decisions",
+    "canonical_update_decisions",
+    "conflict_resolution",
+    "qualifications",
+    "review_manifest_hash",
+    "stage_manifest_hash",
+    "lead_rationale"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "merge_decision"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "stage_id": {
+      "$ref": "common.schema.json#/$defs/stage_id"
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "overall_status": {
+      "enum": [
+        "approved",
+        "rejected",
+        "needs_human"
+      ]
+    },
+    "card_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "card_id",
+          "decision",
+          "qualification",
+          "canonical_destinations"
+        ],
+        "properties": {
+          "card_id": {
+            "$ref": "common.schema.json#/$defs/result_card_id"
+          },
+          "decision": {
+            "enum": [
+              "accept",
+              "accept_with_qualification",
+              "reject",
+              "supersede",
+              "defer",
+              "needs_human"
+            ]
+          },
+          "qualification": {
+            "type": "string"
+          },
+          "canonical_destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/relative_path"
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "accept_with_qualification"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "qualification": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "canonical_destinations": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "accept",
+                    "supersede"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "canonical_destinations": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "reject",
+                    "defer",
+                    "needs_human"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "canonical_destinations": {
+                  "maxItems": 0
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "canonical_update_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "decision",
+          "reason"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "decision": {
+            "enum": [
+              "apply",
+              "omit",
+              "needs_human"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "conflict_resolution": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "qualifications": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "review_manifest_hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "stage_manifest_hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "lead_rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "overall_status": {
+            "const": "approved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "card_decisions": {
+            "items": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "accept",
+                    "accept_with_qualification",
+                    "reject",
+                    "supersede",
+                    "defer"
+                  ]
+                }
+              }
+            }
+          },
+          "canonical_update_decisions": {
+            "items": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "apply",
+                    "omit"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "overall_status": {
+            "const": "rejected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "card_decisions": {
+            "items": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "reject",
+                    "defer",
+                    "supersede"
+                  ]
+                }
+              }
+            }
+          },
+          "canonical_update_decisions": {
+            "items": {
+              "properties": {
+                "decision": {
+                  "const": "omit"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "overall_status": {
+            "const": "needs_human"
+          }
+        }
+      },
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "card_decisions": {
+                "contains": {
+                  "properties": {
+                    "decision": {
+                      "const": "needs_human"
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "canonical_update_decisions": {
+                "contains": {
+                  "properties": {
+                    "decision": {
+                      "const": "needs_human"
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

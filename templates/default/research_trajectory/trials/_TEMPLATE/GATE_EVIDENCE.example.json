@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "gate_evidence",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "killed_by_human": false,
+  "final_ready": false,
+  "human_blocker": false,
+  "budget_reached": false,
+  "operational_blocker": false,
+  "viable_path": true,
+  "concrete_high_value_move": true,
+  "expected_value": "high",
+  "reasons": [
+    "Replication remains a high-value bounded move."
+  ],
+  "recommended_status": "continue"
+}

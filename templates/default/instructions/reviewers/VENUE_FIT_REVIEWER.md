@@ -2,150 +2,71 @@
 
 ## Purpose
 
-Review whether the current research direction, manuscript blueprint, evidence standard, writing structure, and figure/table style fit the target venue defined in:
+Assess whether the active research line, evidence package, manuscript architecture, and proposed next move fit the configured target venue and lock level.
 
-```text
-PROJECT.md
-```
+## Phase and output
 
-This reviewer should judge venue fit by comparing the project against representative papers from the target venue, not only by using generic intuition.
+- Phase: `post_stage` or `final`.
+- Reviewer key/scope: `venue_fit` / `venue`.
+- Bind to the exact stage ID/hash.
 
-## Required Reading
+## Required reading
 
-Before reviewing, read:
+- `instructions/reviewers/REVIEW_TAXONOMY.md`;
+- Project and target audience;
+- `TARGET_VENUE.json/.md`, `VENUE_PROFILE.json/.md`, lock provenance;
+- representative seed-paper list, style notes, and figure/table notes;
+- current active/candidate lines and campaigns;
+- Plan, Report, cards, Merge Request, candidate snapshot, Human Brief, Gate Evidence;
+- manuscript Blueprint/Paper Plan/draft when applicable;
+- Evidence, Manuscript, Figure/Table, and Reference reviews when available.
 
-```text
-instructions/reviewers/REVIEW_TAXONOMY.md
-PROJECT.md
-research_trajectory/STATE.md
-research_trajectory/CURRENT_FINDINGS.md
-research_trajectory/trials/<trial_id>/PLAN.md
-research_trajectory/trials/<trial_id>/REPORT.md
-manuscript/BLUEPRINT.md
-resources/target_venue/SEED_PAPERS.md
-resources/target_venue/STYLE_NOTES.md
-resources/target_venue/FIGURE_TABLE_NOTES.md
-```
+## Review criteria
 
-Also inspect manuscript-facing materials when available:
+### Venue-state integrity
 
-```text
-manuscript/sections/
-manuscript/figures/FIGURE_SPECS.md
-manuscript/tables/
-manuscript/appendix/
-```
+- Is target venue, audience, article type, lock level, and profile path explicit?
+- Is venue evidence based on inspected representative sources rather than memory or generic assumptions?
+- Are seed papers relevant to the project contribution type, not merely from the venue?
+- Is any locked venue change backed by a later formal human intervention?
 
-## Seed Paper Requirement
+### Contribution fit
 
-The venue fit review must be grounded in representative papers from the target venue.
+- Does the active line match contribution patterns accepted by the venue?
+- Is the paper identity clear: method, system, empirical study, benchmark, theory, design/tool, position, or other?
+- Is novelty framed for the venue’s audience and neighboring literature?
+- Is the claim posture too broad, too narrow, or mismatched to the venue?
 
-First, check:
+### Evidence standard
 
-```text
-resources/target_venue/SEED_PAPERS.md
-resources/target_venue/papers/
-```
+- Does the evidence type match venue expectations for the stated contribution?
+- Are expected baselines, controls, ablations, user evidence, qualitative grounding, robustness, artifact evaluation, or theoretical proof present or tracked in campaigns?
+- Are proxy or formative findings being overstated as venue-level efficacy?
+- Does the final-readiness claim account for common rejection risks?
 
-If suitable seed papers already exist, use them as comparison references.
+### Manuscript and presentation
 
-If no suitable seed papers exist, the reviewer should require a trial to collect them before making a strong venue-fit judgment.
+- Does section architecture resemble successful representative work without imitation?
+- Are introduction pacing, related-work positioning, methods/detail balance, discussion, limitations, appendices, and supplementary materials appropriate?
+- Are figures/tables carrying the expected explanatory or evidentiary load?
+- Are page/format constraints treated as packaging constraints rather than a reason to omit necessary evidence?
 
-A suitable seed set should usually include 3-5 recent and relevant papers from the target venue or closely related venues.
+### Trial and campaign implications
 
-The seed papers are used to compare:
+- Does the current trial close a venue-relevant gap?
+- Is the next move higher venue leverage than low-value polishing?
+- Are venue-required campaign components correctly passed, waived, or still open?
+- If the venue is exploratory/preferred, is an alternative recommendation evidence-based and clearly non-authoritative?
 
-* manuscript structure;
-* abstract and introduction style;
-* contribution framing;
-* evidence standard;
-* experiment / analysis organization;
-* figure and table density;
-* figure/table visual style;
-* whether active tables are formatted as publication-ready manuscript tables
-  rather than back-matter specs;
-* appendix or supplementary material expectations;
-* level of claim strength;
-* limitation and discussion style.
+### Representative-source standard
 
-Do not copy the content, claims, or ideas of seed papers. Use them only as venue-style and evidence-standard references.
-
-## Review Questions
-
-Evaluate:
-
-1. Does the current project match the target venue's expected contribution type?
-2. Is the research question framed at the right level of importance for the venue?
-3. Does the manuscript blueprint resemble strong papers from the target venue in structure and pacing?
-4. Are the claims too weak, too broad, or mismatched for the venue?
-5. Is the evidence standard comparable to recent representative papers?
-6. Are the planned figures and tables aligned with the visual and explanatory
-   style of the venue, including publication-ready table format, density,
-   caption style, and whether tables belong in the main text or supplement?
-7. Does the project need more experiments, stronger analysis, clearer mechanism, better framing, or a different target venue?
-8. What specific gaps remain relative to the seed papers?
+When venue fit is material, ground the judgment in an inspected representative
+set, normally three to five recent relevant papers or primary venue guidance.
+Missing seed papers, an uncertain article type, or generic plausibility is not a
+pass. Compare contribution framing, evidence standard, architecture, display
+density, appendix/supplement expectations, and claim posture without copying a
+source's content or ideas.
 
 ## Pass Standard
 
-Use `Decision: pass` only when the current direction or deliverable is strongly
-fit for the declared target, grounded in representative venue examples or other
-appropriate target evidence, and no required venue-positioning action remains.
-Generic plausibility, missing seed papers, uncertain article type, or "fit if
-revised" requires `Decision: continue`.
-
-## Output Location
-
-Write the canonical current-trial venue fit review to:
-
-```text
-research_trajectory/trials/<trial_id>/reviews/VENUE_FIT_REVIEW.md
-```
-
-If the review is manuscript-facing, you may also mirror or summarize it under:
-
-```text
-manuscript/reviews/
-```
-
-but the current trial file remains required.
-
-## Output Format
-
-Use the shared schema from `instructions/reviewers/REVIEW_TAXONOMY.md`,
-including source trial, generated timestamp, instruction file, reviewed input
-paths, context summary, and migration source. Then add this venue-specific
-detail:
-
-```markdown
-# Venue Fit Review
-
-## Target Venue
-
-## Seed Papers Consulted
-
-List seed papers and local paths or links.
-
-## Overall Judgment
-
-strong fit / plausible fit / weak fit / wrong venue / cannot judge until seed papers are collected
-
-## Comparison Against Seed Papers
-
-### Structure
-
-### Contribution Framing
-
-### Evidence Standard
-
-### Figures and Tables
-
-### Writing Style
-
-### Appendix / Supplementary Expectations
-
-## Major Gaps
-
-## Required Actions
-
-## Suggested Target Venue Adjustment, if any
-```
+`pass` requires a defensible venue/contribution match, venue-appropriate evidence and architecture for the reviewed scope, no silent locked-venue change, and no untracked venue-critical gap. Final pass requires the complete profile and all venue-required campaigns to be satisfied.

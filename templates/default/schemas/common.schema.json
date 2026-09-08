@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.schema.json",
+  "title": "CoAutoResearch v2 Common Definitions",
+  "type": "object",
+  "$defs": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[0-9]{6}_[a-z0-9][a-z0-9-]{0,79}$"
+    },
+    "trial_reference_id": {
+      "type": "string",
+      "pattern": "^[0-9]{6}_[a-z0-9][a-z0-9_-]{0,79}$"
+    },
+    "result_card_id": {
+      "type": "string",
+      "pattern": "^RC-[0-9]{6}-[0-9]{2}$"
+    },
+    "line_id": {
+      "type": "string",
+      "pattern": "^L[0-9]{4}$"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^C[0-9]{4}$"
+    },
+    "human_task_id": {
+      "type": "string",
+      "pattern": "^HT-[0-9]{4}$"
+    },
+    "transaction_id": {
+      "type": "string",
+      "pattern": "^TXN-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$"
+    },
+    "stage_id": {
+      "type": "string",
+      "pattern": "^STAGE-[0-9]{6}-[a-f0-9]{8}$"
+    },
+    "review_id": {
+      "type": "string",
+      "pattern": "^RV-[0-9]{6}-[a-z_]+-[0-9]{2}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^/"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[A-Za-z]:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "\\\\"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "//"
+          }
+        },
+        {
+          "not": {
+            "pattern": "/$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "\\u0000"
+          }
+        }
+      ]
+    },
+    "nonempty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "string_list": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "source_kind",
+        "scope"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "common.schema.json#/$defs/relative_path"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_kind": {
+          "enum": [
+            "artifact",
+            "resource",
+            "code",
+            "dataset",
+            "review",
+            "trial",
+            "manuscript",
+            "external_url"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "extensions": {
+          "$ref": "common.schema.json#/$defs/extensions"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "source_kind"
+            ],
+            "properties": {
+              "source_kind": {
+                "const": "external_url"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          },
+          "else": {
+            "required": [
+              "sha256"
+            ],
+            "properties": {
+              "sha256": {
+                "$ref": "common.schema.json#/$defs/sha256"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "role"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "common.schema.json#/$defs/relative_path"
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "extensions": {
+          "$ref": "common.schema.json#/$defs/extensions"
+        }
+      }
+    },
+    "line_effect": {
+      "enum": [
+        "creates",
+        "strengthens",
+        "weakens",
+        "narrows",
+        "broadens",
+        "supersedes",
+        "kills",
+        "no_change"
+      ]
+    },
+    "reviewer_key": {
+      "enum": [
+        "plan",
+        "process",
+        "evidence",
+        "venue_fit",
+        "manuscript",
+        "figure_table",
+        "reference",
+        "final_gate"
+      ]
+    },
+    "gate_status": {
+      "enum": [
+        "continue",
+        "pass",
+        "needs_human",
+        "paused_budget",
+        "blocked",
+        "no_viable_line",
+        "killed_by_human"
+      ]
+    }
+  }
+}

@@ -1,95 +1,63 @@
 # Contributing
 
-Thanks for your interest in CoAutoResearch! Contributions of all kinds are
-welcome — bug reports, feature ideas, documentation, and code.
+Bug reports, feature ideas, documentation, and focused code changes are welcome.
+Please follow our [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities
+privately as described in [SECURITY.md](SECURITY.md).
 
-The project follows a standard fork-and-pull-request workflow. By participating,
-you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
+## Work from a checkout
 
-User-facing setup and product usage live in [README.md](README.md) and
-[docs/](docs/); this file is for people changing the project itself.
-
-## Ways to contribute
-
-- **Report a bug** or **request a feature** by opening an issue — please search
-  existing issues first.
-- **Ask a question** or share an idea in GitHub Discussions.
-- **Send a change** as a pull request (see below).
-
-For anything beyond a small fix, please open an issue first so we can agree on
-the approach before you invest time — it avoids surprises during review.
-
-Found a security problem? Do **not** open a public issue — see
-[SECURITY.md](SECURITY.md).
-
-## Development setup
-
-Clone the repository:
+Follow [agent setup](docs/agent-setup.md) for prerequisites and provider login.
+There is no application dependency installation or build step:
 
 ```bash
-git clone https://github.com/YihongT/CoAutoResearch.git
-cd CoAutoResearch
+node bin/auto-research.js doctor
+node bin/auto-research.js ui --projects-dir ../coauto-projects
 ```
 
-Install the local checkout as the global CLI while developing:
+Keep research projects outside the repository. Do not modify the reusable
+`templates/default/` by running research inside it. Product changes belong in
+`bin/` and `templates/default/ui/`; research protocol instructions and schemas
+live alongside that UI in the template. Public documentation lives in `docs/`.
 
-```bash
-npm link
-```
+## Submit a change
 
-`co-auto-research` now points at this checkout, so pulling changes updates the
-command without reinstalling.
+1. Open an issue before a substantial change so the scope can be agreed.
+2. Create a branch and keep the change focused. Preserve users' projects and
+   existing settings when changing installation, migration, or runtime behavior.
+3. Reproduce the original issue and verify the changed behavior through the
+   relevant dashboard controls or CLI commands. Include the environment,
+   steps, outcomes, and remaining limitations in the pull request.
+4. Run `npm run pack:dry-run` and inspect the file list. For packaging changes,
+   verify a fresh installation as described in [RELEASING.md](RELEASING.md).
+5. Update user-facing instructions when behavior changes, then open the pull
+   request against `main`.
 
-To compare behavior with the current published package, install the latest npm
-release in a separate shell or environment:
+This repository contains the product and its documentation. Development test
+suites, fixtures, and local verification artifacts are not distributed here.
+The packaging workflow builds a tarball; it is not an end-to-end quality gate.
+Do not include research data, credentials, generated papers, logs, or local
+verification projects in a contribution.
 
-```bash
-npm install -g co-auto-research@latest
-```
+## Documentation
 
-## Pull request workflow
-
-1. **Fork** the repository and create a branch from `main`
-   (for example, `git checkout -b fix/clearer-error-message`).
-2. Make your change. Keep it focused — one logical change per pull request.
-3. Run the checks locally; they must pass:
-
-   ```bash
-   npm test
-   npm run pack:dry-run
-   ```
-
-   `npm test` verifies the reusable project template, UI flow expectations, and
-   CLI smoke behavior.
-4. Write a clear commit message and PR description: what changed and why, and
-   link the related issue (for example, `Closes #123`).
-5. Open the pull request against `main`. A maintainer will review — please
-   respond to feedback and keep your branch up to date.
-
-By submitting a contribution, you agree that it is licensed under the project's
-[Apache-2.0](LICENSE) license.
-
-## Documentation site
-
-The public documentation source lives in `docs/` and should stay written from a
-user perspective: installation, first run, continuing work, platform notes, and
-safe remote use.
-
-To preview the docs site locally:
+Install the documentation dependencies in an isolated Python environment:
 
 ```bash
 python -m pip install -r docs/requirements.txt
-sphinx-build -b html docs /tmp/coauto-docs-site
+sphinx-build -W --keep-going -b html docs /tmp/coauto-docs-site
 python -m http.server 4027 --directory /tmp/coauto-docs-site
 ```
 
-Do not add GitHub Pages setup instructions to the public docs navigation.
+## Product language
 
-## Releasing
+Use English for public documentation and interface text. Agent replies follow the
+user’s language. Explain the action and its consequence: adding to a draft is
+not sending, requesting a pause is not yet being paused, and recording a result
+is not external publication. Preserve API fields, enums, event markers and
+recovery-matched diagnostics when polishing visible text. Keep research claims
+proportional to their evidence.
 
-Publishing to npm is handled by maintainers — see [RELEASING.md](RELEASING.md).
-Release publishes use npm provenance:
+## License and releases
 
-```bash
-npm publish --provenance
-```
+Contributions are licensed under [Apache-2.0](LICENSE). Maintainers publish
+releases using [RELEASING.md](RELEASING.md).

@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "result-cards.schema.json",
+  "title": "Result Cards",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "cards"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "result_cards"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "summary",
+          "claim_ids",
+          "effect",
+          "evidence",
+          "scope",
+          "caveats",
+          "compatibility_constraints",
+          "source_trial_id",
+          "supersedes",
+          "content_hash",
+          "proposed_status",
+          "extensions"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/result_card_id"
+          },
+          "type": {
+            "enum": [
+              "positive_evidence",
+              "negative_evidence",
+              "diagnostic_insight",
+              "boundary_condition",
+              "artifact",
+              "design_decision",
+              "resource_decision",
+              "claim_revision",
+              "method_decision",
+              "process_lesson"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "claim_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "effect": {
+            "enum": [
+              "supports",
+              "weakens",
+              "narrows",
+              "broadens",
+              "supersedes",
+              "bounds",
+              "informs",
+              "no_change"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/evidence_ref"
+            }
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 1
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "compatibility_constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_trial_id": {
+            "$ref": "common.schema.json#/$defs/trial_reference_id"
+          },
+          "supersedes": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/result_card_id"
+            },
+            "uniqueItems": true
+          },
+          "content_hash": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "proposed_status": {
+            "const": "proposed"
+          },
+          "extensions": {
+            "$ref": "common.schema.json#/$defs/extensions"
+          }
+        }
+      },
+      "minItems": 1
+    }
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "expert-route.schema.json",
+  "title": "Expert Route",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "move_pack",
+    "domain_packs",
+    "method_packs",
+    "venue_profile",
+    "risk_flags",
+    "required_standards",
+    "missing_packs",
+    "review_triggers",
+    "requested_review_level"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "expert_route"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "move_pack": {
+      "type": "string",
+      "enum": [
+        "moves/EXPERIMENT_TEST.md",
+        "moves/FAILURE_DIAGNOSIS.md",
+        "moves/FRAMING.md",
+        "moves/MANUSCRIPT_PACKAGING.md",
+        "moves/METHOD_BUILD.md",
+        "moves/RESOURCE_ACQUISITION.md",
+        "moves/REVIEW_REPAIR.md",
+        "moves/SYNTHESIS.md"
+      ]
+    },
+    "domain_packs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^domains/[a-z][a-z0-9_]{1,63}/DOMAIN\\.md$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "method_packs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "venue_profile": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/relative_path"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "risk_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "required_standards": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "missing_packs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pack",
+          "impact"
+        ],
+        "properties": {
+          "pack": {
+            "type": "string",
+            "minLength": 1
+          },
+          "impact": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "review_triggers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "requested_review_level": {
+      "enum": [
+        "light",
+        "standard",
+        "full",
+        "final"
+      ]
+    }
+  }
+}

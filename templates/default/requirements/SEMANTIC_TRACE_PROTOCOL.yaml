@@ -1,0 +1,36 @@
+spec_version: 2.0.0
+transport: Existing research SSE stream and agent_trace parser.
+stages:
+  - observe
+  - orient
+  - route
+  - charter
+  - preflight
+  - execute
+  - distill
+  - stage
+  - review_route
+  - review
+  - repair
+  - brief
+  - gate
+  - validate
+  - publish
+  - recovery
+event_required_fields:
+  - schema_version
+  - event_id
+  - project_id
+  - trial_id
+  - stage
+  - event_type
+  - message
+  - timestamp
+  - payload
+rules:
+  - The SSE envelope uses event_id, stage, event_type, timestamp, and payload; payload contains the schema-valid semantic_trace artifact fields run_id, sequence, phase, status, details, and redacted.
+  - Existing command, tool_call, file_change, plan_update, approval, usage, web_search, and error events remain available.
+  - Semantic stage events are explicit typed events, not regex-only inference from prose.
+  - Event order is monotonic within a trial; repair may return from review to stage.
+  - UI must tolerate unknown future event_type values through payload.extensions or a generic renderer.
+  - Events must not contain secrets, full environment dumps, authentication tokens, or private file contents.

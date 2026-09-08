@@ -1,0 +1,23 @@
+spec_version: 2.0.0
+profile_id: P1-local-single-user
+supported:
+  user_model: one trusted human operator
+  server_model: one local multi-project browsing dashboard with isolated project state and one global active agent-worker slot
+  network: loopback by default; authenticated reverse proxy/tunnel for remote production access
+  concurrency: one active agent child process across the dashboard and one sequential autoresearch trial; ordinary UI reads and service-owned queue writes may continue
+  agent_backends:
+  - codex
+  - claude
+  operating_systems:
+  - ubuntu
+  - macos
+  - windows
+  node: 20+
+  python: 3.10+
+not_supported:
+- public unauthenticated long-running service
+- multi-tenant project isolation
+- shared untrusted user accounts
+- parallel multi-trial batches
+- domain-specific or submission-ready claims when a matched pack or current official venue evidence is unavailable
+release_label: production-ready is valid only for this profile after the release acceptance checklist passes

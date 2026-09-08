@@ -1,0 +1,56 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "plan",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "plan_revision": 1,
+  "target": "evaluation",
+  "move": "test",
+  "primary_local_question": "Does the current method outperform the baseline on the smallest credible benchmark?",
+  "why_now": "The main evidence campaign is blocked by the absence of a credible comparison.",
+  "critical_path_target": "CP1",
+  "active_line_ids": [
+    "L0001"
+  ],
+  "campaign_ids": [
+    "C0001"
+  ],
+  "working_set": {
+    "included_trials": [],
+    "included_result_cards": [],
+    "material_exclusions": [],
+    "combination_rationale": "This is the first empirical trial."
+  },
+  "minimum_useful_output": "A completed comparison or a diagnosed failure with reusable logs.",
+  "success_conditions": [
+    "Baseline and method run under the same metric."
+  ],
+  "stop_conditions": [
+    "Metric cannot be resolved from inspected sources."
+  ],
+  "must_not_do": [
+    "Do not expand into ablations before the main signal is known."
+  ],
+  "resource_scout": {
+    "decision": "skipped",
+    "reason": "All required resources are already inspected locally.",
+    "search_scope": "",
+    "resource_types": [],
+    "known_clues": [],
+    "freshness": "not date-sensitive",
+    "download_policy": "none",
+    "expected_destinations": [],
+    "stop_criteria": []
+  },
+  "expected_result_card_types": [
+    "positive_evidence",
+    "negative_evidence",
+    "diagnostic_insight"
+  ],
+  "expected_human_outcome": "The human can see whether the main signal exists.",
+  "requested_review_level": "standard",
+  "parallelism": "sequential"
+}

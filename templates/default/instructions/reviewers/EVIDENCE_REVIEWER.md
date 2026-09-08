@@ -2,74 +2,84 @@
 
 ## Purpose
 
-Review whether claims are supported by evidence.
+Determine whether proposed result cards, findings, line/campaign effects, candidate canonical files, and Human Brief statements are supported at the strength and scope claimed.
 
-## Required Reading
+## Phase and output
 
-- `instructions/reviewers/REVIEW_TAXONOMY.md`
-- `PROJECT.md`
-- `research_trajectory/STATE.md`
-- `research_trajectory/CURRENT_FINDINGS.md`
-- current trial `PLAN.md`, `REPORT.md`, `reviews/`, and artifacts
-- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when present
-- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
-- specialized review outputs named by the reviewer spawn decision, when present
-- `manuscript/BLUEPRINT.md` if claims are manuscript-facing
+- Phase: `post_stage` or `final` when included in Final review.
+- Reviewer key/scope: `evidence` / `evidence`.
+- Bind the output to the exact stage ID and manifest hash.
 
-## Output Location
+## Required reading
 
-Write the canonical current-trial evidence review to:
+- `instructions/reviewers/REVIEW_TAXONOMY.md`;
+- Project and declared success/claim scope;
+- current Plan, Report, Result Cards, artifacts, commands/configurations/logs;
+- Merge Request, candidate Findings/lines/campaigns/State, Human Brief, Gate Evidence;
+- current published evidence that the stage reuses or supersedes;
+- relevant resource provenance and external-source records;
+- other reviewer outputs only after independently checking primary evidence.
 
-`research_trajectory/trials/<trial_id>/reviews/EVIDENCE_REVIEW.md`
+## Review criteria
 
-If the review is manuscript-facing, you may also mirror or summarize it under
-`manuscript/reviews/`, but the current trial file remains required.
+### Provenance and reproducibility
 
-## Review Criteria
+- Are scout-discovered resources treated as raw inputs until inspected and
+  promoted through normal evidence provenance?
+- Does the reviewer spawn decision identify any specialized evidence risk, and
+  was every required specialized review read before this decision?
+- Does every material claim point to a concrete artifact, resource, code path, dataset, trial, or review?
+- Are paths valid and contained within the project?
+- Are hashes present where applicable and do they match?
+- Are commands/methods/configurations/data splits/versions/parameters sufficient for inspection or reproduction?
+- Are missing, generated, or placeholder artifacts incorrectly presented as evidence?
 
-Check:
+### Claim-to-evidence calibration
 
-- Is each claim supported by current findings?
-- Is evidence active, tentative, rejected, or superseded?
-- Are limitations explicit?
-- Are alternative explanations addressed?
-- Is there overclaiming?
-- Are raw artifacts traceable through trial reports?
-- For result-dependent deliverables, did the trial produce actual result
-  evidence, a negative result, or a documented first blocker?
-- If `REPORT.md` says `Empirical progress: yes`, is that supported by a real
-  artifact, result, conversion inventory, or `ACQUISITION_DECISION.md` that
-  changed evidence/resource state?
-- If `REPORT.md` says `Empirical progress: no`, is the lack of empirical
-  progress reflected honestly in Critical Path status and next action?
-- Do Resource Scout outputs reveal missing evidence, counterevidence,
-  benchmark/data gaps, or source-quality issues that should prevent pass?
-- Are scout-discovered resources treated as raw inputs until promoted through
-  a trial report or canonical findings/state update?
-- Does the reviewer spawn decision or any specialized review identify evidence,
-  statistics, benchmark-validity, reproducibility, ethics, safety, privacy, or
-  domain-specific risks that should prevent pass?
+- Does the evidence support the exact claim wording, population, dataset, period, venue, and generality?
+- Are single-run, subset, proxy, simulated, qualitative, or exploratory results scoped accordingly?
+- Are causal, mechanism, utility, robustness, generalization, novelty, and superiority claims supported by the required evidence type?
+- Are uncertainty, variability, confounding, alternative explanations, and measurement validity addressed?
+- Does the Human Brief distinguish established, tentative, qualified, negative, and unresolved conclusions?
 
-Apply evidence-certainty judgment to each central claim. Consider source
-quality, bias, indirectness, imprecision, inconsistency, missing counterevidence,
-and whether the prose uses stronger language than the evidence warrants.
-Do not treat unexecuted scaffolds, schemas, harnesses, or package contracts as
-empirical, model, benchmark, or result evidence.
+### Positive and negative evidence
+
+- Are failures, null results, contradictions, and boundary conditions preserved?
+- Has the stage cherry-picked successful trials while excluding materially relevant contrary evidence?
+- Are exclusions justified by invalidation, supersession, incompatibility, or scope rather than desirability?
+- Does a negative result become an informative boundary/diagnosis only when the evidence supports that interpretation?
+
+### Result-card integrity
+
+For every card:
+
+- stable ID and source trial are correct;
+- content is immutable and corrections use supersession;
+- type and effect match the evidence;
+- claim IDs and scope are explicit;
+- caveats and compatibility constraints are complete;
+- evidence references are sufficient;
+- requested decision and canonical destination are appropriate;
+- the worker has not self-assigned accepted status.
+
+### Candidate canonical consistency
+
+- Current Findings includes only cards requested for acceptance/qualification/supersession.
+- Lines list both supporting and limiting cards and keep material conflicts visible.
+- Campaign component changes match actual evidence, not planned future work.
+- Critical Path and next move follow from the evidence.
+- Manuscript claims do not outrun accepted evidence.
+
+### Preserved legacy empirical-progress check
+
+When a legacy `REPORT.md` says `Empirical progress: yes`, require a real result
+artifact, informative negative, conversion inventory, or
+`ACQUISITION_DECISION.md` that changed the evidence/resource state. A scaffold,
+schema, harness, or package contract alone is not empirical evidence. Apply the
+same substance test to the v2 Report and Result Cards.
 
 ## Pass Standard
 
-Use `Decision: pass` only when every central claim in the declared scope is
-traceable, source-audited, and calibrated to the evidence strength used in the
-deliverable. If a claim is "supported with qualification", pass is allowed only
-after the qualification is already reflected in the active deliverable and no
-required evidence action remains.
+`pass` requires no unsupported or overbroad material claim, no missing primary evidence for requested acceptance, no hidden contrary result, and no unresolved reproducibility/provenance issue within scope.
 
-If any source check, qualification, citation audit, alternative explanation, or
-claim-language revision remains, use `Decision: continue`.
-
-## Output Schema
-
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
-input paths for the findings, claim/evidence map, trial report, artifacts, and
-manuscript files you assessed. If there is little evidence to assess in the
-current trial, still write the file with a scoped judgment and unassessed areas.
+Use `revise` when claims must be narrowed, cards corrected/superseded, artifacts added, uncertainty exposed, or candidate state changed. Use blocker decisions only under the shared strict semantics.

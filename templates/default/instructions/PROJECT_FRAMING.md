@@ -1,13 +1,17 @@
 # Project Framing Protocol
 
+> **V2 control-plane override.** Framing changes during autoresearch are proposed through a Framing trial, result cards, merge request, and staged project/line/venue updates. A locked venue or project-identity change requires formal human authority. Initial pre-trial framing may be applied by the project initialization service.
+
+
 ## Purpose
 
 `PROJECT.md` is the canonical launch frame for autoresearch. It defines the
 research objective, scope, audience or venue, likely contribution, important
 resources, constraints, assumptions, exclusions, success criteria, and open
-uncertainties. `resources/target_venue/TARGET_VENUE.md` is the compact
-target-venue/audience note and must stay consistent with the target venue or
-audience stated in `PROJECT.md`.
+uncertainties. `resources/target_venue/TARGET_VENUE.json` is the authoritative
+structured venue state. Its `target_venue` may be `null`. The service
+deterministically renders the compact
+`resources/target_venue/TARGET_VENUE.md` view from that JSON.
 
 Use this protocol whenever creating, revising, or deciding whether to preserve a
 change in `PROJECT.md`.
@@ -16,14 +20,27 @@ change in `PROJECT.md`.
 
 ## Before Autoresearch Starts
 
-Before the first autoresearch run, treat `PROJECT.md` as a live framing
-document. Keep it current whenever the latest turn produces a clearer or
-materially different launch frame.
+Before the first autoresearch run, treat `PROJECT.md` as live launch framing.
+An agent edit is a candidate: the service restores the direct write, validates
+the quarantined bytes after a successful chat turn, and commits the candidate
+as a trusted service write. This framing commit does not start autoresearch;
+only the user's explicit Start action creates Trial 1.
 
 Evaluate the full latest turn, not only the user's raw message. If your planned
-answer itself establishes or materially changes the launch frame, update
-`PROJECT.md` before sending the final response. Do not leave launch-ready
-framing only in the chat transcript.
+answer itself establishes or materially changes the launch frame, write a
+complete `PROJECT.md` candidate before sending the final response. Do not leave
+launch-ready framing only in the chat transcript.
+
+Preserve the user's conditions as well as the desired outcome. In particular,
+record any action reserved for later human authorization under Constraints,
+including the action, the required decision, and whether that decision is still
+pending. Quote the short controlling instruction when paraphrasing could lose
+its meaning. A request to discuss something before authorizing a final evaluation
+is not permission to run that evaluation after merely freezing a plan. Clicking
+Start or Resume authorizes the currently permitted work; it does not remove a
+separate human approval condition. Check the candidate against the user's
+message for omitted prerequisites, exclusions, budgets and environment
+requirements before yielding. Surface pending decisions in the final summary.
 
 Update or draft `PROJECT.md` when the latest turn:
 
@@ -43,9 +60,23 @@ Update or draft `PROJECT.md` when the latest turn:
 
 Do not wait for the user to say "revise `PROJECT.md`" when the new framing is
 clear enough to preserve and would affect how autoresearch should begin. When
-the preserved framing chooses or changes the target venue or audience, update
-both `PROJECT.md` and `resources/target_venue/TARGET_VENUE.md` before the final
-response.
+the candidate chooses, changes, or clears the target venue or audience, write
+both `PROJECT.md` and a schema-valid
+`resources/target_venue/TARGET_VENUE.json` candidate. The JSON must bind the
+current project and revision 0. Do not hand-author the paired Markdown; the
+service owns it.
+
+Read the current `project_id` from `research_trajectory/STATE.json` and reuse
+that exact value in the venue candidate. Do not invent an identifier, copy an
+example identifier, or use the project folder name. Validate the candidate's
+identity as well as its schema before yielding; a rejected candidate is not a
+saved research brief.
+
+If the service rejects a candidate, its direct writes are restored after the
+agent reply. Re-read the actual files before repairing them; earlier tool
+successes and chat claims do not prove those files survived. Reconstruct the
+complete requested framing from the user's brief, including PROJECT.md when
+the restored file is still the empty scaffold.
 
 Do not update `PROJECT.md` for greetings, UI/how-to questions, status questions,
 ordinary discussion, purely casual chat, or early brainstorming that does not
@@ -130,8 +161,9 @@ Always answer the user's latest message first. If you update `PROJECT.md`, repor
 the change after the answer and briefly state why the update belonged in the
 launch frame.
 
-If you update the target venue or audience, also report the synchronized
-`resources/target_venue/TARGET_VENUE.md` update.
+If you propose a target venue or audience change, report the structured venue
+candidate. The service reports and renders the synchronized Markdown after it
+validates and commits the candidate.
 
 Do not use a file-update summary such as "Updated `PROJECT.md`" as a substitute
 for answering the user's question.

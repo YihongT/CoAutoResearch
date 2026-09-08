@@ -1,147 +1,128 @@
-<div align="center">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo.svg">
+    <img src="assets/logo-white.svg" width="88" alt="CoAutoResearch logo">
+  </picture>
+</p>
 
-<img src="assets/logo.svg" width="88" alt="CoAutoResearch logo" />
+<h1 align="center">CoAutoResearch</h1>
 
-# CoAutoResearch
+<p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-**A self-improving autonomous research partner you stay in control of.**
+CoAutoResearch brings autonomous investigation and human–AI collaboration into one research workflow. Define a question, discuss emerging findings, guide the next step, and build a manuscript from evidence you can trace.
 
-An open-source research agent that works *with* you and sharpens its own work
-trial by trial — planning the next step, running it, reviewing it against
-reviewer gates, and revising until it holds up — while you stay able to
-understand, steer, and defend the project at every step.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="docs/walkthrough.md">Walkthrough</a> ·
+  <a href="docs/index.md">Documentation</a>
+</p>
 
-[![npm](https://img.shields.io/npm/v/co-auto-research)](https://www.npmjs.com/package/co-auto-research)
-[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![docs](https://img.shields.io/badge/docs-online-1a1812)](https://yihongt.github.io/CoAutoResearch/)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="License: Apache 2.0"></a>
+  <a href="docs/index.md"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a>
+</p>
 
-</div>
+## Co + Auto
 
-![The CoAutoResearch dashboard](assets/hero.png)
+**Co — Research together.** Ask why a result looks convincing, discuss an alternative, or prepare a change in direction. Send the suggestions you choose into the research session.
 
-<div align="center"><sub>The dashboard ships in two themes — Ivory and Nocturne.</sub></div>
+**Auto — Keep research moving.** Let the agent plan, execute, interpret and review bounded research steps within your question and constraints. Pause to reconsider, then continue with new guidance.
 
-Most "auto research" tools optimize for autonomous output: generate ideas, run
-experiments, write a paper, done. CoAutoResearch optimizes for **research
-ownership** — the result isn't a finished artifact you can't explain, it's a
-traceable research trajectory you can actually use, revise, and defend.
+**Research — Build on evidence.** Keep proposals, observations, reviewed results and limitations distinct. Follow how the research changes, and carry its supporting evidence into the manuscript.
 
-<details>
-<summary><strong>What's new</strong></summary>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
+  <img src="assets/co-auto-light.svg" alt="Human direction and autonomous research exchange reviewed suggestions and findings. A shared record preserves evidence and limitations, informs the next question, and supports a manuscript and paper.">
+</picture>
 
-- **0.1.1** — Default dashboard project folder is now `co-autoresearch-projects/` (legacy `local-projects/` still discovered).
-- **0.1.0** — Initial release: immutable project template; `co-auto-research` CLI (`init` / `ui` / `doctor` / `ls` / `attach`); remote-server tunneling; product-docs site.
+Discussion does not silently change a project. **Add to research draft** prepares a suggestion; you review it and send it to guide the main research. The shared record preserves what was tried, what was learned and what remains uncertain.
 
-Full history in [CHANGELOG.md](CHANGELOG.md).
+## What you can do
 
-</details>
+- **Start with a question.** Describe what you want to understand, attach relevant material and set practical limits before starting research.
+- **Continue existing work.** Bring a proposal, code, notes or prior results. The agent inspects their context before building on them.
+- **Discuss while research runs.** Use a separate chat to examine findings and prepare suggestions alongside the autonomous session.
+- **Guide the next iteration.** Review a plan, send an instruction, request a pause or resume with a different emphasis.
+- **Inspect the evidence.** Read trials, reviews, resource records and limitations behind the current conclusions.
+- **Build a paper.** Generate an evidence-grounded draft, figures, references and PDF from the product, then inspect its review notes.
+
+![The CoAutoResearch workspace invites a research question, materials and constraints before any research starts.](assets/workspace.png)
 
 ## Quick start
 
-From any folder, run the published CLI without installing it:
+Give your coding agent one instruction:
+
+> Set up and launch CoAutoResearch from https://github.com/YihongT/CoAutoResearch. Follow docs/agent-setup.md, reuse my existing coding-agent login, configure paper generation, verify the setup, and open the dashboard.
+
+The [setup contract](docs/agent-setup.md) checks the environment, reuses your existing Codex or Claude Code authentication, prepares paper tools and verifies the dashboard. Complete any interactive provider login yourself. Dashboard readiness and PDF-tool readiness are reported separately; installation time depends on the dependencies already available.
+
+<details>
+<summary>Manual setup from source</summary>
+
+You need Node.js 20+, Python 3.10+, Git and an authenticated Codex or Claude Code CLI.
 
 ```bash
-npx --yes co-auto-research ui
+git clone https://github.com/YihongT/CoAutoResearch.git
+cd CoAutoResearch
+node bin/auto-research.js doctor
+node bin/auto-research.js ui
 ```
 
-No repository clone is needed for this path. It downloads the CLI if needed,
-starts a local dashboard, and opens it in your browser. If you run the same
-`npx` command from inside a cloned CoAutoResearch checkout, npm resolves that
-local checkout instead.
+Open the printed URL and keep the server terminal running. The dashboard has no application dependencies or build step. Choose `--projects-dir /path/to/projects` for a different research folder.
 
-Click **+** in the sidebar to create a project, then describe where your research
-should begin. Attach local files with the composer `+` button — they're copied
-into your project's `resources/user_input/attachments/` so the agent can cite
-them later.
+For PDF generation, follow [paper-tool setup](docs/paper-generation.md): it additionally prepares Python 3.12+, four pinned scientific skills, LaTeX and Poppler. Research projects can have their own scientific dependencies. Compare the npm version with the checkout before choosing an installation source.
 
-On first launch, the dashboard checks Codex and Claude Code readiness before it
-opens project creation. You can still create a project before runtime setup is
-complete; agent runs are blocked until one selected backend is ready.
+</details>
 
-Bringing a proposal, a deep-research report, or a half-finished project? See
-[Best practices](docs/best-practices.md) for the recommended ways to start — and
-how to turn the blueprint into a finished paper.
+Create a project, send a research brief and review the proposed direction. Choose **Start autoresearch** when you are ready. Creating a project alone does not start research. See [Getting started](docs/getting-started.md) for the complete first-run guide.
 
-You'll need **Node 18+** and one agent CLI — **Codex** (default) or **Claude
-Code**. Each backend can use its normal CLI login, or a provider API key saved in
-the UI Settings. The few-minute setup is in
-[Getting started](docs/getting-started.md).
+## A research walkthrough
 
-For repeated use, install it once:
+Start with a question and practical limits. Review the prepared brief, including any decisions you have reserved for later, then start a bounded research iteration. While it runs, open a separate chat to question an assumption or examine an emerging finding.
 
-```bash
-npm install -g co-auto-research
-co-auto-research ui
-```
+Choose **Add to research draft** when a discussion produces a useful suggestion. Review the wording and send it. At the next applicable boundary, inspect how the research addresses it. Request a pause to reconsider the direction, or resume with a precise instruction.
 
-Update anytime with `npm install -g co-auto-research@latest`.
+The [workflow walkthrough](docs/walkthrough.md) follows these controls through to reviewing evidence and generating a paper. It explains what each action does without claiming a particular research outcome.
 
-Closed the terminal? Reopen any project from the same folder:
+## From findings to a paper
 
-```bash
-co-auto-research ls
-co-auto-research attach my-project
-```
+**Manuscript** brings the evolving research story together with its evidence and gaps. Once reviewed results are recorded and project agents are idle, choose **Generate paper**. Specify a venue and year, or request a general research report, then review the model settings.
 
-On a remote server, `co-auto-research ui --remote` uses `cloudflared` to print
-a temporary Cloudflare browser link, so you can open the UI without SSH port
-forwarding. If `cloudflared` is not installed yet, the CLI prints a short
-Cloudflare CLI setup guide with install, run, and check commands — see
-[Remote servers](docs/remote-server.md). On Linux servers that require an
-HTTP proxy for internet access, the same command can automatically route
-`cloudflared` through `graftcp`; if the helper is missing, the CLI prints the
-one-command `install-graftcp` setup step.
+The internal agent uses four scientific skills for writing, visualization, citations and venue templates. It works from a frozen evidence snapshot, creates figures from saved results and compiles a PDF. It does not run new experiments during writing.
 
-## Why it's different
+Follow progress, cancel if needed, and open **Paper** when the draft is ready. Preview its pages, download the PDF and source, and inspect review notes. A previous draft remains available if a replacement fails. A compiled PDF still needs human review of claims, references, authorship and submission requirements. [Paper generation details →](docs/paper-generation.md)
 
-- **You're the PI.** Step in anytime to change direction, scope, methods,
-  claims, or venue — and your decisions become part of the project record.
-- **Progress you can follow.** The agent picks one next objective, plans it,
-  runs it, and reports — no hidden search tree to reverse-engineer.
-- **Every claim is traceable.** Findings, evidence, limitations, and rejected
-  paths are kept separate, not buried in chat logs or generated prose.
-- **Built for revision.** Answer reviewers, defend assumptions, and keep the
-  project moving after the AI hands off.
-- **Your work stays yours.** Each project is an independent copy; the reusable
-  template is never touched during normal work.
+## How it works
 
-## What a project looks like
+Each **Trial** is a focused research iteration. The agent prepares a bounded plan, performs the work, interprets the evidence and submits the result to the applicable checks. The service records accepted changes and determines whether to continue, pause or request a human decision.
 
-Generated projects keep the pieces that make research usable, separate and legible:
+The research record connects directions, resources, results, reviews and manuscript content. Technical contracts distinguish proposed work from recorded changes and support recovery after interruptions. An internal review is a workflow check, not external peer review or proof of scientific correctness. [Architecture and lifecycle →](docs/conceptual-framework.md)
 
-- **`PROJECT.md`** — your canonical research direction.
-- **`research_trajectory/`** — current state, findings, and a trial-by-trial audit trail.
-- **`resources/`** — papers, data, prior work, and target-venue materials.
-- **`workspace/`** — the live workbench for concrete implementations, analyses, prototypes, outputs, and other inspectable work products.
-- **`manuscript/`** — blueprint, figure specs, reviews, and deliverables.
+## Practical questions
 
-## Documentation
+**Can I use my existing coding-agent login?** Yes. Reuse an authenticated Codex or Claude Code CLI. Available models, usage limits and billing depend on your provider account; model discovery in Settings shows what the selected backend exposes.
 
-- [Getting started](docs/getting-started.md) — install, prerequisites, first project
-- [Concepts](docs/conceptual-framework.md) — how the research loop works
-- [Best practices](docs/best-practices.md) — how to start well, and turn the blueprint into a paper
-- [CLI reference](docs/cli.md) — every command and flag
-- [Multiple projects](docs/multiple-projects.md) · [Remote servers](docs/remote-server.md) · [Platform support](docs/platforms.md) · [Upgrading projects](docs/upgrading.md)
+**Where does my research go?** Project files remain in your chosen local or server folder. The configured model provider processes the context sent to it. External resource lookup can use the network. Review sensitive material before attaching it. This release targets one trusted researcher, not public multi-user hosting.
 
-## Contributing
+**Can I pause and come back?** Request **Pause after current turn**, wait for **Paused**, then use **Resume autoresearch**. Closing a browser tab does not stop a running server. Server interruptions may require explicit recovery. [Control semantics →](docs/getting-started.md#pause-continue-or-start-over)
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md), which also
-covers running from a source checkout.
+**What remains my responsibility?** Choosing the question, evaluating scientific claims, resolving decisions that require human judgment and reviewing anything you share or submit. [Research practices →](docs/best-practices.md)
 
-## Citation
+## Documentation and community
 
-If you use CoAutoResearch in your research, please cite it:
+[Setup](docs/agent-setup.md) · [CLI](docs/cli.md) · [Remote access](docs/remote-server.md) · [Platforms](docs/platforms.md) · [Upgrades](docs/upgrading.md)
+
+Report reproducible problems through [Issues](https://github.com/YihongT/CoAutoResearch/issues). See [Contributing](CONTRIBUTING.md), the [Code of conduct](CODE_OF_CONDUCT.md) and [Security](SECURITY.md) for contribution and private vulnerability-reporting guidance.
+
+If CoAutoResearch contributes to your research, cite the software and record the version used:
 
 ```bibtex
-@software{coautoresearch2026,
-  title        = {CoAutoResearch: A self-improving autonomous research partner you stay in control of},
-  author       = {Tang, Yihong},
-  year         = {2026},
-  howpublished = {\url{https://github.com/YihongT/CoAutoResearch}}
+@software{coautoresearch,
+  title = {CoAutoResearch},
+  author = {CoAutoResearch contributors},
+  url = {https://github.com/YihongT/CoAutoResearch}
 }
 ```
 
-## License & contact
-
-Released under the [Apache-2.0](LICENSE) license.
-Questions, feedback, or collaboration: <yihong.tang.edu@gmail.com>
+Licensed under [Apache 2.0](LICENSE). Upstream tools and scientific skills retain their respective licenses and attribution requirements.

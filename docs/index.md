@@ -1,62 +1,50 @@
-# Welcome to CoAutoResearch's documentation
+# CoAutoResearch
 
-CoAutoResearch is a self-improving, human-centered research scaffold. It helps a
-local agent backend do substantial research work — sharpening it trial by trial —
-while keeping the human author able to understand, steer, defend, and revise the
-project. Codex is the default backend;
-Claude Code is optional.
+**An autonomous research partner you can question, guide, and build with.**
 
-The goal is not a finished artifact you cannot explain. The goal is a traceable
-research trajectory you can actually use.
+CoAutoResearch brings autonomous investigation and human–AI collaboration into
+one research workflow. Define a question, discuss emerging findings, guide the
+next step, and build a manuscript from evidence you can trace.
 
-## Key Features
+## Co + Auto
 
-- **Reviewable automation:** project framing, trials, reports, and findings stay
-  visible as files.
-- **Human control:** interventions can redirect scope, method, venue, claim, or
-  priority.
-- **Continuation-friendly workflow:** close the browser or terminal, then return
-  later with `co-auto-research ls` and `co-auto-research attach`.
-- **Remote-friendly UI:** run the server on SSH machines and open it from your
-  local browser through a tunnel.
+**Co — Research together.** Discuss a finding while the agent works. Prepare a
+suggestion, review it, and send it into the research session.
 
-## Quick Start
+**Auto — Keep research moving.** The agent plans, executes, interprets and reviews
+bounded research steps within your direction and constraints.
 
-Open the dashboard from any folder:
+**Research — Build on evidence.** Follow the question, results, limitations and
+remaining decisions through a shared research record and into a manuscript.
 
-```bash
-npx --yes co-auto-research ui
-```
+## Start here
 
-No repository clone is needed for this path. It starts the local dashboard and
-opens it in your browser. If you run it from inside a cloned CoAutoResearch
-checkout, npm resolves that local checkout instead.
+Give your coding agent the instruction in [Getting started](getting-started.md).
+It follows the [setup checklist](agent-setup.md), reuses your provider login,
+verifies the dashboard and prepares the paper tools. Creating a project does
+not automatically start research.
 
-Create projects, attach files, revise framing, and start autoresearch from the
-UI.
-
-For repeated use, install once with `npm install -g co-auto-research`, then run
-`co-auto-research ui`.
-
-To update later:
-
-```bash
-npm install -g co-auto-research@latest
-```
+Read the [walkthrough](walkthrough.md) to follow discussion, draft handoff,
+research controls and paper generation. Use [Best practices](best-practices.md) to plan useful
+iterations, and [Paper generation](paper-generation.md) to turn recorded results
+into a draft you can inspect.
 
 ```{toctree}
-:caption: Get Started
+:caption: Get started
 :maxdepth: 2
 
 getting-started
+agent-setup
+walkthrough
 best-practices
-cli
+paper-generation
 ```
 
 ```{toctree}
-:caption: User Guide
+:caption: Using the system
 :maxdepth: 2
 
+cli
 multiple-projects
 remote-server
 platforms
@@ -64,7 +52,7 @@ upgrading
 ```
 
 ```{toctree}
-:caption: Concepts
+:caption: Technical reference
 :maxdepth: 2
 
 conceptual-framework

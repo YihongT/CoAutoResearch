@@ -2,86 +2,71 @@
 
 ## Purpose
 
-Review the manuscript's reference list as a professional, complete, and
-internally consistent artifact. This reviewer owns the actual `References`
-list; the manuscript reviewer only covers reference *posture*.
+Review source provenance, citation accuracy, coverage, recency where relevant, and bidirectional integrity between inline citations and the reference list.
 
-## Required Reading
+## Phase and output
 
-- `instructions/reviewers/REVIEW_TAXONOMY.md`
-- `instructions/MANUSCRIPT.md` (the `References` contract)
-- `PROJECT.md`
-- `resources/target_venue/SEED_PAPERS.md`
-- `resources/target_venue/STYLE_NOTES.md` when present
-- `manuscript/BLUEPRINT.md` — both `Reference / Literature Grounding Plan` and
-  the canonical `References` section, plus every inline citation in
-  `Manuscript Architecture`
-- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when present
-- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
-- specialized review outputs named by the reviewer spawn decision, when they
-  affect source, citation, provenance, venue, or reference quality
-- `resources/user_input/RESOURCE_MANIFEST.md`, when scout-discovered resources
-  are cited, linked, or downloaded
-- any `references.bib` or integrated source files under `workspace/` when present
-  as secondary caches
+- Phase: `post_stage` or `final`.
+- Reviewer key/scope: `reference` / `reference`.
+- Bind to the exact stage ID/hash.
 
-## Output Location
+## Required reading
 
-Write the canonical current-trial reference review to:
+- `instructions/reviewers/REVIEW_TAXONOMY.md`;
+- Resource Manifest, Resource Scout report, seed-paper/venue resources;
+- all new or changed external-source claims, quotations, citations, and reference entries;
+- current Plan, Report, cards, Merge Request, candidate snapshot, Human Brief;
+- manuscript/reference list and relevant line/campaign updates;
+- primary sources themselves when available.
 
-`research_trajectory/trials/<trial_id>/reviews/REFERENCE_REVIEW.md`
+## Review criteria
 
-## Review Criteria
+### Source existence and provenance
 
-**Layer 1 — integrity (venue-independent):**
+- Does every source have citation-ready metadata: stable title, author or
+  responsible organization, date/version, locator, and access/provenance
+  details where applicable?
+- Does every cited source exist and match author/title/date/venue/identifier?
+- Are URLs, DOIs, arXiv IDs, report versions, dataset/model versions, and access dates accurate where applicable?
+- Was the source actually inspected, or only mentioned by another source?
+- Are uploaded, discovered, and externally linked resources distinguished?
 
-- Does the blueprint contain a canonical `## References` section that holds the
-  actual resolved list, not just a strategy description?
-- Does every entry carry author(s), title, venue or container, year, and a
-  stable locator (DOI preferred, else resolvable URL, else unambiguous
-  publisher/standard identifier)?
-- Is there exactly one canonical entry and stable key per source, with no
-  duplicate entries for the same work?
-- Bidirectional completeness: does every inline citation in the manuscript
-  architecture resolve to exactly one entry, and is every list entry cited at
-  least once?
-- Are all locators resolvable, with no placeholder, fabricated, or dead links?
-- Is the `References` section mutually consistent with the
-  `Reference / Literature Grounding Plan` posture?
-- For scout-discovered sources, does the scout report or manifest contain
-  citation-ready metadata, provenance `autoresearch_discovered`, access/license
-  notes when relevant, and a stable local path or link?
-- If a specialized review affects source quality, provenance, citation
-  readiness, or venue-source fit, are its source requirements reflected in the
-  reference list and citation plan?
+### Citation-to-claim accuracy
 
-**Layer 2 — presentation (venue-bound):**
+- Does each source support the exact nearby claim?
+- Are quotations exact, short, and correctly attributed?
+- Are secondary citations used only when primary material is unavailable and disclosed?
+- Are limitations, disagreement, and study context represented fairly?
+- Are broad field/novelty claims supported by adequate coverage rather than one convenient paper?
 
-- Does the citation and ordering style match the declared target venue?
-- If the venue does not fix a style, is one consistent style used across all
-  entries, and is that style stated?
+### Coverage and balance
+
+- Are major relevant competing approaches, negative evidence, and foundational work covered?
+- Is the literature set appropriate to the project scope, contribution type, and venue?
+- Is recency handled when the question is date-sensitive?
+- Are seed papers representative rather than cherry-picked?
+
+### Reference-list integrity
+
+- Every inline citation has one reference entry.
+- Every reference entry is cited or intentionally listed in a documented resource appendix.
+- No duplicates, unresolved placeholders, missing required metadata, or inconsistent keys remain.
+- Citation keys remain stable across manuscript and artifacts.
+
+### Research-memory integrity
+
+- Literature-derived result cards distinguish empirical source evidence from project-generated evidence.
+- External URLs are not treated as durable local artifacts without provenance.
+- Copyright-sensitive source material is summarized rather than copied excessively.
+
+### Submission-grade list contract
+
+Each canonical reference entry includes authors, title, venue/container, year,
+and a stable locator (prefer DOI, then a resolvable URL or unambiguous publisher
+identifier). Every inline citation resolves to exactly one entry, every listed
+entry is cited or intentionally documented in a resource appendix, and duplicate,
+placeholder, fabricated, dead, or orphan records require revision.
 
 ## Pass Standard
 
-Use `Decision: pass` only when the reference list is submission-grade for the
-declared scope: a canonical `References` list exists in the blueprint, every
-entry has all required fields and a resolvable locator, there are no duplicates,
-inline citations and list entries are bidirectionally complete, and the style is
-consistent with the target venue.
-
-Orphan inline citations, uncited list entries, missing required fields,
-duplicate entries, placeholder/fabricated/dead locators, a `References` section
-that only restates strategy instead of listing sources, or style inconsistent
-with the declared venue all require `Decision: continue` with `Gate impact:
-continue`. These are blocking for the autoresearch gate.
-
-If references are not yet integrated for the current scope, still write the file
-and judge whether the absence is acceptable for the declared scope; an
-incomplete list for a submission-readiness scope is `continue`.
-
-## Output Schema
-
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Use `Scope: reference`.
-Include explicit reviewed input paths for the blueprint `References` section, the
-grounding plan, sampled inline citations, and any `.bib`/integrated source
-caches consulted. List any orphan citations or uncited entries found by key.
+`pass` requires accurate, inspectable, balanced, and complete references for the reviewed scope. Missing source inspection, unsupported citation, orphan entry, fabricated metadata, or unresolved locator requires `revise`.

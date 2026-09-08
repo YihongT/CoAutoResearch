@@ -1,5 +1,8 @@
 # Human Intervention Protocol
 
+> **V2 control-plane override.** A formal intervention is the highest-priority input. Chat records the intervention but does not directly mutate canonical research truth. The next autoresearch invocation stages the required canonical changes. A blocking human decision uses `needs_human`; an optional request belongs in non-blocking Human Tasks.
+
+
 ## Purpose
 
 This protocol tells chat and autoresearch agents how to recognize and record formal human interventions.
@@ -104,3 +107,8 @@ During autoresearch, apply pending interventions to canonical state only when wa
 - Do not mark an intervention obsolete unless a newer explicit human intervention supersedes it.
 
 The server marks pending interventions as applied only after a valid trial boundary is completed.
+
+
+## V2 Authority Fields
+
+Venue lock/unlock, project kill, core identity change, authorship/ethics decisions, and private-access grants must cite the formal intervention ID in the staged machine state.

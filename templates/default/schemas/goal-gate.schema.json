@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "goal-gate.schema.json",
+  "title": "Goal Gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "status",
+    "decision_rule",
+    "reasons",
+    "response_to_human",
+    "next_move",
+    "canonical_revision",
+    "review_level",
+    "all_required_reviewers_pass"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "goal_gate"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/trial_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common.schema.json#/$defs/gate_status"
+    },
+    "decision_rule": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "response_to_human": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_move": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "move",
+            "question",
+            "expected_value"
+          ],
+          "properties": {
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "move": {
+              "type": "string",
+              "minLength": 1
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_value": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "canonical_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "review_level": {
+      "enum": [
+        "light",
+        "standard",
+        "full",
+        "final"
+      ]
+    },
+    "all_required_reviewers_pass": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "continue"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "next_move": {
+            "type": "object"
+          },
+          "response_to_human": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "pass"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "review_level": {
+            "const": "final"
+          },
+          "all_required_reviewers_pass": {
+            "const": true
+          },
+          "response_to_human": {
+            "type": "null"
+          },
+          "next_move": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "needs_human"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "response_to_human": {
+            "type": "string",
+            "minLength": 1
+          },
+          "next_move": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "paused_budget"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "response_to_human": {
+            "type": "string",
+            "minLength": 1
+          },
+          "next_move": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "blocked",
+              "no_viable_line",
+              "killed_by_human"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "response_to_human": {
+            "type": "string",
+            "minLength": 1
+          },
+          "next_move": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

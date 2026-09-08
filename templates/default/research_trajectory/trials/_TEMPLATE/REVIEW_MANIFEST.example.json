@@ -1,0 +1,46 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "review_manifest",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "router_version": "2.0.0",
+  "minimum_level": "standard",
+  "selected_level": "standard",
+  "selection_rationale": [
+    "Default substantive evidence-producing trial."
+  ],
+  "required_reviewers": [
+    "plan",
+    "process",
+    "evidence"
+  ],
+  "omitted_reviewers": [
+    {
+      "reviewer": "venue_fit",
+      "reason": "No target venue configured."
+    },
+    {
+      "reviewer": "manuscript",
+      "reason": "No manuscript or claim architecture change."
+    },
+    {
+      "reviewer": "figure_table",
+      "reason": "No active visual changed."
+    },
+    {
+      "reviewer": "reference",
+      "reason": "No new external sources."
+    },
+    {
+      "reviewer": "final_gate",
+      "reason": "Gate candidate is continue."
+    }
+  ],
+  "specialized_reviewers": [],
+  "stage_id": "STAGE-000001-aaaaaaaa",
+  "stage_manifest_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "final_candidate": false
+}

@@ -1,5 +1,8 @@
 # Resource Intake Protocol
 
+> **V2 control-plane override.** Resource intake and content inspection remain mandatory. UI/service intake owns `resources/user_input/RESOURCE_MANIFEST.md`; v2 agents may read but must not modify it. Resource Scout discoveries are registered instead in the current trial's stage/revision-scoped machine manifest and report, with raw files limited to `resources/autoresearch_discovered/<trial_id>`. Research meaning becomes canonical only through a published trial merge. Control-flow fields use JSON contracts; Markdown remains the human view.
+
+
 ## Purpose
 
 Use this protocol to acquire and file raw materials before interpreting them as research truth.
@@ -140,9 +143,11 @@ If no relevant embedded resources are found, record that the embedded scan was p
 Resources discovered by `instructions/RESOURCE_SCOUT.md` are raw materials found
 by an autoresearch run, not user-provided truth.
 
-Record each scout-discovered material in
-`resources/user_input/RESOURCE_MANIFEST.md` with provenance
-`autoresearch_discovered`. Include:
+For v2, record each scout-discovered material in the current trial's
+stage/revision-scoped `RESOURCE_SCOUT_MANIFEST.json` and matching report with
+provenance `autoresearch_discovered`; do not modify the service-managed
+`resources/user_input/RESOURCE_MANIFEST.md`. Legacy v1 runs continue to record
+these discoveries in that user-input manifest. Include:
 
 - source URL, DOI, repository, registry id, or other stable locator;
 - title/name, publisher or host, date/year, and access date when relevant;
@@ -173,7 +178,9 @@ implications, but it must not convert those implications into accepted findings.
 
 ## Manifest Requirements
 
-Maintain `resources/user_input/RESOURCE_MANIFEST.md` as a raw intake record. It should include:
+The UI/service maintains `resources/user_input/RESOURCE_MANIFEST.md` as a raw
+intake record. A v2 agent treats its existing bytes and provenance
+classifications as read-only. It should include:
 
 - explicit UI resources and their categories;
 - inferred resource references from user text;

@@ -1,0 +1,57 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "reviewer_output",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {
+    "card_eligibility": [
+      {
+        "card_id": "RC-000001-01",
+        "requested_decision": "accept",
+        "eligible": true,
+        "reason": "The proposed card is eligible for the exact reviewed Merge Request."
+      }
+    ]
+  },
+  "trial_id": "000001_test-main-signal",
+  "review_id": "RV-000001-evidence-01",
+  "reviewer": "evidence",
+  "phase": "post_stage",
+  "decision": "pass",
+  "summary": "The scoped evidence is traceable and the qualification is appropriate.",
+  "strengths": [
+    "Artifact path and metric are explicit."
+  ],
+  "blockers": [],
+  "required_actions": [],
+  "evidence_checked": [
+    {
+      "path": "research_trajectory/trials/000001_test-main-signal/artifacts/results.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_kind": "artifact",
+      "scope": "dataset A, fixed split",
+      "description": "Primary metrics",
+      "extensions": {}
+    }
+  ],
+  "stage_id": "STAGE-000001-aaaaaaaa",
+  "stage_manifest_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "gate_effect": "none",
+  "scope": "evidence",
+  "confidence": "high",
+  "context_summary": "Reviewed the scoped comparison, result card, staged findings, and proposed qualification.",
+  "instruction_file": "instructions/reviewers/EVIDENCE_REVIEWER.md",
+  "reviewed_inputs": [
+    "research_trajectory/trials/000001_test-main-signal/REPORT.json",
+    "research_trajectory/trials/000001_test-main-signal/RESULT_CARDS.json",
+    "research_trajectory/.staging/000001_test-main-signal/STAGE-000001-aaaaaaaa/STAGED_UPDATE_MANIFEST.json"
+  ],
+  "qualified_partial_passes": [
+    "The result is credible for the stated subset."
+  ],
+  "unassessed_areas": [],
+  "human_task_candidates": [],
+  "response_to_human": null,
+  "migration_source": null
+}

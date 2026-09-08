@@ -36,9 +36,11 @@
     attachments: [],
     planModeArmed: {},
     clearNotices: {},
+    composerSelections: {},
     editingMessageIndex: null,
   };
 
+  var pendingSessionSends = new Set();
   var autoCreateCheckedFor = "";
   var pendingRenameSessionId = "";
   var pendingClearSessionId = "";
@@ -108,10 +110,10 @@
     else if (isError) alert(message);
   }
 
-  function currentSettings() {
+  function currentSettings(includeComposer = true) {
     var settings = typeof ui().settingsFromForm === "function" ? ui().settingsFromForm() : {};
     settings = Object.assign({}, settings || {});
-    var controller = composerController();
+    var controller = includeComposer ? composerController() : null;
     return controller?.settings ? controller.settings(settings) : settings;
   }
 
@@ -169,14 +171,15 @@
   }
 
   function newDraftSession() {
+    var settings = currentSettings(false);
     return normalizeSession({
       id: DRAFT_CHAT_ID,
       kind: "chat",
       title: "New chat",
       status: "idle",
       running: false,
-      backend: activeComposerBackend(),
-      settings: currentSettings(),
+      backend: normalizeSessionBackend(settings.backend),
+      settings: settings,
       chat_history: [],
       transcript: [],
       plan_artifacts: {},
@@ -186,7 +189,7 @@
 
   function activeSessionForView() {
     if (isDraftSessionId(state.activeId)) return state.draftSession || null;
-    return visibleSessions().find(function (item) { return item.id === state.activeId; }) || null;
+    return state.sessions.find(function (item) { return item.id === state.activeId; }) || null;
   }
 
   function chatSessionMessageCount(session) {
@@ -227,7 +230,7 @@
   }
 
   function railTitle(session) {
-    if (session && session.kind === "evolution") return "Autoresearch session";
+    if (session && session.kind === "evolution") return "Research session";
     return displayTitle(session);
   }
 
@@ -251,11 +254,14 @@
     autoCreateCheckedFor = pid;
     try {
       var r = await apiCall("/api/sessions");
+      if (pid !== projectId()) return;
       var existing = (r.sessions || []).map(normalizeSession);
       var hasEvolution = existing.some(function (session) { return session.kind === "evolution"; });
       if (!hasEvolution) {
         await apiCall("/api/sessions", { method: "POST", body: JSON.stringify({ kind: "evolution", title: FIXED_RUN_LABEL }) });
+        if (pid !== projectId()) return;
         r = await apiCall("/api/sessions");
+        if (pid !== projectId()) return;
         existing = (r.sessions || []).map(normalizeSession);
       }
       state.sessions = mergeSessionList(existing);
@@ -277,6 +283,9 @@
   }
 
   function showSessionsView(show) {
+    if (show && (ui().activeNavigationPanel?.() || "chat") !== "chat" && typeof window.setPanel === "function") {
+      window.setPanel("chat", { scrollToLatest: false });
+    }
     document.body.classList.toggle("has-sessions-active", show);
     var view = document.getElementById("sessions-view");
     if (view) view.classList.toggle("is-active", show);
@@ -394,10 +403,9 @@
     var kind = session.kind === "evolution" ? "evolution" : "chat";
     var active = state.activeId === session.id && (kind === "evolution" ? !state.surfaceActive : state.surfaceActive);
     var statusClass = sessionStatusClass(session);
-    // Same rule for both kinds: only show a status dot when there's an
-    // actual status to report, so Autoresearch session (usually idle) reads
-    // as plain text exactly like an idle chat row, with no icon of its own.
-    var showDot = statusClass !== "idle";
+    // Idle sessions have no marker. Running sessions share Paper's trailing
+    // spinner; errors retain their existing status marker.
+    var showDot = statusClass !== "idle" && statusClass !== "running";
     var row = el(
       "div",
       "project-switch-row rail-session-row is-" + kind
@@ -425,6 +433,11 @@
     var text = el("span");
     text.innerHTML = '<strong>' + escapeHtml(railTitle(session)) + '</strong>';
     button.appendChild(text);
+    if (statusClass === "running") {
+      var spinner = el("span", "nav-running-indicator");
+      spinner.title = sessionStatusLabel(session);
+      spinner.setAttribute("aria-label", sessionStatusLabel(session));
+    }
     row.appendChild(button);
 
     if (kind === "chat") {
@@ -436,6 +449,7 @@
       menuButton.setAttribute("aria-haspopup", "menu");
       menuButton.setAttribute("aria-expanded", menuOpen ? "true" : "false");
       menuButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>';
+      if (spinner) { menuButton.innerHTML = ""; menuButton.appendChild(spinner); menuButton.title = sessionStatusLabel(session) + " · Session options"; }
       menuButton.onclick = function (event) {
         event.stopPropagation();
         state.openMenuId = state.openMenuId === session.id ? "" : session.id;
@@ -463,6 +477,7 @@
       pinBadge.title = "Pinned";
       pinBadge.setAttribute("aria-hidden", "true");
       pinBadge.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+      if (spinner) { pinBadge.innerHTML = ""; pinBadge.appendChild(spinner); pinBadge.title = sessionStatusLabel(session); pinBadge.removeAttribute("aria-hidden"); }
       row.appendChild(pinBadge);
     }
     return row;
@@ -512,29 +527,35 @@
     var command = document.getElementById("sv-resume-command-bar")?.dataset?.command || "";
     if (!command) return;
     if (typeof ui().copyTextToClipboard === "function") {
-      await ui().copyTextToClipboard(command, "Resume command copied.");
+      await ui().copyTextToClipboard(command, "CLI continuation command copied.");
       return;
     }
     try {
       await navigator.clipboard.writeText(command);
-      notify("Resume command copied.");
+      notify("CLI continuation command copied.");
     } catch {
       notify("Could not copy resume command.", true);
     }
   }
 
   function sessionStatusClass(session) {
-    if (session && session.running) return "running";
     var status = String((session && session.status) || "idle").toLowerCase();
-    if (status === "error") return "error";
+    // The initial session list lacks the main run's pause reason. Wait for
+    // syncResearchSession before showing an interruption marker.
+    if (session?.kind === "evolution" && status === "interrupted" && session.loop_stop_reason === undefined) return "idle";
+    if (session?.running || status === "running" || status === "stopping") return "running";
+    if (status === "error" || status === "failed") return "error";
     if (status === "interrupted") return "interrupted";
     return "idle";
   }
 
   function sessionStatusLabel(session) {
-    if (session && session.running) return "Running";
     var status = String((session && session.status) || "idle").toLowerCase();
+    if (status === "stopping") return "Stopping";
+    if (session?.running || status === "running") return "Running";
     if (status === "error") return "Error";
+    if (status === "failed") return "Failed";
+    if (status === "interrupted" && session.kind === "evolution" && session.loop_stop_reason === "paused_by_user") return "Paused";
     if (status === "interrupted") return "Interrupted";
     return "Idle";
   }
@@ -617,6 +638,8 @@
     }
     if (session.running) {
       html += thinkingMessageHtml(session);
+    } else if (session.status === "interrupted" && history.length) {
+      html += sessionMessageHtml({ role: "control", text: "Response stopped. Send a new message, or edit and resend your previous message to continue." }, "interrupted", session);
     }
     logEl.innerHTML = html;
     if (typeof ui().scheduleWorkingTicker === "function") ui().scheduleWorkingTicker();
@@ -760,7 +783,11 @@
         var activityHtml = sessionPlanActivityHtml(message, index, session, artifact);
         return ui().planCardHtml(
           { id: "session-plan-" + planId, kind: "plan", artifact: artifact },
-          { includeProjectLaunch: false, activityHtml: activityHtml }
+          {
+            includeProjectLaunch: false,
+            activityHtml: activityHtml,
+            handoffToResearch: Boolean(session?.read_only || ui().currentV2ResearchBoard?.()?.legacy === false),
+          }
         );
       }
     }
@@ -781,7 +808,43 @@
       copy: role !== "control",
       canEdit: role === "user",
       editing: role === "user" && state.editingMessageIndex === index,
+      extraActionsHtml: role === "assistant" && session?.read_only && String(message.text || "").trim()
+        ? '<button class="text-button" type="button" data-session-handoff="' + index + '" title="Review this suggestion in the research draft before sending">Add to research draft</button>'
+        : "",
     });
+  }
+
+  function handoffPlanToResearch(planId) {
+    var session = activeSessionForView();
+    var artifact = session?.plan_artifacts?.[planId];
+    var text = String(artifact?.plan_text || artifact?.text || "").trim();
+    if (!artifact || artifact.status !== "ready" || !text) {
+      notify("This plan is still being prepared. Wait for it to finish before adding it to your research draft.", true);
+      return;
+    }
+    handoffToResearch(text, "plan");
+  }
+
+  function handoffMessageToResearch(index) {
+    var session = activeSessionForView();
+    var message = session?.chat_history?.[index];
+    if (!session?.read_only || message?.role !== "assistant" || !String(message.text || "").trim()) return;
+    handoffToResearch(message.text, "suggestion");
+  }
+
+  function handoffToResearch(text, label) {
+    if (typeof ui().insertComposerPrompt !== "function") {
+      notify("The research draft is not ready. Reopen the research session and try again.", true);
+      return;
+    }
+    var main = state.sessions.find(function (item) { return item.kind === "evolution"; });
+    if (main) {
+      state.activeId = main.id;
+      writeStoredActiveSessionId(main.id);
+    }
+    enterEvolutionView();
+    ui().insertComposerPrompt("## Discussion " + label + "\n\n" + text);
+    notify("Added to your research draft. Review it before sending.");
   }
 
   function thinkingMessageHtml(session) {
@@ -805,19 +868,22 @@
       return ui().emptyWelcomeHtml({
         eyebrow: "Chat",
         title: "What is worth understanding next?",
-        body: "Follow a question, test an idea, or ask where the research should move.",
+        body: "Discuss findings, question an approach, or prepare a suggestion. Add it to the research draft when you are ready to send it.",
       });
     }
     return sessionMessageHtml({
       role: "control",
-      text: "What is worth understanding next?\n\nFollow a question, test an idea, or ask where the research should move.",
+      text: "What is worth understanding next?\n\nDiscuss findings, question an approach, or prepare a suggestion. Add it to the research draft when you are ready to send it.",
     }, "empty");
   }
 
   function renderSessionComposer(session) {
+    var submitting = pendingSessionSends.has(projectId() + "/" + session.id);
     hydrateSessionComposer(session);
     var input = document.getElementById("sv-chat-input");
     var sendBtn = document.getElementById("sv-chat-send");
+    var boundary = document.getElementById("sv-discussion-boundary");
+    if (boundary) boundary.hidden = !session.read_only;
     document.querySelectorAll("[data-session-clear-context]").forEach(function (button) {
       button.dataset.sessionClearContext = session?.id || "";
       button.disabled = !session?.id || session?.draft || session?.kind === "evolution";
@@ -828,14 +894,14 @@
     });
     if (input) {
       input.placeholder = session.running ? "Session is running…" : "Message this session…";
-      input.disabled = !!session.running;
+      input.disabled = !!session.running || submitting;
       autoResizeSessionInput(input);
     }
     var controller = composerController();
     if (sendBtn && controller?.syncAction) {
       controller.syncAction({
         stopMode: !!session.running,
-        disabled: !session.running && !composerHasContent(),
+        disabled: submitting || (!session.running && !composerHasContent()),
         sendHtml: sendIconHtml(),
       });
       sendBtn.dataset.stopMode = session.running ? "true" : "false";
@@ -843,9 +909,9 @@
       var stopMode = !!session.running;
       sendBtn.classList.toggle("is-stop-mode", stopMode);
       sendBtn.dataset.stopMode = stopMode ? "true" : "false";
-      sendBtn.disabled = stopMode ? false : !composerHasContent();
-      sendBtn.setAttribute("aria-label", stopMode ? "Stop answering" : "Send");
-      sendBtn.title = stopMode ? "Stop answering" : "Send";
+      sendBtn.disabled = submitting || (!stopMode && !composerHasContent());
+      sendBtn.setAttribute("aria-label", stopMode ? "Stop current run" : "Send");
+      sendBtn.title = stopMode ? "Stop current run" : "Send";
       sendBtn.innerHTML = stopMode ? stopIconHtml() : sendIconHtml();
     }
     renderSessionPlanMode();
@@ -858,7 +924,7 @@
   }
 
   function hydrateSessionComposer(session) {
-    var base = composerBaseSettings();
+    var base = composerBaseSettings(session);
     var backend = normalizeSessionBackend(base.backend || "codex");
     var modelValue = String(base.model || "gpt-5.5");
     var reasoningValue = String(base.reasoningEffort || "medium");
@@ -892,12 +958,27 @@
     fitSessionComposerSelects();
   }
 
-  function composerBaseSettings() {
+  function composerBaseSettings(session) {
     var form = document.getElementById("session-settings-form");
-    return {
+    var base = {
       backend: form?.elements?.backend?.value || "",
       model: document.getElementById("composer-model")?.value || form?.elements?.model?.value || "",
       reasoningEffort: document.getElementById("composer-reasoning")?.value || form?.elements?.reasoningEffort?.value || "",
+    };
+    session = session || activeSessionForView();
+    var selected = state.composerSelections[projectId() + "/" + (session?.id || "")] || session?.settings;
+    if (selected?.model && normalizeSessionBackend(selected.backend) === normalizeSessionBackend(base.backend)) {
+      base.model = selected.model;
+      base.reasoningEffort = selected.reasoningEffort;
+    }
+    return base;
+  }
+
+  function rememberComposerSelection() {
+    state.composerSelections[projectId() + "/" + state.activeId] = {
+      backend: activeComposerBackend(),
+      model: document.getElementById("sv-composer-model")?.value || "",
+      reasoningEffort: document.getElementById("sv-composer-reasoning")?.value || "",
     };
   }
 
@@ -1056,25 +1137,27 @@
     var bcEl = document.getElementById("sv-ws-breadcrumb");
     if (bcEl) {
       bcEl.innerHTML = "";
+      var root = el("button", "sv-ws-crumb", "/");
+      root.type = "button";
+      root.disabled = !state.wsPath;
+      root.onclick = function () { loadWorkspace(currentSessionId(), ""); };
+      bcEl.appendChild(root);
       if (state.wsPath) {
         var parts = state.wsPath.split("/").filter(Boolean);
-        var root = el("span", null, "/");
-        root.style.cursor = "pointer";
-        root.onclick = function () { loadWorkspace(currentSessionId(), ""); };
-        bcEl.appendChild(root);
         var acc = "";
         parts.forEach(function (part) {
-          bcEl.appendChild(el("span", null, " / "));
+          var separator = el("span", "sv-ws-crumb-separator", "/");
+          separator.setAttribute("aria-hidden", "true");
+          bcEl.appendChild(separator);
           acc = acc ? acc + "/" + part : part;
           (function (path, label) {
-            var seg = el("span", null, label);
-            seg.style.cursor = "pointer";
+            var seg = el("button", "sv-ws-crumb", label);
+            seg.type = "button";
+            seg.disabled = path === state.wsPath;
             seg.onclick = function () { loadWorkspace(currentSessionId(), path); };
             bcEl.appendChild(seg);
           })(acc, part);
         });
-      } else {
-        bcEl.appendChild(el("span", null, "/"));
       }
     }
 
@@ -1083,7 +1166,8 @@
     listEl.innerHTML = "";
 
     if (state.wsPath) {
-      var back = el("div", "sv-ws-back", "↑ ..");
+      var back = el("button", "sv-ws-back", "↑ ..");
+      back.type = "button";
       back.onclick = function () {
         var parts = state.wsPath.split("/").filter(Boolean);
         parts.pop();
@@ -1099,21 +1183,12 @@
 
     state.wsItems.forEach(function (item) {
       var row = el("div", "sv-ws-item" + (item.is_dir ? " is-dir" : ""));
-      row.appendChild(el("span", "sv-ws-item-icon", item.is_dir ? "▸" : fileIcon(item.name)));
-      row.appendChild(el("span", "sv-ws-item-name", item.name));
-      if (!item.is_dir) {
-        var actions = el("div", "sv-ws-item-actions");
-        var viewBtn = el("button", "sv-ws-item-act", "Preview");
-        viewBtn.title = "Preview";
-        viewBtn.onclick = function (event) { event.stopPropagation(); previewFile(currentSessionId(), item.path); };
-        actions.appendChild(viewBtn);
-        var dlBtn = el("button", "sv-ws-item-act", "Download");
-        dlBtn.title = "Download";
-        dlBtn.onclick = function (event) { event.stopPropagation(); downloadFile(currentSessionId(), item.path); };
-        actions.appendChild(dlBtn);
-        row.appendChild(actions);
-      }
-      row.onclick = function () {
+      var openBtn = el("button", "sv-ws-item-open");
+      openBtn.type = "button";
+      openBtn.title = item.is_dir ? "Open folder" : "Preview file";
+      openBtn.appendChild(el("span", "sv-ws-item-icon", item.is_dir ? "▸" : fileIcon(item.name)));
+      openBtn.appendChild(el("span", "sv-ws-item-name", item.name));
+      openBtn.onclick = function () {
         if (item.is_dir) {
           var nextPath = state.wsPath ? state.wsPath + "/" + item.name : item.name;
           loadWorkspace(currentSessionId(), nextPath);
@@ -1121,6 +1196,16 @@
           previewFile(currentSessionId(), item.path);
         }
       };
+      row.appendChild(openBtn);
+      if (!item.is_dir) {
+        var actions = el("div", "sv-ws-item-actions");
+        var dlBtn = el("button", "sv-ws-item-act", "Download");
+        dlBtn.type = "button";
+        dlBtn.title = "Download";
+        dlBtn.onclick = function () { downloadFile(currentSessionId(), item.path); };
+        actions.appendChild(dlBtn);
+        row.appendChild(actions);
+      }
       listEl.appendChild(row);
     });
   }
@@ -1139,54 +1224,8 @@
     return "file";
   }
 
-  function openViewer(name, content, isImage, imageUrl, options) {
-    options = options || {};
-    closeViewer();
-    var overlay = el("div", "cas-viewer-overlay");
-    overlay.id = "cas-viewer-overlay";
-    overlay.onclick = closeViewer;
-    document.body.appendChild(overlay);
-
-    var modal = el("div", "cas-viewer");
-    modal.id = "cas-viewer";
-    var head = el("div", "cas-viewer-head");
-    head.appendChild(el("span", null, name));
-    var closeBtn = el("button", "cas-viewer-close", "×");
-    closeBtn.onclick = closeViewer;
-    head.appendChild(closeBtn);
-    modal.appendChild(head);
-
-    var body = el("div", "cas-viewer-body");
-    if (isImage && imageUrl) {
-      var img = el("img");
-      img.src = imageUrl;
-      body.appendChild(img);
-    } else if (options.kind === "pdf" && options.url) {
-      var pdf = el("iframe", "cas-viewer-frame");
-      pdf.src = options.url;
-      pdf.title = name;
-      body.appendChild(pdf);
-    } else if (options.kind === "html" && options.url) {
-      var html = el("iframe", "cas-viewer-frame");
-      html.src = options.url;
-      html.title = name;
-      html.setAttribute("sandbox", "");
-      body.appendChild(html);
-    } else {
-      body.textContent = content;
-    }
-    modal.appendChild(body);
-    document.body.appendChild(modal);
-  }
-
-  function closeViewer() {
-    var overlay = document.getElementById("cas-viewer-overlay");
-    var modal = document.getElementById("cas-viewer");
-    if (overlay) overlay.remove();
-    if (modal) modal.remove();
-  }
-
   async function loadSessions() {
+    var pid = projectId();
     try {
       if (!projectId()) {
         state.sessions = [];
@@ -1199,8 +1238,10 @@
       }
       var mergeBase = state.sessions.slice();
       await ensureDefaults();
+      if (pid !== projectId()) return;
       var previousActive = visibleSessions().find(function (session) { return session.id === state.activeId; });
       var r = await apiCall("/api/sessions");
+      if (pid !== projectId()) return;
       state.sessions = mergeSessionList(r.sessions || [], mergeBase);
       if (isDraftSessionId(state.activeId) && state.surfaceActive && state.draftSession) {
         renderAll();
@@ -1213,8 +1254,9 @@
         var evolution = visible.find(function (session) { return session.kind === "evolution"; });
         var fallback = stored || evolution || visible.find(function (session) { return session.kind === "chat"; });
         state.activeId = fallback ? fallback.id : "";
-        state.surfaceActive = Boolean(fallback && fallback.kind !== "evolution");
-        if (stored && stored.kind !== "evolution") {
+        state.surfaceActive = (ui().activeNavigationPanel?.() || "chat") === "chat"
+          && Boolean(fallback && fallback.kind !== "evolution");
+        if (stored && state.surfaceActive) {
           renderRail();
           selectSession(stored.id);
           return;
@@ -1321,6 +1363,7 @@
   }
 
   async function selectSession(id) {
+    var pid = projectId();
     var current = visibleSessions().find(function (session) { return session.id === id; });
     if (!current) return;
     state.draftSession = null;
@@ -1345,7 +1388,7 @@
 
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id));
-      if (state.activeId !== id) return;
+      if (pid !== projectId() || state.activeId !== id || !state.surfaceActive) return;
       var existing = state.sessions.find(function (item) { return item.id === id; });
       var fetched = normalizeSession(r.session, existing);
       updateSession(fetched);
@@ -1357,7 +1400,7 @@
     } catch (err) {
       console.warn("[sessions] failed to fetch session", err);
     }
-    if (state.activeId !== id) return;
+    if (pid !== projectId() || state.activeId !== id || !state.surfaceActive) return;
     renderAll();
   }
 
@@ -1369,9 +1412,11 @@
   }
 
   async function refreshSessionSnapshot(id, options) {
+    var pid = projectId();
     options = options || {};
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id));
+      if (pid !== projectId()) return;
       updateSession(r.session);
       renderAll();
       if (options.workspace && state.activeId === id) loadWorkspace(id, state.wsPath || "");
@@ -1392,6 +1437,21 @@
   }
 
   async function sendMessage(id, text, options) {
+    var pid = projectId();
+    var key = pid + "/" + id;
+    if (pendingSessionSends.has(key)) return;
+    pendingSessionSends.add(key);
+    renderSessionComposer(activeSessionForView() || {});
+    try {
+      return await submitSessionMessage(id, text, options);
+    } finally {
+      pendingSessionSends.delete(key);
+      if (pid === projectId()) renderSessionComposer(activeSessionForView() || {});
+    }
+  }
+
+  async function submitSessionMessage(id, text, options) {
+    var pid = projectId();
     options = options || {};
     var editIndex = Number.isInteger(options.editIndex) ? options.editIndex : null;
     var isEdit = editIndex !== null;
@@ -1403,14 +1463,17 @@
     var files = [];
     var attachmentSnapshot = state.attachments.slice();
     var draftSend = isDraftSessionId(id);
-    var draftSessionSnapshot = draftSend && state.draftSession ? normalizeSession(state.draftSession) : null;
+    var draftSessionAtStart = state.draftSession;
+    var draftSessionSnapshot = draftSend && draftSessionAtStart ? normalizeSession(draftSessionAtStart) : null;
     if (!isEdit) {
       try {
         files = await collectAttachmentPayloads();
       } catch (err) {
+        if (pid !== projectId() || state.activeId !== id) return;
         notify("Attachment read failed: " + err.message, true);
         return;
       }
+      if (pid !== projectId() || state.activeId !== id) return;
       var input = document.getElementById("sv-chat-input");
       if (input) {
         input.value = "";
@@ -1421,23 +1484,37 @@
     if (draftSend) {
       try {
         var created = await apiCall("/api/sessions", { method: "POST", body: JSON.stringify({ kind: "chat" }) });
+        if (pid !== projectId()) return;
+        var draftStillSelected = state.surfaceActive && state.activeId === DRAFT_CHAT_ID && state.draftSession === draftSessionAtStart;
         state.sessions = mergeSessionList(created.result.sessions || state.sessions);
         updateSession(created.result.session);
         var createdId = String(created.result.session?.id || "");
         if (!createdId) throw new Error("Created session missing id");
         if (isPlanSend) {
           setSessionPlanModeState(createdId, previousPlanState);
-          delete state.planModeArmed[DRAFT_CHAT_ID];
+          if (draftStillSelected) delete state.planModeArmed[DRAFT_CHAT_ID];
           planState = sessionPlanModeState(createdId);
           previousPlanState = { armed: planState.armed, revisePlanId: planState.revisePlanId };
         }
-        state.draftSession = null;
-        state.activeId = createdId;
-        state.surfaceActive = true;
-        writeStoredActiveSessionId(createdId);
+        if (draftStillSelected) {
+          var selectionKey = pid + "/" + DRAFT_CHAT_ID;
+          if (state.composerSelections[selectionKey]) {
+            state.composerSelections[pid + "/" + createdId] = state.composerSelections[selectionKey];
+            delete state.composerSelections[selectionKey];
+          }
+          state.draftSession = null;
+          state.activeId = createdId;
+          state.surfaceActive = true;
+          writeStoredActiveSessionId(createdId);
+        }
         id = createdId;
         renderRail();
       } catch (err) {
+        if (pid !== projectId()) return;
+        if (state.activeId !== DRAFT_CHAT_ID || state.draftSession !== draftSessionAtStart) {
+          notify("Create failed: " + err.message, true);
+          return;
+        }
         state.draftSession = draftSessionSnapshot || newDraftSession();
         state.activeId = DRAFT_CHAT_ID;
         state.surfaceActive = true;
@@ -1491,10 +1568,12 @@
       session.status = "running";
       session.started_at = new Date().toISOString();
       session.transcript = [];
-      state.editingMessageIndex = null;
       state.clearNotices[id] = "";
       renderRail();
-      renderSessionView(isEdit ? { focusIndex: editIndex, scrollToBottom: false } : { scrollToBottom: true });
+      if (state.activeId === id) {
+        state.editingMessageIndex = null;
+        renderSessionView(isEdit ? { focusIndex: editIndex, scrollToBottom: false } : { scrollToBottom: true });
+      }
     }
     try {
       var body = { message: requestText, settings: currentSettings() };
@@ -1512,14 +1591,15 @@
         method: "POST",
         body: JSON.stringify(body),
       });
+      if (pid !== projectId()) return;
       if (isPlanSend) setSessionPlanModeState(id, null);
-      if (!isEdit) state.attachments = [];
       updateSession(r.result.session);
       if (state.activeId === id) connectEvents(id);
       renderAll();
       if (isEdit && state.activeId === id) scrollSessionMessageIntoView(editIndex);
       if (state.activeId === id) loadWorkspace(id, state.wsPath || "");
     } catch (err) {
+      if (pid !== projectId()) return;
       if (session) {
         session.chat_history = previousHistory;
         session.running = false;
@@ -1528,9 +1608,9 @@
         session.started_at = previousStartedAt;
       }
       if (isPlanSend) setSessionPlanModeState(id, previousPlanState);
-      if (isEdit) {
+      if (isEdit && state.activeId === id) {
         state.editingMessageIndex = editIndex;
-      } else {
+      } else if (!isEdit && state.activeId === id) {
         state.attachments = attachmentSnapshot;
         var input = document.getElementById("sv-chat-input");
         if (input && !input.value) {
@@ -1570,17 +1650,18 @@
   }
 
   async function loadWorkspace(id, relPath) {
+    var pid = projectId();
     if (isDraftSessionId(id)) return;
     if (state.activeId !== id) return;
     var requestedPath = relPath || "";
     state.wsPath = requestedPath;
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/workspace?path=" + encodeURIComponent(requestedPath));
-      if (state.activeId !== id) return;
+      if (pid !== projectId() || state.activeId !== id || state.wsPath !== requestedPath) return;
       state.wsItems = r.items || [];
       renderWorkspace();
     } catch (err) {
-      if (state.activeId !== id) return;
+      if (pid !== projectId() || state.activeId !== id || state.wsPath !== requestedPath) return;
       state.wsItems = [];
       renderWorkspace();
       console.warn("[sessions] workspace load failed", err);
@@ -1592,14 +1673,18 @@
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/workspace/file?path=" + encodeURIComponent(relPath));
       var kind = String(r.kind || "").toLowerCase();
       var mime = String(r.content_type || "").toLowerCase();
-      var isImage = kind === "image" || mime.startsWith("image/");
       var rawUrl = withProject("/api/sessions/" + encodeURIComponent(id) + "/workspace/file?path=" + encodeURIComponent(relPath) + "&raw=1");
-      var imageUrl = isImage ? "data:" + r.content_type + ";base64," + r.content : "";
-      openViewer(r.name || relPath, isImage ? "" : (r.content || "(empty)"), isImage, imageUrl, {
-        kind: kind || (mime.includes("pdf") ? "pdf" : ""),
+      if (typeof ui().openFilePayloadFullscreen !== "function") throw new Error("File viewer is unavailable");
+      ui().openFilePayloadFullscreen({
+        exists: true,
+        is_dir: false,
+        path: relPath,
+        text: r.content || "",
+        editable: false,
+        kind: kind || (mime.includes("pdf") ? "pdf" : "text"),
         mime: r.content_type || "",
         url: rawUrl,
-      });
+      }, { title: r.name || relPath, cache: false });
     } catch (err) {
       notify("Preview failed: " + err.message, true);
     }
@@ -1675,8 +1760,9 @@
     state.eventSourceId = id;
     es.addEventListener("research", function (event) {
       try {
-        if (state.eventSourceId !== id) return;
+        if (state.eventSource !== es) return;
         var data = JSON.parse(event.data);
+        if (data.event_stream_reset) state.eventLastIds[id] = 0;
         var eventId = Number(data.event_id || 0);
         if (eventId > 0) {
           if (eventId <= Number(state.eventLastIds[id] || 0)) return;
@@ -1689,7 +1775,7 @@
             planSession.plan_artifacts[data.plan.id] = data.plan;
             if (state.activeId === id) renderSessionView();
           }
-        } else if (data.kind === "completed" || data.kind === "error") {
+        } else if (data.kind === "completed" || data.kind === "error" || (data.kind === "session" && data.status === "interrupted")) {
           refreshSessionSnapshot(id, { workspace: true });
         } else if (data.log || data.transcript_entry) {
           var session = state.sessions.find(function (item) { return item.id === id; });
@@ -1721,7 +1807,7 @@
     form?.reset();
     if (input) input.value = session.title || "";
     if (note) {
-      note.textContent = "Renaming changes the chat label only. It does not move workspace files.";
+      note.textContent = "";
       note.dataset.tone = "";
     }
     var dialog = document.getElementById("session-rename-dialog");
@@ -1939,10 +2025,21 @@
     var log = document.getElementById("sv-chat-log");
     if (log) {
       log.addEventListener("click", function (event) {
+        var messageHandoff = event.target.closest("[data-session-handoff]");
+        if (messageHandoff) {
+          event.preventDefault();
+          handoffMessageToResearch(Number(messageHandoff.dataset.sessionHandoff));
+          return;
+        }
+        var planHandoff = event.target.closest("[data-plan-handoff]");
         var planApprove = event.target.closest("[data-plan-approve]");
-        if (planApprove) {
+        if (planHandoff || planApprove) {
           event.preventDefault();
           event.stopPropagation();
+          if (planHandoff || activeSessionForView()?.read_only || ui().currentV2ResearchBoard?.()?.legacy === false) {
+            handoffPlanToResearch(planHandoff?.dataset.planHandoff || planApprove.dataset.planApprove || "");
+            return;
+          }
           var approvePlanId = planApprove.dataset.planApprove || "";
           apiCall("/api/sessions/" + encodeURIComponent(state.activeId) + "/plan/approve", {
             method: "POST",
@@ -2010,12 +2107,14 @@
       renderSessionPlanMode();
     });
     document.getElementById("sv-composer-model")?.addEventListener("change", function (event) {
+      syncSessionReasoningOptions();
+      rememberComposerSelection();
       event.currentTarget.dataset.hydratedFor = state.activeId || "";
       event.currentTarget.dataset.hydratedKey = currentSessionComposerHydrationKey();
-      syncSessionReasoningOptions();
       fitSessionComposerSelects();
     });
     document.getElementById("sv-composer-reasoning")?.addEventListener("change", function (event) {
+      rememberComposerSelection();
       event.currentTarget.dataset.hydratedFor = state.activeId || "";
       event.currentTarget.dataset.hydratedKey = currentSessionComposerHydrationKey();
       fitSessionComposerSelects();
@@ -2135,11 +2234,16 @@
 
     setInterval(syncActiveProject, 1500);
 
-    setInterval(function () {
+    var railPollPending = false;
+    var lastRailPoll = 0;
+    setInterval(async function () {
       if (!window.activeProjectId) return;
-      var shouldRefresh = state.surfaceActive || state.sessions.some(function (session) { return session.running; });
-      if (shouldRefresh) loadSessions();
-    }, 15000);
+      var running = state.sessions.some(function (session) { return sessionStatusClass(session) === "running"; });
+      if (railPollPending || (!running && (!state.surfaceActive || Date.now() - lastRailPoll < 15000))) return;
+      railPollPending = true;
+      lastRailPoll = Date.now();
+      try { await loadSessions(); } finally { railPollPending = false; }
+    }, 2000);
   }
 
   // Also called directly by app.js (window.CoAutoSessions.syncProject) the
@@ -2159,11 +2263,19 @@
     }
     state.sessions = [];
     state.draftSession = null;
-    delete state.planModeArmed[DRAFT_CHAT_ID];
+    state.planModeArmed = {};
+    state.clearNotices = {};
+    state.eventLastIds = {};
+    state.attachments = [];
+    state.editingMessageIndex = null;
+    state.openMenuId = "";
     state.activeId = "";
     state.surfaceActive = false;
     state.wsPath = "";
     state.wsItems = [];
+    var input = document.getElementById("sv-chat-input");
+    if (input) input.value = "";
+    renderAll();
     loadSessions();
   }
 
@@ -2173,8 +2285,20 @@
     mount();
   }
 
+  function syncResearchSession(pid, session, running) {
+    if (pid !== projectId() || !session?.status) return;
+    var evolution = state.sessions.find(function (item) { return item.kind === "evolution"; });
+    var stopReason = String(session.loop_stop_reason || "");
+    if (!evolution || (evolution.status === session.status && evolution.running === running && evolution.loop_stop_reason === stopReason)) return;
+    evolution.status = session.status;
+    evolution.running = running;
+    evolution.loop_stop_reason = stopReason;
+    renderRail();
+  }
+
   window.CoAutoSessions = {
     syncProject: syncActiveProject,
+    syncResearchSession: syncResearchSession,
     leave: function () {
       if (!state.surfaceActive && !document.body.classList.contains("has-sessions-active")) return;
       state.surfaceActive = false;

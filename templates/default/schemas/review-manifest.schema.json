@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-manifest.schema.json",
+  "title": "Review Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "router_version",
+    "minimum_level",
+    "selected_level",
+    "selection_rationale",
+    "required_reviewers",
+    "omitted_reviewers",
+    "specialized_reviewers",
+    "stage_id",
+    "stage_manifest_hash",
+    "final_candidate"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "review_manifest"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "router_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "minimum_level": {
+      "enum": [
+        "light",
+        "standard",
+        "full",
+        "final"
+      ]
+    },
+    "selected_level": {
+      "enum": [
+        "light",
+        "standard",
+        "full",
+        "final"
+      ]
+    },
+    "selection_rationale": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "required_reviewers": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/reviewer_key"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "omitted_reviewers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reviewer",
+          "reason"
+        ],
+        "properties": {
+          "reviewer": {
+            "$ref": "common.schema.json#/$defs/reviewer_key"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "specialized_reviewers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "instruction_path",
+          "output_path",
+          "trigger"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "instruction_path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "output_path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "trigger": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "stage_id": {
+      "$ref": "common.schema.json#/$defs/stage_id"
+    },
+    "stage_manifest_hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "final_candidate": {
+      "type": "boolean"
+    }
+  }
+}

@@ -1,11 +1,15 @@
 # Platform Support
 
-CoAutoResearch is designed to run on macOS, Linux, and Windows.
+CoAutoResearch includes platform-specific paths for macOS, Linux and Windows.
+Installation guidance is not evidence that every backend and feature has been
+validated on every platform. Release notes should name the actual environments
+checked. Paper tools have additional requirements described in
+[paper generation](paper-generation.md).
 
 ## Required Tools
 
-- Node.js 18 or newer.
-- Python 3.
+- Node.js 20 or newer.
+- Python 3.10 or newer.
 - Git.
 - OpenAI Codex CLI for the default backend.
 - Claude Code CLI for the optional Claude backend.
@@ -42,10 +46,22 @@ For direct UI server use:
 python3 ui/server.py --host 127.0.0.1 --port 8765
 ```
 
+On POSIX, agent cleanup tracks the dedicated process group plus discoverable
+descendants that retain the per-run process marker, including ordinary
+`setsid()` descendants. This is cleanup attribution, not an OS sandbox: a
+same-user process that deliberately clears the marker needs cgroup, container,
+or platform-supervisor containment.
+
 ## Windows Native
 
 Windows native use should work with Node.js, Python 3, Git, and the selected
 agent CLI on the Windows `PATH`.
+
+Keep native Windows projects on NTFS or ReFS. Runtime-session persistence pins
+each project ancestor with a no-follow Windows handle and requires the
+filesystem to expose a trustworthy 128-bit file identity. A filesystem or
+provider that returns the Windows “identity unavailable” sentinel is rejected
+instead of weakening link, replacement, or recovery checks.
 
 PowerShell examples:
 
@@ -88,10 +104,15 @@ The UI resolves Codex in this order:
 
 1. `COAUTO_CODEX`, if set.
 2. `CODEX_BIN`, if set.
-3. `codex.cmd`, `codex.exe`, `codex.bat`, then `codex` on `PATH`.
+3. On macOS, the newest installed CLI among `codex` on `PATH` and the Codex bundled with ChatGPT/Codex App.
+4. On other platforms, `codex.cmd`, `codex.exe`, `codex.bat`, then `codex` on `PATH`.
 
 This matters on Windows because npm global binaries are commonly installed as
-`.cmd` shims. If Codex fails to start, run:
+`.cmd` shims. CoAutoResearch never interpolates agent arguments through
+`cmd.exe`: for an npm `.cmd`/`.bat` shim it invokes the sibling `.ps1` shim with
+a PowerShell argument vector, or uses a native `.exe`. A batch shim without a
+sibling PowerShell shim is rejected; configure the native executable explicitly
+in that unusual case. If Codex fails to start, run:
 
 ```powershell
 codex --version

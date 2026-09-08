@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan.schema.json",
+  "title": "Trial Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "plan_revision",
+    "target",
+    "move",
+    "primary_local_question",
+    "why_now",
+    "critical_path_target",
+    "active_line_ids",
+    "campaign_ids",
+    "working_set",
+    "minimum_useful_output",
+    "success_conditions",
+    "stop_conditions",
+    "must_not_do",
+    "resource_scout",
+    "expected_result_card_types",
+    "expected_human_outcome",
+    "requested_review_level",
+    "parallelism"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "plan"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "plan_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "target": {
+      "enum": [
+        "framing",
+        "resource",
+        "method",
+        "data",
+        "evaluation",
+        "result",
+        "claim",
+        "manuscript",
+        "process",
+        "venue"
+      ]
+    },
+    "move": {
+      "enum": [
+        "explore",
+        "acquire",
+        "build",
+        "test",
+        "diagnose",
+        "compare",
+        "synthesize",
+        "repair",
+        "decide",
+        "package",
+        "profile"
+      ]
+    },
+    "primary_local_question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "why_now": {
+      "type": "string",
+      "minLength": 1
+    },
+    "critical_path_target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "active_line_ids": {
+      "description": "Every research line whose JSON or Markdown may be changed or supplied in the staged candidate bundle, including pair-integrity repairs when no active-line marker exists.",
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/line_id"
+      },
+      "uniqueItems": true
+    },
+    "campaign_ids": {
+      "description": "Every campaign whose JSON or Markdown may be changed or supplied in the staged candidate bundle.",
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/campaign_id"
+      },
+      "uniqueItems": true
+    },
+    "working_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "included_trials",
+        "included_result_cards",
+        "material_exclusions",
+        "combination_rationale"
+      ],
+      "properties": {
+        "included_trials": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/trial_reference_id"
+          },
+          "uniqueItems": true
+        },
+        "included_result_cards": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/result_card_id"
+          },
+          "uniqueItems": true
+        },
+        "material_exclusions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "reason"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "combination_rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "minimum_useful_output": {
+      "type": "string",
+      "minLength": 1
+    },
+    "success_conditions": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "stop_conditions": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "must_not_do": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "resource_scout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "reason",
+        "search_scope",
+        "resource_types",
+        "known_clues",
+        "freshness",
+        "download_policy",
+        "expected_destinations",
+        "stop_criteria"
+      ],
+      "properties": {
+        "decision": {
+          "enum": [
+            "required",
+            "skipped"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "search_scope": {
+          "type": "string"
+        },
+        "resource_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "known_clues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "download_policy": {
+          "type": "string"
+        },
+        "expected_destinations": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          }
+        },
+        "stop_criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "expected_result_card_types": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "positive_evidence",
+          "negative_evidence",
+          "diagnostic_insight",
+          "boundary_condition",
+          "artifact",
+          "design_decision",
+          "resource_decision",
+          "claim_revision",
+          "method_decision",
+          "process_lesson"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "expected_human_outcome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requested_review_level": {
+      "enum": [
+        "light",
+        "standard",
+        "full",
+        "final"
+      ]
+    },
+    "parallelism": {
+      "const": "sequential"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "human_brief",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "trial_outcome": "advanced",
+  "one_line_outcome": "A scoped positive main signal shows a scoped positive main signal with a replication qualification.",
+  "evidence": [
+    {
+      "path": "research_trajectory/trials/000001_test-main-signal/artifacts/results.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_kind": "artifact",
+      "scope": "dataset A, fixed split",
+      "description": "Primary metrics",
+      "extensions": {}
+    }
+  ],
+  "line_impact": "L0001 strengthened but not final.",
+  "campaign_impact": "C0001 main_signal is tentative.",
+  "venue_impact": "No venue change.",
+  "negative_or_limiting_evidence": [
+    "Single run only."
+  ],
+  "current_best_line": "L0001",
+  "current_bottleneck": "Replication across seeds.",
+  "next_move": {
+    "target": "evaluation",
+    "move": "test",
+    "question": "Does the result replicate across seeds?",
+    "expected_value": "high"
+  },
+  "human_action": {
+    "needed": false,
+    "blocking": false,
+    "why_needed": null,
+    "question": null,
+    "options": [],
+    "recommendation": null,
+    "can_continue_meanwhile": true
+  },
+  "outcome_changes": [
+    "Added tentative finding F0001."
+  ]
+}

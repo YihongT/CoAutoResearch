@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "venue-profile.schema.json",
+  "title": "Venue Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "venue_name",
+    "contribution_patterns",
+    "evidence_standards",
+    "manuscript_expectations",
+    "figure_table_expectations",
+    "common_rejection_risks",
+    "requirements_evidence",
+    "seed_papers",
+    "profile_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "venue_profile"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "venue_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contribution_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "evidence_standards": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "manuscript_expectations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "figure_table_expectations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "common_rejection_risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "requirements_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "source",
+          "authority",
+          "accessed_at",
+          "applies_to",
+          "inspection_status"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "authority": {
+            "enum": [
+              "official_venue",
+              "official_publisher"
+            ]
+          },
+          "accessed_at": {
+            "$ref": "common.schema.json#/$defs/timestamp"
+          },
+          "applies_to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inspection_status": {
+            "enum": [
+              "inspected",
+              "excluded"
+            ]
+          }
+        }
+      }
+    },
+    "seed_papers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "source",
+          "inspection_status"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inspection_status": {
+            "enum": [
+              "not_acquired",
+              "acquired",
+              "inspected",
+              "excluded"
+            ]
+          }
+        }
+      }
+    },
+    "profile_status": {
+      "enum": [
+        "draft",
+        "partial",
+        "ready"
+      ]
+    }
+  }
+}

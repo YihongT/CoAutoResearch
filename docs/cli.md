@@ -19,7 +19,13 @@ To update:
 npm install -g co-auto-research@latest
 ```
 
-Source-checkout development commands are covered in the contributor guide.
+For the current source checkout, use `node bin/auto-research.js` in place of
+`co-auto-research` in the examples below. There is no build step. See
+[Getting started](getting-started.md) for the difference between the source
+version and the published npm release, and [agent setup](agent-setup.md) to
+have your coding agent install and verify it.
+
+CoAutoResearch v2.0 requires Node.js 20 or newer and Python 3.10 or newer.
 
 ## Commands
 
@@ -34,7 +40,9 @@ Source-checkout development commands are covered in the contributor guide.
 | `install-graftcp` | Install the Linux proxy helper used when `--remote` runs behind an HTTP proxy. |
 | `doctor` | Check local prerequisites and port availability. |
 | `upgrade` | Print installed version, detected project template version, and npm update command. |
-| `upgrade-project` | Sync core reviewer and trial-protocol instructions in an existing project, with backup. |
+| `upgrade-project` | Plan or apply an additive v1-to-v2 project migration and sync managed instructions, with backups. |
+| `backup` | Create a hash-manifested project recovery directory without raw runtime secrets, staging, or transaction snapshots. |
+| `restore` | Verify and restore such a backup into a missing or empty project directory. |
 | `version` | Print the installed CLI package version. |
 
 ## Start the UI
@@ -88,7 +96,7 @@ slash commands:
 | --- | --- |
 | `/goal` | Show the current autoresearch state. |
 | `/goal resume` | Resume the loop from the latest active trial. |
-| `/goal pause` | Let the current turn finish, then prevent the next trial from starting. |
+| `/goal pause` | Let the current agent turn finish, then pause automatic continuation; the trial may be unfinished. |
 | `/goal restart` | Confirm, archive the current trajectory, and start a new Trial 1. |
 | `/status` | Show session and gate status. |
 | `/ps` | Show running process state. |
@@ -96,13 +104,34 @@ slash commands:
 
 `/goal restart` is not a lightweight reset. It archives existing trials, runtime
 state, working manuscript, generated workspace, and current findings under
-`archive/restarts/`. User-uploaded or user-confirmed resources remain available;
-autoresearch-discovered or generated resources become prior-run context until
-you explicitly reattach or confirm them.
+`archive/restarts/`. Legacy projects retain user-uploaded or user-confirmed
+resources; autoresearch-discovered or generated resources become prior-run
+context until you explicitly reattach or confirm them.
+
+For v2, Restart restores the immutable first-launch `PROJECT.md`, explicit
+resource set, and chat prefix through the original `Start autoresearch.` record.
+It archives later chat, appends a new `Restart autoresearch.` record, rebuilds
+canonical revision 0, and allocates `000001_restart`. Retry continues that exact
+Trial 1/stage. Resume—not Restart—is the operation that continues the current
+canonical trajectory and numbering.
 
 The dashboard ships with Ivory and Nocturne themes.
 The setting is local to the browser and does not clear composer text,
 attachments, or context chips.
+
+## v2.0 Run Semantics
+
+For a v2 project, Start and Restart establish a Trial 1 boundary, Resume
+continues the current canonical trajectory, and Resume From Trial creates a
+bounded fork. One invocation never starts a second trial. Agent output remains proposed until the service validates the typed
+artifacts, stages and hashes the candidate snapshot, derives the review route,
+closes the required reviews, evaluates merge and gate truth, and commits a
+recoverable publication transaction. The UI reports a canonical revision only
+when a matching publish receipt exists.
+
+The service, not the agent, owns canonical JSON, merge decisions, gate results,
+transactions, and receipts. Existing v1 projects continue through a labeled
+legacy read-only Research Board until an additive migration succeeds.
 
 ## Update Project Instructions
 
@@ -112,6 +141,7 @@ instructions can be synced when `doctor` or the UI reports an outdated
 instruction baseline:
 
 ```bash
+co-auto-research upgrade-project --dry-run
 co-auto-research upgrade-project
 ```
 
@@ -121,9 +151,65 @@ For a dashboard folder:
 co-auto-research upgrade-project --all --projects-dir co-autoresearch-projects
 ```
 
-The command backs up previous core reviewer and protocol files under
-`archive/template_migrations/` and preserves custom extra reviewer or
-instruction files outside the managed core set.
+Managed instruction backups are stored under `archive/template_migrations/`.
+The v2 migration journal, exact before snapshots, receipt, and rollback
+instructions are stored under `archive/v2_migrations/`. The migration preserves
+v1 trials, reviewer history, Markdown research content, and custom files outside
+the managed core set.
+
+Rollback is deliberately fail-closed and is allowed only while the project is
+idle and no newer v2 canonical artifacts depend on the migrated state:
+
+```bash
+co-auto-research upgrade-project --rollback
+```
+
+The command verifies recorded after-hashes before restoring exact before bytes.
+It refuses to discard newer work. See [Upgrading](upgrading.md) for the separate
+managed-instruction backup procedure.
+
+## Project Backup And Restore
+
+Stop active work, then create a private backup outside the project directory:
+
+```bash
+co-auto-research backup ./my-project --output ./backups/my-project-2026-07-14
+```
+
+When run inside a project, the project argument may be omitted. The backup
+includes canonical state, trials, resources, manuscript files, schemas,
+instructions, and project configuration. It omits `.env`, secret directories,
+live staging, and transaction snapshots. `ui/.runtime/settings.json` is kept
+only in structurally useful redacted form; token, password, credential, cookie,
+and API-key values become `[redacted]`. `BACKUP_MANIFEST.json` records every
+included path, size, source mode, and SHA-256.
+Keep the `manifest sha256` printed by the backup command separately; restore
+requires that value so a replaced manifest cannot silently redefine the backup.
+
+Rehearse recovery into a clean path rather than overwriting a working project:
+
+```bash
+co-auto-research restore ./backups/my-project-2026-07-14 ./restore-check/my-project \
+  --expected-manifest-sha256 <sha256-from-backup-output>
+co-auto-research attach ./restore-check/my-project
+```
+
+Restore verifies every manifest entry before it exposes the destination and
+refuses a non-empty target, a symlink, a duplicate/unsafe path, or any size/hash
+mismatch. The attached Research Board reports `recovery_required`, the restored
+project is read-only, and research run controls remain disabled. After inspection,
+explicitly release the recovery gate:
+
+```bash
+co-auto-research restore-acknowledge ./restore-check/my-project \
+  --expected-manifest-sha256 <sha256-from-backup-output> \
+  --operator <operator-identifier>
+```
+
+Acknowledgement rehashes the restored tree and validates canonical provenance
+and retained transaction audit metadata. Resource symlinks are recorded but
+never followed or recreated; relink those paths deliberately. Re-enter backend
+credentials after restore because raw secrets are deliberately not recoverable.
 
 ## Port and Browser Options
 
@@ -146,8 +232,9 @@ co-auto-research ui --remote --proxy http://10.21.11.21:8888
 
 Remote mode is for SSH-accessible servers. It keeps browser launch disabled on
 the server, keeps the UI bound to `127.0.0.1`, and prints a temporary
-Cloudflare browser link. Install the official `cloudflared` CLI on the remote
-server for this one-command browser access.
+Cloudflare browser link plus an access key. The browser must present that key;
+API requests without it receive `401`. Install the official `cloudflared` CLI
+on the remote server for this one-command browser access.
 If `cloudflared` is missing, the command prints a short Cloudflare CLI setup
 guide with install, run, and check commands. Keep the terminal open while using
 the link.
@@ -162,6 +249,32 @@ If Cloudflare is blocked on the server, set `COAUTO_REMOTE_MODE=ssh` to force
 SSH-only remote mode. In that fallback path, the command uses
 `user@<ssh-host>` unless `COAUTO_REMOTE_TARGET` is set, because server
 hostnames are often not valid SSH aliases from your laptop.
+
+## Supervised experiment execution
+
+From a generated project, coding agents can run a worker with an external wall
+deadline and durable exit evidence:
+
+```bash
+python3 -B ui/compute_runner.py --wall-seconds 300 \
+  --output-dir workspace/run-evidence/attempt-001 -- python3 -u workspace/experiment.py
+```
+
+Use the Python executable available on the host and the wall limit approved for
+the experiment. The evidence directory must be new: existing output is never
+overwritten. `events.jsonl` records the start and final status; `stdout.log` and
+`stderr.log` capture worker output. Workers should flush milestone output.
+Success requires `status: succeeded`, exit code `0`, and completed process
+cleanup. A signal, nonzero exit, timeout, or cleanup failure remains a failed
+execution even if partial result files exist. Research conclusions still need
+their normal evidence validation.
+
+On POSIX, cleanup covers the worker's isolated process group without requiring
+access to the host process table. Workers and their children must remain in that
+group: do not daemonize or create detached sessions. On Windows, cleanup uses a
+Job Object. The recorded `cleanup_scope` identifies this boundary. The runner
+enforces wall time, not aggregate CPU time; a separately approved CPU limit still
+needs an appropriate external mechanism. No worker-side profiling timer is needed.
 
 ## Environment Variables
 
@@ -185,3 +298,6 @@ hostnames are often not valid SSH aliases from your laptop.
 | `COAUTO_REMOTE_PROXY_MODE` | Set to `off` to disable automatic `graftcp` wrapping even when proxy variables are present. |
 | `COAUTO_REMOTE_MODE` | Set to `ssh` to disable the default Cloudflare Quick Tunnel link and print SSH tunnel instructions instead. |
 | `COAUTO_REMOTE_TARGET` | Override the SSH target printed by the SSH fallback path, for example `yihong@login.example.edu`. |
+| `COAUTO_REMOTE_AUTH_TOKEN` | Optional fixed remote access key; must contain at least 32 characters. If unset, `--remote` generates one for that process. |
+| `COAUTO_ALLOWED_HOSTS` | Comma-separated Host allowlist for an authenticated reverse-proxy deployment. |
+| `COAUTO_ALLOWED_ORIGINS` | Comma-separated browser Origin allowlist for state-changing requests through a reverse proxy. |

@@ -1,150 +1,54 @@
-# CoAutoResearch Agent
-
-This file is the agent entry point. Keep it short. Detailed operating rules live in `instructions/`.
+# CoAutoResearch Agent Entry Point
 
 ## Mission
 
-Produce high-quality research.
+Produce research that a human owner can understand, steer, reuse, and defend. Optimize for changes in the project belief state and deliverable readiness, not for more files, more experiments, or more prose.
 
-High-quality research means research with:
+## Required Route
 
-- a real and well-motivated problem;
-- novelty beyond obvious engineering or superficial recombination;
-- a clear and solid contribution;
-- credible evidence;
-- meaningful scientific, technical, practical, or real-world impact;
-- honest treatment of limitations and alternative explanations.
+Before substantive autoresearch work, read in order:
 
-The repository structure is only a mechanism for supporting research quality. Do not optimize for producing more files, more code, more experiments, or more text.
-
----
-
-## First Files to Read
-
-Use the active session type to choose the instruction route:
-
-- `Evolution Run`: read `instructions/sessions/evolution/ENTRY.md`, then follow
-  the standard files below.
-- Ordinary `Chat`: no file-backed session instruction is required. Use the
-  user's message plus the runtime session boundary.
-- `Monitor progress` in Chat: use
-  `instructions/sessions/chat/prompts/MONITOR_PROGRESS.md` as the editable
-  prompt template.
-
-Before substantive work, read these in order:
-
-1. `instructions/EXECUTION_AGENT.md`
+1. `instructions/KERNEL.md`
 2. `PROJECT.md`
-3. `research_trajectory/STATE.md`
-4. `research_trajectory/CURRENT_FINDINGS.md`
+3. `research_trajectory/STATE.json` and `STATE.md`
+4. `research_trajectory/CURRENT_FINDINGS.json` and `CURRENT_FINDINGS.md`
+5. `research_trajectory/lines/ACTIVE_LINE.json` when present
+6. `research_trajectory/campaigns/INDEX.json` when present
+7. `research_trajectory/HUMAN_TASKS.json`
+8. pending formal human interventions
+9. `resources/target_venue/TARGET_VENUE.json` when present
 
-If the project is empty or newly initialized, also read:
+Then follow `instructions/EXPERT_ROUTER.md` and the selected move playbook.
 
-- `instructions/COLD_START.md`
+For project creation, conversion, resource intake, intervention handling, manuscript work, or review, also read the corresponding instruction file named by `KERNEL.md`.
 
-If creating, revising, or deciding whether to update `PROJECT.md`, also read:
+## Core Rule
 
-- `instructions/PROJECT_FRAMING.md`
+A trial is one bounded research move that closes one local research question. It is not a miniature paper section and does not have to complete an entire research module. Global completeness is tracked by research lines and campaigns.
 
-If the latest user message or UI submission mentions files, folders, repositories, papers, datasets, proposals, prior work, reviews, or target-venue materials, also read:
+## Write Boundary
 
-- `instructions/RESOURCE_INTAKE.md`
+During an autoresearch invocation, write only to the current trial directory, its staging directory, `workspace/`, permitted resource destinations, note proposals, and instruction patch proposals. Tool and skill scratch files belong under `workspace/tmp/`; never create a project-root `tmp/`, `output/`, or cache directory. Do not directly modify protected canonical state. Proposed canonical changes must be represented in the staged snapshot and merge artifacts. The service publishes validated changes.
 
-If the project starts from existing work, old repos, notes, proposals, or raw user input, also read:
+## Authority
 
-- `instructions/CONVERSION.md`
-
-If updating manuscript-facing materials, also read:
-
-- `instructions/MANUSCRIPT.md`
-- `manuscript/BLUEPRINT.md`
-
-If reviewing, use the relevant file under:
-
-- `instructions/reviewers/`
-
-If planning or running a trial, also read:
-
-- `instructions/RESOURCE_SCOUT.md`
-- `instructions/REVIEWER_SCOPE_ANALYST.md`
-
----
-
-## Repository Map
-
-- `PROJECT.md`: canonical research proposal and target definition.
-- `instructions/`: reusable agent protocols.
-- `resources/`: raw input materials, user brief, prior/ongoing work, seed papers, literature, data-source notes.
-- `workspace/`: live workbench for concrete research work products: implementations, models, methods, frameworks, system designs, prototypes, pipelines, analyses, simulations, configs, prompts, schemas, working/derived data, generated outputs, logs, checkpoints, weights, and caches.
-- `research_trajectory/STATE.md`: current control state: objective, active plan, method status, blockers, constraints, next step.
-- `research_trajectory/CURRENT_FINDINGS.md`: latest global synthesis of accepted/tentative/rejected findings, results, claims, limitations, and evidence.
-- `research_trajectory/trials/`: audit trail of complete research attempts.
-- `research_trajectory/notes/index.md`: map of sparse, topic-based knowledge
-  notes for reusable resource, method, process, and human-preference lessons.
-- `research_trajectory/notes/NOTES.md`: compatibility entrypoint that points to
-  `index.md`.
-- `research_trajectory/human_interventions/`: formal human interventions only.
-- `manuscript/`: target-aware manuscript blueprint, figure specifications, candidate deliverable materials, and manuscript reviews.
-- `archive/`: deprecated or misleading materials retained for history.
-
-Detailed folder rules are in `instructions/EXECUTION_AGENT.md` under **Folder Operation Contract**.
-
----
-
-## Iterative Workflow
-
-Before choosing the next research action, perform adaptive intake triage. Explicit UI uploads, drag-and-drop files, and local-browser file or folder selections are authoritative raw resources: file them under `resources/` and record them before framing, conversion, or research reasoning. Natural-language paths, repository names, papers, datasets, or prior-work references are resource clues: follow `instructions/RESOURCE_INTAKE.md` before treating them as available context.
-
-When an answer, plan, conversion, review, or project update depends on a user-provided resource, path-level intake is not enough. Follow the Content Inspection Gate in `instructions/RESOURCE_INTAKE.md`: inventory the provided resource, inspect its content-bearing files, name what was inspected, and state any skipped material. Do not make content-grounded claims from only `RESOURCE_MANIFEST.md`, a symlink listing, a filename, or the user's short description.
-
-Research proceeds as a loop:
-
-1. read the required files;
-2. perform adaptive intake triage;
-3. check pending formal human interventions;
-4. choose the complete research objective required for the current deliverable;
-5. create a trial under `research_trajectory/trials/<trial_id>/`;
-6. write `PLAN.md` with a `Resource Scout Brief`;
-7. write `reviews/PLAN_REVIEW.md`;
-8. if required, run Resource Scout work with a real subagent when available, otherwise the inline Resource Scout fallback;
-9. build, run, analyze, and evaluate mainly in `workspace/`;
-10. record outputs in or from the trial `artifacts/`;
-11. write `REPORT.md` after execution;
-12. run Reviewer Scope Analyst work with a real subagent when available, otherwise the inline Reviewer Scope Analyst fallback;
-13. write any required specialized review, then all eight core files under `reviews/`;
-14. update only the global files whose current state genuinely changed.
-
-Process review is also a trial. If progress is stuck, create a trial such as `000024_process_review/` and review recent work there.
-
----
-
-## Current Truth and Authority
-
-When sources conflict, use this priority order:
+When sources conflict, use this order:
 
 1. latest formal human intervention;
-2. `research_trajectory/STATE.md`;
+2. published canonical JSON at the current canonical revision;
 3. `PROJECT.md`;
-4. `research_trajectory/CURRENT_FINDINGS.md`;
-5. current trial `PLAN.md`, `REPORT.md`, `reviews/`, and artifacts;
-6. `research_trajectory/notes/index.md` and topic notes;
-7. `resources/`;
-8. `archive/`.
+4. published accepted findings, active line, and campaigns;
+5. published trial artifacts and merge decisions;
+6. notes and inspected resources;
+7. archive.
 
-`workspace/` may contain the latest working artifact or implementation state, but it is not automatically accepted research truth. A method or result becomes current only when reflected in `STATE.md`, `CURRENT_FINDINGS.md`, and/or a trial report.
+Markdown is the human-readable view. For v2 control flow, validated JSON is authoritative. V1 Markdown remains readable through compatibility logic.
 
----
+## Legacy project route
 
-## Human Messages During a Run
-
-Human messages are either ordinary interaction, pre-start launch framing, or formal human intervention. The UI/server does not make the semantic classification; the agent must decide from the message, project context, and `instructions/INTERVENTION_PROTOCOL.md`.
-
-Ordinary interaction includes progress questions, clarifications, temporary pauses, requests to inspect logs, and requests for explanations. Do not create intervention files for ordinary interaction.
-
-Before autoresearch starts, messages that change venue, scope, outline, objective, contribution framing, constraints, exclusions, success gates, or expected output are launch-framing updates. Follow `instructions/PROJECT_FRAMING.md` and update `PROJECT.md` when warranted; do not create human intervention files before there is an autoresearch trajectory.
-
-After autoresearch has started, a formal human intervention changes or constrains research direction, plan, method, resource, claim, target venue, or priority. In chat mode, record pending interventions under `research_trajectory/human_interventions/` and update the intervention index only; do not update canonical research state, trials, reviewer files, or manuscript gates from chat.
-
-Pending interventions are priority inputs for the next Start/Resume autoresearch run. The execution agent must read them before selecting or executing the next objective.
-
-When unsure, follow `instructions/INTERVENTION_PROTOCOL.md`.
+When valid v2 machine state is absent, read `LEGACY_AGENTS.md` and
+`instructions/LEGACY_EXECUTION_AGENT.md` before operating a v1 project or
+legacy trial. Those files preserve the detailed v1 intake, intervention,
+review, manuscript, Human Task, note, checkpoint, pause/resume, and trial-loop
+contracts. Once valid v2 state exists, this entry point and `KERNEL.md` take
+precedence wherever authority or write ownership differs.

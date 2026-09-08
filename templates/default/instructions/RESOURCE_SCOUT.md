@@ -1,5 +1,27 @@
 # Resource Scout Protocol
 
+> **V2 control-plane override.** Resource Scout is preflight or a dedicated resource-acquisition move, not a reviewer. It writes under the current trial artifacts and permitted raw-resource destinations. It never edits canonical findings/lines/campaigns directly. The plan declares whether Scout is required; a material scout result increments plan revision and requires a new Plan Review.
+
+In v2 agent execution, the permitted raw-resource destination is
+`resources/autoresearch_discovered/<trial_id>`. Record discovery provenance in
+the current trial's stage/revision-scoped `RESOURCE_SCOUT_MANIFEST.json` and
+`RESOURCE_SCOUT_REPORT.md`. Those two trial artifacts are the authoritative v2
+registration. `resources/user_input/RESOURCE_MANIFEST.md` is service-managed
+intake state because Restart behavior depends on its user-provenance fields; a
+v2 agent must read it when relevant but must never modify it. Do not write
+promoted resource destinations directly from the v2 agent process.
+
+V2 `PLAN.resource_scout.expected_destinations` must name the exact Scout
+subdirectory or files under the current trial's `artifacts/resource_scout/`,
+plus any raw material under `resources/autoresearch_discovered/<trial_id>`.
+Use a stage/revision-specific Scout subdirectory, for example
+`artifacts/resource_scout/<stage_id>/plan-r<plan_revision>/`; do not declare
+the entire Scout root, `workspace`, or general resource roots as destinations.
+Both the report and manifest must exist before a required Scout can pass
+preflight. Plan Review must list every file in those destinations in its
+`reviewed_inputs`; unrelated workspace scaffolds are not Scout evidence.
+
+
 ## Purpose
 
 The Resource Scout is a research-resource subagent for finding, filing, and
@@ -46,9 +68,15 @@ Do not skip merely because the agent thinks it already knows the area, the trial
 is small, search may take time, the needed resource type is unclear, or current
 resources look probably sufficient.
 
-When the plan says `Scout: required`, the main execution agent must run the
-Resource Scout after `PLAN.md` and `reviews/PLAN_REVIEW.md`, before main
-execution, by following this explicit action:
+In v2, when the plan says `Scout: required`, complete Resource Scout after
+drafting the Plan and before the final passing Plan Review, within the service's
+plan/preflight phase. Do not defer it until execution: service approval freezes
+the reviewed Plan and Scout material. If Scout changes material assumptions,
+revise the paired Plan and obtain a fresh review of those exact outputs.
+
+In legacy v1, run Resource Scout after `PLAN.md` and
+`reviews/PLAN_REVIEW.md`, before main execution. In both versions, the main
+execution agent follows this explicit action:
 
 `spawn a Resource Scout subagent to search, file, and report potentially relevant resources for the overall research goal and current trial, including files, papers, datasets, reports, news, and other external resources via web search or appropriate external sources`
 
@@ -68,6 +96,11 @@ continue. Do not set the gate to `blocked` or `needs_human` solely because
 Resource Scout subagent orchestration failed. `blocked` and `needs_human` are
 whole-loop hard stops, not scout-local outcomes.
 
+Wait for a delegated Scout at most once. If that wait returns without a
+completed result, classify the delegation as stalled immediately, emit the
+`fallback` progress line, and complete the work inline; never enter a repeated
+subagent-wait loop.
+
 If human input would help but the main agent can still continue with metadata,
 alternate public sources, a follow-up retrieval trial, manuscript cleanup, or
 evidence/state work, include a `Human Task Candidates` entry in the scout report
@@ -83,7 +116,8 @@ work:
 Subagent update: Resource Scout | status: <starting | waiting | completed | fallback> | task: <short task> | output: <path or none>
 ```
 
-Use `output: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`
+Use the actual stage/revision-scoped report path in v2. In legacy v1 use
+`output: research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`
 when the report path is known.
 
 ## Required Inputs
@@ -96,7 +130,7 @@ trial:
 - `research_trajectory/STATE.md`
 - `research_trajectory/CURRENT_FINDINGS.md`
 - current trial `PLAN.md`
-- current trial `reviews/PLAN_REVIEW.md`
+- current trial `reviews/PLAN_REVIEW.md`, when a prior or preliminary review exists
 - `instructions/RESOURCE_INTAKE.md`
 - this file
 - existing `resources/user_input/RESOURCE_MANIFEST.md`, when present
@@ -126,6 +160,10 @@ Download policy:
 Expected destinations:
 Stop criteria:
 ```
+
+Every `Expected destinations` entry is a canonical project-relative path. A
+directory entry names the directory without a trailing `/`; schema-valid paths
+and the runtime path normalizer use the same no-trailing-slash contract.
 
 Use short, concrete entries. `Decision reason:` must explain why the scout is
 required or skipped for the overall research goal and current trial. `Scout:
@@ -168,11 +206,13 @@ sources not listed here.
 
 ## Saving Policy
 
-Use `resources/` for raw inputs. Scout-discovered resources must be recorded as
-`autoresearch_discovered` in `resources/user_input/RESOURCE_MANIFEST.md`; they
-are not current truth until the main execution agent promotes them into
-`STATE.md`, `CURRENT_FINDINGS.md`, `PROJECT.md`, manuscript files, or a trial
-report.
+Use `resources/` for raw inputs. In v2, Scout-discovered resources must be
+recorded as `autoresearch_discovered` in the current trial's
+stage/revision-scoped `RESOURCE_SCOUT_MANIFEST.json` and human-readable report;
+never modify `resources/user_input/RESOURCE_MANIFEST.md`. In legacy v1, retain
+the existing behavior of recording discoveries in that user-input manifest.
+Scout discoveries are not current truth until a reviewed trial promotes their
+research meaning into canonical state, manuscript files, or a trial report.
 
 Default handling:
 
@@ -193,6 +233,11 @@ Never write secrets into tracked files. Do not bypass access controls. Respect
 license, terms, robots, and privacy constraints.
 
 ## Destination Defaults
+
+In v2, downloaded or copied Scout material goes only under
+`resources/autoresearch_discovered/<trial_id>`. Record the intended promoted
+category in the Scout manifest; do not write the category destinations below
+directly. The legacy v1 defaults are:
 
 - `resources/literature/`: papers, surveys, bibliographies, literature notes.
 - `resources/data_sources/`: datasets, benchmark definitions, data-access
@@ -246,7 +291,8 @@ A failed rung still counts as empirical progress when the trial writes the
 and next rung or terminal verdict. Empty searching, link collection, or
 unexamined blocker recording does not count.
 
-For each research-critical resource, write:
+For each research-critical resource, write `ACQUISITION_DECISION.md` beside
+the scoped Scout report in v2. The legacy v1 path is:
 
 `research_trajectory/trials/<trial_id>/artifacts/resource_scout/ACQUISITION_DECISION.md`
 
@@ -318,19 +364,31 @@ the Research-Critical Acquisition Mandate and record the verdict.
 
 ## Required Outputs
 
-Write a scout report at:
+In v2, write `RESOURCE_SCOUT_REPORT.md` and `RESOURCE_SCOUT_MANIFEST.json`
+together in the stage/revision-specific subdirectory declared in the Plan,
+under `research_trajectory/trials/<trial_id>/artifacts/resource_scout/`.
+For every research-critical resource, write `ACQUISITION_DECISION.md` there too.
+
+In legacy v1, write a scout report at:
 
 `research_trajectory/trials/<trial_id>/artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`
 
-For every research-critical resource, also write:
+For every legacy v1 research-critical resource, also write:
 
 `research_trajectory/trials/<trial_id>/artifacts/resource_scout/ACQUISITION_DECISION.md`
 
-Update:
+The v2 manifest must register every discovered primary and alternate resource with
+`autoresearch_discovered` provenance, stable locator, access date, trial/stage
+and report binding, link-only/downloaded disposition, access/license note,
+resource type/domain, relevance, and local or intended destination. Do not
+update `resources/user_input/RESOURCE_MANIFEST.md` in v2.
 
-`resources/user_input/RESOURCE_MANIFEST.md`
+Legacy v1 Scout runs continue to update
+`resources/user_input/RESOURCE_MANIFEST.md`.
 
-Save downloaded or copied artifacts under the appropriate `resources/` folder.
+Save v2 downloaded or copied artifacts under
+`resources/autoresearch_discovered/<trial_id>`; use the legacy destination
+defaults only for v1.
 
 Report any non-blocking user request under `Human Task Candidates` for the main
 execution agent to merge into `research_trajectory/HUMAN_TASKS.md`.
@@ -407,3 +465,8 @@ The scout must not:
 
 The main execution agent decides whether scout-discovered resources affect
 current state, findings, manuscript structure, references, or future plans.
+
+
+## V2 Machine Output
+
+When Scout runs, write a machine-readable report under the current trial artifacts with: decision, queries/inspection performed, acquired and rejected resources, provenance, license/access notes, local paths, integrity checks, substitution-ladder position, planning impact, and human-task candidates. A human-readable `RESOURCE_SCOUT_REPORT.md` must agree with the JSON.

@@ -1,139 +1,161 @@
-# Review Taxonomy
+# Review Taxonomy and Machine Output Contract
 
 ## Purpose
 
-Use this shared taxonomy for every reviewer. It is intentionally general so it
-can support different domains, methods, and target venues.
+This taxonomy governs every v2 core and specialized reviewer. It preserves the rigor of the v1 review system while binding each post-stage judgment to an exact staged candidate state.
 
-The taxonomy draws on mature review patterns: journal peer review, grant
-review, critical appraisal, evidence-certainty assessment, transparency
-guidelines, artifact review, reporting checklists, and reviewer ethics.
+## Core review dimensions
 
-## Core Dimensions
+Use only dimensions relevant to the reviewer role, but never lower the standard because a trial is early:
 
-Review only the dimensions relevant to the reviewer role, but do not lower the
-standard because the work is early.
+1. importance and project fit;
+2. novelty and contribution calibration;
+3. methodological or reasoning rigor;
+4. evidence certainty and claim calibration;
+5. traceability, provenance, and reproducibility;
+6. ethics, safety, privacy, integrity, and misuse risk;
+7. communication and human inspectability;
+8. deliverable and venue completeness;
+9. readiness and unresolved blockers;
+10. consistency with research lines, campaigns, Critical Path, and target venue.
 
-1. Importance / fit: the work addresses the project goal, audience, venue, or
-   decision need.
-2. Novelty / contribution: the contribution is distinct from existing work and
-   stated at the right level.
-3. Rigor / approach: methods, reasoning, analyses, plans, or synthesis steps can
-   support the goal.
-4. Evidence certainty / claim calibration: claims are supported at the strength
-   used in prose and do not overstate evidence.
-5. Traceability / reproducibility: sources, data, code, artifacts, decisions, and
-   provenance can be followed by another agent or human.
-6. Ethics / risk / integrity: safety, privacy, bias, conflicts, misuse,
-   publication ethics, and misleading communication risks are handled.
-7. Communication / deliverable quality: outputs are clear, self-contained, and
-   useful for the intended audience.
-8. Deliverable completeness: final-facing artifacts include the expected
-   format, organization, claim/evidence map, figures, tables, references,
-   appendix/supplement posture, limitations, and target-venue rationale for the
-   declared scope.
-9. Readiness / blocking issues: all required actions are resolved for the
-   declared scope.
+## Review phases
 
-## Canonical Decisions
+- `pre_execution`: Plan Review before substantive execution; `stage_id` and `stage_manifest_hash` are null.
+- `post_stage`: review of the exact candidate stage; both stage fields are required.
+- `final`: strict final-readiness review of the exact candidate stage; both stage fields are required.
 
-Use only these decisions in reviewer outputs:
+## Canonical decisions
 
-- `pass`: strict pass for the declared scope.
-- `continue`: useful progress, but at least one required action, unresolved
-  qualification, unassessed critical area, or blocking uncertainty remains.
-- `blocked`: the current critical-path bottleneck has a documented non-human
-  terminal blocker after the acquisition/substitution ladder, conversion, and
-  viable project-preserving alternatives have been exhausted. This is a hard
-  stop, not a reviewer-local "I cannot decide" state. Reviewer files using
-  `blocked` must include `Response to human:` with one concise user-facing
-  blocker summary or decision request.
-- `needs_human`: the current critical-path bottleneck genuinely requires a human
-  decision, clarification, scope confirmation, credential, private resource, or
-  access/environment change after the acquisition/substitution ladder has a
-  documented terminal verdict. Reviewer files using `needs_human` must include
-  `Response to human:` with one concise user-facing question or decision request.
+Use only:
 
-Do not use `approved`, `completed`, `ready`, `plausible`, `acceptable`,
-`architecture pass`, or `targeted revision ready` as reviewer decisions. If
-those ideas matter, put them under `Qualified / partial passes` and keep
-`Decision: continue`.
+- `pass`: no blocker, required action, unresolved material qualification, or critical unassessed area remains for this reviewer scope.
+- `revise`: the stage or plan is useful but must be changed and rereviewed before closure.
+- `blocked`: a non-human operational dependency prevents every valuable continuation relevant to the current trial and has a concrete recovery condition.
+- `needs_human`: a human-only decision, credential, private resource, authority, or scope choice blocks every valuable continuation relevant to the current trial.
 
-## Output Schema
+Reviewer decisions are quality-control decisions. They are not the global Goal Gate. A reviewer must not use `continue` as a decision in v2.
 
-Every reviewer output must use this schema:
+## Gate effects
+
+Use one:
+
+- `none`;
+- `trial_block`;
+- `human_block`;
+- `operational_block`;
+- `final_pass_block`.
+
+`gate_effect` is descriptive input to the service evaluators. It does not override the service ReviewRouter, MergeEvaluator, or GateEvaluator.
+
+## Strict pass rule
+
+A reviewer may return `pass` only when all are true for the declared scope:
+
+- no blocker remains;
+- no required action remains;
+- any qualification is already represented as an explicit scope/caveat in the staged state;
+- no critical area required by the scope is unassessed;
+- every reviewed claim or update is traceable to listed inputs/evidence;
+- the exact stage hash matches the reviewed bundle;
+- the output remains defensible under skeptical human inspection.
+
+Words such as “plausible,” “ready for revision,” “architecture coherent,” or “mostly complete” are not pass conditions.
+
+## Revise and stage invalidation
+
+`revise` keeps the trial open. Any material correction to the candidate canonical snapshot, Merge Request, Human Brief, Gate Evidence, or referenced trial evidence changes the stage hash. Every affected post-stage review becomes stale and must be rerun.
+
+## Human and operational blockers
+
+Use `needs_human` only when:
+
+- exactly one human-only dependency can be stated;
+- it blocks every valuable next move;
+- the response to human is one concrete question or request;
+- `can_continue_meanwhile` would be false.
+
+If useful work remains, add a non-blocking human-task candidate and return `pass` or `revise` according to review quality; do not return `needs_human`.
+
+Reviewers must not edit canonical `research_trajectory/HUMAN_TASKS.md`
+directly. In the v1 fallback, when the current critical-path bottleneck is human-gated,
+the main execution agent promotes the one blocking question;
+otherwise reviewer suggestions remain non-blocking Human Task Candidates.
+
+Use `blocked` only for a non-human operational dependency with a concrete recovery condition. Ordinary reviewer uncertainty is `revise`, not `blocked`.
+
+## Required machine output
+
+Write JSON first and validate it against `schemas/reviewer-output.schema.json`. Write the checked Markdown view beside it.
+
+Required machine fields include:
+
+- schema and artifact versions;
+- project, trial, and review IDs;
+- reviewer key and scope;
+- phase;
+- decision and gate effect;
+- confidence;
+- summary and context summary;
+- instruction file;
+- explicit reviewed inputs;
+- strengths;
+- blockers;
+- required actions;
+- qualified/partial passes;
+- unassessed areas;
+- human-task candidates;
+- response to human when blocked/needs-human;
+- migration source, when any;
+- evidence checked;
+- exact stage ID and manifest hash for post-stage/final review.
+
+Every path in `reviewed_inputs` and every non-external path in
+`evidence_checked` must preserve the exact on-disk identifier (including
+underscores), resolve to a regular project file, and use the SHA-256 of those
+exact bytes where a hash is required.
+
+## Markdown rendering order
 
 ```markdown
-Reviewer: <reviewer name>
-Scope: <plan / trial / evidence / venue / manuscript / figure-table / reference / process / final-gate / other>
-Decision: <pass / continue / blocked / needs_human>
-Gate impact: <pass / continue / blocked / needs_human>
-Confidence: <high / medium / low>
-Source trial: <research_trajectory/trials/<trial_id>/, or none>
-Generated at: <ISO 8601 timestamp>
-Instruction file: <instructions/reviewers/<REVIEWER>.md>
-Reviewed inputs:
-- <explicit file path>
-Context summary: <brief summary of what was reviewed and why>
-Migration source: <none, legacy REVIEW.md section, backfilled from older reviewer file, or other provenance>
+# <Reviewer Name> Review
 
-## Blocking Issues
+- Review ID:
+- Trial:
+- Phase:
+- Decision:
+- Gate effect:
+- Confidence:
+- Stage ID:
+- Stage manifest hash:
+- Instruction file:
+- Migration source:
 
-- <none, or concrete blockers>
+## Context Summary
+
+## Reviewed Inputs
+
+## Evidence Checked
+
+## Strengths
+
+## Blockers
 
 ## Required Actions Before Pass
 
-- <none, or concrete required actions>
-
 ## Qualified / Partial Passes
-
-- <things that are acceptable but do not satisfy the whole gate>
 
 ## Unassessed Areas
 
-- <critical areas not checked, or none>
-
 ## Human Task Candidates
 
-- <none, or Priority; Blocks; Question/request; Why needed; Continue meanwhile; Source>
-
-Response to human: <required when Decision or Gate impact is blocked or needs_human; otherwise omit>
+## Response to Human
 ```
 
-`Gate impact` must be no stronger than `Decision`. If any blocking issue,
-required action, unresolved qualification, or critical unassessed area remains,
-`Decision` and `Gate impact` must be `continue`, `blocked`, or `needs_human`,
-not `pass`.
+Omit no required section; use an empty list or `None` in JSON where allowed.
 
-Do not use `blocked` or `needs_human` for ordinary preferences, final
-confirmation, optional human review, reviewer-local uncertainty, or a
-file/upload/request that can wait while useful work continues. Keep
-`Decision: continue` and either list the required action or report a
-`Human Task Candidates` entry for the main execution agent to merge into
-`research_trajectory/HUMAN_TASKS.md`. Reviewers must not edit
-`HUMAN_TASKS.md` directly. A queue of available bookkeeping work is not a reason
-to withhold `needs_human` once the critical-path bottleneck is human-gated.
+## Review Manifest authority
 
-Every active trial must have all eight core reviewer files under
-`research_trajectory/trials/<trial_id>/reviews/`. A reviewer file can only
-support the current gate for its own source trial. Do not carry a pass forward
-silently from a previous trial; if content is migrated or backfilled, declare it
-in `Migration source` and keep the decision truthful for the reviewed scope.
+The service ReviewRouter determines the required reviewer set. The agent may request escalation but may not downgrade it. A required reviewer may not return `not_applicable`. Omitted reviewers appear only in the Review Manifest with a deterministic reason.
 
-## Strict Pass Rule
-
-A reviewer may write `Decision: pass` only when all of these are true for the
-declared scope:
-
-- no blocking issues remain;
-- no required actions before pass remain;
-- no unresolved qualification is being treated as accepted;
-- no critical area required for the scope is unassessed;
-- final-facing artifacts are self-contained enough for a human to inspect,
-  defend, and revise without relying on hidden trial logs;
-- the output would still be defensible if a skeptical human reviewer inspected
-  the cited files and artifacts.
-
-Progress words such as "ready for revision", "architecture is coherent",
-"plausible fit", "plan completed", or "evidence supported with qualification"
-are not strict pass conditions.
+A v1 trial without `REVIEW_MANIFEST.json` retains the legacy eight-reviewer closure rule. Do not fabricate a v2 stage hash for legacy reviews without formal migration provenance.

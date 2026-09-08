@@ -1,75 +1,58 @@
-# Reviewer Spawning Protocol
+# Specialized Reviewer Registration and Spawning
 
 ## Purpose
 
-Create specialized reviewer instructions when existing reviewers are insufficient.
+Add domain-, method-, risk-, or project-specific review coverage when the eight core reviewers are insufficient. Specialized reviewers are routed by registered expert packs; they do not create an untracked ninth global gate.
 
-A spawned reviewer is an instruction file, not a review output.
+All specialized reviewers inherit
+`instructions/reviewers/REVIEW_TAXONOMY.md` and its machine-output contract.
 
-## When to Spawn
+## V2.0 baseline
 
-Spawn a reviewer only when the Reviewer Scope Analyst decision says
-`Spawn needed: yes` and identifies a clear quality risk, such as:
+The enabled `general_research` pack may register no specialized reviewers. The Review Manifest must state this explicitly when none are required.
 
-- domain-specific judgment not covered by existing reviewers;
-- statistics or causal inference risk;
-- dataset or benchmark validity risk;
-- theory/proof risk;
-- ethics/safety/privacy risk;
-- reproducibility risk;
-- repeated blind spot identified by process review;
-- explicit human request.
+## When specialized coverage is required
 
-## Where to Put Spawned Reviewers
+Examples include:
 
-Reusable reviewers go under:
+- statistics or causal inference;
+- dataset/benchmark validity or leakage;
+- human-subjects, ethics, privacy, safety, or dual use;
+- theory/proof correctness;
+- model/LLM evaluation validity;
+- reproducibility or artifact execution;
+- domain-specific clinical, legal, policy, or scientific judgment;
+- repeated blind spots identified by Process Review;
+- explicit formal human request.
 
-`instructions/reviewers/`
+## Registry contract
 
-Do not create `research_trajectory/reviewers/`.
+A reusable specialized reviewer belongs to an enabled domain/method/risk pack registry and defines:
 
-If a reviewer is project-specific, still place it in `instructions/reviewers/` but name it clearly, for example:
+- stable reviewer ID and version;
+- deterministic trigger conditions;
+- purpose and scope;
+- required reading;
+- detailed criteria;
+- output filename/path;
+- whether it is advisory or closure-required;
+- which core reviewer(s) consume its findings;
+- valid/invalid fixtures and routing tests.
 
-`PROJECT_STATISTICS_REVIEWER.md`
+Do not create a reviewer ad hoc merely to obtain a favorable decision. If a one-off project-specific reviewer is needed, create a versioned instruction patch proposal and require the ReviewRouter/human to approve its registration before it counts for closure.
 
-## Required Format
+## Output rules
 
-Each spawned reviewer must define:
+- Use `schemas/reviewer-output.schema.json` with `scope: specialized`.
+- Bind post-stage output to the exact stage hash.
+- List the reviewer in `REVIEW_MANIFEST.json`.
+- Record its trigger and instruction path.
+- A closure-required specialized reviewer must pass before final publication.
+- Its blocker is propagated through the relevant core reviewer and Merge/Gate evaluators; it does not independently rewrite global status.
 
-1. reviewer name;
-2. purpose;
-3. when to invoke;
-4. required reading;
-5. review criteria;
-6. output location;
-7. output format;
-8. whether it can block execution or only advise.
+## Prohibitions
 
-Every spawned reviewer must read and follow:
-
-`instructions/reviewers/REVIEW_TAXONOMY.md`
-
-It must use the shared output schema and canonical decisions unless it is only a
-non-gating advisory note. If it can affect the autoresearch gate, it must define
-a strict pass standard and a `Gate impact`.
-
-## Output Rule
-
-Reviewer instructions do not store review results.
-
-Review results go into:
-
-- current trial `reviews/<SPECIALIZED_REVIEW>.md`, for trial-level review;
-- `manuscript/reviews/`, for manuscript-facing review.
-
-Core reviewer results always keep their canonical names under the current
-trial's `reviews/` directory. Spawned reviewers must not replace the eight core
-reviewer files required for the autoresearch gate.
-
-## Record the Spawn
-
-When spawning a reviewer, record why in the active trial `REPORT.md` or in the
-spawned review file's context summary. Also record the instruction path and
-specialized review output path in:
-
-`research_trajectory/trials/<trial_id>/artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
+- Do not replace or silently omit a required core reviewer.
+- Do not store reviewer instructions in research trajectory state.
+- Do not write review results into the instruction directory.
+- Do not allow a specialized pack to override the kernel, write guard, transaction, state vocabulary, or gate priority.

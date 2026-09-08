@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "human-tasks.schema.json",
+  "title": "Non-blocking Human Tasks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "tasks",
+    "blocking_tasks_allowed"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "human_tasks"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "status",
+          "question",
+          "why_useful",
+          "created_at",
+          "source_trial_id"
+        ],
+        "properties": {
+          "task_id": {
+            "$ref": "common.schema.json#/$defs/human_task_id"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "waiting",
+              "completed",
+              "dismissed",
+              "superseded"
+            ]
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "why_useful": {
+            "type": "string",
+            "minLength": 1
+          },
+          "created_at": {
+            "$ref": "common.schema.json#/$defs/timestamp"
+          },
+          "source_trial_id": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/trial_reference_id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "blocking_tasks_allowed": {
+      "const": false
+    }
+  }
+}

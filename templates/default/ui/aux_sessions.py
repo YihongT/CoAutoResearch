@@ -6,9 +6,9 @@ single-session autoresearch engine WITHOUT touching the evolution loop.
 
 Two session kinds are supported:
 
-- ``chat``      : ordinary project agent chat. It runs from the project root so
-                  users can ask questions and request edits; its private
-                  workspace stores attachments and session-local files.
+- ``chat``      : independent project discussion. V2 chats use read-only tools
+                  and can run alongside research; changes go through the main
+                  research flow. Legacy chats retain their editing behavior.
 - ``evolution`` : the persistent autoresearch loop. There is exactly ONE and it
                   is handled by the legacy engine; this manager only tracks a
                   lightweight pointer to it so the UI can list it uniformly.
@@ -26,13 +26,25 @@ from __future__ import annotations
 import json
 import os
 import base64
+import hashlib
+import re
 import shutil
 import subprocess
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
+
+try:
+    from .v2_guard import audit_and_restore_agent_writes, capture_agent_baseline, load_agent_baseline
+    from .v2_paths import PathRegistry
+    from .v2_security import redact_mapping
+except ImportError:  # Direct import from a packed project's ui directory.
+    from v2_guard import audit_and_restore_agent_writes, capture_agent_baseline, load_agent_baseline
+    from v2_paths import PathRegistry
+    from v2_security import redact_mapping
 
 
 AUX_SESSION_KINDS = ("chat", "evolution")
@@ -41,6 +53,61 @@ AUX_CHAT_HISTORY_MAX = 200
 AUX_LOG_MAX = 2000
 AUX_TRANSCRIPT_MAX = 600
 AUX_EVENT_BUFFER_MAX = 500
+_AUX_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def _is_within(root: Path, candidate: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _private_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
+    return path
+
+
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    _private_dir(path.parent)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _write_private_json(path: Path, value: Any) -> None:
+    _write_private_bytes(
+        path,
+        (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
+
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
@@ -93,7 +160,7 @@ class AuxSession:
         self.created_at = _now_iso()
         self.updated_at = self.created_at
         self.cli_session_id = ""
-        self.status = "idle"  # idle | running | error | completed
+        self.status = "idle"  # idle | running | interrupted | error | completed
         self.started_at = ""
         self.settings: dict[str, Any] = {}
         self.backend = "codex"
@@ -112,12 +179,16 @@ class AuxSession:
         self._process: subprocess.Popen[str] | None = None
         self._thread: threading.Thread | None = None
         self._cancel_requested = False
+        self._stop_requested = False
+        self._v2_guard_dir: Path | None = None
+        self._v2_boundary_mode = ""
+        self.v2_boundary_status = ""
         self.lock = threading.RLock()
         self.event_condition = threading.Condition(threading.RLock())
         # per-session directories
         self.dir = self.manager.sessions_dir / self.id
         self.context_dir = self.dir / "context"
-        self.workspace_dir = self.dir / "workspace"
+        self.workspace_dir = self.manager.workspace_path(self)
         self.context_path = self.context_dir / "CONTEXT.md"
 
     # ---- lifecycle -------------------------------------------------------
@@ -128,14 +199,21 @@ class AuxSession:
         }.get(self.kind, "New session")
 
     def ensure_dirs(self) -> None:
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self.context_dir.mkdir(parents=True, exist_ok=True)
-        self.workspace_dir.mkdir(parents=True, exist_ok=True)
+        _private_dir(self.dir)
+        _private_dir(self.context_dir)
+        # Preserve attachments from older releases without changing the live
+        # project while the research worker may be writing there.
+        legacy = self.manager.context.root / "workspace" / "ui_sessions" / self.id
+        if self.workspace_dir != legacy and not self.workspace_dir.exists() and legacy.is_dir() and not legacy.is_symlink():
+            shutil.copytree(legacy, self.workspace_dir, ignore=lambda directory, names: [
+                name for name in names if (Path(directory) / name).is_symlink()
+            ])
+        _private_dir(self.workspace_dir)
 
     def is_running(self) -> bool:
         with self.lock:
             proc = self._process
-        return bool(proc and proc.poll() is None)
+        return bool(proc and not getattr(proc, "_coauto_tree_drained", False))
 
     def is_active(self) -> bool:
         """True while this session has (or claims to have) a run in flight."""
@@ -166,18 +244,28 @@ class AuxSession:
                 "settings": self.settings,
                 "returncode": self.returncode,
                 "plan_id": self.plan_id,
+                "v2_boundary_status": self.v2_boundary_status,
+                "read_only": self.manager.is_read_only_discussion(self),
             }
 
     def public(self) -> dict[str, Any]:
         m = self.meta()
         with self.lock:
             running = (m["status"] == "running") if self.kind == "evolution" else self.is_active()
-            m["workspace"] = str(self.workspace_dir)
-            m["project_root"] = str(self.manager.context.root)
-            m["context_path"] = str(self.context_path)
+            if self.manager.uses_strict_boundary():
+                # Files remain available through the contained workspace API;
+                # internal absolute paths are not part of the public contract.
+                m["workspace"] = ""
+                m["project_root"] = ""
+                m["context_path"] = ""
+                m["settings"] = self.manager.public_value(m.get("settings", {}))
+            else:
+                m["workspace"] = str(self.workspace_dir)
+                m["project_root"] = str(self.manager.context.root)
+                m["context_path"] = str(self.context_path)
             m["event_id"] = self.event_id
             m["last_event_at"] = self.last_event_at
-            m["last_event_summary"] = self.last_event_summary
+            m["last_event_summary"] = self.manager.public_value(self.last_event_summary)
             m["running"] = running
             m["chat_history_count"] = len(self.chat_history)
             m["transcript_count"] = len(self.transcript)
@@ -187,11 +275,11 @@ class AuxSession:
     def snapshot(self) -> dict[str, Any]:
         m = self.public()
         with self.lock:
-            m["chat_history"] = list(self.chat_history)[-AUX_CHAT_HISTORY_MAX:]
-            m["logs"] = list(self.logs)[-200:]
-            m["transcript"] = list(self.transcript)[-120:]
-            m["context_preview"] = self.context_preview()
-            m["plan_artifacts"] = self.plan_artifacts_snapshot_locked()
+            m["chat_history"] = self.manager.public_value(list(self.chat_history)[-AUX_CHAT_HISTORY_MAX:])
+            m["logs"] = self.manager.public_value(list(self.logs)[-200:])
+            m["transcript"] = self.manager.public_value(list(self.transcript)[-120:])
+            m["context_preview"] = self.manager.public_value(self.context_preview())
+            m["plan_artifacts"] = self.manager.public_value(self.plan_artifacts_snapshot_locked())
         return m
 
     def plan_artifacts_snapshot_locked(self) -> dict[str, Any]:
@@ -237,18 +325,10 @@ class AuxSession:
             logs = list(self.logs)[-200:]
             transcript = list(self.transcript)[-120:]
         try:
-            (self.dir / "meta.json").write_text(
-                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            (self.dir / "chat_history.json").write_text(
-                json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            (self.dir / "logs.json").write_text(
-                json.dumps(logs, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            (self.dir / "transcript.json").write_text(
-                json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            _write_private_json(self.dir / "meta.json", meta)
+            _write_private_json(self.dir / "chat_history.json", history)
+            _write_private_json(self.dir / "logs.json", logs)
+            _write_private_json(self.dir / "transcript.json", transcript)
         except OSError:
             pass
 
@@ -269,6 +349,7 @@ class AuxSession:
                     self.cli_session_id = str(data.get("cli_session_id") or "")
                     self.backend = str(data.get("backend") or "codex")
                     self.plan_id = str(data.get("plan_id") or "")
+                    self.v2_boundary_status = str(data.get("v2_boundary_status") or "")
                     if isinstance(data.get("settings"), dict):
                         self.settings = data["settings"]
                     prev = str(data.get("status") or "idle")
@@ -297,7 +378,7 @@ class AuxSession:
             "kind": str(kind or "agent_event"),
             "created_at": _now_iso(),
         }
-        event.update(payload or {})
+        event.update(self.manager.public_value(payload or {}))
         with self.event_condition:
             self.event_id += 1
             event["event_id"] = self.event_id
@@ -322,6 +403,7 @@ class AuxSession:
 
     def append_log(self, line: str, normalizer: Any = None) -> None:
         engine = self.manager.engine
+        line = self.manager.redact_log_text(line)
         backend = self.backend or "codex"
         display = engine.format_agent_event(line, backend)
         trace_updates: list[dict[str, Any]] = []
@@ -477,11 +559,21 @@ class AuxSession:
     def start_prepared_run(self, prompt: str, display_message: str, settings: dict[str, Any], resume: bool) -> None:
         """Launch a prepared CLI prompt while showing a compact user message."""
         engine = self.manager.engine
+        if self.manager.is_read_only_discussion(self):
+            settings = engine.aux_discussion_settings(settings)
         self.ensure_dirs()
-        self.settings = settings
-        self.backend = engine.normalize_agent_backend(settings.get("backend"))
+        backend = engine.normalize_agent_backend(settings.get("backend"))
         visible = str(display_message or "").strip()
         with self.lock:
+            previous_backend = engine.normalize_agent_backend(self.backend)
+            if backend != previous_backend:
+                # Provider thread ids are backend-specific. Reusing a Codex id
+                # with Claude (or vice versa) turns an ordinary backend switch
+                # into a guaranteed resume failure.
+                self.cli_session_id = ""
+                resume = False
+            self.settings = settings
+            self.backend = backend
             if self.kind == "chat" and self.title_source == "auto" and self.title == self._default_title():
                 self.title = auto_session_title(visible)
             if visible:
@@ -492,11 +584,21 @@ class AuxSession:
             self.streaming_transcript = {}
             self.updated_at = self.started_at
             self._cancel_requested = False
+            self._stop_requested = False
         self.persist()
         self.emit("session", {"status": "running"})
+        try:
+            self.manager.begin_v2_boundary(self, "chat")
+        except Exception:
+            with self.lock:
+                self.status = "error"
+                self.updated_at = _now_iso()
+            self.persist()
+            self.emit("error", {"status": "error", "message": "The v2 auxiliary boundary could not start."})
+            raise
         thread = threading.Thread(
-            target=self.manager.engine.run_in_project,
-            args=(self.manager.context, self._run, prompt, resume),
+            target=self.manager.run_in_project,
+            args=(self, self._run, prompt, resume),
             daemon=True,
         )
         with self.lock:
@@ -519,16 +621,24 @@ class AuxSession:
         if cancelled:
             # stop() was called before this thread reached Popen -- honor it
             # instead of silently starting the run anyway.
+            self.manager.finish_v2_boundary(self)
             self.persist()
             self.emit("session", {"status": "interrupted"})
             return
-        command = self.manager.agent_command(self, resume)
-        env = engine.agent_process_env(self.backend)
-        cwd = engine.repo_path(".")
-        normalizer = engine.make_research_trace_normalizer(self.backend, "exec", self.settings)
+        wrapper_path: Path | None = None
+        proc: subprocess.Popen[str] | None = None
+        normalizer: Any = None
         try:
-            popen_command, use_shell, _wrapper = engine.popen_command_for_agent(command, self.settings, env)
-            proc = subprocess.Popen(
+            env = engine.agent_process_env(self.backend, self.settings)
+            command = list(self.manager.agent_command(self, resume))
+            if not command:
+                raise ValueError("Agent command is empty.")
+            command[0] = engine.resolve_agent_executable(self.backend, env)
+            cwd = engine.repo_path(".")
+            normalizer = engine.make_research_trace_normalizer(self.backend, "exec", self.settings)
+            popen_command, use_shell, wrapper_path = engine.popen_command_for_agent(command, self.settings, env)
+            proc = self.manager.spawn_registered_agent(
+                self,
                 popen_command,
                 cwd=str(cwd),
                 env=env,
@@ -538,19 +648,39 @@ class AuxSession:
                 text=True,
                 bufsize=1,
                 shell=use_shell,
-                start_new_session=os.name != "nt",
             )
-            with self.lock:
-                self._process = proc
+            if proc is None:
+                self.manager.finish_v2_boundary(self)
+                with self.lock:
+                    self._thread = None
+                    self.returncode = 130
+                    self.updated_at = _now_iso()
+                self.persist()
+                self.emit("session", {"status": "interrupted"})
+                return
+            if wrapper_path:
+                setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
             assert proc.stdin is not None
             proc.stdin.write(prompt)
             proc.stdin.write("\n")
             proc.stdin.close()
-        except (OSError, ValueError) as exc:
+        except Exception as exc:
             self.append_log(f"Failed to start agent: {exc}")
+            boundary = self.manager.finish_v2_boundary(self)
+            if wrapper_path and (
+                not boundary or boundary.get("process_tree_drained", True)
+            ):
+                try:
+                    wrapper_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             with self.lock:
                 self.status = "error"
-                self._process = None
+                if not boundary or boundary.get("process_tree_drained", True):
+                    self._process = None
+                self._thread = None
+                self.returncode = 127
+                self._finalize_active_streaming_transcripts_locked()
                 self.chat_history.append(
                     {
                         "role": "control",
@@ -586,21 +716,40 @@ class AuxSession:
                 self._append_trace_updates(normalizer.finish(returncode))
             except Exception:
                 pass
+        boundary = self.manager.finish_v2_boundary(self)
+        wrapper_cleanup = getattr(proc, "_coauto_pre_exec_wrapper", None)
+        if wrapper_cleanup and (
+            not boundary or boundary.get("process_tree_drained", True)
+        ):
+            try:
+                Path(wrapper_cleanup).unlink(missing_ok=True)
+            except OSError:
+                pass
         with self.lock:
             self._finalize_active_streaming_transcripts_locked()
-            self._process = None
+            if not boundary or boundary.get("process_tree_drained", True):
+                self._process = None
             self._thread = None
             self.returncode = returncode
-            self.status = "completed" if returncode == 0 else "error"
-            # Prefer the final result text (Claude "result" event); fall back
-            # to collected assistant messages.
-            reply = final_text or ("\n".join(assistant_parts) if assistant_parts else "")
+            boundary_clean = not boundary or bool(boundary.get("publishable"))
+            self.status = (
+                "completed" if returncode == 0 and boundary_clean
+                else "interrupted" if self._stop_requested and boundary_clean
+                else "error"
+            )
+            # Codex exec emits progress and the final answer as separate
+            # agent_message items. Keep progress in the activity transcript;
+            # only the last answer belongs in the completed chat / handoff.
+            reply = final_text or (
+                assistant_parts[-1] if self.backend == "codex" and returncode == 0 and assistant_parts
+                else "\n".join(assistant_parts)
+            )
             if reply:
                 self.chat_history.append(
                     {"role": "assistant", "text": reply, "at": _now_iso()}
                 )
                 self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
-            elif returncode != 0:
+            elif returncode != 0 and self.status == "error":
                 code = returncode if returncode is not None else "unknown"
                 self.chat_history.append(
                     {
@@ -610,12 +759,21 @@ class AuxSession:
                     }
                 )
                 self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
+            if boundary and not boundary_clean:
+                self.chat_history.append(
+                    {
+                        "role": "control",
+                        "text": "The v2 write boundary rejected this auxiliary turn and restored unauthorized project changes.",
+                        "at": _now_iso(),
+                    }
+                )
+                self.chat_history = self.chat_history[-AUX_CHAT_HISTORY_MAX:]
             self.updated_at = _now_iso()
         self.persist()
         payload = {"status": self.status, "returncode": returncode}
-        if returncode != 0 and not reply:
+        if self.status == "error" and returncode != 0 and not reply:
             payload["message"] = "Agent run failed before returning a response."
-        self.emit("completed" if returncode == 0 else "error", payload)
+        self.emit("session" if self.status == "interrupted" else self.status, payload)
 
     def run_plan(self, prompt: str, artifact: dict[str, Any]) -> None:
         engine = self.manager.engine
@@ -646,6 +804,7 @@ class AuxSession:
                 self.status = "interrupted"
                 self.updated_at = _now_iso()
         if cancelled:
+            self.manager.finish_v2_boundary(self)
             self.persist()
             self.emit("session", {"status": "interrupted"})
             return
@@ -655,6 +814,7 @@ class AuxSession:
             with self.lock:
                 self.status = "error"
                 self.updated_at = _now_iso()
+            self.manager.finish_v2_boundary(self)
             self.persist()
             self.emit("error", {"status": "error"})
             return
@@ -665,9 +825,21 @@ class AuxSession:
         else:
             returncode = self._run_codex_plan(prompt, settings, normalizer, update_artifact, fail_plan)
 
+        boundary = self.manager.finish_v2_boundary(self)
+
         with self.lock:
             proc = self._process
-        if proc is not None:
+        wrapper_cleanup = getattr(proc, "_coauto_pre_exec_wrapper", None) if proc is not None else None
+        if wrapper_cleanup and (
+            not boundary or boundary.get("process_tree_drained", True)
+        ):
+            try:
+                Path(wrapper_cleanup).unlink(missing_ok=True)
+            except OSError:
+                pass
+        if proc is not None and (
+            not boundary or boundary.get("process_tree_drained", True)
+        ):
             with self.lock:
                 self._process = None
 
@@ -676,17 +848,22 @@ class AuxSession:
             artifact_after = engine.read_plan_artifact(plan_id)
         except Exception:
             artifact_after = {}
-        ready = str(artifact_after.get("status") or "") == "ready"
+        boundary_clean = not boundary or bool(boundary.get("publishable"))
+        ready = str(artifact_after.get("status") or "") == "ready" and boundary_clean
         with self.lock:
             self._finalize_active_streaming_transcripts_locked()
             self._thread = None
             self.returncode = 0 if ready else (returncode if returncode is not None else 1)
-            self.status = "completed" if ready else "error"
+            self.status = (
+                "completed" if ready
+                else "interrupted" if self._stop_requested and boundary_clean
+                else "error"
+            )
             self.plan_thread_id = ""
             self.plan_turn_id = ""
             self.updated_at = _now_iso()
         self.persist()
-        self.emit("completed" if ready else "error", {"status": self.status, "returncode": self.returncode, "plan": public_plan(artifact_after)})
+        self.emit("session" if self.status == "interrupted" else self.status, {"status": self.status, "returncode": self.returncode, "plan": public_plan(artifact_after)})
 
     def _run_codex_plan(
         self,
@@ -703,10 +880,11 @@ class AuxSession:
         turn_id = ""
         plan_text_parts: dict[str, list[str]] = {}
         final_plan_text = ""
+        startup_errors: list[str] = []
         sent_thread_start = False
         sent_turn_start = False
         next_request_id = 1
-        normalizer = engine.make_research_trace_normalizer("codex", "app-server", settings)
+        normalizer: Any = None
         wrapper_path: Path | None = None
 
         def request(method: str, params: dict[str, Any] | None = None) -> int:
@@ -719,10 +897,25 @@ class AuxSession:
             return request_id
 
         try:
+            settings = self.manager.preflight_settings(
+                self, settings,
+                implementation=False,
+                force_refresh=False,
+            )
+            env = engine.agent_process_env("codex", settings)
             command = engine.codex_app_server_command(settings)
-            env = engine.agent_process_env("codex")
+            if self.manager.is_read_only_discussion(self):
+                command[1:1] = engine.aux_discussion_codex_args(settings)
+            if not command:
+                raise ValueError("Codex app-server command is empty.")
+            command[0] = engine.resolve_agent_executable("codex", env)
+            normalizer = engine.make_research_trace_normalizer("codex", "app-server", settings)
+            with self.lock:
+                self.settings = settings
+                self.backend = "codex"
             popen_command, use_shell, wrapper_path = engine.popen_command_for_agent(command, settings, env)
-            proc = subprocess.Popen(
+            proc = self.manager.spawn_registered_agent(
+                self,
                 popen_command,
                 cwd=str(engine.repo_path(".")),
                 env=env,
@@ -732,12 +925,12 @@ class AuxSession:
                 text=True,
                 bufsize=1,
                 shell=use_shell,
-                start_new_session=os.name != "nt",
             )
+            if proc is None:
+                fail_plan("Plan launch was cancelled before process registration.")
+                return 130
             if wrapper_path:
                 setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
-            with self.lock:
-                self._process = proc
             self.append_log(f"Started: {' '.join(command)}")
             update_artifact(status="running")
             assert proc.stdout is not None
@@ -756,6 +949,8 @@ class AuxSession:
                 try:
                     event = json.loads(stripped)
                 except json.JSONDecodeError:
+                    if stripped.startswith("Error:") or startup_errors:
+                        startup_errors.append(stripped)
                     continue
                 if not isinstance(event, dict):
                     continue
@@ -890,10 +1085,9 @@ class AuxSession:
             fail_plan(str(exc))
             returncode = proc.poll() if proc else returncode
         finally:
-            wrapper_cleanup = getattr(proc, "_coauto_pre_exec_wrapper", None) if proc is not None else wrapper_path
-            if wrapper_cleanup:
+            if proc is None and wrapper_path:
                 try:
-                    Path(wrapper_cleanup).unlink(missing_ok=True)
+                    wrapper_path.unlink(missing_ok=True)
                 except OSError:
                     pass
             if proc is not None:
@@ -907,8 +1101,6 @@ class AuxSession:
                     self._append_trace_updates(normalizer.finish(returncode))
                 except Exception:
                     pass
-            with self.lock:
-                self._process = None
 
         try:
             artifact_after = engine.read_plan_artifact(self.plan_id)
@@ -920,7 +1112,7 @@ class AuxSession:
                 update_artifact(status="ready", plan_text=text, thread_id=thread_id, session_id=thread_id)
                 returncode = 0
             else:
-                fail_plan("Codex app-server did not return a plan item. Upgrade Codex CLI; CoAutoResearch does not fallback to sending `/plan` through codex exec.")
+                fail_plan(str(artifact_after.get("error") or "\n".join(startup_errors)[-1800:] or "Codex app-server did not return a plan item. Check the activity log and your Codex CLI version, then retry."))
                 returncode = returncode if returncode not in {0, None} else 1
         return returncode
 
@@ -935,20 +1127,38 @@ class AuxSession:
         engine = self.manager.engine
         proc: subprocess.Popen[str] | None = None
         returncode: int | None = None
-        plan_settings = engine.normalize_claude_settings({**settings, "permissionPreset": "plan", "permissionMode": "plan"}, settings)
-        plan_settings["backend"] = "claude"
-        with self.lock:
-            self.settings = plan_settings
-            self.backend = "claude"
-        normalizer = engine.make_research_trace_normalizer("claude", "exec", plan_settings)
+        normalizer: Any = None
         wrapper_path: Path | None = None
+        read_only = self.manager.is_read_only_discussion(self)
         try:
-            settings_path = engine.write_claude_plan_hook(self.plan_id)
-            executable = engine.resolve_agent_executable("claude", engine.agent_process_env("claude"))
-            command = [executable, *engine.settings_to_claude_args(plan_settings, resume=False), "--settings", str(settings_path)]
-            env = engine.agent_process_env("claude")
+            settings = self.manager.preflight_settings(
+                self, settings,
+                implementation=False,
+                force_refresh=False,
+            )
+            plan_settings = engine.normalize_claude_settings(
+                {**settings, "permissionPreset": "plan", "permissionMode": "plan"},
+                settings,
+            )
+            plan_settings["backend"] = "claude"
+            if read_only:
+                plan_settings = engine.aux_discussion_settings(plan_settings)
+            env = engine.agent_process_env("claude", plan_settings)
+            executable = engine.resolve_agent_executable("claude", env)
+            normalizer = engine.make_research_trace_normalizer("claude", "exec", plan_settings)
+            with self.lock:
+                self.settings = plan_settings
+                self.backend = "claude"
+            command = [executable, *engine.settings_to_claude_args(plan_settings, resume=False)]
+            if read_only:
+                command.extend(engine.aux_discussion_claude_args(self))
+                prompt += "\nReturn the complete proposed plan as your final response. Do not create a plan file or request implementation."
+            else:
+                settings_path = engine.write_claude_plan_hook(self.plan_id)
+                command.extend(["--settings", str(settings_path)])
             popen_command, use_shell, wrapper_path = engine.popen_command_for_agent(command, plan_settings, env)
-            proc = subprocess.Popen(
+            proc = self.manager.spawn_registered_agent(
+                self,
                 popen_command,
                 cwd=str(engine.repo_path(".")),
                 env=env,
@@ -958,12 +1168,12 @@ class AuxSession:
                 text=True,
                 bufsize=1,
                 shell=use_shell,
-                start_new_session=os.name != "nt",
             )
+            if proc is None:
+                fail_plan("Plan launch was cancelled before process registration.")
+                return 130
             if wrapper_path:
                 setattr(proc, "_coauto_pre_exec_wrapper", wrapper_path)
-            with self.lock:
-                self._process = proc
             self.append_log(f"Started: {' '.join(command)}")
             update_artifact(status="running")
             assert proc.stdin is not None
@@ -981,6 +1191,8 @@ class AuxSession:
                 except json.JSONDecodeError:
                     continue
                 plan = engine.extract_claude_exit_plan(event)
+                if read_only and event.get("type") == "result" and not event.get("is_error"):
+                    plan = str(event.get("result") or "").strip()
                 if plan:
                     update_artifact(status="ready", plan_text=plan)
             returncode = proc.wait()
@@ -989,10 +1201,9 @@ class AuxSession:
             fail_plan(str(exc))
             returncode = proc.poll() if proc else returncode
         finally:
-            wrapper_cleanup = getattr(proc, "_coauto_pre_exec_wrapper", None) if proc is not None else wrapper_path
-            if wrapper_cleanup:
+            if proc is None and wrapper_path:
                 try:
-                    Path(wrapper_cleanup).unlink(missing_ok=True)
+                    wrapper_path.unlink(missing_ok=True)
                 except OSError:
                     pass
             if normalizer is not None:
@@ -1000,8 +1211,6 @@ class AuxSession:
                     self._append_trace_updates(normalizer.finish(returncode))
                 except Exception:
                     pass
-            with self.lock:
-                self._process = None
 
         try:
             artifact_after = engine.read_plan_artifact(self.plan_id)
@@ -1012,23 +1221,29 @@ class AuxSession:
             if str(artifact_after.get("status") or "") != "ready":
                 update_artifact(status="ready", plan_text=text)
             return 0 if returncode in {0, None} else returncode
-        fail_plan("Claude plan mode did not provide an ExitPlanMode plan.")
+        fail_plan(str(artifact_after.get("error") or "Claude did not return a plan. Check the activity log and retry."))
         return returncode if returncode not in {0, None} else 1
 
     def stop(self, force: bool = False) -> None:
-        with self.lock:
-            proc = self._process
-            plan_thread_id = self.plan_thread_id
-            plan_turn_id = self.plan_turn_id
-            backend = self.backend
-            if self.status == "running" and proc is None:
-                # start_message() has marked this session running but the
-                # background thread hasn't reached Popen yet (still copying
-                # the protected-file snapshot, etc.) -- there is no OS
-                # process to signal yet. Ask _run() to bail out before it
-                # spawns one instead of silently doing nothing.
-                self._cancel_requested = True
-        if proc and proc.poll() is None:
+        # Serialize the pending->Popen window with spawn_registered_agent().
+        # Whichever side enters first either records cancellation before the
+        # spawn check, or leaves a registered process for this stop to signal.
+        with self.manager.context.run_launch_lock:
+            with self.lock:
+                proc = self._process
+                plan_thread_id = self.plan_thread_id
+                plan_turn_id = self.plan_turn_id
+                backend = self.backend
+                if self.status == "running":
+                    self._stop_requested = True
+                if self.status == "running" and proc is None:
+                    # start_message() has marked this session running but the
+                    # background thread hasn't reached Popen yet (still copying
+                    # the protected-file snapshot, etc.) -- there is no OS
+                    # process to signal yet. Ask _run() to bail out before it
+                    # spawns one instead of silently doing nothing.
+                    self._cancel_requested = True
+        if proc and not bool(getattr(proc, "_coauto_tree_drained", False)):
             interrupted = False
             if not force and backend == "codex" and plan_thread_id and plan_turn_id:
                 try:
@@ -1047,7 +1262,12 @@ class AuxSession:
             if interrupted:
                 return
             try:
-                self.manager.engine.signal_research_process(proc, force=force)
+                if force:
+                    self.manager.engine.drain_agent_process_tree(
+                        proc, grace_seconds=0.0
+                    )
+                else:
+                    self.manager.engine.signal_research_process(proc)
             except Exception:
                 pass
 
@@ -1158,6 +1378,408 @@ class AuxSessionManager:
         self.order: list[str] = []
         self.lock = threading.RLock()
         self._loaded = False
+        self._active_v2_session_id = ""
+        self._v2_recovery_errors: list[str] = []
+        self._v2_recovered_violations = 0
+        self._protocol_kind = ""
+        self._recover_external_v2_guards()
+
+    # ---- v2 trust boundary ----------------------------------------------
+    def protocol_classification(self, *, refresh: bool = False) -> str:
+        if self._protocol_kind and not refresh:
+            if self._protocol_kind != "legacy":
+                return self._protocol_kind
+            marker = self.context.root / ".co-auto-research-template" / "v2-migration.json"
+            state = self.context.root / "research_trajectory" / "STATE.json"
+            if not marker.exists() and not state.exists():
+                return self._protocol_kind
+        try:
+            result = self.engine.classify_project(self.context.root)
+        except Exception:
+            marker = self.context.root / ".co-auto-research-template" / "v2-migration.json"
+            state = self.context.root / "research_trajectory" / "STATE.json"
+            self._protocol_kind = "corrupt" if marker.exists() or state.exists() else "legacy"
+        else:
+            self._protocol_kind = str(result.get("classification") or "corrupt") if isinstance(result, dict) else "corrupt"
+        return self._protocol_kind
+
+    def uses_strict_boundary(self) -> bool:
+        return self.protocol_classification() != "legacy"
+
+    def is_read_only_discussion(self, session: AuxSession) -> bool:
+        return session.kind == "chat" and self.protocol_classification() == "v2"
+
+    def workspace_path(self, session: AuxSession) -> Path:
+        if self.is_read_only_discussion(session):
+            return session.dir / "workspace"
+        return self.context.root / "workspace" / "ui_sessions" / session.id
+
+    def preflight_settings(self, session: AuxSession, raw: Any, **options: Any) -> dict[str, Any]:
+        read_only = self.is_read_only_discussion(session)
+        if read_only:
+            # Readiness/model probes also support shell setup. Strip it before
+            # probing, not merely before launching the discussion worker.
+            raw = self.engine.aux_discussion_settings(self.engine.normalize_research_settings(raw))
+        settings = self.engine.preflight_agent_settings(raw, **options)
+        return self.engine.aux_discussion_settings(settings) if read_only else settings
+
+    def _configured_secret_values(self) -> list[str]:
+        keys = getattr(self.engine, "SECRET_ENV_KEYS", ())
+        values = [os.environ.get(str(key), "") for key in keys if str(key)]
+        values.append(str(getattr(self.engine, "REMOTE_AUTH_TOKEN", "") or ""))
+        return [value for value in values if value]
+
+    def public_value(self, value: Any) -> Any:
+        if not self.uses_strict_boundary():
+            return value
+        clean = redact_mapping(value, self._configured_secret_values())
+        raw_replacements = {
+            str(self.sessions_dir): "[session-runtime]",
+            str(self.sessions_dir.resolve()): "[session-runtime]",
+            str(self.context.root): "[project]",
+            str(self.context.root.resolve()): "[project]",
+            str(Path.home()): "~",
+            str(Path.home().resolve()): "~",
+        }
+        replacements = sorted(raw_replacements.items(), key=lambda item: len(item[0]), reverse=True)
+
+        def scrub(item: Any) -> Any:
+            if isinstance(item, dict):
+                return {str(key): scrub(child) for key, child in item.items()}
+            if isinstance(item, list):
+                return [scrub(child) for child in item]
+            if isinstance(item, tuple):
+                return [scrub(child) for child in item]
+            if not isinstance(item, str):
+                return item
+            text = item
+            for source, replacement in replacements:
+                if source:
+                    text = text.replace(source, replacement)
+            return text
+
+        return scrub(clean)
+
+    def redact_log_text(self, value: Any) -> str:
+        if not self.uses_strict_boundary():
+            return str(value or "")
+        return str(redact_mapping(str(value or ""), self._configured_secret_values()))
+
+    def _guard_project_root(self, *, create: bool) -> Path:
+        configured = str(os.environ.get("COAUTO_GUARD_ROOT", "") or "").strip()
+        base = Path(os.path.expanduser(configured)).resolve() if configured else (Path.home() / ".co-auto-research" / "guards").resolve()
+        project = self.context.root.resolve()
+        if base == project or _is_within(project, base):
+            raise RuntimeError("COAUTO_GUARD_ROOT must be outside the project directory.")
+        key = hashlib.sha256(str(project).encode("utf-8")).hexdigest()[:24]
+        target = base / "aux-sessions" / key
+        return _private_dir(target) if create else target
+
+    def _recover_external_v2_guards(self) -> None:
+        try:
+            root = self._guard_project_root(create=False)
+        except Exception as exc:
+            self._v2_recovery_errors.append(str(exc))
+            return
+        if not root.exists():
+            return
+        if root.is_symlink() or not root.is_dir():
+            self._v2_recovery_errors.append("Auxiliary guard root is not a trustworthy directory.")
+            return
+        for directory in sorted(root.iterdir()):
+            if directory.is_symlink() or not directory.is_dir():
+                self._v2_recovery_errors.append(f"Untrustworthy auxiliary guard entry: {directory.name}")
+                continue
+            if (directory / "COMPLETED.json").is_file():
+                continue
+            baseline_path = directory / "baseline.json"
+            if not baseline_path.is_file():
+                # The agent is launched only after baseline.json is durable.
+                shutil.rmtree(directory, ignore_errors=True)
+                continue
+            active: dict[str, Any] = {}
+            try:
+                raw = json.loads((directory / "ACTIVE.json").read_text(encoding="utf-8"))
+                active = raw if isinstance(raw, dict) else {}
+            except (OSError, json.JSONDecodeError):
+                pass
+            process_tree = active.get("process_tree")
+            if isinstance(process_tree, dict):
+                drain_recorded = getattr(
+                    self.engine, "drain_recorded_agent_process_tree", None
+                )
+                if not callable(drain_recorded):
+                    self._v2_recovery_errors.append(
+                        "Auxiliary process-tree recovery is unavailable."
+                    )
+                    continue
+                try:
+                    drain_recorded(process_tree)
+                except Exception as exc:
+                    self._v2_recovery_errors.append(
+                        f"Auxiliary agent process group/Job is still active: {exc}"
+                    )
+                    continue
+            else:
+                self._v2_recovery_errors.append(
+                    "Active auxiliary guard has no valid agent process-tree identity."
+                )
+                continue
+            try:
+                baseline = load_agent_baseline(directory)
+                if baseline.project_root != self.context.root.resolve():
+                    raise RuntimeError("Auxiliary guard baseline belongs to another project.")
+                result = audit_and_restore_agent_writes(baseline).to_dict()
+                errors = [str(item) for item in result.get("restoration_errors", ())]
+                if errors:
+                    raise RuntimeError("; ".join(errors))
+                self._v2_recovered_violations += len(result.get("violations", ()))
+                _write_private_json(
+                    directory / "COMPLETED.json",
+                    {
+                        "schema_version": 1,
+                        "state": "recovered",
+                        "completed_at": _now_iso(),
+                        "protocol_violation": bool(result.get("violations")),
+                    },
+                )
+            except Exception as exc:
+                self._v2_recovery_errors.append(f"{directory.name}: {exc}")
+
+    def recovery_status(self) -> dict[str, Any]:
+        return {
+            "ready": not self._v2_recovery_errors,
+            "errors": list(self._v2_recovery_errors),
+            "recovered_violations": self._v2_recovered_violations,
+        }
+
+    def has_active_v2_run(self) -> bool:
+        with self.lock:
+            return bool(self._active_v2_session_id)
+
+    def active_agent_session_ids(self, *, exclude_session_id: str = "", writers_only: bool = False) -> list[str]:
+        with self.lock:
+            sessions = list(self.sessions.values())
+        return [
+            session.id
+            for session in sessions
+            if session.id != exclude_session_id and session.is_active()
+            and (not writers_only or not self.is_read_only_discussion(session))
+        ]
+
+    def spawn_registered_agent(
+        self, session: AuxSession, command: Any, **popen_kwargs: Any
+    ) -> subprocess.Popen[str] | None:
+        """Close cancel/shutdown/delete races through process registration."""
+
+        engine = self.engine
+        with self.context.run_launch_lock:
+            with session.lock:
+                if session._cancel_requested:
+                    session._cancel_requested = False
+                    session.status = "interrupted"
+                    session.updated_at = _now_iso()
+                    return None
+            engine.ensure_server_accepting_runs()
+            engine.ensure_current_project_writeable()
+            self.ensure_aux_run_allowed(session)
+            proc = engine.spawn_agent_process(command, **popen_kwargs)
+            with session.lock:
+                session._process = proc
+            self.record_v2_process(session, proc)
+            return proc
+
+    def ensure_main_run_allowed(self) -> None:
+        """Server integration hook: call under the project lock before a main run."""
+        if self.uses_strict_boundary():
+            with self.lock:
+                if self._v2_recovery_errors:
+                    raise ValueError("Auxiliary write-boundary recovery is required before starting research.")
+                if self._active_v2_session_id:
+                    raise ValueError(
+                        "Wait for the active auxiliary session before starting a research run."
+                    )
+        if self.active_agent_session_ids(writers_only=True):
+            raise ValueError("Wait for the active auxiliary session before starting a research run.")
+
+    def ensure_aux_run_allowed(self, session: AuxSession) -> None:
+        kind = self.protocol_classification(refresh=True)
+        if kind not in {"legacy", "v2"}:
+            raise ValueError(f"Auxiliary agent runs are disabled while the project protocol is {kind}.")
+        if self.is_read_only_discussion(session):
+            with self.lock:
+                if self._v2_recovery_errors or self._active_v2_session_id:
+                    raise ValueError("Wait for auxiliary write-boundary recovery before starting a discussion.")
+            return
+        with self.context.lock:
+            if self.engine.project_main_agent_active(self.context):
+                raise ValueError("Wait for the active research run before starting an auxiliary session.")
+        if self.engine.active_figure_image_jobs(self.context):
+            raise ValueError("Wait for figure image generation before starting an auxiliary session.")
+        if self.active_agent_session_ids(exclude_session_id=session.id):
+            raise ValueError("Only one auxiliary agent session may run at a time.")
+        if kind == "v2":
+            with self.lock:
+                if self._v2_recovery_errors:
+                    raise ValueError("Auxiliary write-boundary recovery is required before starting another session.")
+                if self._active_v2_session_id and self._active_v2_session_id != session.id:
+                    raise ValueError("Only one auxiliary v2 agent session may run at a time.")
+
+    def _v2_registry(self, session: AuxSession, mode: str) -> PathRegistry:
+        token = hashlib.sha256(session.id.encode("utf-8")).hexdigest()[:12]
+        registry = PathRegistry.for_run(f"999999_aux-{token}", f"AUX-{token}")
+        for path in (self.sessions_dir, session.dir, session.context_dir, session.workspace_dir):
+            if path.is_symlink() or not path.is_dir():
+                raise ValueError("Auxiliary session directories must be contained, regular directories.")
+        workspace = session.workspace_dir.resolve().relative_to(self.context.root.resolve()).as_posix()
+        return replace(
+            registry,
+            allowed_agent_write_patterns=(workspace, f"{workspace}/**"),
+            service_mutable_patterns=(),
+        )
+
+    def begin_v2_boundary(self, session: AuxSession, mode: str) -> str:
+        if self.protocol_classification() != "v2":
+            return ""
+        self.ensure_aux_run_allowed(session)
+        if self.is_read_only_discussion(session):
+            # A whole-project rollback would undo the parallel research run.
+            # These invocations enforce read-only CLI capabilities instead.
+            session.v2_boundary_status = "read_only"
+            return ""
+        with self.context.lock:
+            with self.lock:
+                if self._active_v2_session_id and self._active_v2_session_id != session.id:
+                    raise ValueError("Only one auxiliary v2 agent session may run at a time.")
+                self._active_v2_session_id = session.id
+            guard = self._guard_project_root(create=True) / f"{session.id}-{mode}-{uuid.uuid4().hex}"
+            try:
+                registry = self._v2_registry(session, mode)
+                baseline = capture_agent_baseline(
+                    self.context.root,
+                    guard,
+                    trial_id=registry.trial_id,
+                    attempt_id=registry.attempt_id,
+                    registry=registry,
+                )
+                _write_private_json(
+                    guard / "ACTIVE.json",
+                    {
+                        "schema_version": 1,
+                        "state": "active",
+                        "project_hash": hashlib.sha256(str(self.context.root.resolve()).encode("utf-8")).hexdigest(),
+                        "session_id": session.id,
+                        "mode": mode,
+                        "service_pid": os.getpid(),
+                        "agent_pid": None,
+                        "started_at": _now_iso(),
+                    },
+                )
+            except Exception:
+                with self.lock:
+                    if self._active_v2_session_id == session.id:
+                        self._active_v2_session_id = ""
+                raise
+        with session.lock:
+            session._v2_guard_dir = baseline.run_dir
+            session._v2_boundary_mode = mode
+            session.v2_boundary_status = "active"
+        return str(baseline.run_dir)
+
+    def record_v2_process(self, session: AuxSession, process: Any) -> None:
+        with session.lock:
+            guard = session._v2_guard_dir
+        if not guard:
+            return
+        active_path = guard / "ACTIVE.json"
+        try:
+            value = json.loads(active_path.read_text(encoding="utf-8"))
+            active = value if isinstance(value, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            active = {}
+        pid = int(getattr(process, "pid", process))
+        tree: dict[str, Any] | None = None
+        if hasattr(process, "pid"):
+            identify = getattr(self.engine, "agent_process_tree_identity", None)
+            if not callable(identify):
+                raise RuntimeError("Auxiliary process-tree identity is unavailable.")
+            tree = identify(process)
+        active.update(
+            {
+                "schema_version": 1,
+                "state": "active",
+                "agent_pid": pid,
+                "process_tree": tree,
+                "updated_at": _now_iso(),
+            }
+        )
+        _write_private_json(active_path, active)
+
+    def finish_v2_boundary(self, session: AuxSession) -> dict[str, Any]:
+        with session.lock:
+            guard = session._v2_guard_dir
+            proc = session._process
+        if proc is not None:
+            try:
+                self.engine.drain_agent_process_tree(proc)
+            except Exception as exc:
+                message = f"Auxiliary agent process group/Job did not drain: {exc}"
+                with self.lock:
+                    if message not in self._v2_recovery_errors:
+                        self._v2_recovery_errors.append(message)
+                with session.lock:
+                    session.v2_boundary_status = "recovery_required"
+                return {
+                    "publishable": False,
+                    "protocol_violation": True,
+                    "violations": [],
+                    "restoration_errors": [message],
+                    "process_tree_drained": False,
+                }
+        if not guard:
+            return {}
+        try:
+            result = audit_and_restore_agent_writes(load_agent_baseline(guard)).to_dict()
+            errors = [str(item) for item in result.get("restoration_errors", ())]
+            if errors:
+                raise RuntimeError("; ".join(errors))
+            status = "clean" if result.get("publishable") else "protocol_violation"
+            _write_private_json(
+                guard / "COMPLETED.json",
+                {
+                    "schema_version": 1,
+                    "state": status,
+                    "completed_at": _now_iso(),
+                    "protocol_violation": bool(result.get("violations")),
+                },
+            )
+        except Exception as exc:
+            result = {
+                "publishable": False,
+                "protocol_violation": True,
+                "violations": [],
+                "restoration_errors": [str(exc)],
+            }
+            status = "recovery_required"
+            with self.lock:
+                self._v2_recovery_errors.append(str(exc))
+        result["process_tree_drained"] = True
+        with session.lock:
+            session._v2_guard_dir = None
+            session._v2_boundary_mode = ""
+            session.v2_boundary_status = status
+        with self.lock:
+            if self._active_v2_session_id == session.id:
+                self._active_v2_session_id = ""
+        return result
+
+    def run_in_project(self, session: AuxSession, callback: Callable[..., Any], *args: Any) -> None:
+        try:
+            self.engine.run_in_project(self.context, callback, *args)
+        finally:
+            # Covers a host callback that aborts before entering the session
+            # runner (and keeps test doubles honest); normal runners clear it.
+            self.finish_v2_boundary(session)
 
     # ---- persistence -----------------------------------------------------
     def load(self) -> None:
@@ -1173,8 +1795,11 @@ class AuxSessionManager:
                 return
             order = data.get("order") if isinstance(data, dict) else None
             for sid in order if isinstance(order, list) else []:
-                sdir = self.sessions_dir / str(sid)
-                if not sdir.exists():
+                clean_id = str(sid)
+                if not _AUX_SESSION_ID_RE.fullmatch(clean_id):
+                    continue
+                sdir = self.sessions_dir / clean_id
+                if sdir.is_symlink() or not sdir.is_dir():
                     continue
                 kind = "chat"
                 meta_path = sdir / "meta.json"
@@ -1185,10 +1810,10 @@ class AuxSessionManager:
                     except (OSError, json.JSONDecodeError):
                         pass
                 session = AuxSession(self, kind)
-                session.id = str(sid)
+                session.id = clean_id
                 session.dir = sdir
                 session.context_dir = sdir / "context"
-                session.workspace_dir = sdir / "workspace"
+                session.workspace_dir = self.workspace_path(session)
                 session.context_path = session.context_dir / "CONTEXT.md"
                 session.load_persisted()
                 if session.kind != kind:
@@ -1198,12 +1823,9 @@ class AuxSessionManager:
                 self.order.append(session.id)
 
     def _save_registry(self) -> None:
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        _private_dir(self.sessions_dir)
         try:
-            self.registry_path.write_text(
-                json.dumps({"order": self.order, "updated_at": _now_iso()}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            _write_private_json(self.registry_path, {"order": self.order, "updated_at": _now_iso()})
         except OSError:
             pass
 
@@ -1248,11 +1870,17 @@ class AuxSessionManager:
         session = self.get(session_id)
         if session.kind == "evolution":
             raise ValueError("The evolution session is the persistent autoresearch loop and cannot be deleted.")
+        if session.is_active():
+            raise ValueError(
+                "Stop the active auxiliary session and wait for process-tree drain before deleting it."
+            )
         session.stop(force=True)
         # Chat workspace + all session dirs are deleted outright (user choice).
         try:
             if session.dir.exists():
                 shutil.rmtree(session.dir, ignore_errors=True)
+            if session.workspace_dir.exists():
+                shutil.rmtree(session.workspace_dir, ignore_errors=True)
         except OSError:
             pass
         with self.lock:
@@ -1265,6 +1893,10 @@ class AuxSessionManager:
         session = self.get(session_id)
         if session.kind == "evolution":
             raise ValueError("The evolution session is the persistent autoresearch loop and cannot be reset.")
+        if session.is_active():
+            raise ValueError(
+                "Stop the active auxiliary session and wait for process-tree drain before refreshing it."
+            )
         session.refresh()
         # Rebuild context document from the latest project state.
         self.write_context(session)
@@ -1285,6 +1917,7 @@ class AuxSessionManager:
             raise ValueError("Message is required.")
         if session.is_active():
             raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
+        self.ensure_aux_run_allowed(session)
         if session.kind == "evolution" and self.engine.evolution_loop_status(self.context)["running"]:
             # The evolution session's subprocess and the legacy autoresearch
             # loop both have write access to research_trajectory/manuscript;
@@ -1293,6 +1926,11 @@ class AuxSessionManager:
                 "The evolution run is already active in the main research panel. "
                 "Use that panel to continue it, or stop it there first."
             )
+        settings = self.preflight_settings(
+            session, payload.get("settings") or session.settings,
+            implementation=not self.is_read_only_discussion(session),
+            force_refresh=True,
+        )
         if edit_index is not None:
             if uploads:
                 raise ValueError("Edited chat messages cannot add new attachments yet.")
@@ -1309,7 +1947,6 @@ class AuxSessionManager:
             message += "\n".join(lines)
         if not message:
             raise ValueError("Message is required.")
-        settings = self.engine.implementation_settings_from_payload(payload.get("settings") or session.settings)
         self.write_context(session)
         resume = bool(session.cli_session_id) and edit_index is None
         session.start_message(message, settings, resume)
@@ -1332,6 +1969,12 @@ class AuxSessionManager:
             raise ValueError("Plan request is required.")
         if session.is_active():
             raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
+        self.ensure_aux_run_allowed(session)
+        settings = self.preflight_settings(
+            session, payload.get("settings") or session.settings,
+            implementation=False,
+            force_refresh=True,
+        )
         if edit_index is not None and uploads:
             raise ValueError("Edited plan messages cannot add new attachments yet.")
         edit_meta: dict[str, Any] = {}
@@ -1356,7 +1999,6 @@ class AuxSessionManager:
         if not agent_message.strip():
             raise ValueError("Plan request is required.")
 
-        settings = self.engine.normalize_research_settings(payload.get("settings") or session.settings)
         backend = self.engine.normalize_agent_backend(settings.get("backend"))
         revision_of = self.engine.normalize_plan_id(payload.get("revisePlanId") or edit_meta.get("archived_plan_id"))
         revision_plan = ""
@@ -1377,9 +2019,14 @@ class AuxSessionManager:
             owner_session_id=session.id,
         )
         prompt = self.engine.plan_research_prompt(agent_message, conversation_history=conversation_history, revision_plan=revision_plan)
+        if self.is_read_only_discussion(session):
+            prompt = self.discussion_prompt(session, prompt)
 
         with session.lock:
             session.plan_id = str(artifact.get("id") or "")
+            previous_backend = self.engine.normalize_agent_backend(session.backend)
+            if backend != previous_backend:
+                session.cli_session_id = ""
             session.backend = backend
             session.settings = settings
             if session.title_source == "auto" and session.title == session._default_title():
@@ -1392,13 +2039,24 @@ class AuxSessionManager:
             session.streaming_transcript = {}
             session.updated_at = session.started_at
             session._cancel_requested = False
+            session._stop_requested = False
         self.write_context(session)
         session.persist()
         session.emit("plan", {"plan": self.engine.public_plan_artifact(artifact)})
         session.emit("session", {"status": "running"})
+        try:
+            self.begin_v2_boundary(session, "plan")
+        except Exception:
+            with session.lock:
+                session.status = "error"
+                session.updated_at = _now_iso()
+            session.persist()
+            self.engine.update_plan_artifact(session.plan_id, status="failed", error="The v2 auxiliary boundary could not start.")
+            session.emit("error", {"status": "error", "message": "The v2 auxiliary boundary could not start."})
+            raise
         thread = threading.Thread(
-            target=self.engine.run_in_project,
-            args=(self.context, session.run_plan, prompt, artifact),
+            target=self.run_in_project,
+            args=(session, session.run_plan, prompt, artifact),
             daemon=True,
         )
         with session.lock:
@@ -1410,6 +2068,10 @@ class AuxSessionManager:
         session = self.get(session_id)
         if session.kind != "chat":
             raise ValueError("Plan approval is only available for chat sessions.")
+        if self.protocol_classification() == "v2":
+            raise ValueError(
+                "A v2 auxiliary plan is advisory only. Start it through the main research flow so changes use staging, review, and service-owned publication."
+            )
         plan_id = self.engine.normalize_plan_id(payload.get("planId") or payload.get("id"))
         if not plan_id or plan_id != str(session.plan_id or ""):
             raise ValueError("Plan id does not match the active session plan.")
@@ -1420,7 +2082,12 @@ class AuxSessionManager:
             raise ValueError("Only a ready plan can be approved.")
         if session.is_active():
             raise ValueError("This session already has an active run. Wait for it to finish or refresh it.")
-        settings = self.engine.implementation_settings_from_payload(payload.get("settings") or session.settings)
+        self.ensure_aux_run_allowed(session)
+        settings = self.engine.preflight_agent_settings(
+            payload.get("settings") or session.settings,
+            implementation=True,
+            force_refresh=True,
+        )
         artifact = self.engine.update_plan_artifact(plan_id, status="approved", approved_at=self.engine.now_iso(), implemented_run_id=session.id)
         session.emit("plan", {"plan": self.engine.public_plan_artifact(artifact)})
         instruction = str(payload.get("instruction") or "").strip()
@@ -1457,7 +2124,7 @@ class AuxSessionManager:
                 target = root / f"{stem}-{counter}{suffix}"
                 counter += 1
             try:
-                target.write_bytes(data)
+                _write_private_bytes(target, data)
                 saved.append(str(target.relative_to(session.workspace_dir)))
             except OSError:
                 continue
@@ -1478,13 +2145,27 @@ class AuxSessionManager:
                 text = self.engine.build_evolution_context(session)
             else:
                 text = self.engine.build_chat_context(session)
-            session.context_path.write_text(text, encoding="utf-8")
+            _write_private_bytes(session.context_path, text.encode("utf-8"))
         except Exception:
             pass
 
     # ---- prompt + command ------------------------------------------------
     def build_prompt(self, session: AuxSession, message: str) -> str:
-        return self.engine.build_aux_prompt(session, message)
+        prompt = self.engine.build_aux_prompt(session, message)
+        if not self.is_read_only_discussion(session):
+            return prompt
+        return self.discussion_prompt(session, prompt)
+
+    def discussion_prompt(self, session: AuxSession, prompt: str) -> str:
+        return f"""CoAutoResearch read-only discussion:
+- Help the human understand evidence, question assumptions, compare ideas, and propose next steps.
+- Read only the files needed for the question; do not run the main research startup checklist. Prefer a concise, useful answer over a full project audit unless requested.
+- You may read the project at `{self.context.root}` and attachments at `{session.workspace_dir}`. Do not write files, run experiments, or launch agents.
+- Main research may be running concurrently. Cite inspected files and distinguish published findings from in-progress work. Re-read relevant state before claiming something is current; say when observations may have changed.
+- When changes are requested, explain the concrete proposal and its rationale in your reply. The human can use “Add to research draft” to review and send it through the main research flow. Do not claim a proposal has been applied or sent.
+- Project execution instructions describe the main researcher; in this discussion your role remains read-only.
+
+{prompt}"""
 
     def agent_command(self, session: AuxSession, resume: bool) -> list[str]:
         return self.engine.aux_agent_command(session, resume)

@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "campaign.schema.json",
+  "title": "Campaign",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "campaign_id",
+    "title",
+    "purpose",
+    "requirement_sources",
+    "components",
+    "aggregate_status",
+    "current_blockers",
+    "last_published_revision"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "campaign"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "campaign_id": {
+      "$ref": "common.schema.json#/$defs/campaign_id"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requirement_sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "component_id",
+          "title",
+          "status",
+          "satisfying_card_ids",
+          "rationale"
+        ],
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,63}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "not_started",
+              "in_progress",
+              "partial",
+              "tentative",
+              "passed",
+              "waived_with_rationale",
+              "not_applicable",
+              "blocked"
+            ]
+          },
+          "satisfying_card_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/result_card_id"
+            },
+            "uniqueItems": true
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "aggregate_status": {
+      "enum": [
+        "not_started",
+        "in_progress",
+        "partial",
+        "tentative",
+        "passed",
+        "blocked"
+      ]
+    },
+    "current_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "last_published_revision": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

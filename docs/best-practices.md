@@ -1,108 +1,127 @@
-# Best Practices
+# Research together, build on evidence
 
-CoAutoResearch is **Co** as much as **Auto**: the agent does the heavy lifting,
-but you stay the PI — you bring the context, steer the direction, and own the
-result. The autonomy is a means; the goal is research you can understand,
-revise, and defend. These patterns get the most out of that.
+Use CoAutoResearch to advance work you can understand, question and revise.
+The agent can carry out a sequence of research steps; you bring context,
+decide what matters and remain responsible for interpreting the result.
 
-## Best ways to start
+## Start with a useful brief
 
-The agent works best when you give it real research context to ground in, not
-just a one-line prompt. Two starting points work especially well — both are
-uploaded through the composer `+` button and filed under your project's
-`resources/`.
+An initial question is enough to begin a conversation. A stronger brief explains
+what is known, what remains uncertain and which constraints matter. Add a
+proposal, prior experiments or notes when available. Say which conclusions
+would change your next decision, rather than requiring a positive result.
 
-### Bring a proposal and a deep-research report
+For example: “Compare these two methods under a fixed compute budget. Report
+uncertainty and failure cases. Do not use the final test set to choose settings.”
+A target venue helps shape reporting, but does not establish novelty or supply
+missing evidence.
 
-If you've already shaped an idea with ChatGPT or Claude — a proposal, plus a
-deep-research report on the landscape — upload both and let CoAutoResearch take
-it from there. It grounds its trials, evidence, and manuscript in your framing
-instead of starting cold, so the direction is yours from the first step.
+When an action needs a later decision, name that action and its prerequisite.
+Review the prepared brief before Start to confirm the condition was retained.
+Starting autonomous work does not waive a separate approval you reserved.
 
-### Continue a half-finished project
+## Bring existing work without losing its meaning
 
-Have work already in progress? Upload the folder, or a `.zip` of your ongoing
-project — drafts, notes, data, prior experiments. CoAutoResearch surfaces what's
-there, files it as resources, and continues the research rather than restarting
-it.
+Upload research material or link an accessible folder through the composer.
+Uploads are copied; linked material stays in place. Include enough context to
+distinguish raw data, derived results, abandoned experiments and current code.
+Do not include credentials or unrelated private files.
 
-Either way, uploaded material is copied into `resources/` and recorded, so the
-agent can cite it and you can trace where everything came from.
+Research-bearing material in `resources/ongoing_work/` triggers a conversion
+trial before ordinary research. It inventories existing work, records resource
+locations and treats earlier quantitative results as tentative until checked.
+An imported number is not automatically a verified new finding. Preserve source
+files and explain how earlier results were produced.
 
-For ongoing projects, put research-bearing material under
-`resources/ongoing_work/` or upload it through the UI. CoAutoResearch now runs a
-mandatory conversion trial before normal autoresearch when that folder contains
-code, data, checkpoints, results, manuscript sources, or metrics. The conversion
-trial inventories what is present, activates large resources in place, migrates
-runnable code or derived data into `workspace/`, and registers prior quantitative
-results as tentative findings until the new run verifies them.
+## Use discussion to improve the next step
 
-## Keep the Critical Path empirical
+Open **New chat** while autoresearch is working. Ask a specific question: Is the
+comparison fair? Would the finding survive a different split? Which alternative
+explanation remains? Discussions can inspect the project without directly
+changing its research files.
 
-The loop is driven by the Critical Path in `research_trajectory/STATE.md`. Each
-trial should target the current bottleneck: acquire or substitute data, run or
-repair methods, produce results, build figures/tables, or assemble the
-deliverable. Audits and register cleanup are useful only when they unblock one
-of those items.
+When an answer suggests a useful change, choose **Add to research draft**.
+Review the wording and send it to the research session. Make the intended scope
+explicit: “Before the next evaluation, add class-level error analysis” is easier
+to apply than “make the study better.” Check the following plan or result to see
+how the instruction was handled. A draft handoff is not an applied intervention.
 
-When a public dataset or file is research-critical, the agent should not leave
-it as a link-only note. It should record an acquisition decision, try user
-provided ongoing work and local caches first, then official downloads and
-acceptable substitutes within the objective. A human decision is reserved for
-credentials, private resources, scope changes, or substitutions that would
-change the core claim.
+## Keep each trial focused
 
-## Working with the manuscript blueprint
+A trial should resolve a concrete uncertainty or remove a blocker. Define a
+bounded next move with an observable outcome: acquire data, compare methods,
+repair an experiment, investigate a failure, or organize verified findings.
+Prefer a small useful run before spending more compute.
 
-CoAutoResearch uses two manuscript artifacts. `manuscript/PAPER_PLAN.md` is the
-working venue-format plan: section obligations, planned figures/tables, evidence
-gaps, and blockers live there. `manuscript/BLUEPRINT.md` is the exportable
-blueprint: it should contain only real, source-backed content, including real
-results, figure/table blocks, references, appendix posture, and provenance.
+For statistical work, establish evaluation rules in advance. Fit preprocessing
+only on training data, preserve an untouched test set where appropriate, record
+seeds and account for uncertainty. Do not repeatedly change splits until a result
+looks attractive. A careful negative comparison can be more useful than an
+unreliable improvement.
 
-The blueprint is not finished prose. That is deliberate. Today's models can plan
-and ground a paper far more reliably than they can write the full narrative with
-correct, defensible reasoning end to end. So we keep the part that must be right
-and traceable — the research itself — as the deliverable, and leave the final
-sentence-level prose to you.
+Read live updates for the current action, observations and next step. Review
+technical details when investigating a specific problem. If a run stalls, check
+whether it is waiting for a provider, executing work or asking for a decision;
+a failed page refresh is not itself evidence of a failed experiment.
 
-This is the Co in CoAutoResearch: every claim is tied to evidence you can check,
-and you can revise the argument before a single paragraph is written. You own
-and can defend the result, instead of inheriting prose you would have to
-reverse-engineer.
+### Resolve execution setup before experiments
 
-When the paper is complete, hand the **Paper-Writing Pack** to GPT or Claude and
-ask it to write the paper from the blueprint. Because the structure, claims, and
-evidence are already fixed, the model is rendering your research into prose —
-not inventing it.
+Ask the agent to verify its project-local interpreter and dependencies before
+using evaluation data. If a copied Python environment cannot start, inspect the
+error and try an installed interpreter with the required version. Do not treat
+a failed installation as an experimental result or silently inherit system
+packages when isolation was requested.
 
-If the UI offers a **Research Status Pack** instead, the run is not ready for
-paper writing. That export is an honest checkpoint containing `PAPER_PLAN.md`,
-state, findings, and blockers.
+Codex web search and command networking are separate settings. If dependency
+downloads fail, inspect the actual error and host connectivity first. When the
+cause is the workspace command network restriction, you can enable downloads
+for this project in **Settings → Agent → Advanced config** with
+`sandbox_workspace_write.network_access=true`, save, and resume the stopped run.
+This enables network access for commands, not just the browser search tool.
+See the [official Codex network documentation](https://learn.chatgpt.com/docs/agent-approvals-security#network-access).
 
-## Generating figures
+## Give guidance at the right boundary
 
-Figures follow the same split. The blueprint gives a **description/spec for each
-figure** rather than treating a generated image as the source of truth. The
-figure block should say what the display must do, where it belongs in the paper,
-which evidence or concept it carries, what caption it needs, and what still
-blocks it from being final.
+Use **Pause after current turn** when you want to review progress before automatic
+continuation. Wait for **Paused** before assuming work has stopped. Resume with
+specific guidance when the current direction remains useful.
 
-If you are using the Codex backend and image generation is available,
-CoAutoResearch can create candidate figure previews from active inline figure
-specs. Generated previews are saved under `manuscript/figures/generated/`, and
-the matching `manuscript/BLUEPRINT.md` figure block records the source path and
-Markdown `Preview image`. Claude Code does not start Codex figure-image jobs.
+Use **Stop current run** when an active execution must be interrupted; its work
+may be incomplete. Reserve **Restart autoresearch** for returning to the original
+launch direction, with later work archived. A follow-up message usually preserves
+more useful context than editing and resending an earlier message.
 
-You can also work manually: copy the figure description into an image model,
-save the result under `manuscript/figures/`, and update the figure block with
-its source path and preview image. Either way, the blueprint remains the
-auditable source for what the figure must show; the image is a candidate display
-until you accept it as part of the manuscript.
+## Read findings with their limits
 
-## Staying in the loop
+Distinguish a proposed idea, a measured observation and a reviewed result recorded
+in the project. Inspect data provenance, comparison conditions, uncertainty,
+failed attempts and unresolved explanations. Internal review checks the research
+record; it does not substitute for independent replication or peer review.
 
-The Co is the point: step in whenever you want to change direction, scope,
-methods, claims, or target venue. Your interventions become part of the project
-record, so the research stays yours — steerable while it runs, and defensible
-after the agent hands off.
+Candidate routes are directions still available to explore. Rejected or replaced
+routes belong to history and help explain how the current direction was chosen.
+Avoid treating the number of trials or review files as a measure of scientific
+progress. Ask what the latest evidence actually allows you to claim.
+
+## Move from manuscript to paper in the product
+
+Use **Manuscript** to read the evolving research story and inspect its evidence.
+The underlying `manuscript/PAPER_PLAN.md` describes the writing plan;
+`manuscript/BLUEPRINT.md` connects content to supporting material. Missing analysis
+belongs in the research process, not in invented prose.
+
+Once reviewed results are recorded and project agents are idle, choose
+**Generate paper**. The product's internal agent uses scientific writing,
+visualization, citation and venue-template skills to produce a draft and PDF
+from the saved evidence. It does not run new experiments during writing.
+
+Choose a general research report when the work is an exploratory comparison.
+For a conference target, specify the venue and year. A template or a long PDF
+cannot compensate for missing evidence. Review notes should distinguish issues
+that better writing can resolve from gaps requiring further research.
+
+Check every figure against its source data. Numeric figures should preserve
+uncertainty, units and comparison conditions. Conceptual illustrations must not
+be presented as experimental evidence. Then inspect citations, author details,
+limitations, ethics statements and the actual venue requirements before sharing.
+See [paper generation](paper-generation.md) for tools, cancellation and recovery.

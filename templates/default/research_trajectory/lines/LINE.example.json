@@ -1,0 +1,32 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "line",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "line_id": "L0001",
+  "status": "active",
+  "title": "Scoped method improvement",
+  "thesis": "The method improves the scoped benchmark under the fixed evaluation setup.",
+  "claim_hierarchy": [
+    {
+      "claim_id": "CLAIM-001",
+      "text": "The method improves the scoped benchmark.",
+      "strength": "tentative"
+    }
+  ],
+  "supporting_cards": [
+    "RC-000001-01"
+  ],
+  "limiting_cards": [],
+  "conflicting_cards": [],
+  "material_exclusions": [],
+  "scope_boundary": "Dataset A, fixed split, metric M.",
+  "current_bottleneck": "Replication across seeds.",
+  "kill_criteria": [
+    "The signal disappears under replication."
+  ],
+  "venue_fit": "Not yet assessed.",
+  "last_published_revision": 1
+}

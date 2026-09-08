@@ -1,0 +1,37 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "campaign",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "campaign_id": "C0001",
+  "title": "Core evidence",
+  "purpose": "Build evidence for the active claim.",
+  "requirement_sources": [
+    "PROJECT.md"
+  ],
+  "components": [
+    {
+      "component_id": "main_signal",
+      "title": "Main signal",
+      "status": "tentative",
+      "satisfying_card_ids": [
+        "RC-000001-01"
+      ],
+      "rationale": "One scoped run."
+    },
+    {
+      "component_id": "replication",
+      "title": "Replication",
+      "status": "not_started",
+      "satisfying_card_ids": [],
+      "rationale": "Required before supported status."
+    }
+  ],
+  "aggregate_status": "tentative",
+  "current_blockers": [
+    "Replication is missing."
+  ],
+  "last_published_revision": 1
+}

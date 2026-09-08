@@ -1,10 +1,10 @@
 {
   "name": "co-auto-research",
-  "version": "0.1.2",
-  "description": "A self-improving, autonomous AI research partner you stay in control of — with traceable evidence and steerable progress.",
+  "version": "2.0.0",
+  "description": "Autonomous research and human–AI collaboration, from a question to a manuscript built on traceable evidence.",
   "license": "Apache-2.0",
   "type": "module",
-  "packageManager": "npm@11.9.0",
+  "packageManager": "npm@11.15.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/YihongT/CoAutoResearch.git"
@@ -23,34 +23,38 @@
   "files": [
     "bin/",
     "templates/",
+    "!templates/default/research_trajectory/.staging/**",
+    "templates/default/research_trajectory/.staging/.gitkeep",
+    "!templates/default/research_trajectory/.transactions/**",
+    "templates/default/research_trajectory/.transactions/.gitkeep",
     "docs/",
+    "!docs/**/*.docx",
+    "!**/__pycache__/**",
+    "!**/*.py[cod]",
     "assets/",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "SECURITY.md"
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "RELEASING.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
-    "test": "node scripts/verify-template.js && node scripts/check-prompt-sync.js && node scripts/agent-trace-test.js && node scripts/ui-flow-test.js && node scripts/smoke-test.js",
-    "verify": "node scripts/verify-template.js && node scripts/check-prompt-sync.js",
-    "agent-trace": "node scripts/agent-trace-test.js",
-    "smoke": "node scripts/smoke-test.js",
-    "scenarios": "node scripts/scenario-tests/server-scenarios.js",
-    "visual:themes": "node scripts/visual-theme-check.js",
-    "audit:ui": "node scripts/ui-audit-check.js",
+    "start": "node bin/auto-research.js ui",
+    "doctor": "node bin/auto-research.js doctor",
     "pack:dry-run": "npm pack --dry-run"
   },
   "keywords": [
-    "research",
-    "self-improving",
-    "autonomous",
-    "human-centered",
+    "ai-research",
+    "human-ai-collaboration",
+    "research-automation",
+    "autonomous-agents",
     "codex",
-    "scaffold",
-    "template",
-    "agent"
+    "claude-code",
+    "scientific-writing"
   ]
 }

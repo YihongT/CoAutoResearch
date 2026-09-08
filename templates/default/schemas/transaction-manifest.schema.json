@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "transaction-manifest.schema.json",
+  "title": "Transaction Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "transaction_id",
+    "trial_id",
+    "stage_id",
+    "base_revision",
+    "target_revision",
+    "state",
+    "operations",
+    "prepared_at",
+    "committed_at",
+    "commit_marker_path",
+    "journal_path"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "transaction_manifest"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "transaction_id": {
+      "$ref": "common.schema.json#/$defs/transaction_id"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "stage_id": {
+      "$ref": "common.schema.json#/$defs/stage_id"
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "target_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "state": {
+      "enum": [
+        "created",
+        "prepared",
+        "applying",
+        "committed",
+        "rolled_back",
+        "failed"
+      ]
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "operation",
+          "before_sha256",
+          "after_sha256",
+          "applied",
+          "before_snapshot_path",
+          "after_source_path",
+          "temp_path",
+          "applied_at",
+          "extensions"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "operation": {
+            "enum": [
+              "create",
+              "replace"
+            ]
+          },
+          "before_sha256": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/sha256"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "after_sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "applied": {
+            "type": "boolean"
+          },
+          "extensions": {
+            "$ref": "common.schema.json#/$defs/extensions"
+          },
+          "before_snapshot_path": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/relative_path"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "after_source_path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "temp_path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "prepared_at": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "committed_at": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "commit_marker_path": {
+      "$ref": "common.schema.json#/$defs/relative_path"
+    },
+    "journal_path": {
+      "$ref": "common.schema.json#/$defs/relative_path"
+    }
+  }
+}

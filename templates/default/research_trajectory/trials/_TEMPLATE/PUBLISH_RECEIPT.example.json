@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "publish_receipt",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "transaction_id": "TXN-20260714T120000Z-aaaaaaaa",
+  "stage_id": "STAGE-000001-aaaaaaaa",
+  "base_revision": 0,
+  "published_revision": 1,
+  "published_at": "2026-07-14T12:00:00Z",
+  "published_files": [
+    {
+      "path": "research_trajectory/CURRENT_FINDINGS.json",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  ],
+  "gate_status": "continue"
+}

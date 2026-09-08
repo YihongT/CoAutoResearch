@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "semantic-trace.schema.json",
+  "title": "Semantic Trace Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "run_id",
+    "trial_id",
+    "sequence",
+    "phase",
+    "status",
+    "message",
+    "details",
+    "redacted"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "semantic_trace"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trial_id": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/trial_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "phase": {
+      "enum": [
+        "observe",
+        "orient",
+        "route",
+        "charter",
+        "preflight",
+        "execute",
+        "distill",
+        "stage",
+        "review_route",
+        "review",
+        "repair",
+        "brief",
+        "gate",
+        "validate",
+        "publish",
+        "recovery"
+      ]
+    },
+    "status": {
+      "enum": [
+        "started",
+        "progress",
+        "completed",
+        "warning",
+        "failed"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "redacted": {
+      "type": "boolean"
+    }
+  }
+}

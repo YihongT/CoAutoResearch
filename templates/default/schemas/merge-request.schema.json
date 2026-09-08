@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "merge-request.schema.json",
+  "title": "Merge Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "base_revision",
+    "stage_id",
+    "staged_update_manifest_path",
+    "requested_card_decisions",
+    "requested_line_updates",
+    "requested_campaign_updates",
+    "conflicts",
+    "human_implications",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "merge_request"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stage_id": {
+      "$ref": "common.schema.json#/$defs/stage_id"
+    },
+    "staged_update_manifest_path": {
+      "$ref": "common.schema.json#/$defs/relative_path"
+    },
+    "requested_card_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "card_id",
+          "decision",
+          "qualification"
+        ],
+        "properties": {
+          "card_id": {
+            "$ref": "common.schema.json#/$defs/result_card_id"
+          },
+          "decision": {
+            "enum": [
+              "accept",
+              "accept_with_qualification",
+              "reject",
+              "supersede",
+              "defer",
+              "needs_human"
+            ]
+          },
+          "qualification": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "requested_line_updates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "line_id",
+          "effect",
+          "rationale"
+        ],
+        "properties": {
+          "line_id": {
+            "$ref": "common.schema.json#/$defs/line_id"
+          },
+          "effect": {
+            "$ref": "common.schema.json#/$defs/line_effect"
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "requested_campaign_updates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "human_implications": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

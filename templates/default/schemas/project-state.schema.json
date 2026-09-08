@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project-state.schema.json",
+  "title": "Project State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "canonical_revision",
+    "current_objective",
+    "active_line_id",
+    "critical_path",
+    "goal_gate_path",
+    "next_step"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "project_state"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "canonical_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "current_objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "active_line_id": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/line_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "critical_path": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "description",
+          "status",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^CP[0-9]+$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "open",
+              "in_progress",
+              "blocked_human",
+              "blocked_operational",
+              "complete"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "maxItems": 3
+    },
+    "goal_gate_path": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/relative_path"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_step": {
+      "type": "string"
+    }
+  }
+}

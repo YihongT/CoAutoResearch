@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gate-evidence.schema.json",
+  "title": "Goal Gate Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "killed_by_human",
+    "final_ready",
+    "human_blocker",
+    "budget_reached",
+    "operational_blocker",
+    "viable_path",
+    "concrete_high_value_move",
+    "expected_value",
+    "reasons",
+    "recommended_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "gate_evidence"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "killed_by_human": {
+      "type": "boolean"
+    },
+    "human_kill_authority": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "authority_id",
+            "record_path",
+            "record_sha256",
+            "recorded_at"
+          ],
+          "properties": {
+            "source": {
+              "enum": [
+                "formal_intervention",
+                "authenticated_ui_action"
+              ]
+            },
+            "authority_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            "record_path": {
+              "$ref": "common.schema.json#/$defs/relative_path"
+            },
+            "record_sha256": {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            "recorded_at": {
+              "$ref": "common.schema.json#/$defs/timestamp"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "final_ready": {
+      "type": "boolean"
+    },
+    "human_blocker": {
+      "type": "boolean"
+    },
+    "budget_reached": {
+      "type": "boolean"
+    },
+    "operational_blocker": {
+      "type": "boolean"
+    },
+    "viable_path": {
+      "type": "boolean"
+    },
+    "concrete_high_value_move": {
+      "type": "boolean"
+    },
+    "expected_value": {
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "recommended_status": {
+      "$ref": "common.schema.json#/$defs/gate_status"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "killed_by_human"
+        ],
+        "properties": {
+          "killed_by_human": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "human_kill_authority"
+        ],
+        "properties": {
+          "human_kill_authority": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
+}

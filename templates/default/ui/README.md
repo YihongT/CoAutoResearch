@@ -1,102 +1,77 @@
-# CoAutoResearch Web UI
+# CoAutoResearch dashboard runtime
 
-This is a local, file-backed web interface for the CoAutoResearch scaffold. The main surface starts as a project-framing chat, then becomes a conversation connected to the selected real agent CLI session after autoresearch is launched. Codex is the default backend; Claude Code is optional. Project materials open from the left sidebar when needed.
+The dashboard is the research workspace for CoAutoResearch. A research brief
+starts the conversation; the researcher chooses when to start Autoresearch.
+Separate chats support parallel discussion, with suggestions reviewed and sent
+through the main research draft. Manuscript and Paper connect the research
+record to a readable narrative and generated PDF.
 
-## Run
+## Run a generated project
 
-From the repository root:
-
-```bash
-python3 ui/server.py
-```
-
-Open:
-
-```text
-http://127.0.0.1:8765
-```
-
-Optional host and port:
+From this generated project's root, with Python 3.10+:
 
 ```bash
-python3 ui/server.py --host 127.0.0.1 --port 8780
+python3 ui/server.py --host 127.0.0.1 --port 8765
 ```
 
-If the requested port is busy, the server automatically tries the next available
-port and prints the actual URL to open.
-
-On Windows, direct server use is usually:
-
-```powershell
-py -3 ui/server.py --host 127.0.0.1 --port 8780
-```
-
-If an agent CLI fails to start on Windows, verify `codex --version` or
-`claude --version` in the same PowerShell session used to launch the UI. The
-backend resolves `.cmd`, `.exe`, and `.bat` shims; set `COAUTO_CODEX` or
-`COAUTO_CLAUDE` to `(Get-Command <tool>).Source` if your PATH differs between
-terminals.
-
-From the package CLI, a parent folder can be served as a multi-project
-dashboard:
+On Windows, `py -3 ui/server.py` can select Python. Open the URL printed by the
+server and keep the process running. For a folder containing several projects,
+prefer the package CLI:
 
 ```bash
 co-auto-research ui --projects-dir /path/to/projects
 ```
 
-In dashboard mode, click `+` in the left sidebar to create a new project inside
-that folder, choose the project default agent backend, and continue with
-framing. The UI uses the same immutable template as `co-auto-research init`.
+The dashboard uses the Python standard library and has no npm application
+dependencies. Research environments and paper-generation tools are separate.
+Keep loopback binding for local use; configure supported authentication before
+remote access. This deployment is intended for one trusted researcher.
 
-No npm or pip install is required.
+## Main files
 
-## Files
+| File | Responsibility |
+| --- | --- |
+| `server.py` | HTTP serving, project operations, agent runs and lifecycle coordination |
+| `index.html`, `styles.css` | Application shell, themes and responsive layout |
+| `app.js` | Research views, controls, polling, previews and settings |
+| `sessions-panel.js`, `aux_sessions.py` | Separate discussion sessions and draft handoff |
+| `v2_*.py` | Typed research lifecycle, review, publication and recovery |
+| `paper_export.py`, `paper_tools.py` | Isolated evidence-to-paper execution and its tool environment |
 
-- `server.py`: Python standard-library backend for static serving, file summaries, cold-start writes, Codex or Claude Code runs, session settings, and git status.
-- `index.html`: Cold start and agent-session single-page application shell.
-- `styles.css`: responsive, warm minimal workspace styling.
-- `app.js`: client-side rendering, polling, previews, cold-start submission, session controls, and agent chat commands.
-- `PRODUCT_REQUIREMENTS.md`: product specification.
+## Agent access
 
-## User Experience
+The selected backend must be installed and authenticated. Refresh login and
+model discovery after changing a CLI or account. An installed executable alone
+does not prove model access. A missing selected backend blocks the run with
+setup guidance; the service does not silently switch providers.
 
-- Project framing: write the research brief, set target venue / audience, attach optional resources, and review or edit the generated `PROJECT.md` draft in the main chat surface.
-- Launch autoresearch: opens a settings dialog and starts the first real agent CLI session only after the user confirms launch. The dialog can override the per-project backend for that run unless `COAUTO_AGENT_BACKEND` forces a backend in the server environment; invalid env values are ignored with a visible warning.
-- Session chat: after launch, the same UI shows the captured transcript and sends follow-up messages to the same resumed session.
-- Chat: enabled only after a session exists, and sends follow-up instructions through Codex `exec resume` or Claude Code `--resume`.
-- Continue: resumes the current session and asks it to continue the research loop without an extra user instruction.
-- Session controls: passes provider-specific model, reasoning effort, permissions, live web search, and advanced Codex `-c key=value` overrides where applicable.
-- Slash commands: handles CoAutoResearch controls such as `/goal`, `/goal pause`, `/goal resume`, `/ps`, `/status`, and `/diff` locally; other provider/tool commands can still be sent to the current session.
-- Left sidebar: switches the main area between Agents, Resources, Trials, Reviews, and Manuscript.
-- Project switcher: in multi-project mode, the left sidebar switches between
-  independent generated projects. Each project has its own files, UI runtime
-  state, settings, and agent session. The `+` button creates another independent
-  project in the served parent folder.
-- Resources and Trials: shown as expandable file-browser views.
-- Markdown preview: shown beside editable Markdown in cold start and inline file views.
-- Source preview: shown inline at the file's own position and can save supported text files.
+The runtime launches Codex or Claude Code through their CLIs. It does not
+control an already-open IDE conversation. Use `COAUTO_CODEX` or `COAUTO_CLAUDE`
+for an executable outside PATH. On Windows, supported executable shims are
+resolved by the server. Shell aliases are not inherited by subprocesses.
 
-The UI controls a real local Codex or Claude Code CLI session. It does not control an already-open conversation inside an IDE panel.
+## State and control boundaries
 
-Project creation succeeds even if the selected agent CLI is not installed yet.
-Starting framing, autoresearch, chat, resume, or restart checks the selected
-backend with the provider `--version` and auth status commands. Missing or
-unauthenticated selected backends block startup with Codex- or Claude-specific
-setup guidance; the UI does not silently fall back to the other backend.
-For Claude Code, readiness also recognizes Anthropic-compatible gateway
-credentials supplied through Settings, `~/.claude/settings.json`, or
-`.claude/settings.local.json`. Shell aliases/functions are not inherited; point
-`COAUTO_CLAUDE` at a wrapper script if a wrapper is required.
+Project creation does not start research. Sending a brief prepares the research
+direction; starting Autoresearch authorizes the bounded lifecycle. A pause
+request takes effect after the current agent turn, which may leave a trial
+unfinished. Stop interrupts execution. Resume continues the current process;
+Restart restores the first-launch direction and archives later work.
 
-## File Writes
+In v2, auxiliary discussions are read-only with respect to research files.
+**Add to research draft** changes the composer, not the research state. The
+researcher reviews and sends the suggestion. Uploaded files are copied into
+project resources; linked folders remain at their source location. A remote
+server can access only paths available on that host.
 
-The UI writes only when the user submits a form:
+Validated JSON and service-owned transaction records determine v2 state.
+Markdown views make it readable. Internal publication means a reviewed result
+was recorded in the project, not scientific endorsement or external publication.
+Keep API paths, schemas, status enums and history markers compatible when
+changing display text. Provider errors used by recovery logic must retain their
+original diagnostics.
 
-- Project-framing input: `resources/user_input/INITIAL_BRIEF.md`.
-- Project draft editor: `PROJECT.md`.
-- Source preview save: supported text files inside the repository.
-- Target venue text: `resources/target_venue/TARGET_VENUE.md`.
-- Local resources: files or folders selected in the UI are attached into `resources/ongoing_work/`, `resources/literature/`, `resources/proposals/`, or `resources/data_sources/` based on the selected type; the backend creates symlinks when possible and falls back to copy only when symlink creation fails.
-- Agent runs: whatever repository files the active Codex or Claude Code session edits after the user launches autoresearch, continues, chats, or sends provider/tool commands.
-
-Do not put real secrets into uploaded files or markdown resources.
+Paper generation snapshots eligible evidence into an isolated writing workspace.
+It creates figures, sources and a PDF without running new experiments. A ready
+paper is a draft for human review. Cancellation or a failed replacement leaves
+an earlier completed paper available.

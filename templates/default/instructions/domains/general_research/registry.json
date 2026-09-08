@@ -1,0 +1,22 @@
+{
+  "schema_version": "2.0",
+  "domain_id": "general_research",
+  "display_name": "General Research",
+  "version": "2.0.0",
+  "enabled_by_default": true,
+  "triggers": ["all projects unless a more specific enabled pack is selected"],
+  "claim_types": [
+    "descriptive",
+    "comparative",
+    "design",
+    "method",
+    "empirical",
+    "analytical",
+    "process",
+    "negative_or_boundary"
+  ],
+  "campaign_templates": [],
+  "method_pack_recommendations": [],
+  "specialized_reviewers": [],
+  "extensions": {}
+}

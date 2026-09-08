@@ -1,0 +1,17 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "target_venue",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "target_venue": null,
+  "audience": "General research audience",
+  "article_type": "research report",
+  "lock_level": "exploratory",
+  "locked_by_intervention_id": null,
+  "profile_path": null,
+  "alternative_venues": [],
+  "human_constraints": [],
+  "last_published_revision": 0
+}

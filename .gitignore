@@ -12,6 +12,7 @@ pnpm-debug.log*
 .env.*
 !.env.example
 .claude/
+.agents/skills/
 secrets/*
 !secrets/README.md
 
@@ -34,6 +35,10 @@ docs/_site/
 .jekyll-cache/
 ui/.runtime/
 **/ui/.runtime/
+templates/default/research_trajectory/.staging/*
+!templates/default/research_trajectory/.staging/.gitkeep
+templates/default/research_trajectory/.transactions/*
+!templates/default/research_trajectory/.transactions/.gitkeep
 
 # Generated local projects and manual test sandboxes
 tmp/
@@ -62,3 +67,8 @@ auto-research-test*/
 *.pt
 *.pth
 *.safetensors
+
+# Local development and research artifacts
+output/
+release-evidence/
+.venv/

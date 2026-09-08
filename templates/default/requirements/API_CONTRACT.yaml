@@ -1,0 +1,98 @@
+spec_version: 2.0.0
+principle: Additive evolution of the existing server and /api/overview; do not rewrite the UI stack.
+existing_endpoints_to_preserve:
+  - GET /api/overview
+  - GET /api/research/events
+  - GET /api/research/session
+  - POST /api/research/go
+  - POST /api/research/resume
+  - POST /api/research/pause
+  - POST /api/research/restart
+  - POST /api/research/resume-from-trial
+  - GET /api/file
+  - GET /api/file/raw
+restart_contract:
+  endpoint: POST /api/research/restart
+  mode: v2_full_reset
+  active_boundary: canonical revision 0 with next trial 000001_restart
+  framing: authoritative original launch prefix plus one Restart record
+  retry: resume the exact new Trial 1 phase and stage without another archive
+  failure: restore either the complete old active state or retain the complete committed new state
+resume_contract:
+  endpoint: POST /api/research/resume
+  success_status: 202
+  response: accepted and running control state without waiting for guard audit, recovery, or agent startup
+  ownership: the admission thread is project-owned, duplicate-safe, and drained by stop, delete, and server shutdown
+  failure: background admission publishes an authoritative error event and persists the exact retryable or recovery state
+v2_overview_fields:
+  research_board:
+    required:
+      - schema_version
+      - canonical_revision
+      - global_status
+      - status_reasons
+      - active_line
+      - candidate_lines
+      - current_claims
+      - supporting_evidence
+      - qualified_evidence
+      - limiting_evidence
+      - negative_evidence
+      - campaign_readiness
+      - critical_path
+      - current_bottleneck
+      - target_venue
+      - venue_readiness
+      - latest_published_trial
+      - next_move
+      - human_action
+      - recovery_state
+  trials_each:
+    required:
+      - trial_id
+      - lifecycle_state
+      - target
+      - move
+      - primary_local_question
+      - trial_outcome
+      - one_line_outcome
+      - result_cards
+      - merge_status
+      - published_revision
+      - review_level
+      - required_reviewers
+      - reviewer_statuses
+      - expert_route
+      - line_effects
+      - campaign_effects
+      - venue_impact
+      - human_action
+      - artifact_paths
+      - legacy
+  transaction_health:
+    required:
+      - lock_state
+      - recovery_required
+      - last_transaction_id
+      - last_published_revision
+optional_additive_endpoints:
+  - method: GET
+    path: /api/research-board
+    purpose: Return the same typed Research Board object independently for testability.
+  - method: GET
+    path: /api/trials/<trial_id>/v2
+    purpose: Return parsed v2 trial detail with legacy fallback.
+  - method: GET
+    path: /api/transactions/health
+    purpose: Return non-sensitive recovery and revision health.
+  - method: POST
+    path: /api/interventions
+    purpose: Record a formal human intervention through the existing intervention protocol.
+security:
+  - All project-relative paths use the existing safe resolver and must reject traversal and symlink escape.
+  - State-changing endpoints require the existing remote token boundary when remote mode is enabled.
+  - Responses containing project file content use no-store.
+  - Do not expose transaction before-snapshots, secrets, or agent environment variables through overview APIs.
+compatibility:
+  - Existing overview consumers continue to work when v2 fields are absent.
+  - V1 projects return legacy=true and synthesize a read-only board without claiming v2 publication status.

@@ -1,0 +1,189 @@
+spec_version: 2.0.0
+trial_lifecycle_state:
+  created:
+  - planned
+  - aborted
+  planned:
+  - preflight_passed
+  - needs_human
+  - blocked
+  - aborted
+  preflight_passed:
+  - executing
+  - needs_human
+  - blocked
+  - aborted
+  executing:
+  - distilled
+  - needs_human
+  - blocked
+  - invalidated
+  - aborted
+  distilled:
+  - staged
+  - needs_human
+  - blocked
+  - invalidated
+  staged:
+  - reviewing
+  - needs_human
+  - blocked
+  - invalidated
+  reviewing:
+  - staged
+  - ready_to_publish
+  - needs_human
+  - blocked
+  - invalidated
+  ready_to_publish:
+  - published
+  - invalidated
+  published: []
+  needs_human:
+  - staged
+  - published
+  - aborted
+  blocked:
+  - staged
+  - published
+  - aborted
+  invalidated: []
+  aborted: []
+line_status:
+  candidate:
+  - active
+  - paused
+  - killed
+  - superseded
+  active:
+  - candidate_final
+  - paused
+  - killed
+  - superseded
+  paused:
+  - candidate
+  - active
+  - killed
+  - superseded
+  candidate_final:
+  - active
+  - killed
+  - superseded
+  killed: []
+  superseded: []
+campaign_component_status:
+  not_started:
+  - in_progress
+  - not_applicable
+  - waived_with_rationale
+  - blocked
+  in_progress:
+  - partial
+  - tentative
+  - passed
+  - blocked
+  - not_applicable
+  - waived_with_rationale
+  partial:
+  - in_progress
+  - tentative
+  - passed
+  - blocked
+  - waived_with_rationale
+  - not_applicable
+  tentative:
+  - in_progress
+  - partial
+  - passed
+  - blocked
+  - waived_with_rationale
+  - not_applicable
+  passed:
+  - in_progress
+  - partial
+  - tentative
+  - blocked
+  waived_with_rationale:
+  - in_progress
+  - blocked
+  not_applicable:
+  - in_progress
+  - blocked
+  blocked:
+  - in_progress
+  - partial
+  - tentative
+  - passed
+  - waived_with_rationale
+  - not_applicable
+result_card_canonical_status:
+  proposed:
+  - accepted
+  - accepted_with_qualification
+  - rejected
+  - superseded
+  - deferred
+  deferred:
+  - accepted
+  - accepted_with_qualification
+  - rejected
+  - superseded
+  accepted:
+  - superseded
+  accepted_with_qualification:
+  - superseded
+  rejected: []
+  superseded: []
+venue_lock_level:
+  exploratory:
+  - preferred
+  - locked
+  preferred:
+  - exploratory
+  - locked
+  locked:
+  - exploratory
+  - preferred
+venue_authority_rules:
+  exploratory_to_preferred: published framing or venue decision may change with provenance
+  preferred_to_exploratory: published framing or venue decision may change with rationale
+  any_to_locked: formal human intervention required
+  locked_to_any: later formal human intervention required
+human_task_status:
+  open:
+  - waiting
+  - completed
+  - dismissed
+  - superseded
+  waiting:
+  - open
+  - completed
+  - dismissed
+  - superseded
+  completed: []
+  dismissed: []
+  superseded: []
+transaction_state:
+  created:
+  - prepared
+  - failed
+  - rolled_back
+  prepared:
+  - applying
+  - rolled_back
+  - failed
+  applying:
+  - committed
+  - rolled_back
+  - failed
+  committed: []
+  rolled_back: []
+  failed:
+  - rolled_back
+v2_retry_or_recovery_status:
+  agent_failed: retry the same phase, trial, and trustworthy stage with a fresh guard baseline
+  interrupted: resume the same phase, trial, and trustworthy stage after process-tree drain and guard audit
+  protocol_violation: restore protected writes from the exact guard and require explicit safe retry or stage renewal
+  recovery_required: block until guard, transaction, migration, or trusted runtime corruption is resolved
+  stage_resolution_required: block automatic launch until an unmatched orphan stage is resolved
+  repair_limit_reached: stop only after the configured number of material research revisions, never for infrastructure failures

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "publish-receipt.schema.json",
+  "title": "Publish Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "transaction_id",
+    "stage_id",
+    "base_revision",
+    "published_revision",
+    "published_at",
+    "published_files",
+    "gate_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "publish_receipt"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "transaction_id": {
+      "$ref": "common.schema.json#/$defs/transaction_id"
+    },
+    "stage_id": {
+      "$ref": "common.schema.json#/$defs/stage_id"
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "published_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "published_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "published_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "gate_status": {
+      "$ref": "common.schema.json#/$defs/gate_status"
+    }
+  }
+}

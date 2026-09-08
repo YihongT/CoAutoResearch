@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "human-brief.schema.json",
+  "title": "Human Brief",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "trial_outcome",
+    "one_line_outcome",
+    "outcome_changes",
+    "evidence",
+    "line_impact",
+    "campaign_impact",
+    "venue_impact",
+    "negative_or_limiting_evidence",
+    "current_best_line",
+    "current_bottleneck",
+    "next_move",
+    "human_action"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "human_brief"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "trial_outcome": {
+      "description": "Whole-trial outcome. blocked and needs_human use the Goal Gate's universal-blocker semantics; a local failure with an independent valuable move is informative_negative, no_state_change, or advanced.",
+      "enum": [
+        "advanced",
+        "informative_negative",
+        "no_state_change",
+        "blocked",
+        "needs_human",
+        "invalidated",
+        "aborted"
+      ]
+    },
+    "one_line_outcome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/evidence_ref"
+      }
+    },
+    "line_impact": {
+      "type": "string"
+    },
+    "campaign_impact": {
+      "type": "string"
+    },
+    "venue_impact": {
+      "type": "string"
+    },
+    "negative_or_limiting_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "current_best_line": {
+      "type": "string"
+    },
+    "current_bottleneck": {
+      "type": "string"
+    },
+    "next_move": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "move",
+            "question",
+            "expected_value"
+          ],
+          "properties": {
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "move": {
+              "type": "string",
+              "minLength": 1
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_value": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "human_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "needed",
+        "blocking",
+        "why_needed",
+        "question",
+        "options",
+        "recommendation",
+        "can_continue_meanwhile"
+      ],
+      "properties": {
+        "needed": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "why_needed": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recommendation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "can_continue_meanwhile": {
+          "type": "boolean"
+        }
+      }
+    },
+    "outcome_changes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "human_action": {
+            "properties": {
+              "blocking": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "human_action": {
+            "properties": {
+              "needed": {
+                "const": true
+              },
+              "why_needed": {
+                "type": "string",
+                "minLength": 1
+              },
+              "question": {
+                "type": "string",
+                "minLength": 1
+              },
+              "can_continue_meanwhile": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "human_action": {
+            "properties": {
+              "needed": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "human_action": {
+            "properties": {
+              "blocking": {
+                "const": false
+              },
+              "why_needed": {
+                "type": "null"
+              },
+              "question": {
+                "type": "null"
+              },
+              "options": {
+                "maxItems": 0
+              },
+              "recommendation": {
+                "type": "null"
+              },
+              "can_continue_meanwhile": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "human_action": {
+            "properties": {
+              "needed": {
+                "const": true
+              },
+              "blocking": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "human_action": {
+            "properties": {
+              "question": {
+                "type": "string",
+                "minLength": 1
+              },
+              "why_needed": {
+                "type": "string",
+                "minLength": 1
+              },
+              "can_continue_meanwhile": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

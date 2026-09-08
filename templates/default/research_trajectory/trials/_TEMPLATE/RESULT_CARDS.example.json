@@ -1,0 +1,42 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "result_cards",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "cards": [
+    {
+      "id": "RC-000001-01",
+      "type": "positive_evidence",
+      "summary": "The method outperformed the baseline on the scoped benchmark.",
+      "claim_ids": [
+        "CLAIM-001"
+      ],
+      "effect": "supports",
+      "evidence": [
+        {
+          "path": "research_trajectory/trials/000001_test-main-signal/artifacts/results.json",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_kind": "artifact",
+          "scope": "dataset A, fixed split",
+          "description": "Primary metrics",
+          "extensions": {}
+        }
+      ],
+      "scope": "Dataset A, fixed split, one run.",
+      "caveats": [
+        "Single run."
+      ],
+      "compatibility_constraints": [
+        "Use only with the same metric definition."
+      ],
+      "source_trial_id": "000001_test-main-signal",
+      "supersedes": [],
+      "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "proposed_status": "proposed",
+      "extensions": {}
+    }
+  ]
+}

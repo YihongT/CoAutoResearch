@@ -1,0 +1,142 @@
+spec_version: 2.0.0
+local_question_outcome:
+- answered
+- partially_answered
+- failed_diagnosed
+- unresolved
+- not_attempted
+trial_outcome:
+- advanced
+- informative_negative
+- no_state_change
+- blocked
+- needs_human
+- invalidated
+- aborted
+trial_lifecycle_state:
+- created
+- planned
+- preflight_passed
+- executing
+- distilled
+- staged
+- reviewing
+- ready_to_publish
+- published
+- blocked
+- needs_human
+- invalidated
+- aborted
+line_effect:
+- creates
+- strengthens
+- weakens
+- narrows
+- broadens
+- supersedes
+- kills
+- no_change
+result_card_type:
+- positive_evidence
+- negative_evidence
+- diagnostic_insight
+- boundary_condition
+- artifact
+- design_decision
+- resource_decision
+- claim_revision
+- method_decision
+- process_lesson
+result_card_canonical_status:
+- proposed
+- accepted
+- accepted_with_qualification
+- rejected
+- superseded
+- deferred
+line_status:
+- candidate
+- active
+- paused
+- candidate_final
+- killed
+- superseded
+campaign_component_status:
+- not_started
+- in_progress
+- partial
+- tentative
+- passed
+- waived_with_rationale
+- not_applicable
+- blocked
+review_level:
+- light
+- standard
+- full
+- final
+review_decision:
+- pass
+- revise
+- blocked
+- needs_human
+merge_decision:
+- accept
+- accept_with_qualification
+- reject
+- supersede
+- defer
+- needs_human
+merge_overall_status:
+- approved
+- rejected
+- needs_human
+gate_status:
+- continue
+- pass
+- needs_human
+- paused_budget
+- blocked
+- no_viable_line
+- killed_by_human
+venue_lock_level:
+- exploratory
+- preferred
+- locked
+human_task_status:
+- open
+- waiting
+- completed
+- dismissed
+- superseded
+transaction_state:
+- created
+- prepared
+- applying
+- committed
+- rolled_back
+- failed
+v2_retry_or_recovery_status:
+- agent_failed
+- interrupted
+- protocol_violation
+- recovery_required
+- stage_resolution_required
+- repair_limit_reached
+semantic_phase:
+- observe
+- orient
+- route
+- charter
+- preflight
+- execute
+- distill
+- stage
+- review_route
+- review
+- repair
+- brief
+- gate
+- validate
+- publish
+- recovery

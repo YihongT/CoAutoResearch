@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "project_state",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "canonical_revision": 1,
+  "current_objective": "Replicate the scoped main signal.",
+  "active_line_id": "L0001",
+  "critical_path": [
+    {
+      "id": "CP1",
+      "description": "Replicate the main signal across seeds.",
+      "status": "open",
+      "source": "C0001/replication"
+    }
+  ],
+  "goal_gate_path": "research_trajectory/trials/000001_example/GOAL_GATE.json",
+  "next_step": "Run a replication trial."
+}

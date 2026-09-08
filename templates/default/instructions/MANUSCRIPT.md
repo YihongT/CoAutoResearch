@@ -1,5 +1,8 @@
 # Manuscript Instructions
 
+> **V2 control-plane override.** Manuscript-facing updates during autoresearch are written only into the staged candidate snapshot. The service publishes them after required manuscript/figure/reference/venue reviews. Only published accepted or qualified result cards may support active result claims. Planned results stay in `PAPER_PLAN.md`; they must not appear as completed results in `BLUEPRINT.md`.
+
+
 ## Purpose
 
 The manuscript directory uses a two-artifact model:
@@ -7,9 +10,12 @@ The manuscript directory uses a two-artifact model:
 - `manuscript/PAPER_PLAN.md` is the always-current venue-format plan. It may
   contain planned sections, evidence obligations, planned figures/tables,
   unresolved blockers, and Critical Path links.
-- `manuscript/BLUEPRINT.md` is the exportable manuscript blueprint. It is a full
-  venue-format proposal with complete real results. Sentence-level prose polish
-  is out of scope, but complete result content is not.
+- `manuscript/BLUEPRINT.md` is the cumulative, evidence-backed manuscript
+  blueprint, including readable research prose and its structured writing plan.
+  It becomes progressively more complete as reviewed results are
+  published. It need not be submission-ready during research, but every unit
+  it does contain must be real, source-backed, readable in manuscript order,
+  and complete for its stated scope.
 
 `BLUEPRINT.md` must contain only real, source-backed manuscript content: real
 results, real numbers when relevant, real figure/table/appendix/reference
@@ -21,7 +27,31 @@ slots in `BLUEPRINT.md`.
 
 Before results are available, `BLUEPRINT.md` may be a clearly marked pre-results
 stub pointing to `PAPER_PLAN.md` and `research_trajectory/STATE.md` `## Critical
-Path`. Planned or pending language is legal only in `PAPER_PLAN.md`.
+Path`. Once an accepted or qualified research result exists, the stub is no
+longer valid: the next staged candidate must promote the cumulative supported
+story into `BLUEPRINT.md`. Planned or pending language is legal only in
+`PAPER_PLAN.md`.
+
+## Mandatory Result Promotion
+
+When the current Merge Request asks to `accept`,
+`accept_with_qualification`, or `supersede` a result card that has a claim ID,
+or whose type is positive evidence, negative evidence, diagnostic insight,
+boundary condition, claim revision, or method decision:
+
+- stage both `manuscript/BLUEPRINT.md` and `manuscript/PAPER_PLAN.md`;
+- integrate the supported result, negative result, boundary, or claim revision
+  into the cumulative reader-facing story;
+- include every current manuscript-relevant card ID in `Provenance / Audit
+  Index`;
+- keep all incomplete evidence and future work in `PAPER_PLAN.md`.
+
+If the canonical Blueprint is still a pre-results stub while Current Findings
+already names accepted or qualified cards, the staged candidate must perform a
+one-time catch-up and list every such published card ID in the provenance
+section. This catch-up does not make the manuscript submission-ready; Final
+Gate retains the complete venue, evidence, display, reference, and packaging
+requirements below.
 
 ---
 
@@ -55,6 +85,12 @@ Do not impose a generic paper structure unless it matches the target. Section
 titles and order must come from explicit venue rules, target-venue notes, seed
 papers as style references, and `PROJECT.md`, in that order.
 
+Before staging `PAPER_PLAN.md` or `BLUEPRINT.md`, consume the active venue
+projection from `TARGET_VENUE.json` and its matching `VENUE_PROFILE.json`.
+Apply every projected organization and figure/table requirement, or record the
+specific mismatch as a venue/manuscript gap. Passing venue review later is not
+a substitute for this architecture input.
+
 ---
 
 ## Source of Evidence
@@ -79,7 +115,8 @@ Allowed:
 
 `manuscript/` must not contain exploratory raw outputs, unreviewed workspace
 files as evidence, trial logs, control/status/dependency/blocker registers,
-citation queues, or full paper prose unless explicitly requested.
+or citation queues. Write readable prose for supported sections as results
+accumulate; do not pad the draft to imitate a completed paper.
 
 ---
 
@@ -121,6 +158,12 @@ Every promoted titled unit in `Manuscript Architecture` must state:
 
 - target-venue title;
 - target-venue role;
+- `Draft prose:` followed by the actual research text for this unit, in
+  complete connected paragraphs. State the supported result and its limits,
+  cite the relevant references, and refer to the inline figures/tables where
+  the reader needs them. This is reader-facing draft text, not instructions
+  about what a future writer should write. Put subsequent structured fields
+  on their own lines so the prose remains separate from the writing plan;
 - section brief: 2-4 sentences of finished-results paper-map prose explaining
   what this unit argues, what evidence/results/displays it uses, and why it
   appears here;
@@ -141,6 +184,10 @@ transition job.
 ---
 
 ## Inline Artifact Blocks
+
+Write each labeled figure, table, method, or result field on its own line.
+Keep captions, notes, source paths, and inclusion status separate; do not join
+several fields into one paragraph. This preserves their display and review boundaries.
 
 Active artifacts must be placed inline where the final manuscript would use
 them. Valid inline inclusion statuses are `active`, `candidate`, and
@@ -272,3 +319,8 @@ Reviews of manuscript-facing deliverables belong in:
 Trial-level manuscript review gates belong in:
 
 `research_trajectory/trials/<trial_id>/reviews/MANUSCRIPT_REVIEW.md`
+
+
+## V2 Staged Snapshot Inputs
+
+Manuscript reviewers inspect the staged `BLUEPRINT.md`, `PAPER_PLAN.md`, reference state, and active display artifacts. Final pass additionally requires a Final review manifest and a final staged Human Brief.

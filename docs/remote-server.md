@@ -1,5 +1,10 @@
 # Remote Servers
 
+The supported v2.0 production profile is one trusted human and one project per
+UI server process. Remote production requires an authenticated network boundary.
+The built-in Quick Tunnel path is temporary personal access, not a multi-user or
+long-running service.
+
 Run the UI on the remote server in remote mode:
 
 ```bash
@@ -14,10 +19,15 @@ Quick Tunnel, and prints a browser URL you can open from your local machine:
 ```text
 Open:
   https://example.trycloudflare.com
+Access key:
+  generated-secret-shown-in-this-terminal
 ```
 
-Keep the terminal running while you use the UI. Press `Ctrl+C` to stop both the
-UI and the temporary link.
+Opening the URL shows an access-key form. After successful login, the server
+sets an HttpOnly, SameSite cookie; unauthenticated API requests return `401`.
+Keep the terminal running while you use the UI, and do not paste the link or key
+into chat, logs, screenshots, or shared shell history. Press `Ctrl+C` to stop
+both the UI and the temporary link.
 
 ## Cloudflare CLI setup
 
@@ -107,8 +117,36 @@ co-auto-research ui --projects-dir . --remote
 ```
 
 Cloudflare Quick Tunnels are intended for development and personal temporary
-access. The printed link is a temporary public URL while the terminal process is
-running. Do not share it broadly or use it as a long-running public service.
+access. The printed link is a temporary publicly routed URL while the terminal
+process is running; the CoAutoResearch access key still protects the UI. Do not
+share the link or key or use a Quick Tunnel as a long-running public service.
+
+## Authenticated Production Boundary
+
+For sustained remote use, keep the UI on loopback and put it behind a VPN,
+Cloudflare Access, or an authenticated HTTPS reverse proxy. Set a random token
+of at least 32 characters if process restarts must retain a known credential:
+
+```bash
+COAUTO_REMOTE_AUTH_TOKEN='<random-32+-character-secret>' \
+  co-auto-research ui --remote
+```
+
+Configure `COAUTO_ALLOWED_HOSTS` and `COAUTO_ALLOWED_ORIGINS` as comma-separated
+public host/origin allowlists when a reverse proxy changes the browser-facing
+host. Forward the original Host and HTTPS scheme, and do not log authorization
+headers, cookies, query strings, or the access key. State-changing requests are
+rejected for foreign origins and cross-site fetches even after authentication.
+
+TLS termination, rate limiting, network identity, audit retention, and account
+lifecycle remain the operator's responsibility. V2.0 does not claim public
+multi-user or multi-tenant isolation.
+
+On a shared POSIX host, run the UI under a dedicated OS account and use a
+cgroup, container, or platform supervisor for hostile-workload containment.
+The built-in process cleanup follows the registered process group and
+discoverable descendants retaining the per-run marker; it is not a substitute
+for an OS isolation boundary.
 
 ## HTTP proxy servers
 
@@ -177,6 +215,8 @@ Then open:
 http://127.0.0.1:8765
 ```
 
+The SSH-forwarded page still asks for the access key printed by the remote CLI.
+
 ## File Access Semantics
 
 - The UI server runs on the remote machine.
@@ -193,7 +233,8 @@ http://127.0.0.1:8765
 ## Security
 
 Prefer `--remote` for temporary remote access because it keeps the UI bound to
-localhost and uses Cloudflare Quick Tunnel instead of opening a server port.
-Avoid `--host 0.0.0.0` unless the server is protected by network controls and
+localhost, requires an application access key, and uses Cloudflare Quick Tunnel
+instead of opening a server port. Avoid `--host 0.0.0.0`; non-loopback binding
+requires explicit remote mode and still needs network controls and
 authentication. The UI can read project files and launch local agent CLI runs,
-so it should not be exposed as a long-running public web service.
+so it must not be exposed as an unauthenticated public web service.

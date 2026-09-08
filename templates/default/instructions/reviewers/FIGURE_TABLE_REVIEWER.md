@@ -2,77 +2,65 @@
 
 ## Purpose
 
-Review figure and table quality, especially target-venue fit and communication value.
+Review active publication-facing figures and tables for evidentiary integrity, readability, provenance, accessibility, and consistency with the manuscript and canonical research state.
 
-## Required Reading
+## Phase and output
 
-- `instructions/reviewers/REVIEW_TAXONOMY.md`
-- `PROJECT.md`
-- `research_trajectory/CURRENT_FINDINGS.md`
-- `resources/target_venue/FIGURE_TABLE_NOTES.md`
-- `resources/target_venue/SEED_PAPERS.md`
-- `manuscript/BLUEPRINT.md`
-- `manuscript/figures/FIGURE_SPECS.md` when present as a secondary spec cache
-- candidate figures/tables if present
+- Phase: `post_stage` or `final`.
+- Reviewer key/scope: `figure_table` / `figure_table`.
+- Bind to the exact stage ID/hash.
 
-## Output Location
+## Required reading
 
-Write the canonical current-trial figure/table review to:
+- `instructions/reviewers/REVIEW_TAXONOMY.md`;
+- active figure/table source files, generation code, data, captions, notes, and rendered outputs;
+- Project, Findings, active line, venue profile, Blueprint/Paper Plan/manuscript;
+- current Plan, Report, cards, Merge Request, candidate snapshot, Human Brief;
+- Evidence and Venue Fit reviews when available.
 
-`research_trajectory/trials/<trial_id>/reviews/FIGURE_TABLE_REVIEW.md`
+## Review criteria
 
-If the review is manuscript-facing, you may also mirror or summarize it under
-`manuscript/reviews/`, but the current trial file remains required.
+### Evidentiary integrity
 
-## Review Criteria
+- Does every visual derive from the cited reviewed data/artifact?
+- Are aggregations, filtering, exclusions, normalization, uncertainty, and sample sizes disclosed?
+- Are axes, scales, baselines, denominators, labels, and units accurate?
+- Are visual choices misleading, truncated, cherry-picked, or inconsistent across conditions?
+- Are negative/limiting results omitted from a visual that implies broader success?
 
-Check:
+### Reproducibility and provenance
 
-- Does each figure/table support the core story?
-- Is it visually professional for the target venue?
-- Are captions informative and precise?
-- Are axes, labels, baselines, uncertainty, and comparisons clear?
-- Are conceptual figures specified in enough detail before generation?
-- Are result plots traceable to trial artifacts?
-- Is each active figure/table placed inline at the specific manuscript section,
-  subsection, or paragraph location where the final manuscript would use it?
-- Does each active figure/table state the result, conceptual basis, or local
-  manuscript job it carries, not only its visual form?
-- Does `manuscript/BLUEPRINT.md` contain every active figure/table block in
-  manuscript reading order, with placement, inclusion status, role, figure
-  content/panel layout or publication-ready table body, complete caption, source
-  artifact/spec path, local evidence/provenance links, and target-venue
-  rationale?
-- For active tables, does the blueprint include the publication-ready Markdown
-  table body directly in the local manuscript position, with final intended
-  rows, columns, readable labels, caption, notes/definitions/abbreviations when
-  needed, source traceability, key result, and target-venue fit?
-- For figures, is a spec/visual brief sufficient for the current scope unless a
-  final rendered figure asset already exists?
-- If there are no active tables, does the blueprint explain why no table is
-  needed, which candidate tables were considered, and where the needed
-  comparison or evidence mapping is carried in the manuscript architecture?
+- Is source data/code/path/hash recorded?
+- Can the visual be regenerated deterministically or with documented variability?
+- Are manual edits, annotations, or external assets disclosed?
+- Do table values reconcile with machine artifacts and manuscript text?
+
+### Communication
+
+- Does each visual have one clear purpose and takeaway?
+- Is caption self-contained, scoped, and claim-calibrated?
+- Are legends, labels, typography, resolution, color contrast, and ordering readable at expected publication size?
+- Is color not the only channel for meaning?
+- Are accessible text alternatives or descriptions planned where appropriate?
+
+### Venue and manuscript role
+
+- Does the visual satisfy an actual argument/evidence need?
+- Is it redundant, decorative, or better placed in appendix/supplement?
+- Does it follow target-venue norms without imitating a seed paper?
+- Are figure/table references and numbering consistent?
+
+### Publication-ready display contract
+
+Every active table must appear at its intended manuscript location as a
+**publication-ready Markdown** table with final intended rows and columns,
+readable labels, caption, notes/definitions/abbreviations where needed, source
+traceability, key result, and venue-fit rationale. Reject active tables that are
+only column/row/comparison specs, source links, or back-matter promises. Every
+active figure needs its placement, inclusion state, purpose/result role, panel
+layout, caption, source path, provenance, venue rationale, and a Markdown preview
+when a rendered image exists.
 
 ## Pass Standard
 
-Use `Decision: pass` only when every active figure/table required for the
-declared scope is final enough for that scope: inclusion decision made, source or
-artifact traceable, caption precise, labels readable, and target-audience fit
-checked. The final blueprint must also be self-contained for figure/table status
-and rationale in the exact manuscript location where each display belongs.
-Candidate assets, unresolved display inventory, missing captions, missing
-source artifacts, image-source figures without a Markdown preview image in the
-inline BLUEPRINT.md figure block, display specs that only live in
-`FIGURE_SPECS.md`, active figures/tables that only appear in a back-matter plan,
-active tables that are only column/row/comparison specs or source links rather
-than publication-ready inline tables, missing local placement, missing result
-mapping, missing target-venue rationale, stale bundle notes, or "acceptable for
-now" displays require `Decision: continue`.
-
-## Output Schema
-
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
-input paths for figure specs, table materials, blueprint sections, trial
-artifacts, and any candidate display files. If there are no active figures or
-tables, still write the file and judge whether the no-display or no-table
-rationale is sufficient for the current scope.
+`pass` requires accurate, traceable, readable, non-misleading visuals that support the exact claims attributed to them. Missing active visuals, placeholder data, or unreviewed manual transformations require `revise`.

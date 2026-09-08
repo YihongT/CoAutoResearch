@@ -1,0 +1,50 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "staged_update_manifest",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "stage_id": "STAGE-000001-aaaaaaaa",
+  "base_revision": 0,
+  "operations": [
+    {
+      "path": "research_trajectory/CURRENT_FINDINGS.json",
+      "operation": "replace",
+      "before_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "after_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "candidate_path": "research_trajectory/.staging/000001_test-main-signal/STAGE-000001-aaaaaaaa/candidate/research_trajectory/CURRENT_FINDINGS.json",
+      "extensions": {}
+    }
+  ],
+  "stage_content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash_spec_version": "1",
+  "hash_algorithm": "sha256",
+  "material_inputs": [
+    {
+      "path": "research_trajectory/trials/000001_test-main-signal/MERGE_REQUEST.json",
+      "role": "merge_request",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "extensions": {}
+    },
+    {
+      "path": "research_trajectory/.staging/000001_test-main-signal/STAGE-000001-aaaaaaaa/HUMAN_BRIEF.json",
+      "role": "human_brief",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "extensions": {}
+    },
+    {
+      "path": "research_trajectory/.staging/000001_test-main-signal/STAGE-000001-aaaaaaaa/GATE_EVIDENCE.json",
+      "role": "gate_evidence",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "extensions": {}
+    },
+    {
+      "path": "research_trajectory/.staging/000001_test-main-signal/STAGE-000001-aaaaaaaa/candidate/research_trajectory/CURRENT_FINDINGS.json",
+      "role": "candidate_canonical",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "extensions": {}
+    }
+  ]
+}

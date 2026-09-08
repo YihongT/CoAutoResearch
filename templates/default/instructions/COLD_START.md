@@ -1,5 +1,8 @@
 # Cold Start Protocol
 
+> **V2 control-plane override.** Cold start initializes project-owned material and the initial canonical snapshot through the migration/initialization service. During an autoresearch trial, do not write protected canonical files directly. Create staged JSON/Markdown candidates and let the service publish them. Initialize only campaigns required by the actual project; do not create a universal empty checklist.
+
+
 ## Purpose
 
 Use this protocol when the repository is new, mostly empty, initialized from a UI form, and has no filed prior materials yet.

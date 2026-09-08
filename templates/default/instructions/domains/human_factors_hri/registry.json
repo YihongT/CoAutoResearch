@@ -1,0 +1,45 @@
+{
+  "schema_version": "2.0",
+  "domain_id": "human_factors_hri",
+  "display_name": "Human Factors and HRI",
+  "version": "2.0.0",
+  "enabled_by_default": false,
+  "triggers": [
+    "claims about human interaction, perceived safety, trust, reliance, workload, usability, acceptance, control, or shared environments"
+  ],
+  "claim_types": [
+    "human_factors",
+    "human_robot_interaction",
+    "perception",
+    "behavior",
+    "usability",
+    "trust_and_reliance"
+  ],
+  "evidence_standards": [
+    "Define the participant population, recruitment, task, environment, exposure, interface, and human-system role.",
+    "Use validated constructs and measures, or explicitly justify and limit novel or proxy measures.",
+    "Separate self-report, observed behavior, performance, physiology, and objective system outcomes.",
+    "Account for learning, novelty, demand characteristics, automation bias, calibration, accessibility, and individual differences.",
+    "Record ethics or human-subject review posture and consent constraints for research involving people."
+  ],
+  "campaign_templates": [],
+  "method_pack_recommendations": [],
+  "specialized_reviewers": [],
+  "incompatibilities": [],
+  "safety_constraints": [
+    "Do not equate trust, comfort, acceptance, or perceived safety with objective safety.",
+    "Do not generalize from an unrepresentative sample, short exposure, artificial task, or single interface without qualification.",
+    "Do not treat intended reliance as appropriately calibrated reliance without task- and capability-sensitive evidence."
+  ],
+  "extensions": {
+    "project_match_terms": [
+      "human factors",
+      "human-robot interaction",
+      "human-machine interaction",
+      "hri",
+      "perceived safety",
+      "trust calibration"
+    ],
+    "venue_match_names": []
+  }
+}

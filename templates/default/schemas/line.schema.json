@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "line.schema.json",
+  "title": "Research Line",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "line_id",
+    "status",
+    "title",
+    "thesis",
+    "claim_hierarchy",
+    "supporting_cards",
+    "limiting_cards",
+    "conflicting_cards",
+    "material_exclusions",
+    "scope_boundary",
+    "current_bottleneck",
+    "kill_criteria",
+    "venue_fit",
+    "last_published_revision"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "line"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "line_id": {
+      "$ref": "common.schema.json#/$defs/line_id"
+    },
+    "status": {
+      "enum": [
+        "candidate",
+        "active",
+        "paused",
+        "candidate_final",
+        "killed",
+        "superseded"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thesis": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_hierarchy": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim_id",
+          "text",
+          "strength"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "strength": {
+            "enum": [
+              "exploratory",
+              "tentative",
+              "supported",
+              "final"
+            ]
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "supporting_cards": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/result_card_id"
+      },
+      "uniqueItems": true
+    },
+    "limiting_cards": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/result_card_id"
+      },
+      "uniqueItems": true
+    },
+    "conflicting_cards": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/result_card_id"
+      },
+      "uniqueItems": true
+    },
+    "material_exclusions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "scope_boundary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "current_bottleneck": {
+      "type": "string"
+    },
+    "kill_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "venue_fit": {
+      "type": "string"
+    },
+    "last_published_revision": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

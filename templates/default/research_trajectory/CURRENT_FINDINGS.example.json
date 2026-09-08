@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "current_findings",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "canonical_revision": 1,
+  "accepted_card_ids": [],
+  "qualified_card_ids": [
+    "RC-000001-01"
+  ],
+  "superseded_card_ids": [],
+  "synthesis": [
+    {
+      "finding_id": "F0001",
+      "statement": "The method has a tentative scoped positive signal.",
+      "status": "accepted_with_qualification",
+      "card_ids": [
+        "RC-000001-01"
+      ]
+    }
+  ]
+}

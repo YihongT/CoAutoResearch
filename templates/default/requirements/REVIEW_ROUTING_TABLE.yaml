@@ -1,0 +1,68 @@
+spec_version: 2.0.0
+authority: service ReviewRouter pure function; agent may only escalate
+base_levels:
+  light:
+    required:
+    - plan
+    - process
+    allowed_only_when:
+    - target in resource|process|manuscript
+    - no new or changed claim
+    - no line effect other than no_change
+    - no campaign component promoted beyond in_progress
+    - no venue change
+    - no final gate candidate
+  standard:
+    required:
+    - plan
+    - process
+    - evidence
+    default: true
+  full:
+    required:
+    - plan
+    - process
+    - evidence
+    - venue_fit
+    - manuscript
+    - figure_table
+    - reference
+  final:
+    required:
+    - plan
+    - process
+    - evidence
+    - venue_fit
+    - manuscript
+    - figure_table
+    - reference
+    - final_gate
+triggers:
+- when: external_sources_or_new_citations
+  add:
+  - reference
+- when: target_venue_configured_or_venue_impact
+  add:
+  - venue_fit
+- when: manuscript_or_claim_hierarchy_changed
+  add:
+  - manuscript
+- when: active_figure_or_table_changed
+  add:
+  - figure_table
+- when: central_line_effect_not_no_change
+  minimum_level: full
+- when: campaign_component_marked_passed_or_waived
+  minimum_level: full
+- when: target_venue_lock_change_requested
+  minimum_level: full
+  add:
+  - venue_fit
+- when: gate_candidate_pass
+  minimum_level: final
+- when: high_risk_ethics_legal_human_subjects
+  minimum_level: full
+  specialized_from_registry: true
+not_applicable_rule: A reviewer is omitted only by manifest with deterministic reason. Required reviewer outputs cannot use
+  not_applicable.
+specialized_reviewers: resolved from enabled expert-pack registries; v2.0 general_research registry contains none by default

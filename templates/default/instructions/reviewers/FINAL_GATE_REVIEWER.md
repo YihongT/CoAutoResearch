@@ -2,167 +2,127 @@
 
 ## Purpose
 
-Decide whether the autoresearch goal is truly complete. This reviewer aggregates
-the other reviewer outputs and current project state. It does not replace
-domain, evidence, venue, manuscript, figure/table, process, or plan review.
+Perform the strict final human-defensibility review of the exact candidate stage when the proposed Goal Gate is `pass`.
 
-## Required Reading
+## Phase and output
 
-- `instructions/reviewers/REVIEW_TAXONOMY.md`
-- `PROJECT.md`
-- `research_trajectory/STATE.md`
-- `research_trajectory/CURRENT_FINDINGS.md`
-- current trial `PLAN.md`, `REPORT.md`, `reviews/`, and artifacts
-- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when
-  `PLAN.md` says `Scout: required`
-- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
-- specialized review outputs named by the reviewer spawn decision, when present
-- `resources/user_input/RESOURCE_MANIFEST.md`, when the current trial discovered
-  or used external resources
-- `manuscript/BLUEPRINT.md` and `manuscript/reviews/` when manuscript-facing
-- `manuscript/figures/FIGURE_SPECS.md` when any figure/table/display is active
-- `resources/target_venue/SEED_PAPERS.md`, `STYLE_NOTES.md`, and
-  `FIGURE_TABLE_NOTES.md` when a target venue is declared
-- all non-final current-trial reviewer files under
-  `research_trajectory/trials/<trial_id>/reviews/`
+- Phase: `final`.
+- Reviewer key/scope: `final_gate` / `final_gate`.
+- Bind to the exact final stage ID/hash.
+- This reviewer is required only at Final review level and cannot be omitted.
 
-## Output Location
+## Required reading
 
-Write the canonical current-trial final gate review to:
+- `instructions/reviewers/REVIEW_TAXONOMY.md` and all core/specialized reviewer
+  outputs for the same stage hash;
+- Project and formal interventions;
+- current and candidate State, Findings, Human Tasks, lines, campaigns, venue state, manuscript control files;
+- Plan, Expert Route, Report, Result Cards, artifacts, Merge Request, Human Brief, Gate Evidence;
+- transaction/stage validation summary;
+- final deliverable and export posture;
+- relevant resources, notes, and instruction patches that affect final claims.
 
-`research_trajectory/trials/<trial_id>/reviews/FINAL_GATE_REVIEW.md`
+## Final readiness criteria
 
-If the review is manuscript-facing, you may also mirror or summarize it under
-`manuscript/reviews/`, but the current trial file remains required.
+### Research-line readiness
 
-## Review Criteria
+- The candidate post-merge projection contains exactly one active line with status `candidate_final`.
+- Thesis, contribution, claim hierarchy, scope boundary, supporting cards, limiting cards, conflicts, exclusions, and kill criteria are explicit.
+- No material contradiction is hidden or unresolved.
+- The final line remains defendable under the target audience/venue.
 
-Check:
+### Campaign readiness
 
-- every required reviewer used the shared output schema;
-- every required current-trial reviewer file exists and has `Decision: pass`
-  and `Gate impact: pass`;
-- reviewer instructions are current for this project; an outdated or missing
-  core reviewer file is a blocker;
-- if the current trial required Resource Scout, the scout report exists, the
-  manifest records scout-discovered resources as `autoresearch_discovered`, and
-  the report is consistent with the trial's evidence and reference claims;
-- if Resource Scout was skipped, `PLAN.md` contains a valid skip reason for the
-  declared objective;
-- `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` exists for the current
-  trial;
-- if the reviewer spawn decision says `Spawn needed: yes`, the named specialized
-  reviewer instruction and specialized review output both exist;
-- any specialized review output has no unresolved blocking issue, required
-  action, unresolved qualification, or critical unassessed area that conflicts
-  with pass;
-- there are no unresolved blocking issues, required actions, unresolved
-  qualifications, or critical unassessed areas;
-- `STATE.md`, `CURRENT_FINDINGS.md`, `manuscript/BLUEPRINT.md`, recent trial
-  reports, and manuscript reviews do not contain active revision constraints
-  that contradict a pass;
-- "trial completed", "plan approved", "plausible venue fit", "architecture is
-  coherent", "supported with qualification", or "ready for targeted revision"
-  are not being treated as final pass;
-- if the goal is manuscript-facing, the deliverable is at submission-readiness
-  level for the declared target, not merely ready for another revision phase.
-- if the goal is manuscript-facing, `manuscript/BLUEPRINT.md` is a
-  non-stub, self-contained, target-venue-ready, full-results blueprint with
-  explicit organization,
-  architecture overview/table of contents, target-manual section architecture,
-  compact reader-facing section briefs, paragraph-level writing plans, local
-  claim/evidence/result explanations, reader takeaways for inline
-  figure/table/algorithm/dataset/benchmark/result blocks, reference plan,
-  appendix/supplement plan, qualifications, provenance/audit index, deprecated
-  ideas, and submission-readiness summary.
-- all Critical Path items in `STATE.md` are `done` or `downgraded` through a
-  confirmed human intervention.
-- every research-critical resource has an `ACQUISITION_DECISION.md` terminal
-  verdict.
-- `manuscript/PAPER_PLAN.md` has no remaining blocking evidence unless the
-  scope has been formally downgraded by human intervention.
-- if the target deliverable has an abstract, the blueprint plans the abstract
-  according to the target manual: structured headings when required, otherwise
-  4-6 unstructured rhetorical moves, plus target-venue role, claim/evidence
-  posture, and word/structure constraints.
-- every active figure is placed inline in `Manuscript Architecture` and has a
-  title, placement, inclusion status, purpose/result role, content and panel
-  layout, visual style, caption draft/current caption, source artifact or spec
-  path, preview image using Markdown image syntax when the source is an image
-  file, result shown or conceptual basis, provenance links, target-venue fit
-  rationale.
-- every active table is placed inline in `Manuscript Architecture` and has a
-  title, placement, inclusion status, purpose/result role, publication-ready
-  Markdown table body in final row/column form, caption draft/current caption,
-  table notes or `none`, source artifact or spec path, key result or conceptual
-  contrast, provenance links, and target-venue fit rationale. Table specs,
-  column lists, comparison logic, or source links are not enough for an active
-  manuscript table. If there are no active tables, the
-  blueprint must explain in the architecture or appendix/supplement plan where
-  the needed comparison or evidence mapping is carried instead.
-- every active algorithm, method, dataset, benchmark, or result block is placed
-  inline in `Manuscript Architecture` and includes placement, purpose, source
-  artifacts or code links, validation/evidence or limitations.
-- separate claim/evidence maps, `Figure Plan`, `Table Plan`, and
-  `manuscript/figures/FIGURE_SPECS.md` may support audit, but they cannot be
-  used as the primary proof that the manuscript blueprint is readable or
-  complete.
-- `Blocking Missing Evidence` is explicitly `none`; missing evidence may not be
-  hidden in `BLUEPRINT.md` or as a non-blocking qualification.
-- stale language such as "tentative until source-level evidence checks are
-  completed" is absent once evidence/final gates are claimed as pass.
+- Every required component is `passed`, `waived_with_rationale`, or `not_applicable`.
+- Waivers have human/project authority and do not disguise missing central evidence.
+- No component is merely planned, tentative, partial, in progress, or blocked.
+
+### Evidence readiness
+
+- Every key claim maps either to already published accepted/qualified cards or to current-trial proposed cards explicitly requested for `accept`/`accept_with_qualification` in the exact Merge Request.
+- Current-trial proposed cards are reviewed for **eligibility** before merge; this reviewer must not pretend they are canonically accepted before the service Merge Decision exists.
+- Evidence paths/hashes/provenance are valid.
+- Negative and limiting evidence is visible in findings, line, manuscript, and Human Brief where material.
+- Claim strength matches evidence certainty.
+- Reproducibility/audit trail is adequate for the declared deliverable.
+
+### Process and canonical integrity
+
+- Record the Resource Scout status and verify that required acquisition,
+  substitution, inspection, and provenance work closed coherently.
+- Record the Reviewer Scope Analyst status and verify that every required
+  specialized reviewer is present, exact-stage bound, and passing.
+- The exact stage passed every required core and specialized reviewer.
+- No reviewer is stale, missing, revise, blocked, or needs-human.
+- Protected-path guard, schema validation, JSON/Markdown consistency, base revision, and transaction-preflight checks pass.
+- The agent did not self-publish a Merge Decision, Goal Gate, revision, or receipt.
+
+### Venue and deliverable readiness
+
+- Target venue constraints and evidence standards are satisfied when applicable.
+- The active venue profile cites current inspected official venue or publisher guidance for the exact article type; a draft, inferred, stale, or unverified profile cannot pass.
+- Every installed domain pack required by the project, venue, claims, or risks is routed, and every unavailable required specialization is an explicit blocker or claim limitation.
+- Manuscript/deliverable architecture is coherent and free of reader-facing placeholders.
+- Figures/tables/references are complete for the declared scope.
+- Appendix, supplement, artifact, limitations, ethics/safety, and availability posture are explicit.
 
 ## Artifact Consistency Audit
 
-Before deciding `pass`, write an artifact consistency audit. It must state:
+Before passing, reconcile the candidate and published state across `STATE`,
+`CURRENT_FINDINGS`, active/candidate lines, campaigns, Human Tasks, target venue,
+`manuscript/PAPER_PLAN.md`, `manuscript/BLUEPRINT.md`, the final deliverable,
+review outputs, Merge Request, Human Brief, and Gate Evidence. The audit includes
+paragraph plan completeness, claim/evidence/result mapping, references,
+appendix/supplement posture, and every active display. An active table requires a
+publication-ready Markdown table body; a column list, row description,
+comparison plan, or source link is not a finished table.
 
-- core instruction baseline status: current or outdated;
-- final blueprint section completeness;
-- Critical Path status: all items done or confirmed downgraded;
-- research-critical acquisition decisions: terminal verdicts present;
-- blueprint state: non-stub full-results blueprint;
-- Paper Plan remaining blockers status;
-- target manual section title/order fidelity;
-- architecture overview / table of contents completeness;
-- paragraph plan completeness;
-- section brief readability as a finished-results paper map;
-- local claim/evidence/result explanation completeness;
-- blocking missing evidence status;
-- inline figure block completeness;
-- inline publication-ready table block or no-table rationale completeness;
-- inline algorithm/method/dataset/benchmark/result block completeness;
-- artifact/section boundary integrity: `Result`, `Dataset`, `Benchmark`,
-  `Metric`, and `RSLT...` headings use artifact fields, not section-planning
-  fields;
-- active result readability: no active result block is merely `planned`,
-  `pending`, `TBD`, or waiting on a future trial instead of stating an actual
-  reader-facing result summary and takeaway;
-- planned result slot integrity: any inline `Result`, `Metric`, `RSLT...`,
-  dataset, or benchmark block marked `candidate` must still state an actual
-  result summary and source artifact path; missing or pending results belong in
-  `manuscript/PAPER_PLAN.md`;
-- reference/literature grounding completeness;
-- Resource Scout status: required and completed, skipped with valid reason, or
-  blocking because missing/undocumented/inconsistent;
-- Reviewer Scope Analyst status: decision present, no specialized review needed,
-  or specialized review completed without pass-blocking issues;
-- reference list integrity: a canonical `References` section exists, the
-  Reference reviewer passed, and inline citations and list entries are
-  bidirectionally complete with no orphan citations, uncited entries, missing
-  required fields, duplicates, or unresolved locators;
-- appendix/supplement plan completeness;
-- provenance/audit index status;
-- stale contradiction scan result;
-- exact reason the gate can pass, or the exact next action if it cannot.
+For a manuscript-facing final candidate, the audit also verifies compact
+reader-facing section briefs, local claim/evidence/result explanations, and
+reader takeaways for every inline figure, table, algorithm, dataset, benchmark,
+and result block. It explicitly checks artifact/section boundary integrity:
+`Result`, `Dataset`, `Benchmark`, `Metric`, and `RSLT...` headings must use
+artifact fields rather than section-planning fields.
 
-## Output Schema
+The canonical v2 output is `reviews/final_gate.json` with checked Markdown at
+`reviews/final_gate.md`. A v1 trial retains its canonical legacy output at
+`reviews/FINAL_GATE_REVIEW.md`; migration must not silently relabel that review
+as a v2 stage-bound decision.
 
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`.
+### Human ownership readiness
 
-Use `Decision: pass` only when the autoresearch loop should stop. If any
-required current-trial reviewer file is missing, non-passing, ambiguous, or
-scoped below final readiness, use `Decision: continue` and list the exact
-required action.
+The reviewed Human Brief clearly states:
 
-A final-gate output without an artifact consistency audit is incomplete and
-must not be treated as pass.
+- what was established;
+- what was not established;
+- major uncertainty and limitations;
+- the final research line and evidence;
+- remaining optional next work;
+- any decision the human should make after delivery.
+
+The brief must be understandable without reading hidden logs or all reviewer files.
+
+### No hidden next blocker
+
+- Critical Path has no open blocker required for the declared deliverable.
+- No medium/high-value required move remains that could reasonably change the central claim or resolve a blocking readiness risk.
+- Optional future research is distinguished from required completion work.
+
+## Pass Standard
+
+The shared strict pass rule in
+`instructions/reviewers/REVIEW_TAXONOMY.md` applies. Final pass additionally
+requires every final-readiness criterion and every required reviewer for the
+exact stage to pass with no hidden next blocker.
+
+## Decision rules
+
+- `pass`: every final-readiness criterion is met and all other reviewers for the exact stage pass.
+- `revise`: any final requirement remains incomplete, inconsistent, unreviewed, or overstated.
+- `blocked`/`needs_human`: allowed only under shared strict semantics; a pass proposal must then be withdrawn.
+
+A Final Gate review without an artifact consistency audit, stage-hash check, campaign/line check, and Human Brief check is incomplete.
+
+## Decision scope
+
+A `pass` means only that the exact structured candidate passed the configured automated checks. It is not a claim of factual correctness, novelty, independent peer review, editorial acceptance, regulatory compliance, certification, or formal submission readiness. Those determinations remain explicit human decisions after reviewing the evidence package.

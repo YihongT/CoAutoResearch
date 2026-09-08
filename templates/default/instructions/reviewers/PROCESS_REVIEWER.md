@@ -2,128 +2,113 @@
 
 ## Purpose
 
-Prevent the research process from getting stuck in a local minimum, repeating unproductive trials, or optimizing a small technical issue at the expense of the real research contribution.
+Assess whether the trial and recent trajectory are making substantive research progress without drifting into local minima, repeated repair loops, low-value scaffolding, or protocol ceremony.
 
-Process review is required for every active trial. A dedicated process-review
-trial may still be useful when the process itself is the objective.
+## Phase and output
 
-## When to Invoke
+- Phase: `post_stage` except legacy migrations explicitly marked otherwise.
+- Reviewer key/scope: `process` / `process`.
+- Bind the output to the exact stage ID and manifest hash.
 
-Invoke when:
+## Required reading
 
-- several recent trials made little substantive progress;
-- the agent is repeatedly fixing the same issue;
-- the project seems to be drifting from `PROJECT.md`;
-- evidence is not improving despite activity;
-- a human asks for a process review;
-- the standard autoresearch trial review cycle reaches this reviewer;
-- the agent suspects a pivot or strategy change may be needed.
+- `instructions/reviewers/REVIEW_TAXONOMY.md`;
+- Project, current published State, Findings, lines, campaigns, Human Tasks, venue state;
+- current Plan, Expert Route, Report, Merge Request, staged candidate snapshot, Human Brief, Gate Evidence;
+- recent relevant trial plans/reports/reviews and publish receipts;
+- Resource Scout output and the applicable provenance manifest: the current
+  trial's stage/revision-scoped Scout manifest for v2, or the user-input
+  resource manifest for legacy v1;
+- Reviewer Scope Analyst/Review Manifest and specialized outputs;
+- relevant notes, instruction patch proposals, and formal interventions.
 
-## Output Location
+## Review criteria
 
-Write the canonical current-trial process review to:
+### Trajectory progress
 
-`research_trajectory/trials/<trial_id>/reviews/PROCESS_REVIEW.md`
+- Did the trial close a meaningful local question or produce an informative negative/diagnosis?
+- Does the staged update accurately reflect what changed?
+- Is the Critical Path advancing, or are trials accumulating bookkeeping, scaffolding, audits, or cosmetic changes?
+- Are multiple recent trials repeating the same failure without a new discriminating hypothesis?
+- Is the next move concrete and higher value than obvious alternatives?
 
-If the process itself is the objective, create a process-review trial, for
-example:
+### Scope and drift
 
-`research_trajectory/trials/000024_process_review/`
+- Does the objective, population/data, period, method, deliverable, and target venue still match the Project and formal interventions?
+- If the active line changed, is the effect explicit and properly reviewed?
+- Is a hidden pivot being smuggled through manuscript or campaign edits?
+- Are trial boundaries respected, or did execution expand into an unreviewable module?
 
-That trial still writes `reviews/PROCESS_REVIEW.md`, and summarizes conclusions
-in `REPORT.md`.
+### Resource and expert process
 
-Do not create `research_trajectory/process_reviews/`.
+- Record the Resource Scout process status, including required/skipped reason,
+  real-subagent or fallback execution, output path, and any plan rereview.
+- Record the Reviewer Scope Analyst decision status, including its decision
+  artifact and any specialized reviewer output required for closure.
+- If Resource Scout was required, did it run before dependent execution and record provenance?
+- Were discovered resources inspected and registered correctly? In v2, require
+  the trial-local Scout manifest/report and permitted
+  `resources/autoresearch_discovered/<trial_id>` destination; never require or
+  recommend an agent write to `resources/user_input/RESOURCE_MANIFEST.md`.
+- If Scout was skipped, was that decision still valid after execution?
+- Did Expert Route load the required move/general/venue standards and report missing packs honestly?
+- Did the service Review Manifest include all deterministic triggers?
 
-## Required Reading
+### Self-improvement and knowledge capture
 
-- `instructions/reviewers/REVIEW_TAXONOMY.md`
-- `PROJECT.md`
-- `research_trajectory/STATE.md`
-- `research_trajectory/CURRENT_FINDINGS.md`
-- `instructions/RESOURCE_SCOUT.md`
-- `instructions/REVIEWER_SCOPE_ANALYST.md`
-- recent trial `PLAN.md`, `REPORT.md`, and `reviews/` files
-- current trial `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`, when
-  `PLAN.md` says `Scout: required`
-- current trial `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md`
-- specialized review output under current trial `reviews/`, when the reviewer
-  spawn decision says `Spawn needed: yes`
-- `resources/user_input/RESOURCE_MANIFEST.md`, when scout-discovered resources
-  were saved or linked
-- `research_trajectory/notes/index.md` and relevant topic notes
-- relevant formal human interventions
+- Does the topic-based notes index stay sparse, current, and free of routine
+  trial-summary duplication?
+- Is reusable knowledge buried in reports promoted to a result card, a focused
+  topic note, or another appropriate destination?
+- Are reusable research conclusions in result cards rather than buried in narrative?
+- Are process/resource/method lessons captured only when reusable?
+- Are duplicate or stale notes avoided?
+- Do repeated instruction defects generate patch proposals rather than silent edits?
 
-## Review Criteria
+### Human interaction
 
-Ask:
+- Are formal interventions honored?
+- Are non-blocking human tasks distinct from a blocking needs-human state?
+- Is a user request actionable and timed appropriately?
+- Is the Human Brief understandable without reading reviewer ceremony?
 
-- Are recent trials producing real research progress?
-- Did the current trial complete a research attempt for the declared deliverable,
-  or document the first blocker that prevented completion?
-- Are recent trials repeatedly producing scaffolds, harnesses, audits, reviewer
-  repairs, or manuscript placeholders without completing a research attempt?
-- Is the agent stuck on a minor technical issue?
-- Is the current Critical Path bottleneck advancing, or have recent trials
-  accumulated non-empirical bookkeeping work?
-- Does `REPORT.md` include `Critical path outcome:` and `Empirical progress:`
-  with bare `yes` or `no` for empirical progress?
-- Has `STATE.md` `Consecutive non-empirical trials` been incremented or reset to
-  mirror the current REPORT history?
-- Have the two most recent consecutive closed normal trials reported
-  `Empirical progress: no` while a Critical Path item remains open?
-- Are we optimizing an unimportant metric or artifact?
-- Should the next step be execution, method revision, literature grounding, seed paper review, manuscript restructuring, or human intervention?
-- Is the current target venue still plausible?
-- Are current claims supported by evidence?
-- Is reusable knowledge buried in reports, duplicated across canonical files,
-  or missing from the topic-based notes index?
-- If the plan required Resource Scout, did it run before main execution and
-  write `artifacts/resource_scout/RESOURCE_SCOUT_REPORT.md`?
-- Were scout-discovered resources recorded in
-  `resources/user_input/RESOURCE_MANIFEST.md` as `autoresearch_discovered`?
-- If Resource Scout was skipped, was the skip reason valid for the current
-  objective rather than a convenience omission?
-- Does `artifacts/reviewer_spawn/REVIEWER_SPAWN_DECISION.md` exist for the
-  current trial?
-- If the reviewer spawn decision says `Spawn needed: yes`, does the named
-  specialized reviewer instruction exist under `instructions/reviewers/`, and
-  does the named specialized review output exist under current trial `reviews/`?
-- If the reviewer spawn decision says `Spawn needed: no`, is the coverage reason
-  specific enough to justify relying on the eight core reviewers?
-- Does the current trial objective, dataset vintage, population, period, venue,
-  and deliverable still match `PROJECT.md`?
-- If there is a mismatch, does a formal
-  `research_trajectory/human_interventions/pending/SCOPE_CHANGE_<id>.md`
-  proposal exist? An unexplained mismatch is blocking and requires filing the
-  proposal or reverting to the old scope. A mismatch persisting for two or more
-  trials requires `Decision: needs_human`.
+### Canonical integrity
 
-## Expected Output
+- Did the agent avoid direct writes to protected paths?
+- Does the candidate snapshot use only allowed create/replace operations?
+- Are stage/review hashes current?
+- Is the proposed state internally consistent across findings, line, campaign, Critical Path, venue, manuscript, and brief?
 
-- diagnosis of progress;
-- local-minimum risks;
-- Resource Scout process status for the current trial;
-- Reviewer Scope Analyst decision status for the current trial;
-- recommended next trial;
-- any required updates to `STATE.md`, `CURRENT_FINDINGS.md`, or topic-based
-  knowledge notes.
+## Local-minimum signals requiring revision
+
+- repeated no-state-change trials with no new hypothesis;
+- repeated repair of one low-impact tool issue while a larger bottleneck remains;
+- full empirical suites planned before a main signal exists;
+- paper polishing before evidence readiness;
+- repeatedly selecting favorable subsets without tracking contrary evidence;
+- endless literature/resource search without a stop rule;
+- activity that cannot alter a claim, decision, artifact, or readiness state.
+
+### Preserved legacy trajectory checks
+
+For v1 compatibility, inspect the **two most recent consecutive** closed normal
+trials whenever a Critical Path item remains open. The current `REPORT.md` must
+state `Critical path outcome:` and the service-owned trajectory view must expose
+`Consecutive non-empirical trials`. A trial may claim empirical progress only
+when a real result, informative negative, conversion inventory, or acquisition
+decision changed the evidence/resource state. The v2 structured projection must
+preserve the same two-trial stall signal.
 
 ## Pass Standard
 
-Use `Decision: pass` only when the process is not drifting from `PROJECT.md`, no
-unresolved formal intervention or state inconsistency remains, recent trials are
-making substantive progress, and no known local-minimum or hidden-TODO risk
-needs a follow-up trial. "Process review completed" is not the same as pass.
-Repeated incomplete or scaffold-only trials without a documented first blocker
-are process failures and require `Decision: continue`. Repeated non-empirical
-trials while a Critical Path item is open must make the next action advance the
-bottleneck or escalate under the gate rules.
+The shared strict pass rule in
+`instructions/reviewers/REVIEW_TAXONOMY.md` applies. Process passes only when
+the trajectory is coherent, non-drifting, and its next state and next move are
+fully justified.
 
-## Output Schema
+## Decision rules
 
-Follow `instructions/reviewers/REVIEW_TAXONOMY.md`. Include explicit reviewed
-input paths for recent trial plans, reports, reviewer files, notes, current
-state, and any formal human interventions. If there is not enough trajectory
-history to assess process quality, still write the file and record that as an
-unassessed area or required action.
+- `pass`: process is coherent, non-drifting, and the next state/next move are justified.
+- `revise`: process drift, missing scope control, stale trajectory synthesis, or weak next-move logic remains.
+- `blocked`: non-human environment/resource failure prevents all valuable movement.
+- `needs_human`: a human-only scope/identity/authority choice blocks all valuable movement.

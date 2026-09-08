@@ -1,0 +1,57 @@
+spec_version: 2.0.0
+priority:
+- killed_by_human
+- pass
+- needs_human
+- paused_budget
+- blocked
+- continue
+- no_viable_line
+inputs:
+  killed_by_human: formal human kill intervention exists
+  final_ready: all pass invariants true
+  human_blocker: human-only dependency blocks every valuable next move
+  budget_reached: configured trial/time/cost checkpoint reached
+  operational_blocker: non-human operational dependency blocks every valuable next move
+  viable_path: active/candidate line or credible line-creation/recovery path exists
+  concrete_high_value_move: one bounded next move is concrete and expected value is medium or high
+algorithm:
+- if: killed_by_human
+  status: killed_by_human
+- elif: final_ready
+  status: pass
+- elif: human_blocker
+  status: needs_human
+- elif: budget_reached
+  status: paused_budget
+- elif: operational_blocker
+  status: blocked
+- elif: viable_path and concrete_high_value_move
+  status: continue
+- else: 'true'
+  status: no_viable_line
+pass_invariants:
+- active line status is candidate_final
+- all required campaign components are passed, waived_with_rationale, or not_applicable
+- all key claims map to previously published or newly merge-authorized accepted or accepted_with_qualification result cards
+- negative and limiting evidence is visible
+- critical path has no open blocker
+- deliverable architecture is coherent
+- target venue requirements are satisfied when applicable
+- review level is final and all required reviewers pass
+- final staged HUMAN_BRIEF exists and states proved, not proved, uncertainty, and next options
+- transaction and schema validation pass
+needs_human_invariants:
+- exactly one concrete question
+- why-now explanation
+- blocking=true
+- can_continue_meanwhile=false
+- no independent valuable next move
+continue_invariants:
+- viable_path=true
+- concrete_high_value_move=true
+- human_blocker=false
+- budget_reached=false
+- operational_blocker=false
+evaluation_state: effective post-merge projection built from base revision plus authorized decisions; rejected merge decisions
+  are non-publishable

@@ -1,0 +1,26 @@
+{
+  "schema_version": "2.0",
+  "artifact_type": "trial",
+  "project_id": "coar-demo",
+  "created_at": "2026-07-14T12:00:00Z",
+  "updated_at": "2026-07-14T12:00:00Z",
+  "extensions": {},
+  "trial_id": "000001_test-main-signal",
+  "number": 1,
+  "title": "Test main signal",
+  "lifecycle_state": "planned",
+  "trial_outcome": null,
+  "target": "evaluation",
+  "move": "test",
+  "base_revision": 0,
+  "publish_revision": null,
+  "review_level": "standard",
+  "active_line_ids": [
+    "L0001"
+  ],
+  "campaign_ids": [
+    "C0001"
+  ],
+  "stage_id": null,
+  "closed_at": null
+}

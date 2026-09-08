@@ -1,6 +1,0 @@
-{"type":"item.started","item":{"id":"cmd_1","type":"command_execution","command":"pytest -q","cwd":"/tmp/project","status":"in_progress"}}
-{"method":"item/commandExecution/outputDelta","params":{"itemId":"cmd_1","delta":"test_a passed\n"}}
-{"type":"item.completed","item":{"id":"cmd_1","type":"command_execution","command":"pytest -q","exit_code":0,"aggregated_output":"test_a passed\n"}}
-{"type":"item.completed","item":{"id":"file_1","type":"file_change","changes":[{"path":"src/app.py","action":"update","diff":"--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-old\n+new"}]}}
-{"type":"item.completed","item":{"id":"todo_1","type":"todo_list","items":[{"text":"Read code","status":"completed"},{"text":"Run tests","status":"in_progress"}]}}
-{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":5,"total_tokens":15}}

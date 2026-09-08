@@ -1,0 +1,37 @@
+{
+  "schema_version": "2.0",
+  "domain_id": "nature_machine_intelligence_venue",
+  "display_name": "Nature Machine Intelligence Venue",
+  "version": "2.0.0",
+  "enabled_by_default": false,
+  "triggers": [
+    "the configured target venue is Nature Machine Intelligence"
+  ],
+  "claim_types": [
+    "venue_fit",
+    "article_type_fit",
+    "manuscript_architecture",
+    "editorial_readiness"
+  ],
+  "evidence_standards": [
+    "Bind every venue requirement to a current official source, access date, and inspected excerpt or structured note.",
+    "Distinguish journal-wide guidance from article-type-specific requirements and from inferred style patterns.",
+    "Demonstrate audience fit, contribution fit, article-type fit, evidence sufficiency, and manuscript architecture separately.",
+    "Keep unverified or draft profile fields as explicit final-gate blockers."
+  ],
+  "campaign_templates": [],
+  "method_pack_recommendations": [],
+  "specialized_reviewers": [],
+  "incompatibilities": [],
+  "safety_constraints": [
+    "Do not claim submission readiness from a draft, stale, inferred, or unverified venue profile.",
+    "Do not represent automated reviewer passage as editorial acceptance or independent peer review.",
+    "Do not invent word limits, section rules, reference limits, data policies, or article-type requirements."
+  ],
+  "extensions": {
+    "project_match_terms": [],
+    "venue_match_names": [
+      "Nature Machine Intelligence"
+    ]
+  }
+}

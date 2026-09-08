@@ -28,31 +28,29 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/brand/favicon-16.png" />
     <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260705-export-panel-3" />
-    <link rel="stylesheet" href="/sessions-panel.css?v=20260705-export-panel-3" />
+    <link rel="stylesheet" href="/styles.css?v=20260907-black-gold-white" />
+    <link rel="stylesheet" href="/sessions-panel.css?v=20260717-brand" />
   </head>
   <body class="is-project-loading">
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
-      <symbol id="brand-mark-glyph" viewBox="0 0 32 32">
-        <circle cx="5.5" cy="24" r="2.7" fill="none" stroke="currentColor" stroke-width="1.9" />
-        <path d="M8.4 24 H15 L24.4 10.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
-        <circle cx="15" cy="24" r="1.7" fill="currentColor" />
-        <circle cx="25.5" cy="8.5" r="3.2" fill="currentColor" />
-      </symbol>
       <symbol id="ic-agents" viewBox="0 0 24 24"><path d="M12 3.2c.5 3.6 1.4 4.5 5 5-3.6.5-4.5 1.4-5 5-.5-3.6-1.4-4.5-5-5 3.6-.5 4.5-1.4 5-5Z"/><path d="M18.5 13.5c.25 1.6.7 2 2.3 2.3-1.6.25-2 .7-2.3 2.3-.25-1.6-.7-2-2.3-2.3 1.6-.3 2-.7 2.3-2.3Z"/></symbol>
       <symbol id="ic-files" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h3.5l2 2.2H18a2 2 0 0 1 2 2v7.6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></symbol>
       <symbol id="ic-resources" viewBox="0 0 24 24"><path d="M4.5 5.5A1.5 1.5 0 0 1 6 4h6v15H6a1.5 1.5 0 0 0-1.5 1.5Z"/><path d="M12 4h6a1.5 1.5 0 0 1 1.5 1.5V19H12Z"/></symbol>
       <symbol id="ic-trials" viewBox="0 0 24 24"><path d="M9.5 3v6.2L4.8 17a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3l-4.7-7.8V3"/><path d="M8.5 3h7M8 13h8"/></symbol>
       <symbol id="ic-reviews" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M8.6 12.2l2.3 2.3 4.5-4.8"/></symbol>
       <symbol id="ic-manuscript" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4M9 13h6M9 16.5h4.5"/></symbol>
+      <symbol id="ic-paper" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M7 7h10M7 10h10M7 13h4v5H7zM14 13h3M14 16h3M14 18h3"/></symbol>
     </defs></svg>
     <div class="app-shell">
-      <aside class="rail" aria-label="CoAutoResearch navigation">
+      <aside class="rail" id="app-navigation" aria-label="CoAutoResearch navigation">
+        <button class="mobile-nav-toggle" id="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="app-navigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32"><use href="#brand-mark-glyph"/></svg></div>
+          <div class="brand-mark" aria-hidden="true"></div>
           <div>
             <div class="brand-title">CoAutoResearch</div>
-            <div class="brand-subtitle">Research agent</div>
+            <div class="brand-subtitle">Research workspace</div>
           </div>
         </div>
 
@@ -76,11 +74,12 @@
 
         <nav class="rail-nav" aria-label="Views" hidden>
           <div class="rail-section-label">Current project</div>
-          <button class="rail-action" type="button" data-view="workspace"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-files"/></svg><span>Project files</span></button>
-          <button class="rail-action" type="button" data-view="resources"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-resources"/></svg><span>Resources</span></button>
-          <button class="rail-action" type="button" data-view="trials"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-trials"/></svg><span>Trials</span></button>
-          <button class="rail-action" type="button" data-view="reviews"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-reviews"/></svg><span>Reviews</span></button>
-          <button class="rail-action" type="button" data-view="manuscript"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-manuscript"/></svg><span>Manuscript</span></button>
+          <button class="rail-action" type="button" data-view="workspace" aria-label="Project files"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-files"/></svg><span>Project files</span></button>
+          <button class="rail-action" type="button" data-view="resources" aria-label="Resources"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-resources"/></svg><span>Resources</span></button>
+          <button class="rail-action" type="button" data-view="trials" aria-label="Trials"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-trials"/></svg><span>Trials</span></button>
+          <button class="rail-action" type="button" data-view="reviews" aria-label="Reviews"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-reviews"/></svg><span>Reviews</span></button>
+          <button class="rail-action" type="button" data-view="manuscript" aria-label="Manuscript"><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-manuscript"/></svg><span>Manuscript</span></button>
+          <button class="rail-action rail-paper" type="button" data-view="paper" aria-label="Paper" hidden><svg class="rail-ic" viewBox="0 0 24 24" aria-hidden="true"><use href="#ic-paper"/></svg><span>Paper</span><span id="paper-nav-status" class="paper-nav-status" aria-hidden="true"></span></button>
         </nav>
 
         <div class="rail-sessions-fixed" id="rail-sessions-evolution" hidden></div>
@@ -106,6 +105,7 @@
           </div>
         </div>
       </aside>
+      <div class="mobile-nav-backdrop" id="mobile-nav-backdrop" aria-hidden="true" hidden></div>
 
       <main class="main-stage">
         <div class="agent-status-banner" id="agent-status-banner" role="status" aria-live="polite" hidden></div>
@@ -113,7 +113,7 @@
           <div class="chat-frame">
             <header class="chat-header is-framing">
               <div>
-                <p class="eyebrow" id="chat-eyebrow">Project framing</p>
+                <p class="eyebrow" id="chat-eyebrow">Research brief</p>
                 <h1 id="chat-title"></h1>
               </div>
               <div class="header-tools">
@@ -136,7 +136,7 @@
               </div>
             </header>
             <div class="resume-command-bar" id="resume-command-bar" hidden>
-              <span id="resume-command-label">Resume in agent CLI</span>
+              <span id="resume-command-label">Continue in agent CLI</span>
               <code id="resume-command-text"></code>
               <button class="copy-command-button" id="copy-resume-command" type="button">Copy</button>
             </div>
@@ -157,13 +157,13 @@
                   </section>
                   <div class="card-head">
                     <div>
-                      <p class="eyebrow">Framing</p>
+                      <p class="eyebrow">Define your research</p>
                       <h2>Where should the research begin?</h2>
-                      <p class="setup-copy">Describe the research topic, problem, scope, and any data or materials the agent should use. A proposal or prior writeup is recommended.</p>
+                      <p class="setup-copy">Start with a question, a proposal, or work already in progress. Describe what you want to understand and add any materials or constraints.</p>
                     </div>
                   </div>
 
-                  <section class="framing-thread" id="framing-thread" aria-label="Project framing conversation"></section>
+                  <section class="framing-thread" id="framing-thread" aria-label="Research brief conversation"></section>
                   <button class="scroll-bottom-button" id="framing-scroll-bottom" type="button" aria-label="Scroll to latest message" hidden>
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14m0 0 6-6m-6 6-6-6"/></svg>
                   </button>
@@ -229,25 +229,7 @@
 	                            <label>
 	                              <span>Model</span>
 	                              <select id="composer-model" aria-label="Agent model">
-	                                <option value="gpt-5.5">GPT-5.5</option>
-	                                <option value="gpt-5.4">GPT-5.4</option>
-	                                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-	                                <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
-	                                <option value="gpt-5.3-codex-spark">GPT-5.3 Spark</option>
-	                                <option value="gpt-5.2">GPT-5.2</option>
-	                                <option value="default">Claude Default</option>
-	                                <option value="best">Claude Best</option>
-	                                <option value="opus">Claude Opus 4.8</option>
-	                                <option value="opus[1m]">Claude Opus 4.8 1M</option>
-	                                <option value="opusplan">Claude Opus Plan</option>
-	                                <option value="opusplan[1m]">Claude Opus Plan 1M</option>
-	                                <option value="sonnet">Claude Sonnet 4.6</option>
-	                                <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
-	                                <option value="haiku">Claude Haiku 4.5</option>
-	                                <option value="glm-5.2[1m]">GLM-5.2 1M</option>
-	                                <option value="glm-5.2">GLM-5.2</option>
-	                                <option value="glm-5-turbo">GLM-5 Turbo</option>
-	                                <option value="glm-4.7">GLM-4.7</option>
+	                                <option value="">Loading models...</option>
 	                              </select>
 	                            </label>
 	                            <label>
@@ -280,7 +262,7 @@
                     <div class="project-draft-head">
                       <div>
                         <p class="eyebrow">PROJECT.md</p>
-                        <h3>Project framing draft.</h3>
+                        <h3>Research brief</h3>
                         <p>Edit this Markdown directly, or keep chatting to refine the scope before launch.</p>
                       </div>
                       <div class="project-draft-actions">
@@ -302,7 +284,7 @@
                   <div class="session-empty-mark" aria-hidden="true">3</div>
                   <div>
                     <p class="eyebrow">Step 3</p>
-                    <h2>Chat opens after launch.</h2>
+                    <h2>Chat opens after launch</h2>
                     <p class="setup-copy">Run cold start and launch the first agent session before sending messages or slash commands.</p>
                   </div>
                   <button class="secondary-button" type="button" data-stage-link="2">Go to launch</button>
@@ -350,7 +332,7 @@
 
                 <form id="chat-form" class="composer assistant-card" aria-label="Send message to agent session">
                   <div class="attachment-tray" id="chat-attachment-tray" aria-live="polite"></div>
-                  <textarea name="message" rows="1" placeholder="Steer the research, add constraints, answer questions, or ask for status..." disabled></textarea>
+                  <textarea name="message" rows="1" aria-label="Message agent" placeholder="Steer the research, add constraints, answer questions, or ask for status..." disabled></textarea>
                   <div class="composer-actions">
                     <button class="plan-mode-chip" type="button" data-plan-mode-toggle aria-pressed="false" aria-label="Use Plan mode" title="Plan mode">
                       <span class="plan-mode-chip-icon" aria-hidden="true">
@@ -384,12 +366,13 @@
         <section class="workspace-view sessions-view" id="sessions-view" aria-label="Session chat">
           <div class="sessions-view-frame">
             <div class="resume-command-bar sessions-resume-command-bar" id="sv-resume-command-bar" hidden>
-              <span id="sv-resume-command-label">Resume chat session</span>
+              <span id="sv-resume-command-label">Continue chat in CLI</span>
               <code id="sv-resume-command-text"></code>
               <button class="copy-command-button" id="sv-copy-resume-command" type="button" data-session-copy-resume>Copy</button>
             </div>
             <div class="sessions-view-body">
               <div class="sessions-chat-col">
+                <p class="sessions-discussion-boundary" id="sv-discussion-boundary" hidden>Discuss alongside autoresearch. Add suggestions to the research draft for review before sending.</p>
                 <div class="sessions-chat-log" id="sv-chat-log"></div>
                 <form class="sessions-chat-form brief-editor-shell is-framing-dock" id="sv-chat-form" aria-label="Send message to chat session">
                   <div class="attachment-tray" id="sv-attachment-tray" aria-live="polite"></div>
@@ -400,7 +383,7 @@
                         <path d="M12 5v14M5 12h14" />
                       </svg>
                     </button>
-                    <textarea class="sessions-chat-input" id="sv-chat-input" placeholder="Message this session..." rows="1" wrap="soft"></textarea>
+                    <textarea class="sessions-chat-input" id="sv-chat-input" aria-label="Message this session" placeholder="Message this session..." rows="1" wrap="soft"></textarea>
                     <div class="brief-run-controls">
                       <button class="plan-mode-chip" type="button" data-session-plan-mode-toggle aria-pressed="false" aria-label="Use Plan mode" title="Plan mode">
                         <span class="plan-mode-chip-icon" aria-hidden="true">
@@ -416,25 +399,7 @@
                       <label>
                         <span>Model</span>
                         <select id="sv-composer-model" aria-label="Chat session model">
-                          <option value="gpt-5.5">GPT-5.5</option>
-                          <option value="gpt-5.4">GPT-5.4</option>
-                          <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-                          <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
-                          <option value="gpt-5.3-codex-spark">GPT-5.3 Spark</option>
-                          <option value="gpt-5.2">GPT-5.2</option>
-                          <option value="default">Claude Default</option>
-                          <option value="best">Claude Best</option>
-                          <option value="opus">Claude Opus 4.8</option>
-                          <option value="opus[1m]">Claude Opus 4.8 1M</option>
-                          <option value="opusplan">Claude Opus Plan</option>
-                          <option value="opusplan[1m]">Claude Opus Plan 1M</option>
-                          <option value="sonnet">Claude Sonnet 4.6</option>
-                          <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
-                          <option value="haiku">Claude Haiku 4.5</option>
-                          <option value="glm-5.2[1m]">GLM-5.2 1M</option>
-                          <option value="glm-5.2">GLM-5.2</option>
-                          <option value="glm-5-turbo">GLM-5 Turbo</option>
-                          <option value="glm-4.7">GLM-4.7</option>
+                          <option value="">Loading models...</option>
                         </select>
                       </label>
                       <label>
@@ -469,8 +434,13 @@
               </div>
               <div class="sessions-ws-col" id="sv-ws-col" hidden>
                 <div class="sessions-ws-head">
-                  <span>📁 Workspace</span>
-                  <button class="sessions-ws-refresh" id="sv-ws-refresh" type="button" data-sessions-ws-refresh>⟳</button>
+                  <span class="sessions-ws-title">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11Z"/></svg>
+                    Workspace
+                  </span>
+                  <button class="sessions-ws-refresh" id="sv-ws-refresh" type="button" data-sessions-ws-refresh aria-label="Refresh workspace" title="Refresh workspace">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 8a7.5 7.5 0 1 0 1 7M19 4v4h-4"/></svg>
+                  </button>
                 </div>
                 <div class="sessions-ws-breadcrumb" id="sv-ws-breadcrumb"></div>
                 <div class="sessions-ws-list" id="sv-ws-list"></div>
@@ -486,7 +456,7 @@
         <header class="project-dialog-head">
           <div>
             <p class="eyebrow">New project</p>
-            <h2 id="project-dialog-title">Create a research project.</h2>
+            <h2 id="project-dialog-title">Create a research project</h2>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-project-close aria-label="Close project dialog" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
@@ -505,7 +475,7 @@
           <small>Codex is the default. You can change this later in Settings or for a single launch.</small>
         </label>
         <div class="agent-status-note" id="project-agent-backend-note"></div>
-        <p class="project-dialog-note" id="project-create-note">Creates a separate project from the clean template.</p>
+        <p class="project-dialog-note" id="project-create-note">Creates a separate workspace. You decide when to start research.</p>
         <footer class="project-dialog-actions">
           <button class="secondary-button" type="button" data-project-close>Cancel</button>
           <button class="primary-button" type="submit">Create project</button>
@@ -517,8 +487,7 @@
       <form class="project-dialog-shell" id="project-rename-form" method="dialog">
         <header class="project-dialog-head">
           <div>
-            <p class="eyebrow">Rename project</p>
-            <h2 id="project-rename-title">Rename this project.</h2>
+            <h2 id="project-rename-title">Rename project</h2>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-project-rename-close aria-label="Close rename dialog" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
@@ -528,7 +497,7 @@
           <span>Project name</span>
           <input id="project-rename-name" name="projectName" type="text" autocomplete="off" required />
         </label>
-        <p class="project-dialog-note" id="project-rename-note">Renaming changes the dashboard label only. It does not move or rename the project folder.</p>
+        <p class="project-dialog-note" id="project-rename-note"></p>
         <footer class="project-dialog-actions">
           <button class="secondary-button" type="button" data-project-rename-close>Cancel</button>
           <button class="primary-button" type="submit">Rename</button>
@@ -540,18 +509,17 @@
       <form class="project-dialog-shell" id="session-rename-form" method="dialog">
         <header class="project-dialog-head">
           <div>
-            <p class="eyebrow">Rename session</p>
-            <h2 id="session-rename-title">Rename this chat.</h2>
+            <h2 id="session-rename-title">Rename chat</h2>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-session-rename-close aria-label="Close rename dialog" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
         </header>
         <label class="field">
-          <span>Session title</span>
+          <span>Chat name</span>
           <input id="session-rename-name" name="sessionName" type="text" autocomplete="off" required />
         </label>
-        <p class="project-dialog-note" id="session-rename-note">Renaming changes the chat label only. It does not move workspace files.</p>
+        <p class="project-dialog-note" id="session-rename-note"></p>
         <footer class="project-dialog-actions">
           <button class="secondary-button" type="button" data-session-rename-close>Cancel</button>
           <button class="primary-button" type="submit">Rename</button>
@@ -562,7 +530,7 @@
     <dialog class="project-dialog session-search-dialog" id="session-search-dialog" aria-label="Search chats">
       <section class="project-dialog-shell session-search-shell">
         <div class="session-search-input-row">
-          <input id="session-search-input" type="search" placeholder="Search chats..." autocomplete="off" />
+          <input id="session-search-input" type="search" aria-label="Search chats" placeholder="Search chats..." autocomplete="off" />
           <button class="icon-button dialog-close-button" type="button" data-session-search-close aria-label="Close search" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
@@ -626,7 +594,7 @@
         <header class="local-browser-head">
           <div>
             <p class="eyebrow">Local browser</p>
-            <h2 id="resource-browser-title">Choose files or folders.</h2>
+            <h2 id="resource-browser-title">Choose files or folders</h2>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-browser-close aria-label="Close local browser" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
@@ -715,8 +683,8 @@
         <header class="launch-dialog-head">
           <div>
             <p class="eyebrow">Autoresearch loop</p>
-            <h2 id="launch-dialog-title">Start autoresearch.</h2>
-            <p>The selected agent will continue this same session until strict reviewer gates pass, human input is needed, or the review checkpoint is reached.</p>
+            <h2 id="launch-dialog-title">Start autoresearch</h2>
+            <p>Start autonomous work from your research brief. The agent plans, runs and reviews each step until the research goal is met, a blocking issue needs attention, or your review checkpoint is reached.</p>
           </div>
           <button class="icon-button dialog-close-button" type="button" data-launch-close aria-label="Close launch dialog" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
@@ -734,25 +702,7 @@
             <label class="field">
               <span>Model</span>
               <select name="model">
-                <option value="gpt-5.5">GPT-5.5</option>
-                <option value="gpt-5.4">GPT-5.4</option>
-                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-                <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
-                <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
-                <option value="gpt-5.2">GPT-5.2</option>
-                <option value="default">Claude Default</option>
-                <option value="best">Claude Best</option>
-                <option value="opus">Claude Opus 4.8</option>
-                <option value="opus[1m]">Claude Opus 4.8 1M</option>
-                <option value="opusplan">Claude Opus Plan</option>
-                <option value="opusplan[1m]">Claude Opus Plan 1M</option>
-                <option value="sonnet">Claude Sonnet 4.6</option>
-                <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
-                <option value="haiku">Claude Haiku 4.5</option>
-                <option value="glm-5.2[1m]">GLM-5.2 1M</option>
-                <option value="glm-5.2">GLM-5.2</option>
-                <option value="glm-5-turbo">GLM-5 Turbo</option>
-                <option value="glm-4.7">GLM-4.7</option>
+                <option value="">Loading models...</option>
               </select>
             </label>
             <label class="field">
@@ -781,7 +731,7 @@
             <label class="field">
               <span>Review checkpoint</span>
               <input name="reviewCheckpointInterval" type="number" min="1" step="1" inputmode="numeric" value="100" />
-              <small>Pause after this many agent turns if gates still need work.</small>
+              <small>Pause after this many completed trials if research still needs work.</small>
             </label>
           </div>
           <div class="launch-mode-row">
@@ -806,7 +756,7 @@
                 <small>Show commands, tools, diffs, checklists, and usage as inspectable cards.</small>
               </span>
             </label>
-            <label class="toggle-field launch-toggle">
+            <label class="toggle-field launch-toggle" data-codex-only-field>
               <input name="codexAppServerChat" type="checkbox" />
               <span>
                 <strong>Codex app-server chat</strong>
@@ -820,7 +770,7 @@
             <small>Used only for this launch. Leave blank to run from PROJECT.md with the standard reviewer gate.</small>
           </label>
           <div class="agent-status-note" id="launch-agent-status"></div>
-          <label class="field">
+          <label class="field" data-codex-only-field>
             <span>Advanced config</span>
             <textarea name="extraConfig" rows="2" placeholder='model_verbosity="low"'></textarea>
           </label>
@@ -892,13 +842,18 @@
           </button>
         </header>
         <div class="restart-autoresearch-body">
-          <p>This archives the current autoresearch trajectory and starts a new run in the same project.</p>
+          <p>Return to the research direction and inputs saved when you first started autoresearch. Later work is kept in the Restart archive.</p>
           <ul>
-            <li>Current trials, runtime state, working manuscript snapshots, and generated findings move under <code>archive/restarts/</code>.</li>
-            <li>User-uploaded or explicitly selected resources stay available to the new run.</li>
-            <li>Autoresearch-discovered, generated, or unknown resources are archived as prior-run context, not active inputs.</li>
-            <li>The active Trial axis starts again at Trial 1.</li>
+            <li>The new research process starts at Trial 1.</li>
+            <li>Later trials, results, manuscript, working files and research-session messages are archived. Auxiliary chats are archived too.</li>
+            <li>The research session returns to its first start, with a record of this restart.</li>
+            <li>Only the original research brief, original attached or linked materials, and the optional guidance below enter the new run.</li>
           </ul>
+          <label class="field restart-autoresearch-instruction-field">
+            <span>Optional Restart instruction</span>
+            <textarea id="restart-autoresearch-instruction" name="restartInstruction" rows="3" maxlength="4000" placeholder="Add a constraint or emphasis for the new Trial 1..."></textarea>
+            <small>This adds guidance to the original research brief. Later results and discussion are not included in the new run.</small>
+          </label>
           <p class="restart-autoresearch-reason" id="restart-autoresearch-reason" hidden></p>
         </div>
         <footer class="project-dialog-actions">
@@ -911,7 +866,7 @@
     <dialog class="settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
       <section class="settings-shell">
         <aside class="settings-sidebar" aria-label="Settings sections">
-          <button class="settings-close" type="button" data-settings-close aria-label="Close settings">
+          <button class="settings-close" type="button" data-settings-close aria-label="Close settings" title="Close settings">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
           <nav class="settings-nav">
@@ -958,7 +913,7 @@
             <div class="settings-row">
               <div>
                 <h3>Runtime storage</h3>
-                <p>Settings and tokens are stored locally under <code>ui/.runtime/settings.json</code>, which is ignored by git.</p>
+                <p>Settings and tokens are stored in CoAutoResearch's service runtime, outside project files.</p>
               </div>
               <span class="settings-value">Local only</span>
             </div>
@@ -972,9 +927,9 @@
             <div class="settings-row">
               <div>
                 <h3>Session continuity</h3>
-                <p>Evolution resumes the captured agent session. Chat sessions keep isolated contexts for questions, monitoring, and experiments.</p>
+                <p>Autoresearch continues the research session. Separate chats let you discuss findings while it works. Add a suggestion to the research draft, review it, and send it to guide the main research.</p>
               </div>
-              <span class="settings-value">Resume enabled</span>
+              <span class="settings-value">Separate chat contexts</span>
             </div>
           </section>
 
@@ -1088,25 +1043,7 @@
               <label class="field">
                 <span>Default model</span>
                 <select name="settingsModel">
-                  <option value="gpt-5.5">GPT-5.5</option>
-                  <option value="gpt-5.4">GPT-5.4</option>
-                  <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-                  <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
-                  <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
-                  <option value="gpt-5.2">GPT-5.2</option>
-                  <option value="default">Claude Default</option>
-                  <option value="best">Claude Best</option>
-                  <option value="opus">Claude Opus 4.8</option>
-                  <option value="opus[1m]">Claude Opus 4.8 1M</option>
-                  <option value="opusplan">Claude Opus Plan</option>
-                  <option value="opusplan[1m]">Claude Opus Plan 1M</option>
-                  <option value="sonnet">Claude Sonnet 4.6</option>
-                  <option value="sonnet[1m]">Claude Sonnet 4.6 1M</option>
-                  <option value="haiku">Claude Haiku 4.5</option>
-                  <option value="glm-5.2[1m]">GLM-5.2 1M</option>
-                  <option value="glm-5.2">GLM-5.2</option>
-                  <option value="glm-5-turbo">GLM-5 Turbo</option>
-                  <option value="glm-4.7">GLM-4.7</option>
+                  <option value="">Loading models...</option>
                 </select>
               </label>
               <label class="field">
@@ -1135,7 +1072,7 @@
               <label class="field">
                 <span>Human review checkpoint</span>
                 <input name="settingsReviewCheckpointInterval" type="number" min="1" step="1" inputmode="numeric" value="100" />
-                <small>Pause for human review after this many agent turns if reviewer gates have not passed. You can resume afterward.</small>
+                <small>Pause for human review after this many completed trials if research still needs work. You can resume afterward.</small>
               </label>
               <label class="toggle-field">
                 <input name="settingsWebSearch" type="checkbox" />
@@ -1145,11 +1082,11 @@
                 <input name="settingsRichTrace" type="checkbox" checked />
                 <span>Structured trace cards</span>
               </label>
-              <label class="toggle-field">
+              <label class="toggle-field" data-codex-only-field>
                 <input name="settingsCodexAppServerChat" type="checkbox" />
                 <span>Codex app-server chat</span>
               </label>
-              <label class="field wide settings-advanced-config">
+              <label class="field wide settings-advanced-config" data-codex-only-field>
                 <span>Advanced config</span>
                 <textarea name="settingsExtraConfig" rows="2" placeholder='model_verbosity="low"'></textarea>
               </label>
@@ -1165,9 +1102,10 @@
               </label>
             </div>
             <div class="agent-status-note" id="settings-agent-status"></div>
+            <button class="secondary-button small-button" id="settings-agent-refresh" type="button">Refresh login and models</button>
           </section>
         </form>
-        <div class="settings-resize-zone settings-resize-handle" data-settings-resize="corner" role="separator" aria-orientation="horizontal" aria-label="Resize settings" title="Drag to resize"></div>
+        <div class="settings-resize-zone settings-resize-handle" data-settings-resize="corner" aria-hidden="true" title="Drag to resize"></div>
       </section>
     </dialog>
 
@@ -1180,15 +1118,15 @@
           </div>
           <div class="file-viewer-actions">
             <button class="secondary-button small-button file-viewer-return" type="button" data-file-viewer-return="manuscript/BLUEPRINT.md" hidden>Return to latest manuscript</button>
-            <button class="icon-button" type="button" data-file-viewer-close aria-label="Close fullscreen preview">
+            <button class="icon-button dialog-close-button" type="button" data-file-viewer-close aria-label="Close fullscreen preview" title="Close preview">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
             </button>
           </div>
         </header>
         <div class="file-viewer-body" id="file-viewer-body"></div>
-        <div class="file-viewer-resize-zone is-right" data-file-viewer-resize="right" role="separator" aria-orientation="vertical" aria-label="Resize file preview width" title="Drag to resize width"></div>
-        <div class="file-viewer-resize-zone is-bottom" data-file-viewer-resize="bottom" role="separator" aria-orientation="horizontal" aria-label="Resize file preview height" title="Drag to resize height"></div>
-        <div class="file-viewer-resize-zone file-viewer-resize-handle is-corner" data-file-viewer-resize="corner" role="separator" aria-orientation="horizontal" aria-label="Resize file preview" title="Drag to resize"></div>
+        <div class="file-viewer-resize-zone is-right" data-file-viewer-resize="right" aria-hidden="true" title="Drag to resize width"></div>
+        <div class="file-viewer-resize-zone is-bottom" data-file-viewer-resize="bottom" aria-hidden="true" title="Drag to resize height"></div>
+        <div class="file-viewer-resize-zone file-viewer-resize-handle is-corner" data-file-viewer-resize="corner" aria-hidden="true" title="Drag to resize"></div>
       </section>
     </dialog>
 
@@ -1199,7 +1137,7 @@
             <p class="eyebrow">Runtime preflight</p>
             <h2 id="agent-setup-title">Check your agent runtime</h2>
           </div>
-          <button class="icon-button" type="button" data-agent-setup-close aria-label="Dismiss for now">
+          <button class="icon-button dialog-close-button" type="button" data-agent-setup-close aria-label="Dismiss for now" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
         </header>
@@ -1207,7 +1145,7 @@
           <p class="agent-setup-intro" id="agent-setup-intro">CoAutoResearch can create projects before an agent is ready, but agent runs need Codex or Claude Code to be installed and authenticated.</p>
           <div class="agent-setup-grid" id="agent-setup-grid"></div>
         </div>
-        <footer class="project-dialog-footer">
+        <footer class="project-dialog-actions">
           <button class="secondary-button" type="button" data-agent-setup-create-project hidden>Create project first</button>
           <button class="secondary-button" type="button" data-agent-setup-settings>Open Settings</button>
           <button class="primary-button" type="button" data-agent-setup-recheck>I installed it — re-check</button>
@@ -1217,7 +1155,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js?v=20260705-export-panel-3"></script>
-    <script src="/sessions-panel.js?v=20260705-export-panel-3"></script>
+    <script src="/app.js?v=20260717-brand"></script>
+    <script src="/sessions-panel.js?v=20260717-brand"></script>
   </body>
 </html>

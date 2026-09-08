@@ -1,0 +1,45 @@
+{
+  "schema_version": "2.0",
+  "domain_id": "physical_ai_safety",
+  "display_name": "Physical AI Safety",
+  "version": "2.0.0",
+  "enabled_by_default": false,
+  "triggers": [
+    "claims about embodied or physical-world AI safety, deployment, hazards, failures, assurance, or residual risk"
+  ],
+  "claim_types": [
+    "safety",
+    "hazard",
+    "assurance",
+    "operational_boundary",
+    "failure",
+    "risk_mitigation"
+  ],
+  "evidence_standards": [
+    "Define the system boundary, operational domain, exposed people and assets, and relevant lifecycle phase.",
+    "Trace every safety claim to hazards, failure modes, controls, verification evidence, and residual uncertainty.",
+    "Distinguish observed safety evidence from assumptions, simulations, proxies, and proposed safeguards.",
+    "Test foreseeable misuse, distribution shift, degraded operation, human interaction, and control handoff where relevant.",
+    "State the population, environment, duration, and conditions beyond which evidence does not generalize."
+  ],
+  "campaign_templates": [],
+  "method_pack_recommendations": [],
+  "specialized_reviewers": [],
+  "incompatibilities": [],
+  "safety_constraints": [
+    "Do not equate absence of observed harm with demonstrated safety.",
+    "Do not describe a system as safe without an explicit claim scope, evidence chain, and residual-risk statement.",
+    "Do not recommend real-world exposure when the evidence supports only a laboratory, simulation, or conceptual claim."
+  ],
+  "extensions": {
+    "project_match_terms": [
+      "physical ai",
+      "physical-world ai",
+      "embodied ai",
+      "robot",
+      "robotics",
+      "autonomous vehicle"
+    ],
+    "venue_match_names": []
+  }
+}

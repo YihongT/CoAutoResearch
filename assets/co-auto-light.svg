@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="480" viewBox="0 0 1120 480" role="img" aria-labelledby="title desc">
+<title id="title">Co + Auto: research together, build on evidence</title>
+<desc id="desc">Human direction guides autonomous research through suggestions reviewed and sent by the researcher. Plans, observations and reviewed findings accumulate in a shared research record, informing the next decision and the manuscript and paper.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M1 1 L7 4 L1 7" fill="none" stroke="#826528" stroke-width="1.5"/></marker></defs>
+<rect width="1120" height="480" rx="20" fill="#faf8f1"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="40" y="46" fill="#686256" font-size="13" letter-spacing="2">COAUTORESEARCH · THE COLLABORATION LOOP</text>
+<rect x="40" y="76" width="382" height="180" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<rect x="698" y="76" width="382" height="180" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="64" y="112" fill="#826528" font-size="13" letter-spacing="2">CO</text>
+<text x="64" y="148" fill="#26241f" font-size="26">Human direction</text>
+<text x="64" y="185" fill="#686256" font-size="17">Ask questions. Discuss findings.</text>
+<text x="64" y="214" fill="#686256" font-size="17">Make tradeoffs. Guide the next step.</text>
+<text x="722" y="112" fill="#826528" font-size="13" letter-spacing="2">AUTO</text>
+<text x="722" y="148" fill="#26241f" font-size="26">Autonomous research</text>
+<text x="722" y="185" fill="#686256" font-size="17">Plan. Execute. Interpret.</text>
+<text x="722" y="214" fill="#686256" font-size="17">Review. Continue within your brief.</text>
+<path d="M442 146 H676" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="560" y="129" text-anchor="middle" fill="#686256" font-size="14">Review a suggestion, then send</text>
+<path d="M676 205 H442" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="560" y="236" text-anchor="middle" fill="#686256" font-size="14">Findings and open decisions</text>
+<path d="M890 256 V300" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M230 308 V266" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="40" y="310" width="1040" height="130" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="64" y="348" fill="#26241f" font-size="23">Shared research record</text>
+<text x="64" y="382" fill="#686256" font-size="17">Direction · Evidence · Findings · Limitations</text>
+<text x="64" y="412" fill="#686256" font-size="15">Informs the next question and preserves how conclusions were reached.</text>
+<path d="M685 375 H740" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="766" y="370" fill="#26241f" font-size="21">Manuscript → Paper</text>
+<text x="766" y="400" fill="#686256" font-size="15">Drafts for human review</text>
+</g></svg>

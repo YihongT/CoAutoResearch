@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "staged-update-manifest.schema.json",
+  "title": "Staged Update Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "trial_id",
+    "stage_id",
+    "base_revision",
+    "operations",
+    "hash_spec_version",
+    "hash_algorithm",
+    "material_inputs",
+    "stage_content_hash"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "staged_update_manifest"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "trial_id": {
+      "$ref": "common.schema.json#/$defs/trial_id"
+    },
+    "stage_id": {
+      "$ref": "common.schema.json#/$defs/stage_id"
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "operation",
+          "before_sha256",
+          "after_sha256",
+          "candidate_path",
+          "extensions"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "operation": {
+            "enum": [
+              "create",
+              "replace"
+            ]
+          },
+          "before_sha256": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/sha256"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "after_sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "candidate_path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "extensions": {
+            "$ref": "common.schema.json#/$defs/extensions"
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "hash_spec_version": {
+      "const": "1"
+    },
+    "hash_algorithm": {
+      "const": "sha256"
+    },
+    "material_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "role",
+          "sha256",
+          "extensions"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "common.schema.json#/$defs/relative_path"
+          },
+          "role": {
+            "enum": [
+              "candidate_canonical",
+              "merge_request",
+              "human_brief",
+              "gate_evidence",
+              "plan",
+              "expert_route",
+              "report",
+              "result_cards",
+              "trial_artifact",
+              "resource",
+              "manuscript",
+              "other_review_input"
+            ]
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "extensions": {
+            "$ref": "common.schema.json#/$defs/extensions"
+          }
+        }
+      }
+    },
+    "stage_content_hash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    }
+  }
+}

@@ -1,33 +1,30 @@
 # Concepts
 
-CoAutoResearch is a human-centered research loop. The agent can do substantial
-work, but the human remains responsible for direction, claims, evidence, and
-revision.
+CoAutoResearch combines autonomous research with continuing human direction.
+The agent advances bounded research steps while the researcher can discuss
+findings, question conclusions and guide the next move. A shared record connects
+those decisions to evidence, limitations and the manuscript.
+
+In v2.0, Markdown remains useful for people, but typed JSON and service-owned
+receipts determine control flow. An agent may propose work; it may not publish
+its own claims as canonical truth.
 
 ## Research Loop
 
 ```{mermaid}
 flowchart TD
-  H["Human brief or intervention"] --> P["PROJECT.md<br/>research direction"]
-  P --> S["STATE.md<br/>current objective"]
-  S --> CP["Critical Path<br/>data, method, evaluation, figures, pack"]
-  S --> T["Trial<br/>one coherent work package"]
-  T --> PL["PLAN.md"]
-  PL --> PR["reviews/PLAN_REVIEW.md"]
-  PR --> RS["Resource Scout decision/report<br/>when required"]
-  RS --> W["Execute in workspace/"]
-  W --> RP["REPORT.md"]
-  RP --> RA["Reviewer Scope Analyst decision"]
-  RA --> RV["reviews/*_REVIEW.md<br/>eight core reviewer files"]
-  RP --> F["CURRENT_FINDINGS.md<br/>claims and evidence"]
-  F --> PP["PAPER_PLAN.md<br/>obligations and blockers"]
-  PP --> BP["BLUEPRINT.md<br/>real full-results handoff"]
-  BP --> M["Export gate<br/>Paper Pack or Status Pack"]
-  M --> S
-
-  H -. "redirect scope, method, claim, venue, or priority" .-> S
-  H -. "formal intervention recorded" .-> T
-  CP -. "bottleneck target" .-> T
+  H["Human brief or intervention"] --> O["Observe coherent canonical revision"]
+  O --> T["One bounded trial proposal"]
+  T --> S["Stage candidate files and material hash"]
+  S --> R["Derive review route and close reviews"]
+  R --> M["Service derives merge decision"]
+  M --> G["Service evaluates goal gate"]
+  G -->|publishable| X["Recoverable transaction"]
+  X --> P["Publish receipt + next canonical revision"]
+  P --> B["Research Board"]
+  B --> O
+  G -->|needs_human| H
+  G -->|blocked or terminal| B
 
   classDef human fill:#111411,color:#fffdf6,stroke:#111411;
   classDef truth fill:#f4f7ef,stroke:#9aac9b,color:#20231f;
@@ -35,19 +32,21 @@ flowchart TD
   classDef output fill:#edf3f6,stroke:#9bb4c2,color:#20231f;
 
   class H human;
-  class P,S,CP,F truth;
-  class T,PL,PR,RS,RA,RV,W,RP trial;
-  class PP,BP,M output;
+  class O,P,B truth;
+  class T,S,R,M,G trial;
+  class X output;
 ```
 
 ## What the Diagram Means
 
 - The loop is linear enough for a human to follow.
-- Every substantive work package gets a plan, report, Resource Scout brief,
-  Reviewer Scope Analyst decision, and eight core review files.
-- `STATE.md` contains a Critical Path table. Trials target the current
-  bottleneck instead of drifting into bookkeeping.
-- Claims become current only when reflected in findings and evidence records.
+- Every invocation closes at most one trial boundary.
+- Plans, reports, result cards, reviews, and human briefs remain distinct
+  proposal or audit artifacts until publication.
+- Review level and specialized coverage are derived from the staged material;
+  the required reviewer set is not a worker assertion.
+- Claims become current only through a merge decision and receipt-backed
+  transaction.
 - Human intervention is not an afterthought; it is part of the control system.
 - The output should be something the human can understand, defend, and revise.
 
@@ -79,22 +78,46 @@ Critical Path. The UI labels that state as a paper plan or research status, not
 a paper-writing handoff. The Paper-Writing Pack is available only when the
 blueprint is non-stub, complete, and free of blocking missing evidence.
 
+The dashboard’s **Generate paper** action is a separate writing workflow. It
+uses an isolated snapshot of recorded v2 evidence, four scientific skills and
+local PDF tools. It does not execute new research. The resulting **Paper** is a
+draft with review notes, not confirmation that a venue’s scientific requirements
+have been met. See [paper generation](paper-generation.md).
+
+## Collaboration boundary
+
+Auxiliary chats can run alongside the main research session and inspect project
+context without writing research files. **Add to research draft** transfers a
+suggestion into the composer. The user reviews and sends it before it becomes
+an instruction to the main research process. This preserves the distinction
+between exploring an idea in conversation and applying it to research.
+
 ## Control Surfaces
 
 | Surface | What it controls |
 | --- | --- |
 | `PROJECT.md` | Overall direction, scope, audience, and constraints. |
-| `STATE.md` | Current objective, active plan, blockers, and reviewer gate state. |
+| `STATE.json` and typed line/campaign files | Service-owned current objective, executable bottleneck, claims, and readiness. |
+| Markdown companions | Human-readable projections and legacy history; never a v2 control-flow bypass. |
 | Human interventions | Explicit changes to scope, claim, venue, method, or priority. |
-| Reviewer gates | Plan, process, evidence, venue fit, manuscript, figure/table, reference, and final-gate checks. |
+| Review manifest and reviewer outputs | Material-bound review closure at light, standard, full, or final level. |
+| Goal gate and publish receipt | Derived stop/continue truth and proof of canonical publication. |
 
-Autoresearch stops only after strict reviewer pass. A completed trial, approved
-plan, plausible venue fit, coherent manuscript architecture, or targeted
-revision-ready draft is progress, not final pass.
+Gate states are distinct: `continue`, `pass`, `needs_human`, `blocked`,
+`paused_budget`, `no_viable_line`, and `killed_by_human`. A completed trial,
+approved plan, plausible venue fit, coherent manuscript architecture, or
+targeted revision-ready draft is progress, not final pass.
 
-## Why This Matters
+## Compatibility
 
-The system is not optimized for autonomous output at all costs. It is optimized
-for research ownership: the human should be able to explain why a claim exists,
+V1 projects remain readable without pretending their Markdown history is a v2
+publication. The UI labels the synthesized board and trial cards as legacy,
+uses the fixed-eight reviewer fallback, and keeps canonical revision unset.
+Migration is additive, backup-first, idempotent, and reversible while no newer
+v2 work depends on it.
+
+## Research ownership
+
+The shared record supports research ownership: the human should be able to explain why a claim exists,
 where the evidence came from, which alternatives were rejected, and what work
 remains open.

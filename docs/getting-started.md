@@ -1,221 +1,135 @@
-# Getting Started
+# Start your first research project
 
-Start here if you want to use CoAutoResearch from a local machine.
+CoAutoResearch is a research system for working with an autonomous agent over
+multiple iterations. Bring a question, a proposal, or work already in progress.
+You can discuss findings as the research runs and decide which suggestions to
+send back into the research session.
 
-## Quick Start
+## Set up with your coding agent
 
-Open the dashboard from any folder:
+Give your coding agent this instruction:
 
-```bash
-npx --yes co-auto-research ui
-```
+> Set up and launch CoAutoResearch from https://github.com/YihongT/CoAutoResearch. Follow docs/agent-setup.md, reuse my existing coding-agent login, configure paper generation, verify the setup, and open the dashboard.
 
-No repository clone is needed for this path. The command downloads the CLI if
-needed, starts the local UI, and opens it in your browser. If you run it from
-inside a cloned CoAutoResearch checkout, npm resolves that local checkout
-instead.
+The agent checks prerequisites, reuses your Codex or Claude Code login, starts
+the dashboard and prepares the paper tools. Complete any interactive provider
+login yourself. Dashboard readiness and paper-tool readiness are separate:
+research can start while a missing PDF dependency is being resolved.
 
-Create projects, attach files, revise framing, and start autoresearch from the
-UI.
+The dashboard needs Node.js 20+, Python 3.10+, Git and one supported coding-agent
+CLI. Paper generation additionally needs Python 3.12+, LaTeX, Poppler and the
+four writing skills installed by the product's setup command. Projects may
+need their own scientific packages. There is no dashboard build step.
+See [agent setup](agent-setup.md) for the executable checklist and
+[paper generation](paper-generation.md) for the PDF environment.
 
-On first launch, the dashboard checks Codex and Claude Code readiness before it
-opens project creation. Projects can still be created before runtime setup is
-complete; starting an agent run requires a ready selected backend.
-
-## Prerequisites
-
-Install:
-
-- **Node.js 18 or newer** — from the [Node.js downloads page](https://nodejs.org/en/download). Includes `npm`.
-- **Python 3** — from the [Python downloads page](https://www.python.org/downloads/). The CLI auto-detects `python3`, `python`, or Windows `py -3`; set `COAUTO_PYTHON` for another path.
-- **Git**
-- **OpenAI Codex CLI** (default backend) — see the [Codex CLI setup guide](https://developers.openai.com/codex/cli). On macOS/Linux/WSL2:
-
-  ```bash
-  curl -fsSL https://chatgpt.com/codex/install.sh | sh
-  # or: npm install -g @openai/codex
-  ```
-
-  Windows is supported through native Windows or WSL2 ([Codex Windows guide](https://developers.openai.com/codex/windows)).
-- **Claude Code CLI** (optional backend) — install Claude Code to select
-  `Claude Code` in the UI. CoAutoResearch talks to the CLI directly; no SDK is
-  added.
-
-For authentication, keep the default provider if you already use CLI login:
-`Use existing Codex CLI login` or `Use existing Claude Code configuration`.
-Alternatively, open Settings and choose `OpenAI API key` for Codex or
-`Anthropic API key` for Claude Code. API keys saved in Settings are injected only
-into that backend's runs; they are not echoed back by `/api/settings`.
-
-Check the basics:
+For a source checkout, the manual entry point is:
 
 ```bash
-node --version
-python3 --version
-codex --version
-codex login status
-# optional
-claude --version
-claude auth status
+git clone https://github.com/YihongT/CoAutoResearch.git
+cd CoAutoResearch
+node bin/auto-research.js doctor
+node bin/auto-research.js ui
 ```
 
-On Windows, use `python --version` or `py -3 --version` if `python3` is not
-available.
+Keep the server terminal open. Open the URL it prints. If the port is occupied,
+use `--port 8766`; use `--projects-dir /path/to/projects` to choose where research
+is stored. Before choosing the npm distribution, compare its published version
+with the source version. See the [CLI guide](cli.md) for installation and updates.
 
-If you use an API-key provider, the relevant status command is not required for
-readiness, but the selected CLI still must pass `--version`.
+## Define your research
 
-### Claude Code With GLM / Z.AI
+Choose **Create project**, name it, and select a backend. Creating a project
+makes a research workspace; it does not start an investigation.
 
-To use Claude Code as the runtime while sending model calls to GLM, select
-`Claude Code` in Settings, set **Claude provider** to `Z.AI GLM Coding Plan`,
-and paste the Z.AI credential. CoAutoResearch injects the Anthropic-compatible
-endpoint into Claude Code runs only:
+In the research brief, explain:
 
-```text
-ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
-ANTHROPIC_AUTH_TOKEN=<your Z.AI key>
-```
+- the question you want to answer and why it matters;
+- relevant material or existing work;
+- limits on time, compute, data access and scope;
+- what would count as useful evidence, including a negative result.
 
-Claude Code and Goose-style Anthropic clients should use
-`https://api.z.ai/api/anthropic`. Do not put Z.AI's OpenAI-compatible endpoint
-`https://api.z.ai/api/coding/paas/v4` into Claude Code.
+Use **+** to attach materials. Uploads copy files into the project. Linked
+folders remain at their original location and must stay accessible to the
+server. A path on another computer is not automatically available to a remote
+server. Review attachment names and paths before sending.
 
-If you already keep these values in `~/.claude/settings.json` or
-`.claude/settings.local.json`, CoAutoResearch reads the `env` block for readiness
-checks and run launches. Shell aliases/functions are not inherited by the UI
-server; use Claude settings, the Settings gateway form, or set `COAUTO_CLAUDE`
-to a wrapper script file.
+Send your brief. The agent prepares the research direction and may ask for
+missing information. Review the resulting brief, discuss changes, and choose
+**Start autoresearch** when you want autonomous work to begin.
+Check that the brief preserves your limits and any actions awaiting separate
+approval. For example, “ask me before using the final test set” must remain a
+pending decision, not become permission to test as soon as a plan is ready.
 
-## Install the CLI Command
+## Choose the agent settings
 
-For repeated use, install the command once:
+**Settings → Agent** separates installed CLI, authentication and discovered
+models. Use **Refresh login and models** after updating or logging in. A CLI
+being installed does not prove the account can run a model. Resolve discovery
+errors before starting; choose from the models your provider actually exposes.
 
-```bash
-npm install -g co-auto-research
-```
+The composer controls the model and supported reasoning effort for your next
+message. Autoresearch has its own launch controls. A running turn keeps the
+settings captured when it started. Paper generation has separate controls and
+shows its selected model before you launch it.
 
-This makes `co-auto-research` available in your terminal.
+## Work together as research progresses
 
-## Start the Dashboard
+A **Trial** is one focused research iteration. It can test a method, analyze
+an unexpected result, acquire evidence or resolve a research blocker.
 
-After installing the CLI command:
+Use the autoresearch panel to follow the current action and live activity.
+**Trials** keeps earlier iterations, **Reviews** shows their checks, and
+**Resources** shows available material. A result recorded in the project has
+passed the applicable workflow checks; it has not been externally published
+or proved scientifically correct.
 
-```bash
-co-auto-research ui
-```
+Choose **New chat** to discuss findings while the research session works.
+These discussions do not directly change research files. **Add to research
+draft** transfers a reply or plan to the research input. Review or edit the
+draft, then send it to make it an instruction for the main research process.
+When the main agent is busy, the input explains whether the message will wait
+for the current turn. Adding a draft alone does not apply a suggestion.
 
-The UI opens in your browser. If browser launch is unavailable, open the printed
-URL manually.
+## Pause, continue or start over
 
-## Update the CLI
+| Action | What happens |
+| --- | --- |
+| **Pause after current turn** | Requests a pause after the active agent turn. The current trial may still be unfinished. **Pause requested** means the request is pending; **Paused** means automatic continuation has stopped. |
+| **Resume autoresearch** | Continues from the current research state. Optional guidance applies to this resumed loop; leave it blank to continue with existing instructions. |
+| **Stop current run** | Interrupts the active execution. The current turn or trial may remain incomplete. Read its status before resuming. |
+| **Restart autoresearch** | Returns to the brief and materials saved at the first start. Later research work and auxiliary chats are archived, and a new process begins at Trial 1. Review the confirmation dialog carefully. |
 
-Update the CLI and package-managed UI runtime by reinstalling the latest npm
-package:
+When resuming an unfinished trial, leaving the new instruction blank keeps any
+previous resume guidance; entering new guidance replaces it. The resume dialog
+explains this rule before you continue.
 
-```bash
-npm install -g co-auto-research@latest
-```
+Editing an earlier message is different from sending a follow-up. Read the
+confirmation for that message: resending can replace later conversation or
+rerun work. Use a new message when you want to preserve the conversation and
+add a correction. **Continue in agent CLI** copies a provider command; it is
+separate from the dashboard's **Resume autoresearch** action.
 
-Updating the npm package updates the CLI, dashboard, and default UI runtime.
-Existing project research files are not rewritten automatically. Use
-`co-auto-research upgrade` to print the installed version, detected project
-template version, and recommended update command.
+Closing a browser tab does not pause the server. Keep the server process alive
+for work to continue. A stopped or restarted server can interrupt execution;
+return to the dashboard and inspect the recovery action instead of assuming
+that work finished. See [multiple projects](multiple-projects.md) and
+[remote access](remote-server.md) when returning from another machine.
 
-## Create a Project
+## Read the manuscript and generate a paper
 
-1. Click `+` in the left sidebar.
-2. Enter a project name.
-3. Choose the project default agent backend. Codex is the default; Claude Code
-   is optional.
-4. Add a research brief, existing folder, paper bundle, or other resources.
-5. Review the generated framing before starting the autoresearch loop.
+**Manuscript** brings the research narrative, supporting evidence and remaining
+gaps together. After reviewed results are recorded and project agents are idle,
+choose **Generate paper**, enter a venue and year or a general research-report
+target, and review the model settings.
 
-You can change the default backend later in Settings or override one launch
-from the launch dialog. If `COAUTO_AGENT_BACKEND` is set in the server
-environment, the UI shows that backend as forced and runtime launches use it
-until the env var is removed. Only `codex` and `claude` are valid values; other
-values are ignored with a visible warning.
+The internal agent writes from a frozen evidence snapshot, builds figures,
+checks citations and compiles the PDF. Follow progress in Manuscript; you can
+cancel. After a successful generation, **Paper** appears beside Manuscript for
+preview, source downloads and review notes. When replacing a draft, the previous
+PDF stays available if the new generation fails or is cancelled.
 
-Creating a project does not require the selected agent CLI to be installed.
-Starting a run does. The UI checks the selected backend and blocks startup with
-Codex- or Claude-specific install/auth instructions when the CLI is definitely
-missing or unauthenticated.
-
-If you run `co-auto-research ui` outside a generated project, CoAutoResearch
-creates a local dashboard folder:
-
-```text
-co-autoresearch-projects/
-```
-
-Projects created from the UI live there.
-
-## Attach Files
-
-Use the composer `+` button to attach local files to the next message. The UI
-also supports paste and drag-and-drop for files. The `+` button files are copied
-into `resources/user_input/attachments/` by default. You can reclassify an
-attachment in its chip before sending, and uploaded or linked materials are
-recorded in `resources/user_input/RESOURCE_MANIFEST.md`.
-Files over 50 MB prompt for “Copy into resources,” then copy in chunks with
-visible progress before send or launch is enabled again. For existing folders or
-prior project bundles, use the resource browser chips. The server-side browser
-copies files or symlinks folders into the selected `resources/` category.
-
-## Autoresearch Controls
-
-- `Pause after current turn` lets the current agent turn finish, then prevents
-  the autoresearch loop from starting another trial.
-- `Stop current run` terminates the currently running agent process.
-- `Restart autoresearch` archives the current trials, runtime state, working
-  manuscript, generated workspace, and current findings, then starts a new
-  Trial 1 in the same project.
-
-Restart keeps user-uploaded or user-confirmed resources available. Resources
-that were discovered or generated by a prior autoresearch run become archived
-context until you explicitly reattach or confirm them.
-
-## Theme
-
-The dashboard ships with Ivory and Nocturne themes.
-The setting is local to the browser and does not clear composer text,
-attachments, or context chips.
-
-## Return Later
-
-If you closed the browser or terminal, you can find and reopen existing
-projects from the same folder:
-
-```bash
-co-auto-research ls
-co-auto-research attach my-project
-```
-
-`attach` starts the UI for that generated project again. It does not depend on a
-previous UI process still running.
-
-## Start From the CLI
-
-For scripting or a single fixed project:
-
-```bash
-co-auto-research init my-project
-cd my-project
-co-auto-research ui
-```
-
-## Remote Server
-
-If you are SSH'd into a server:
-
-```bash
-co-auto-research ui --remote
-```
-
-With `cloudflared` installed on the server, the CLI prints a temporary
-Cloudflare browser link after the server starts. Keep the terminal open while
-you use the link. If `cloudflared` is missing, the same command prints the
-minimal setup steps first. On Linux servers that need an HTTP proxy for
-internet access, the CLI can route `cloudflared` through `graftcp` and prints
-the one-command `install-graftcp` setup step when that helper is missing.
+Read the claims, figures, citations, limitations and venue requirements before
+sharing a paper. A green check means a draft was generated, not that it is ready
+for submission. See [paper generation](paper-generation.md) and
+[best practices](best-practices.md) for review guidance.

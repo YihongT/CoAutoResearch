@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "target-venue.schema.json",
+  "title": "Target Venue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "project_id",
+    "created_at",
+    "updated_at",
+    "extensions",
+    "target_venue",
+    "audience",
+    "article_type",
+    "lock_level",
+    "locked_by_intervention_id",
+    "profile_path",
+    "alternative_venues",
+    "human_constraints",
+    "last_published_revision"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "artifact_type": {
+      "const": "target_venue"
+    },
+    "project_id": {
+      "$ref": "common.schema.json#/$defs/project_id"
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    },
+    "target_venue": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "audience": {
+      "type": "string"
+    },
+    "article_type": {
+      "type": "string"
+    },
+    "lock_level": {
+      "enum": [
+        "exploratory",
+        "preferred",
+        "locked"
+      ]
+    },
+    "locked_by_intervention_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "profile_path": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/relative_path"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "alternative_venues": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "human_constraints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "last_published_revision": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
