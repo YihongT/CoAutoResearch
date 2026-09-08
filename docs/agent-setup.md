@@ -102,7 +102,7 @@ and paper-export readiness separately if a download, permission, or dependency
 prevents completing the latter. Installing skills alone is not a successful PDF
 setup. The dashboard itself still needs only the prerequisites above.
 
-## 5. Hand off
+## 5. Leave the workspace ready
 
 Report the installed/source version, dashboard URL, project folder, selected
 backend/model, the four skill locations and pinned revision, the paper-environment

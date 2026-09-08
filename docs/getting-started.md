@@ -91,6 +91,8 @@ draft, then send it to make it an instruction for the main research process.
 When the main agent is busy, the input explains whether the message will wait
 for the current turn. Adding a draft alone does not apply a suggestion.
 
+(research-controls)=
+
 ## Pause, continue or start over
 
 | Action | What happens |

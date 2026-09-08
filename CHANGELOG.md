@@ -4,7 +4,7 @@
 
 ### Research experience and documentation
 
-- Unified research-session, draft-handoff, pause and evidence terminology.
+- Unified research-session, research-guidance, pause and evidence terminology.
 - Reworked the README around human direction, autonomous research and a shared evidence record.
 - Added one-instruction setup guidance and an in-product manuscript-to-paper workflow.
 - Updated theme-aware branding and accessible collaboration diagrams.
@@ -24,7 +24,7 @@
 
 ### Collaboration and paper generation
 
-- Added parallel read-only discussion chats and a handoff to the main research draft.
+- Added parallel read-only discussion chats and suggestions prepared in the main research draft.
 - Improved live activity, pause/resume controls, narrow-screen navigation, and
   shared running indicators.
 - Added paper generation from recorded evidence using four pinned scientific

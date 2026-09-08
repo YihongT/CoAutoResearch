@@ -13309,7 +13309,7 @@ function manuscriptReadinessStripHtml(manuscript) {
     `${references.length} reference${references.length === 1 ? "" : "s"}`,
   ].filter(Boolean);
   const action = blueprintBlockers.length
-    ? `${blueprintBlockerCount} manuscript-map issue${blueprintBlockerCount === 1 ? "" : "s"} before paper-writing handoff`
+    ? `${blueprintBlockerCount} manuscript-map issue${blueprintBlockerCount === 1 ? "" : "s"} before paper writing`
     : missingEvidence.length
       ? `${missingEvidence.length} evidence gap${missingEvidence.length === 1 ? "" : "s"} recorded`
       : sections.length
@@ -13658,7 +13658,7 @@ function renderExportPanel() {
   const blockers = Array.isArray(readiness.blockers) ? readiness.blockers : [];
   const blockerItems = blockers.length
     ? blockers.slice(0, 3)
-    : ["The finished-results blueprint is not ready for drafting handoff."];
+    : ["The manuscript needs more work before paper writing."];
   const hiddenBlockerCount = Math.max(0, blockers.length - blockerItems.length);
   const readinessCallout = paperReady
     ? ""
@@ -13677,7 +13677,7 @@ function renderExportPanel() {
   return `
     <div class="export-panel">
       <div class="export-panel-intro">
-        <strong>Paper-writing handoff</strong>
+        <strong>Writing materials</strong>
         <p>${paperReady ? "A clean manuscript package for GPT, Claude, or human co-writing." : "Download the current writing package anytime; readiness only says whether it is paper-ready."}</p>
       </div>
       ${readinessCallout}
@@ -13708,7 +13708,7 @@ function renderExportPanel() {
           <div>
             <header>
               <strong>Clean project package</strong>
-              <em>For handoff</em>
+              <em>For sharing</em>
             </header>
             <p>Final-facing manuscript, workspace, resources, and generated outputs; excludes logs, checkpoints, caches, and secrets.</p>
           </div>

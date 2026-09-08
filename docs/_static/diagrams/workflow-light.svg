@@ -32,7 +32,7 @@
 <text x="52" y="436" fill="#686256" font-size="17" >Explore another approach</text>
 <text x="52" y="461" fill="#686256" font-size="17" >Prepare a suggestion</text>
 <rect x="344" y="314" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
-<text x="364" y="344" fill="#826528" font-size="13" letter-spacing="1.5">HUMAN HANDOFF</text>
+<text x="364" y="344" fill="#826528" font-size="13" letter-spacing="1.5">HUMAN GUIDANCE</text>
 <text x="364" y="377" fill="#26241f" font-size="23" >Review, then send</text>
 <text x="364" y="411" fill="#686256" font-size="17" >Add to research draft</text>
 <text x="364" y="436" fill="#686256" font-size="17" >Edit the scope and wording</text>

@@ -11,7 +11,15 @@ its own claims as canonical truth.
 
 ## System architecture
 
-![The browser uses a local service to coordinate coding agents, preserve the research record, supervise read-only discussion and generate papers from isolated evidence snapshots.](_static/diagrams/architecture.svg)
+```{image} _static/diagrams/architecture.svg
+:alt: The browser uses a local service to coordinate coding agents, preserve the research record, supervise read-only discussion and generate papers from isolated evidence snapshots.
+:class: co-diagram-light
+```
+
+```{image} _static/diagrams/architecture-dark.svg
+:alt: The browser uses a local service to coordinate coding agents, preserve the research record, supervise read-only discussion and generate papers from isolated evidence snapshots.
+:class: co-diagram-dark
+```
 
 The browser sends controls to the local service. The service supervises the
 selected coding-agent CLI and records accepted research changes. Discussion
@@ -76,7 +84,7 @@ continuing the loop.
 
 ## Manuscript Deliverables
 
-The manuscript handoff has two artifacts:
+Manuscript preparation uses two artifacts:
 
 | Artifact | Purpose |
 | --- | --- |
@@ -85,7 +93,7 @@ The manuscript handoff has two artifacts:
 
 Before results exist, `BLUEPRINT.md` is only a stub that points to the plan and
 Critical Path. The UI labels that state as a paper plan or research status, not
-a paper-writing handoff. The Paper-Writing Pack is available only when the
+ready for paper writing. The Paper-Writing Pack is available only when the
 blueprint is non-stub, complete, and free of blocking missing evidence.
 
 The dashboard’s **Generate paper** action is a separate writing workflow. It

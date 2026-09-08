@@ -34,7 +34,7 @@ remote access. This deployment is intended for one trusted researcher.
 | `server.py` | HTTP serving, project operations, agent runs and lifecycle coordination |
 | `index.html`, `styles.css` | Application shell, themes and responsive layout |
 | `app.js` | Research views, controls, polling, previews and settings |
-| `sessions-panel.js`, `aux_sessions.py` | Separate discussion sessions and draft handoff |
+| `sessions-panel.js`, `aux_sessions.py` | Separate discussion sessions and research suggestions |
 | `v2_*.py` | Typed research lifecycle, review, publication and recovery |
 | `paper_export.py`, `paper_tools.py` | Isolated evidence-to-paper execution and its tool environment |
 

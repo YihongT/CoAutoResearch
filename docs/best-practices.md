@@ -44,7 +44,7 @@ When an answer suggests a useful change, choose **Add to research draft**.
 Review the wording and send it to the research session. Make the intended scope
 explicit: “Before the next evaluation, add class-level error analysis” is easier
 to apply than “make the study better.” Check the following plan or result to see
-how the instruction was handled. A draft handoff is not an applied intervention.
+how the instruction was handled. Adding a suggestion to a draft does not send it to the research session.
 
 ## Keep each trial focused
 

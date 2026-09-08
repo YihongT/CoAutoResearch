@@ -2,7 +2,7 @@
 
 This file is the always-current manuscript plan for work that is not yet backed
 by complete real results. Planned, pending, blocked, or obligation language is
-allowed here. It is not the exportable paper-writing handoff.
+allowed here. It is not the exportable manuscript package.
 
 Read alongside:
 

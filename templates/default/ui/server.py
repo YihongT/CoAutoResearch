@@ -11279,22 +11279,22 @@ def export_readme(kind: str, estimate_only: bool = False) -> str:
         readiness = paper_pack_readiness()
         blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
         if readiness.get("ready"):
-            scope = "This package is a clean manuscript handoff for human-machine paper writing. It includes the full-results manuscript blueprint, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets."
+            scope = "This package supports collaborative paper writing. It includes the full-results manuscript blueprint, final findings, venue notes, references, figure/table specs, and referenced final manuscript assets."
             extra: list[str] = [
                 "",
                 "Readiness: structured candidate checks passed.",
                 "Human confirmation is still required for factual correctness, novelty, peer review, and formal submission.",
             ]
         else:
-            scope = "This package contains the current manuscript writing materials. It is downloadable for review, collaboration, and partial handoff, but it has not passed the paper-ready gate."
+            scope = "This package contains the current manuscript writing materials. It is downloadable for review and collaboration, but it has not passed the paper-ready gate."
             extra = ["", "Readiness: not paper-ready.", "", "Current readiness issues:", *(f"- {blocker}" for blocker in blockers[:12] or ["Paper-Writing Pack readiness has not passed."])]
     elif kind == "research_status":
         readiness = paper_pack_readiness()
         blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
-        scope = "This is NOT a paper-writing handoff. Results are incomplete; use this status package to inspect current plans, blockers, state, and findings."
+        scope = "Results are incomplete; use this status package to inspect current plans, blockers, state, and findings."
         extra = ["", "Top blockers:", *(f"- {blocker}" for blocker in blockers[:12] or ["Paper-Writing Pack readiness has not passed."])]
     else:
-        scope = "This package is a clean project handoff with final-facing manuscript, workspace, and resource files. It intentionally excludes autoresearch trajectory, runtime, archive, caches, secrets, and agent scaffolding."
+        scope = "This package contains manuscript, workspace, and resource files. It intentionally excludes autoresearch trajectory, runtime, archive, caches, secrets, and agent scaffolding."
         extra = []
     return "\n".join(
         [
@@ -22996,7 +22996,7 @@ Response language:
 - If the user explicitly asks for another language, follow that request.
 - Do not translate repository artifacts unless the user explicitly asks; keep project files in their established language.
 - In user-facing updates, describe the research action, the observation so far, and the next step. State evidence limits and distinguish a proposal from a recorded result. Keep updates short and useful; do not expose private reasoning or narrate schema maintenance.
-- Describe discussion handoffs as drafts until the user sends them to the research session. Describe service publication as recording reviewed evidence in the project, not external publication or proof of scientific correctness.
+- Describe research suggestions as drafts until the user sends them to the research session. Describe service publication as recording reviewed evidence in the project, not external publication or proof of scientific correctness.
 - For delays or failures, say what remains unfinished, the confirmed cause (or that it is unknown), and the available recovery action. Do not claim work is saved, retrying or successful without the corresponding state.
 """
 

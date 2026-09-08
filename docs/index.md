@@ -6,7 +6,15 @@ CoAutoResearch brings autonomous investigation and human–AI collaboration into
 one research workflow. Define a question, discuss emerging findings, guide the
 next step, and build a manuscript from evidence you can trace.
 
-![Human direction, autonomous research and a shared evidence record.](../assets/co-auto-light.svg)
+```{image} ../assets/co-auto-light.svg
+:alt: Human direction, autonomous research and a shared evidence record.
+:class: co-diagram-light
+```
+
+```{image} ../assets/co-auto-dark.svg
+:alt: Human direction, autonomous research and a shared evidence record.
+:class: co-diagram-dark
+```
 
 ## Co + Auto
 
@@ -26,25 +34,26 @@ It follows the [setup checklist](agent-setup.md), reuses your provider login,
 verifies the dashboard and prepares the paper tools. Creating a project does
 not automatically start research.
 
-Read the [walkthrough](walkthrough.md) to follow discussion, draft handoff,
+Read the [walkthrough](walkthrough.md) to follow discussion, guidance,
 research controls and paper generation. Use [Best practices](best-practices.md) to plan useful
 iterations, and [Paper generation](paper-generation.md) to turn recorded results
 into a draft you can inspect.
 
 ```{toctree}
 :caption: Get started
-:maxdepth: 2
+:maxdepth: 1
 
 getting-started
 agent-setup
 walkthrough
 best-practices
 paper-generation
+faq
 ```
 
 ```{toctree}
 :caption: Using the system
-:maxdepth: 2
+:maxdepth: 1
 
 cli
 multiple-projects
@@ -55,7 +64,7 @@ upgrading
 
 ```{toctree}
 :caption: Technical reference
-:maxdepth: 2
+:maxdepth: 1
 
 conceptual-framework
 ```

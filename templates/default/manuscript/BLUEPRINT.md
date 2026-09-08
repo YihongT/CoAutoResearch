@@ -1,6 +1,6 @@
 # Manuscript Blueprint
 
-Status: pre-results stub. This file becomes the paper-writing handoff only
+Status: pre-results stub. This file becomes ready for paper writing only
 after real, source-backed results, figures, tables, references, and appendix
 materials have been promoted. Until then, planned obligations and blockers live
 in `manuscript/PAPER_PLAN.md` and `research_trajectory/STATE.md` under

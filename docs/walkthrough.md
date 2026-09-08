@@ -4,7 +4,15 @@ This guide follows the product controls from an initial question to a paper
 draft. It describes a workflow, not an experimental result or an external user
 case study. Use your own research question, materials and evaluation criteria.
 
-![From a research brief through autonomous trials, parallel discussion, evidence review and paper generation.](_static/diagrams/workflow-light.svg)
+```{image} _static/diagrams/workflow-light.svg
+:alt: From a research brief through autonomous trials, parallel discussion, evidence review and paper generation.
+:class: co-diagram-light
+```
+
+```{image} _static/diagrams/workflow-dark.svg
+:alt: From a research brief through autonomous trials, parallel discussion, evidence review and paper generation.
+:class: co-diagram-dark
+```
 
 ## 1. Define the question and its boundaries
 

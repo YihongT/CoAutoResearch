@@ -108,19 +108,9 @@ Each **Trial** is a focused research iteration. The agent prepares a bounded pla
 
 The research record connects directions, resources, results, reviews and manuscript content. Technical contracts distinguish proposed work from recorded changes and support recovery after interruptions. An internal review is a workflow check, not external peer review or proof of scientific correctness. [Architecture and lifecycle →](https://yihongt.github.io/CoAutoResearch/conceptual-framework.html)
 
-## Practical questions
-
-**Can I use my existing coding-agent login?** Yes. Reuse an authenticated Codex or Claude Code CLI. Available models, usage limits and billing depend on your provider account; model discovery in Settings shows what the selected backend exposes.
-
-**Where does my research go?** Project files remain in your chosen local or server folder. The configured model provider processes the context sent to it. External resource lookup can use the network. Review sensitive material before attaching it. This release targets one trusted researcher, not public multi-user hosting.
-
-**Can I pause and come back?** Request **Pause after current turn**, wait for **Paused**, then use **Resume autoresearch**. Closing a browser tab does not stop a running server. Server interruptions may require explicit recovery. [Control semantics →](https://yihongt.github.io/CoAutoResearch/getting-started.html#pause-continue-or-start-over)
-
-**What remains my responsibility?** Choosing the question, evaluating scientific claims, resolving decisions that require human judgment and reviewing anything you share or submit. [Research practices →](https://yihongt.github.io/CoAutoResearch/best-practices.html)
-
 ## Documentation and community
 
-[Setup](https://yihongt.github.io/CoAutoResearch/agent-setup.html) · [CLI](https://yihongt.github.io/CoAutoResearch/cli.html) · [Remote access](https://yihongt.github.io/CoAutoResearch/remote-server.html) · [Platforms](https://yihongt.github.io/CoAutoResearch/platforms.html) · [Upgrades](https://yihongt.github.io/CoAutoResearch/upgrading.html)
+[FAQ](https://yihongt.github.io/CoAutoResearch/faq.html) · [Setup](https://yihongt.github.io/CoAutoResearch/agent-setup.html) · [CLI](https://yihongt.github.io/CoAutoResearch/cli.html) · [Remote access](https://yihongt.github.io/CoAutoResearch/remote-server.html) · [Platforms](https://yihongt.github.io/CoAutoResearch/platforms.html) · [Upgrades](https://yihongt.github.io/CoAutoResearch/upgrading.html)
 
 Report reproducible problems through [Issues](https://github.com/YihongT/CoAutoResearch/issues). See [Contributing](CONTRIBUTING.md), the [Code of conduct](CODE_OF_CONDUCT.md) and [Security](SECURITY.md) for contribution and private vulnerability-reporting guidance.
 
@@ -135,3 +125,5 @@ If CoAutoResearch contributes to your research, cite the software and record the
 ```
 
 Licensed under [Apache 2.0](LICENSE). Upstream tools and scientific skills retain their respective licenses and attribution requirements.
+
+Contact: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
