@@ -9,6 +9,16 @@ In v2.0, Markdown remains useful for people, but typed JSON and service-owned
 receipts determine control flow. An agent may propose work; it may not publish
 its own claims as canonical truth.
 
+## System architecture
+
+![The browser uses a local service to coordinate coding agents, preserve the research record, supervise read-only discussion and generate papers from isolated evidence snapshots.](_static/diagrams/architecture.svg)
+
+The browser sends controls to the local service. The service supervises the
+selected coding-agent CLI and records accepted research changes. Discussion
+keeps its own history; paper generation uses a separate evidence snapshot.
+Research data remains in the configured project folder. Context sent to the
+selected model is processed by that provider.
+
 ## Research Loop
 
 ```{mermaid}
@@ -26,10 +36,10 @@ flowchart TD
   G -->|needs_human| H
   G -->|blocked or terminal| B
 
-  classDef human fill:#111411,color:#fffdf6,stroke:#111411;
-  classDef truth fill:#f4f7ef,stroke:#9aac9b,color:#20231f;
-  classDef trial fill:#fffdf7,stroke:#d8cfbd,color:#20231f;
-  classDef output fill:#edf3f6,stroke:#9bb4c2,color:#20231f;
+  classDef human fill:#26241f,color:#faf8f1,stroke:#826528;
+  classDef truth fill:#faf8f1,stroke:#826528,color:#26241f;
+  classDef trial fill:#ffffff,stroke:#ddd7c9,color:#26241f;
+  classDef output fill:#f1ead8,stroke:#826528,color:#26241f;
 
   class H human;
   class O,P,B truth;

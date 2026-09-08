@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640" role="img" aria-labelledby="title desc">
+<title id="title">Research Workflow</title>
+<desc id="desc">A research brief starts autonomous work. Parallel discussion becomes guidance only after the researcher reviews and sends it. Reviewed evidence supports a manuscript and an independently generated paper draft.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M1 1 L7 4 L1 7" fill="none" stroke="#826528" stroke-width="1.5"/></marker></defs>
+<rect width="960" height="640" rx="20" fill="#faf8f1"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="42" fill="#686256" font-size="13" letter-spacing="2">COAUTORESEARCH · RESEARCH WORKFLOW</text>
+<rect x="32" y="80" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="52" y="110" fill="#826528" font-size="13" letter-spacing="1.5">DEFINE</text>
+<text x="52" y="143" fill="#26241f" font-size="23" >Research brief</text>
+<text x="52" y="177" fill="#686256" font-size="17" >Question and materials</text>
+<text x="52" y="202" fill="#686256" font-size="17" >Constraints and approvals</text>
+<text x="52" y="227" fill="#686256" font-size="17" >Review before starting</text>
+<rect x="344" y="80" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="364" y="110" fill="#826528" font-size="13" letter-spacing="1.5">AUTO</text>
+<text x="364" y="143" fill="#26241f" font-size="23" >Autonomous trials</text>
+<text x="364" y="177" fill="#686256" font-size="17" >Plan · Execute · Interpret</text>
+<text x="364" y="202" fill="#686256" font-size="17" >Review proposed findings</text>
+<text x="364" y="227" fill="#686256" font-size="17" >Continue within the brief</text>
+<rect x="656" y="80" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="676" y="110" fill="#826528" font-size="13" letter-spacing="1.5">EVIDENCE</text>
+<text x="676" y="143" fill="#26241f" font-size="23" >Inspect the record</text>
+<text x="676" y="177" fill="#686256" font-size="17" >Read trials and reviews</text>
+<text x="676" y="202" fill="#686256" font-size="17" >Check claims and limits</text>
+<text x="676" y="227" fill="#686256" font-size="17" >Decide what comes next</text>
+<path d="M304 166 H334" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M616 166 H646" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="32" y="314" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="52" y="344" fill="#826528" font-size="13" letter-spacing="1.5">CO · PARALLEL CHAT</text>
+<text x="52" y="377" fill="#26241f" font-size="23" >Discuss findings</text>
+<text x="52" y="411" fill="#686256" font-size="17" >Question an assumption</text>
+<text x="52" y="436" fill="#686256" font-size="17" >Explore another approach</text>
+<text x="52" y="461" fill="#686256" font-size="17" >Prepare a suggestion</text>
+<rect x="344" y="314" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="364" y="344" fill="#826528" font-size="13" letter-spacing="1.5">HUMAN HANDOFF</text>
+<text x="364" y="377" fill="#26241f" font-size="23" >Review, then send</text>
+<text x="364" y="411" fill="#686256" font-size="17" >Add to research draft</text>
+<text x="364" y="436" fill="#686256" font-size="17" >Edit the scope and wording</text>
+<text x="364" y="461" fill="#686256" font-size="17" >Send to the research session</text>
+<path d="M304 400 H334" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M480 314 V264" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="500" y="289" fill="#686256" font-size="14" >Guidance</text>
+<rect x="656" y="314" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
+<text x="676" y="344" fill="#826528" font-size="13" letter-spacing="1.5">WRITE</text>
+<text x="676" y="377" fill="#26241f" font-size="23" >Manuscript → Paper</text>
+<text x="676" y="411" fill="#686256" font-size="17" >Use recorded evidence</text>
+<text x="676" y="436" fill="#686256" font-size="17" >Generate when agents idle</text>
+<text x="676" y="461" fill="#686256" font-size="17" >Review the PDF and notes</text>
+<path d="M792 254 V304" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M32 526 H928" stroke="#ddd7c9"/>
+<text x="32" y="562" fill="#26241f" font-size="20" >Pause at a turn boundary. Inspect progress. Resume with guidance.</text>
+<text x="32" y="596" fill="#686256" font-size="17" >Drafting a suggestion does not send it. A generated paper still needs human review.</text>
+</g></svg>

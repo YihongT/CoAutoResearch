@@ -1,5 +1,6 @@
 project = "CoAutoResearch"
 author = "CoAutoResearch contributors"
+copyright = "2026, CoAutoResearch contributors"
 
 extensions = [
     "myst_parser",

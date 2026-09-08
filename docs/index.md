@@ -6,6 +6,8 @@ CoAutoResearch brings autonomous investigation and human–AI collaboration into
 one research workflow. Define a question, discuss emerging findings, guide the
 next step, and build a manuscript from evidence you can trace.
 
+![Human direction, autonomous research and a shared evidence record.](../assets/co-auto-light.svg)
+
 ## Co + Auto
 
 **Co — Research together.** Discuss a finding while the agent works. Prepare a
