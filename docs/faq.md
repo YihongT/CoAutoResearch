@@ -23,6 +23,12 @@ has no application dependency installation or build step. Follow
 [agent setup](agent-setup.md) for the dashboard and separate paper tools. An
 older npm version may not include the current source features.
 
+## How do I change the documentation theme?
+
+The documentation opens in light mode by default. Use **Dark mode** or
+**Light mode** below the sidebar search, or in the mobile header. Your choice
+is saved in this browser and kept when you open another page.
+
 ## Where can I ask a question or report a problem?
 
 Use [GitHub Issues](https://github.com/YihongT/CoAutoResearch/issues) for

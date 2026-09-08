@@ -18,6 +18,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static", "../assets"]
 html_css_files = ["coautoresearch.css"]
+html_js_files = ["docs-theme.js"]
 templates_path = ["_templates"]
 html_title = "CoAutoResearch"
 html_baseurl = "https://yihongt.github.io/CoAutoResearch/"

@@ -1,16 +1,16 @@
 {% extends "!layout.html" %}
 {% block sidebartitle %}
 <a class="co-brand" href="{{ pathto(root_doc) }}">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="{{ pathto('_static/logo.svg', 1) }}">
-    <img src="{{ pathto('_static/logo-white.svg', 1) }}" alt="" width="38" height="40">
-  </picture>
+  <img class="co-diagram-light" src="{{ pathto('_static/logo-white.svg', 1) }}" alt="" width="38" height="40">
+  <img class="co-diagram-dark" src="{{ pathto('_static/logo.svg', 1) }}" alt="" width="38" height="40">
   <span><strong>CoAutoResearch</strong><small>Documentation</small></span>
 </a>
 {% include "searchbox.html" %}
+<button class="co-theme-toggle" data-docs-theme-toggle type="button" aria-label="Switch to dark theme">Dark mode</button>
 {% endblock %}
 
 {% block mobile_nav %}
 <button class="co-nav-toggle" data-toggle="wy-nav-top" type="button" aria-label="Toggle navigation"><i class="fa fa-bars" aria-hidden="true"></i></button>
 <a href="{{ pathto(root_doc) }}">{{ project }}</a>
+<button class="co-theme-toggle" data-docs-theme-toggle type="button" aria-label="Switch to dark theme">Dark mode</button>
 {% endblock %}
