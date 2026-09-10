@@ -262,7 +262,7 @@ html[data-theme] .rail .rail-action span {
 }
 html[data-theme] .rail-sessions {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: min-content;
   /* No left indent/border here: this nav now holds only the CHATS list --
      Autoresearch session lives in the separate #rail-sessions-evolution
      block above -- so indenting it would put its rows out of column with

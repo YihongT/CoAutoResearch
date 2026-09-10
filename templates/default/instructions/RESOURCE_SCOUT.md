@@ -172,6 +172,52 @@ not help this trial.
 
 ## Search Taxonomy
 
+### Decision-focused search and inspection
+
+Start with the current research decision and an inventory of sources already
+inspected. Identify the specific missing knowledge before choosing queries:
+method assumptions or alternatives, dataset provenance or limitations,
+evaluation reliability, conflicting findings, or manuscript context. Select
+only the dimensions relevant to this trial. Venue/style examples cannot replace
+method or evidence sources merely because they are recent or well presented.
+
+For each decision-relevant source, inspect the original material that supports
+the proposed use: for example its method, experimental setting, results,
+limitations, dataset documentation, or versioned implementation. A title,
+search snippet, citation record, or abstract establishes only what it actually
+contains; it does not establish detailed methods, results, or paper structure.
+Record the inspected section/page or source-code location and access depth.
+Use clickable Markdown links for source locators in the human-readable report.
+Verify that section/line anchors belong to the source itself. Web extraction
+line numbers are not source-code line numbers or PDF page numbers. If a precise
+anchor is unverified, link the versioned file/page and name the inspected
+function or section instead of inventing a fragment. Prefer this function/section
+locator by default. Add source-code line ranges only after counting lines in the
+unmodified raw file and checking that the range includes the cited implementation
+statements, not merely the function declaration or its docstring.
+If full text is unavailable, retain the source as a lead with that limitation,
+try a public author/publisher version when appropriate, and do not promote
+uninspected claims. Local download is optional for accessible contextual
+material; content inspection is not the same as downloading.
+
+Use a bounded search: start with focused queries and primary sources, follow
+relevant citations when they resolve a named gap, and stop when the decision's
+coverage is sufficient or the declared search budget is reached. Reuse valid
+prior inspection notes. Do not impose a reference count, require recency for
+stable foundational work, repeat broad searches every trial, or collect papers
+only to enlarge a bibliography. Record unresolved gaps and their practical
+impact rather than pretending the search is exhaustive.
+
+In the existing Scout report, map each useful source to the research decision
+or manuscript claim it can support, its relevant limitations, and the proposed
+effect (change, qualify, retain, or defer). A justified no-change result is
+valid. The main agent must disposition these leads in the current Plan/Report
+and, where relevant, the staged manuscript with citations and source locators;
+discovery alone is not integration or accepted evidence. Newly suggested
+experiments remain subject to the user's budget and evaluation boundaries.
+Do not use new literature to retroactively describe post-result exploration
+as a prespecified analysis.
+
 Search according to the overall research target, current state/findings, and
 trial objective. Common resource types include files, papers, surveys, datasets,
 benchmarks, code repositories, reports, news, standards, policies, venue
@@ -425,6 +471,7 @@ Use this structure:
 - Gaps:
 
 ## Candidate Implications
+- Source-to-decision/claim mapping (with inspected location and access depth):
 - Potential assumptions affected:
 - Potential evidence or method implications:
 - Potential venue/manuscript implications:

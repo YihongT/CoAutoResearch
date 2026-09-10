@@ -24,6 +24,8 @@ page limits are ceilings, and missing research cannot be repaired by padding.
 After an interruption, a same-evidence retry also carries forward the last
 diagnostics and prioritizes unfinished compilation and checks; completed work
 and already verified records are reused.
+For an unchanged snapshot, the agent starts with the existing draft and concrete
+issues, retaining valid checks and rerunning those affected by its edits.
 
 The source ZIP includes LaTeX, plotting code, the evidence snapshot, bibliography,
 and build/review notes. A generated paper is a draft for human review, not an
@@ -41,7 +43,7 @@ product. Do not manually write a paper as a substitute for testing the button.
    by the selected provider using its existing login; public citation/template
    lookup requires network access.
 2. Find Python **3.12+**, Git, **latexmk**, a LaTeX installation including common
-   conference packages, and **Poppler** (`pdfinfo`, `pdffonts`, `pdftoppm`). Reuse existing
+   conference packages, and **Poppler** (`pdfinfo`, `pdffonts`, `pdftoppm`, `pdftotext`). Reuse existing
    tools. For missing tools use the platform's normal installer, preserving
    existing environments. On macOS, MacTeX supplies LaTeX and `brew install
    poppler` supplies previews. On Debian/Ubuntu, the usual packages are
@@ -105,13 +107,16 @@ scientific results remains a separate autoresearch operation.
 
 Writing and compilation run as supervised processes with time limits and a
 cancellation path. The service recompiles with shell escape disabled, checks for
-unresolved references/citations, overflow and font problems, returns concrete
+unresolved references/citations, overflow, font problems and colliding figure
+labels, returns concrete
 errors to the writing agent for at most two repair passes, renders every PDF
 page and releases a separate
 artifact copy only after these steps pass. The browser exposes only named
 artifacts belonging to the current project. Successful compilation is not proof
 of scientific accuracy: inspect the preview and review notes before using the
-paper.
+paper. Figure text checks catch overlapping words and near-touching numeric
+labels; they do not establish that annotations are clear of plotted data.
+The writing agent must also inspect the rendered figures and pages visually.
 
 The manuscript must preserve evidence limits, failed experiments and uncertain
 technical causes. It must not manufacture results, authors, bibliographic records,

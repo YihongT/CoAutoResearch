@@ -4,6 +4,14 @@
 
 Target venue is an active research constraint, not a final formatting field. Store machine state in `resources/target_venue/TARGET_VENUE.json` with a readable Markdown view.
 
+A null `target_venue` means no venue is configured. A general research report
+can be reviewed against its declared audience, article type, evidence standard,
+and deliverable without selecting a conference or manufacturing a venue profile.
+Keep those project requirements explicit. Venue-specific official guidance,
+seed papers, and profile readiness apply when a venue is configured; their
+absence alone is not a blocker for an explicitly venue-independent report.
+This does not imply submission readiness or relax scientific and final review.
+
 ## Lock levels
 
 - `exploratory`: alternatives may be investigated and proposed.

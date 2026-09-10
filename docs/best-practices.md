@@ -80,6 +80,20 @@ for this project in **Settings → Agent → Advanced config** with
 This enables network access for commands, not just the browser search tool.
 See the [official Codex network documentation](https://learn.chatgpt.com/docs/agent-approvals-security#network-access).
 
+## Make resource searches useful
+
+Ask which missing source could change the method, comparison or interpretation.
+Resource Scout can inspect relevant papers, dataset documentation and code;
+its reports are available in **Resources → Research source reports**. Check what
+was actually read, how it affects the next step and which gaps remain. Finding
+a citation is not the same as verifying the claim it is used to support.
+
+Reuse adequate source checks. A local experiment may still need better method
+or evaluation grounding, while a purely local repair may need no new search.
+Judge source coverage and relevance rather than bibliography length. New
+literature does not justify repeating a used final test set or presenting
+post-result exploration as an analysis specified in advance.
+
 ## Give guidance at the right boundary
 
 Use **Pause after current turn** when you want to review progress before automatic
@@ -125,3 +139,12 @@ uncertainty, units and comparison conditions. Conceptual illustrations must not
 be presented as experimental evidence. Then inspect citations, author details,
 limitations, ethics statements and the actual venue requirements before sharing.
 See [paper generation](paper-generation.md) for tools, cancellation and recovery.
+
+## Model connection stalls
+
+During Codex research, a model request with no progress for 20 minutes is stopped so
+the dashboard does not wait indefinitely. Diagnostic retries do not extend this
+deadline. An explicitly running tool is allowed to finish under its own resource
+limits. This is a runtime interruption, not evidence against the research idea.
+Review Activity and resume the unfinished phase when the connection is available;
+CoAutoResearch does not automatically spend another Trial to retry this timeout.

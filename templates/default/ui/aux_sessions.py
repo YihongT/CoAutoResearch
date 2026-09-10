@@ -2109,9 +2109,10 @@ class AuxSessionManager:
             if not isinstance(item, dict):
                 continue
             name = str(item.get("name") or "attachment").strip()
-            encoded = str(item.get("contentBase64") or "").strip()
-            if not encoded:
+            encoded = item.get("contentBase64")
+            if not isinstance(encoded, str):
                 continue
+            encoded = encoded.strip()
             try:
                 data = base64.b64decode(encoded, validate=True)
             except Exception:

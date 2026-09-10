@@ -555,7 +555,7 @@
     if (status === "stopping") return "Stopping";
     if (session?.running || status === "running") return "Running";
     if (status === "error") return "Error";
-    if (status === "failed") return "Failed";
+    if (status === "failed") return "Needs attention";
     if (status === "interrupted" && session.kind === "evolution" && session.loop_stop_reason === "paused_by_user") return "Paused";
     if (status === "interrupted") return "Interrupted";
     return "Idle";
@@ -1342,6 +1342,10 @@
       var nextActive = visibleSessions().find(function (session) { return session.id === state.activeId; });
       renderRail();
       if (!state.surfaceActive || !nextActive) return;
+      if (needsSessionSnapshotPolling()) {
+        await refreshSessionSnapshot(nextActive.id);
+        return;
+      }
       if (previousActive && sessionSummaryKey(previousActive) === sessionSummaryKey(nextActive)) return;
       renderSessionView();
     } catch (err) {
@@ -1504,8 +1508,13 @@
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id));
       if (pid !== projectId()) return;
-      updateSession(r.session);
-      renderAll();
+      var previous = state.sessions.find(function (item) { return item.id === id; });
+      var next = normalizeSession(r.session, previous);
+      var changed = JSON.stringify(previous) !== JSON.stringify(next);
+      updateSession(next);
+      // Polling is also used when SSE slots are full. An unchanged snapshot must
+      // not replace clickable messages, reset scroll, or discard an edit draft.
+      if (changed) renderAll();
       if (options.workspace && state.activeId === id) loadWorkspace(id, state.wsPath || "");
     } catch (err) {
       console.warn("[sessions] snapshot refresh failed", err);
@@ -1764,6 +1773,18 @@
     }
   }
 
+  function sessionFileReference(path, id) {
+    var value = String(path || "");
+    if (value.startsWith("[project]/")) return { scope: "project", path: value.slice(10) };
+    if (value.startsWith("attachments/")) return { scope: "workspace", path: value };
+    if (!value.startsWith("[session-runtime]/")) return null;
+    var match = value.match(/^\[session-runtime\]\/([^/]+)\/workspace\/(.+)$/);
+    if (!match || match[1] !== id || match[2].split("/").some(function (part) { return part === ".."; })) {
+      return { scope: "unavailable" };
+    }
+    return { scope: "workspace", path: match[2] };
+  }
+
   async function previewFile(id, relPath) {
     try {
       var r = await apiCall("/api/sessions/" + encodeURIComponent(id) + "/workspace/file?path=" + encodeURIComponent(relPath));
@@ -1842,13 +1863,22 @@
     });
   }
 
-  function connectEvents(id) {
+  function needsSessionSnapshotPolling() {
+    return state.surfaceActive && state.activeId && !isDraftSessionId(state.activeId)
+      && (!state.eventSource || state.eventSource.readyState !== 1);
+  }
+
+  function disconnectEvents() {
     if (state.eventSource) {
       state.eventSource.close();
       state.eventSource = null;
       state.eventSourceId = "";
     }
-    if (!id || isDraftSessionId(id)) return;
+  }
+
+  function connectEvents(id) {
+    disconnectEvents();
+    if (document.hidden || !id || isDraftSessionId(id)) return;
     var since = Number(state.eventLastIds[id] || 0);
     var url = withProject("/api/sessions/" + encodeURIComponent(id) + "/events" + (since > 0 ? "?since=" + encodeURIComponent(String(since)) : ""));
     var es = new EventSource(url);
@@ -1887,6 +1917,19 @@
     });
     es.onerror = function () {};
   }
+
+  function resumeSessionEvents() {
+    if (document.hidden || !state.surfaceActive || !state.activeId || isDraftSessionId(state.activeId)) return;
+    connectEvents(state.activeId);
+    refreshSessionSnapshot(state.activeId, { workspace: true });
+  }
+
+  window.addEventListener("pagehide", disconnectEvents);
+  window.addEventListener("pageshow", resumeSessionEvents);
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) disconnectEvents();
+    else resumeSessionEvents();
+  });
 
   function renderAll() {
     renderRail();
@@ -2122,6 +2165,17 @@
     var log = document.getElementById("sv-chat-log");
     if (log) {
       log.addEventListener("click", function (event) {
+        var fileLink = event.target.closest("[data-inline-fullscreen]");
+        var reference = fileLink && sessionFileReference(fileLink.dataset.inlineFullscreen, state.activeId);
+        if (reference?.scope === "project") {
+          fileLink.dataset.inlineFullscreen = reference.path;
+        } else if (reference) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (reference.scope === "workspace") previewFile(state.activeId, reference.path);
+          else notify("This file reference is not available in the current chat. Open its original chat to view it.", true);
+          return;
+        }
         var messageHandoff = event.target.closest("[data-session-handoff]");
         if (messageHandoff) {
           event.preventDefault();
@@ -2337,7 +2391,7 @@
     setInterval(async function () {
       if (!window.activeProjectId) return;
       var running = state.sessions.some(function (session) { return sessionStatusClass(session) === "running"; });
-      if (railPollPending || (!running && (!state.surfaceActive || Date.now() - lastRailPoll < 15000))) return;
+      if (railPollPending || (!running && !needsSessionSnapshotPolling() && (!state.surfaceActive || Date.now() - lastRailPoll < 15000))) return;
       railPollPending = true;
       lastRailPoll = Date.now();
       try { await loadSessions(); } finally { railPollPending = false; }

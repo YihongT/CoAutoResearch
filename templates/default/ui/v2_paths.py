@@ -424,6 +424,10 @@ def resolve_project_path(
     candidate = root.joinpath(*normalized.split("/"))
     try:
         resolved = candidate.resolve(strict=must_exist)
+    except FileNotFoundError as exc:
+        raise UnsafeProjectPath(f"required project path does not exist: {normalized}") from exc
+    except NotADirectoryError as exc:
+        raise UnsafeProjectPath(f"project path has a non-directory parent: {normalized}") from exc
     except (OSError, RuntimeError) as exc:
         raise UnsafeProjectPath("project path cannot be resolved safely") from exc
     if not _contained(root, resolved):

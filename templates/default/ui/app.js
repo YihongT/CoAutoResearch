@@ -22,9 +22,12 @@ function normalizeMaterialPanel(panel, fallback = "resources") {
 }
 
 function initialNavigationPanel(projectId) {
+  // Startup restores navigation after asynchronous settings loads. Honor a
+  // panel the user selected meanwhile, rather than the page-load URL snapshot.
+  const urlParams = new URLSearchParams(window.location.search);
   return normalizeNavigationPanel(
-    initialUrlParams.get("view") ||
-      initialUrlParams.get("panel") ||
+    urlParams.get("view") ||
+      urlParams.get("panel") ||
       projectScopedGet(projectId, "activeNavigationPanel", localStorage.getItem("coAutoResearchActivePanel") || "chat")
   );
 }
@@ -82,6 +85,7 @@ let editingFramingId = "";
 let editingQueuedChatId = "";
 const pendingQueueEditSaves = new Set();
 const pendingQueueSends = new Set();
+const pendingQueueDispatches = new Set();
 let draggingQueuedChatId = "";
 let queueActionMenuOpen = false;
 const editAttachmentDrafts = new Map();
@@ -931,7 +935,7 @@ function resolveReviewReference(path, context) {
 
 function markdownFileButtonHtml(path, label = path, options = {}) {
   if (options.linkFiles === false) return `<code>${escapeHtml(label)}</code>`;
-  let value = repoRelativePath(path);
+  let value = repoRelativePath(path).replace(/(?::[0-9]+(?::[0-9]+)?(?:-[0-9]+)?|#L[0-9]+(?:-L?[0-9]+)?)$/, "");
   if (!value || value.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(value)) return `<code>${escapeHtml(label)}</code>`;
   let reviewAttrs = "";
   const reviewName = value.match(/^(?:reviews\/)?([A-Z][A-Z0-9_]*_REVIEW\.(?:md|json))$/)?.[1];
@@ -951,6 +955,22 @@ function markdownCodeHtml(value, options = {}) {
   const linkTarget = text.includes("::") ? text.split("::")[0] : text;
   const path = repoRelativePath(linkTarget.replace(/[.,;:)]+$/, ""));
   if (/^(?:resources|research_trajectory|manuscript|workspace|archive|instructions|templates|ui)\//.test(path) || /^[A-Z0-9_./-]+\.(?:md|pdf|png|jpg|jpeg|svg|csv|tsv|json|jsonl|ipynb|txt|tex|bib|py|js|ts|tsx|jsx|html|css|scss|r|rb|php|pl|lua|java|go|rs|c|h|cpp|hpp|m|mm|swift|kt|kts|sh|bash|zsh|sql|toml|ini|cfg|conf)$/i.test(path)) {
+    if (!path.includes("/") && !(options.bindReviewReferences && /^[A-Z][A-Z0-9_]*_REVIEW\.(?:md|json)$/.test(path))) {
+      // A code-styled filename may refer to external source code, not a
+      // project file. Only infer a link when the loaded file inventory can
+      // resolve it; explicit Markdown links retain their existing behavior.
+      const matches = new Set();
+      const visit = (node) => {
+        if (!node) return;
+        if (node.type === "file" && node.path?.split("/").at(-1) === path) matches.add(node.path);
+        (node.children || []).forEach(visit);
+      };
+      Object.values(appState?.trees || {}).forEach(visit);
+      const canonical = Object.values(appState?.files || {}).find((file) => file?.exists && file.path?.split("/").at(-1) === path)?.path;
+      const relative = markdownFilePath(path, options);
+      const resolved = matches.has(relative) ? relative : canonical || (matches.size === 1 ? [...matches][0] : "");
+      return resolved ? markdownFileButtonHtml(resolved, text, options) : `<code>${escapeHtml(text)}</code>`;
+    }
     return markdownFileButtonHtml(path, text, options);
   }
   return `<code>${escapeHtml(text)}</code>`;
@@ -968,19 +988,47 @@ function markdownMathHtml(formula, display, source) {
   }
 }
 
+function markdownLinkDestination(source, start) {
+  let depth = 0;
+  const angled = source[start] === "<";
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "\n" || char === "\r") return null;
+    if (char === "\\") { index += 1; continue; }
+    if (angled) {
+      if (char !== ">") continue;
+      if (source[index + 1] !== ")") return null;
+      return { href: source.slice(start, index + 1), end: index + 2 };
+    }
+    if (char === "(") depth += 1;
+    if (char === ")") {
+      if (!depth) return { href: source.slice(start, index).replace(/\\([\\()<>])/g, "$1"), end: index + 1 };
+      depth -= 1;
+    }
+  }
+  return null;
+}
+
 function inlineMarkup(text, options = {}) {
   const source = String(text ?? "");
   const tokens = /`([^`]+)`|!\[([^\]\n]*)\]\(([^)\n]+)\)|\[([^\]\n]+)\]\(([^)\n]+)\)|\*\*([^*]+)\*\*|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<![\\\w$])\$([^\s$](?:[^$\n]*[^\s$])?)\$(?![\w$])/g;
   const html = [];
   let cursor = 0;
-  for (const match of source.matchAll(tokens)) {
+  for (let match; (match = tokens.exec(source));) {
     html.push(escapeHtml(source.slice(cursor, match.index)));
     if (match[1] !== undefined) html.push(markdownCodeHtml(match[1], options));
-    else if (match[2] !== undefined) html.push(markdownImageHtml(match[2], match[3], options));
-    else if (match[4] !== undefined) html.push(markdownLinkHtml(match[4], match[5], options));
+    else if (match[2] !== undefined || match[4] !== undefined) {
+      const destination = markdownLinkDestination(source, match.index + match[0].indexOf("](") + 2);
+      if (destination) {
+        html.push(match[2] !== undefined
+          ? markdownImageHtml(match[2], destination.href, options)
+          : markdownLinkHtml(match[4], destination.href, options));
+        tokens.lastIndex = destination.end;
+      } else html.push(escapeHtml(match[0]));
+    }
     else if (match[6] !== undefined) html.push(`<strong>${inlineMarkup(match[6], options)}</strong>`);
     else html.push(markdownMathHtml(match[7] ?? match[8] ?? match[9] ?? match[10], match[7] !== undefined || match[8] !== undefined, match[0]));
-    cursor = match.index + match[0].length;
+    cursor = tokens.lastIndex;
   }
   html.push(escapeHtml(source.slice(cursor)));
   return html.join("");
@@ -1994,6 +2042,8 @@ async function refreshAgentStatuses() {
     uiSettings = { ...(uiSettings || {}), agent_status: payload.settings?.agent_status };
     renderAllAgentStatusNotes();
     renderAgentSetupCards();
+    renderAgentStatusBanner();
+    runInitialPreflightFlow();
   } catch (error) {
     showToast(error.message, true);
   }
@@ -2450,12 +2500,32 @@ function releasePageRuntimeConnections() {
   workingTickerTimer = null;
 }
 
+function resumePageRuntimeConnections() {
+  if (document.hidden || !activeProjectId) return;
+  startResearchEventStream({ force: true });
+  queueStreamingOverviewRefresh();
+  scheduleOverviewPoll(1000);
+  pollPaperStatus();
+}
+
 window.addEventListener("pagehide", releasePageRuntimeConnections);
+window.addEventListener("pageshow", resumePageRuntimeConnections);
+document.addEventListener("visibilitychange", () => {
+  // Hidden tabs keep durable server state, but must not occupy HTTP/1.x
+  // connection slots needed by foreground navigation and paper requests.
+  if (document.hidden) stopResearchEventStream();
+  else resumePageRuntimeConnections();
+});
 
 function clearOverviewPoll() {
   clearTimeout(overviewPollTimer);
   overviewPollTimer = null;
   overviewPollGeneration += 1;
+}
+
+function v2LifecycleChanged(previous, next) {
+  return ["phase", "status", "canonical_revision"].some((key) => previous?.v2?.[key] !== next?.v2?.[key])
+    || previous?.loop_stop_reason !== next?.loop_stop_reason;
 }
 
 function queueStreamingOverviewRefresh() {
@@ -2566,7 +2636,10 @@ function applyResearchEventPayload(payload) {
   renderResumeCommandBar();
   renderComposerSuggestions();
   scheduleWorkingTicker();
-  if (payload.kind === "completed" || payload.kind === "error") queueStreamingOverviewRefresh();
+  // A streamed run can advance before the status poll observes the old ID.
+  // Refresh published trial records at that boundary as well as at completion.
+  const runChanged = Boolean(nextSession.id && nextSession.id !== currentSession.id);
+  if (runChanged || v2LifecycleChanged(currentSession, nextSession) || payload.kind === "completed" || payload.kind === "error") queueStreamingOverviewRefresh();
   return true;
 }
 
@@ -2580,12 +2653,13 @@ function handleResearchEventMessage(event) {
 
 function scheduleResearchEventReconnect() {
   clearTimeout(researchEventReconnectTimer);
-  if (!activeProjectId || researchEventFailureCount >= 3) return;
+  if (document.hidden || !activeProjectId || researchEventFailureCount >= 3) return;
   const delay = Math.min(10000, 1000 * Math.max(1, researchEventFailureCount));
   researchEventReconnectTimer = setTimeout(() => startResearchEventStream({ force: true }), delay);
 }
 
 function startResearchEventStream(options = {}) {
+  if (document.hidden) { stopResearchEventStream(); return; }
   if (!activeProjectId || typeof EventSource === "undefined") return;
   if (researchEventFailureCount >= 3 && !options.force) return;
   if (researchEventSource && researchEventProjectId === activeProjectId && !options.force) return;
@@ -2744,9 +2818,11 @@ function startOptimisticAutoresearchSession(settings) {
 function startOptimisticV2RetrySession(settings, action = "Resume") {
   const startedAt = new Date().toISOString();
   const current = clonePlainObject(appState?.research_session) || {};
+  const nextTrial = current.v2?.phase === "terminal" && current.v2?.status === "published";
   optimisticResearchSession = {
     ...current,
     optimistic_base_revision: researchSessionControlRevision(current),
+    optimistic_next_trial: nextTrial,
     status: "running",
     started_at: startedAt,
     settings: normalizeSessionSettings(settings || {}),
@@ -2764,7 +2840,7 @@ function startOptimisticV2RetrySession(settings, action = "Resume") {
       trajectory_mismatch: false,
     },
     v2: current.v2 && typeof current.v2 === "object"
-      ? { ...current.v2, status: "agent_running", errors: [] }
+      ? { ...current.v2, status: nextTrial ? "published" : "agent_running", errors: [] }
       : current.v2,
   };
   renderStage();
@@ -3273,6 +3349,10 @@ async function upgradeProjectReviewers(projectId) {
   };
   renderProjectList();
   if (id === activeProjectId) {
+    if (/package-managed project files are out of date/i.test(paperStatusError)) {
+      paperStatusError = "";
+      updatePaperStatus();
+    }
     setProjectLoadPhase("overview");
     await loadOverview(true);
   }
@@ -3717,7 +3797,7 @@ async function loadResearchSessionStatus() {
       project?.id === requestedProjectId ? { ...project, ...projectPatch } : project
     ));
   }
-  if (runChanged || crossedRunBoundary || (activeView === "materials" && Date.now() - materialOverviewCheckedAt >= 5000)) {
+  if (runChanged || crossedRunBoundary || v2LifecycleChanged(previous, next) || (activeView === "materials" && Date.now() - materialOverviewCheckedAt >= 5000)) {
     await loadOverview(true);
     return;
   }
@@ -4243,7 +4323,7 @@ function activeRunProgress() {
   const phase = String(v2.phase || "plan").trim().toLowerCase();
   const stages = {
     plan: [1, "Planning"],
-    prepare: [2, "Working"],
+    prepare: [2, Number(v2.output_recovery_count || 0) > 0 ? "Repairing" : "Working"],
     repair: [2, "Repairing"],
     review: [5, "Reviewing"],
   };
@@ -4261,7 +4341,20 @@ function activeRunMode() {
   return String(activeRun().mode || sessionState().mode || "").toLowerCase();
 }
 
+function isV2TrialAdmissionPending(session = sessionState()) {
+  const run = session.active_run || {};
+  if (String(run.mode || session.mode || "").toLowerCase() !== "v2_trial"
+      || !["running", "stopping"].includes(String(session.status || ""))) return false;
+  if (session.optimistic_next_trial === true) return true;
+  if (session.v2?.phase === "terminal" && session.v2?.status === "published") return true;
+  // Admission can update the stage before the active-run projection catches up.
+  // A published trial remains complete throughout that transition.
+  return run.running === true && Number(run.trial_iteration) > 0
+    && reportForIteration(Number(run.trial_iteration))?.is_closed === true;
+}
+
 function activeRunTrialIteration() {
+  if (isV2TrialAdmissionPending()) return 0;
   const value = Number(activeRun().trial_iteration || 0);
   if (Number.isFinite(value) && value > 0) return value;
   if (activeRunMode() !== "v2_trial") return 0;
@@ -4492,6 +4585,9 @@ function renderQueuedChatPanel() {
   const editorScrollTop = editor?.scrollTop;
   const visible = items.slice(0, 3);
   const extra = Math.max(0, items.length - visible.length);
+  const canDispatch = !isSessionRunning() && !hasUnfinishedV2Trial();
+  const dispatchPending = pendingQueueDispatches.has(String(activeProjectId || ""));
+  const dispatchError = canDispatch && !dispatchPending && String(sessionState().last_event_summary || "").match(/^Queued chat could not start: (.+)$/)?.[1];
   panel.hidden = !items.length;
   const html = items.length
     ? `
@@ -4499,7 +4595,9 @@ function renderQueuedChatPanel() {
         <div class="queue-panel-head">
           <span>Queued</span>
           <strong>${escapeHtml(items.length)} message${items.length === 1 ? "" : "s"}</strong>
+          ${canDispatch ? `<button class="secondary-button small-button" type="button" data-queue-dispatch${dispatchPending || editingQueuedChatId ? " disabled" : ""}>${dispatchPending ? "Sending…" : "Send queued messages"}</button>` : ""}
         </div>
+        ${canDispatch ? `<div class="queue-more" role="status">${dispatchError ? `Last send failed: ${escapeHtml(researchDiagnosticText(dispatchError))}` : "Replies will be sent in order. Autoresearch waits for Resume."}</div>` : ""}
         <div class="queue-list">
           ${visible.map((item, index) => queuedChatItemHtml(item, index, items)).join("")}
         </div>
@@ -4668,6 +4766,28 @@ async function reorderQueuedChatItems(ids) {
   if (requestedProjectId !== String(activeProjectId || "")) return;
   updateQueuedChatSessionFromPayload(response);
   return response;
+}
+
+async function sendQueuedChatMessages() {
+  const projectId = String(activeProjectId || "");
+  if (!projectId || isSessionRunning() || hasUnfinishedV2Trial() || editingQueuedChatId || pendingQueueDispatches.has(projectId)) return;
+  pendingQueueDispatches.add(projectId);
+  renderQueuedChatPanel();
+  try {
+    const response = await api("/api/research/queue/dispatch-next", {
+      method: "POST", body: JSON.stringify({}),
+    });
+    if (projectId !== String(activeProjectId || "")) return;
+    updateQueuedChatSessionFromPayload(response);
+    const result = response.result || response;
+    if (result.error || result.reason === "not_running") {
+      throw new Error(result.error || "The queued reply did not start. Your message is still queued; try again.");
+    }
+    await loadOverview(true);
+  } finally {
+    pendingQueueDispatches.delete(projectId);
+    if (projectId === String(activeProjectId || "")) renderQueuedChatPanel();
+  }
 }
 
 function queuedChatIds() {
@@ -5661,7 +5781,7 @@ function transcriptReplyWindows(cutWindows) {
   return runStarts.flatMap(({ entry, index }, itemIndex) => {
     if (!isFramingThreadUserTranscript(entry)) return [];
     const nextUserIndex = runStarts[itemIndex + 1]?.index ?? transcript.length;
-    const completed = nextUserIndex < transcript.length || !isSessionRunning();
+    const completed = nextUserIndex < transcript.length || !isSessionRunning() || isPreviousTranscriptRun(entry);
     const runEntries = transcript.slice(index + 1, nextUserIndex);
     const planCard = runEntries.some((candidate) => candidate.kind === "plan" && candidate.artifact?.id);
     const candidates = planCard ? [] : runEntries.filter((candidate) => isAssistantReplyCandidate(candidate, cutWindows));
@@ -6782,7 +6902,7 @@ function liveConnectionRetryText(entries, waitState) {
   if (!["active", "idle"].includes(String(waitState?.kind || ""))) return "";
   const latest = (entries || []).at(-1);
   const content = String(latest?.content || "");
-  if (!content.includes("codex_core::responses_retry") || !/retrying request/i.test(content)) return "";
+  if (!content.includes("codex_core::responses_retry") || !/retrying (?:sampling )?request/i.test(content)) return "";
   const context = /compaction/i.test(content) ? " while preparing context" : "";
   return `Model connection interrupted${context}. Codex reported an automatic retry. Open Activity for details.`;
 }
@@ -8250,7 +8370,7 @@ function switchSettingsBackend(backend) {
 async function loadUiSettings({ discoverModels = true } = {}) {
   const requestedProjectId = String(activeProjectId || "");
   try {
-    const payload = await api("/api/settings");
+    const payload = await api("/api/settings?probe_agents=0");
     if (requestedProjectId !== String(activeProjectId || "")) return;
     uiSettings = payload.settings || {};
     settingsSecretKeys = payload.secret_keys || Object.keys(secretKeyLabels);
@@ -8261,6 +8381,7 @@ async function loadUiSettings({ discoverModels = true } = {}) {
     restoreSessionSettings();
     renderAllAgentStatusNotes();
     renderAgentStatusBanner();
+    refreshAgentStatuses();
     if (discoverModels) refreshDiscoveredModels();
   } catch (error) {
     if (requestedProjectId !== String(activeProjectId || "")) return;
@@ -8534,7 +8655,7 @@ function renderChatState() {
 function coldComposerPlaceholder(hasFramingThread) {
   if (isProjectLoading()) return "Opening project...";
   if (isSessionRunning() && isPlanComposerMode()) return "Draft your next plan while this run finishes...";
-  if (!isSessionRunning() && hasUnfinishedV2Trial()) return "Queue a follow-up; resume this trial to continue...";
+  if (!isSessionRunning() && hasUnfinishedV2Trial()) return "Queue for resume...";
   if (canQueueComposerWhileRunning()) {
     return "Queue a follow-up...";
   }
@@ -8644,6 +8765,8 @@ function pill(value, tone = "") {
 function transcriptRole(entry) {
   const rawType = String(entry?.raw_type || "").toLowerCase();
   if (rawType === "ui.command") return isRealUserUiCommand(entry) ? "user" : "command";
+  // Older servers classified untyped JSON tool output as assistant text.
+  if (rawType === "event" && entry?.kind === "assistant") return "tool";
   const role = String(entry?.role || "assistant");
   if (["user", "assistant", "tool", "command", "final"].includes(role)) return role;
   return "assistant";
@@ -9398,11 +9521,29 @@ function pendingExpectedTrialReport(iteration = pendingExpectedTrialIteration())
   };
 }
 
+function autoresearchContinuationInfo(session = sessionState()) {
+  const v2 = session?.v2 || {};
+  if (session?.loop_stop_reason !== "next_trial_admission_failed"
+      || v2.phase !== "terminal" || v2.status !== "published") return null;
+  const error = cleanText(v2.continuation_error, "The next trial could not start.");
+  return {
+    message: /package-managed project files are out of date/i.test(error)
+      ? "The last trial is recorded. Update the project template, then resume autoresearch."
+      : "The last trial is recorded, but the next trial could not start. Resume autoresearch to try again.",
+    error,
+    requiresProjectUpdate: /package-managed project files are out of date/i.test(error),
+  };
+}
+
 function autoresearchFailureInfo(session = sessionState()) {
   const status = String(session?.status || "").trim().toLowerCase();
   const mode = String(session?.mode || "").trim().toLowerCase();
-  if (status !== "failed" || !["goal", "research", "v2_trial"].includes(mode)) return null;
   const v2 = session?.v2 && typeof session.v2 === "object" ? session.v2 : {};
+  const retainedFailure = mode === "chat"
+    && v2.phase === "terminal"
+    && Array.isArray(v2.errors) && v2.errors.length > 0
+    && !["published", "stopped_by_user", "server_shutdown", "deleted_project"].includes(v2.status);
+  if (!retainedFailure && (status !== "failed" || !["goal", "research", "v2_trial"].includes(mode))) return null;
   const expectedAction = v2?.expected_action && typeof v2.expected_action === "object"
     ? v2.expected_action
     : (session?.expected_action && typeof session.expected_action === "object" ? session.expected_action : {});
@@ -9431,25 +9572,35 @@ function autoresearchFailureInfo(session = sessionState()) {
   ).replaceAll('\\"', '"');
   const v2Status = String(v2?.status || "").trim().toLowerCase();
   const v2Phase = String(v2?.phase || "").trim().toLowerCase();
+  const placementRecovery = v2Status === "protocol_violation" && v2.output_recovery_available === true;
   const requiresNewerCodex = /requires a newer version of Codex/i.test(currentError);
   const requiresProjectUpdate = /package-managed project files are out of date/i.test(currentError);
   const message = requiresNewerCodex
     ? `${modelLabel || "The selected model"} requires a newer Codex CLI. Update Codex, then ${isRestart ? "retry Restart" : "retry the run"}.`
+    : placementRecovery
+      ? "Research paused because some outputs were saved in the wrong place. Select Repair and resume to let the system recover and check them before continuing this trial."
     : v2Status === "protocol_violation" && currentError.startsWith("Execution write-boundary violation:")
-      ? "Research stopped at the file-write check. This run was not recorded. Inspect Failure details before using Restart from Trial 1 to start over."
+      ? Number(v2.output_recovery_count || 0) >= 2
+        ? "Automatic repair stopped after two attempts. This trial could not be recorded safely. Earlier recorded results remain available. Please report this problem with the troubleshooting details."
+        : "Research stopped because some changes could not be recorded safely. Automatic repair is unavailable. Earlier recorded results remain available. Please report this problem with the troubleshooting details."
     : ["stage_resolution_required", "recovery_required"].includes(v2Status)
-      ? currentError
-      : compactText(currentError, 240);
+      ? "Research could not continue safely. Please report this problem with the troubleshooting details."
+    : requiresProjectUpdate
+      ? "Update the project template, then try again."
+    : v2Phase !== "terminal" && ["agent_failed", "interrupted"].includes(v2Status)
+      ? "The current run did not finish. Resume autoresearch to continue this trial."
+      : "The current run could not finish. Please report this problem with the troubleshooting details.";
   const retryable = isRestart
     && ["agent_failed", "interrupted"].includes(v2Status)
     && v2Phase !== "terminal";
   const blockedByUntrustedState = ["recovery_required", "stage_resolution_required"].includes(v2Status);
-  const resumable = !isRestart
+  const resumable = placementRecovery || (!isRestart
     && ["agent_failed", "interrupted"].includes(v2Status)
     && v2Phase !== "terminal"
-    && !blockedByUntrustedState;
+    && !blockedByUntrustedState);
   // A same-stage Restart retry and a new full reset are different actions.
-  // Protocol/material terminals cannot reuse their stage, but a deliberate
+  // Verified unfrozen placement recovery can retain the same stage. Other
+  // protocol/material terminals cannot reuse their stage, but a deliberate
   // full Restart may archive that completely audited trajectory and return to
   // the immutable launch boundary.  Untrusted recovery/orphan states remain
   // fail-closed and expose neither action.
@@ -9459,14 +9610,15 @@ function autoresearchFailureInfo(session = sessionState()) {
   return {
     backend,
     iteration: Number.isFinite(iteration) && iteration > 0 ? iteration : 0,
-    title: isRestart ? "Restart failed" : "Autoresearch failed",
-    header: isRestart ? "Restart · Failed" : "Autoresearch · Failed",
+    title: isRestart ? "Restart needs attention" : "Autoresearch needs attention",
+    header: isRestart ? "Restart · Needs attention" : "Autoresearch · Needs attention",
     message,
     details: [...new Set([currentError, ...currentErrors].map((error) => cleanText(error, "")).filter((error) => error && error !== message))],
     actionType,
     isRestart,
     retryable,
     resumable,
+    placementRecovery,
     fullRestart,
     showSettings: requiresNewerCodex,
     v2Status,
@@ -9480,7 +9632,7 @@ function autoresearchFailureActionsHtml(failure) {
           ${failure.requiresProjectUpdate ? `<button class="primary-button small-button" type="button" data-project-upgrade-reviewers="${escapeHtml(activeProjectId)}">Update project template</button>` : ""}
           ${failure.showSettings ? `<button class="secondary-button small-button" type="button" data-autoresearch-failure-settings>Open Settings</button>` : ""}
           ${failure.resumable
-            ? `<button class="primary-button small-button trial-flow-button" type="button" data-resume-autoresearch>${trialActionIconHtml("resume")}<span>Resume same stage</span></button>`
+            ? `<button class="primary-button small-button trial-flow-button" type="button" data-resume-autoresearch>${trialActionIconHtml("resume")}<span>${failure.placementRecovery ? "Repair and resume" : "Resume autoresearch"}</span></button>`
             : ""}
           ${failure.retryable
             ? `<button class="secondary-button small-button trial-danger-button" type="button" data-restart-autoresearch>${trialActionIconHtml("restart")}<span>Retry Restart</span></button>`
@@ -9498,11 +9650,11 @@ function autoresearchFailureHtml(failure) {
       <div class="trial-report-head">
         <div>
           <strong>${escapeHtml(failure.title)}</strong>
-          <em>Failed</em>
+          <em>Needs attention</em>
         </div>
       </div>
       <p class="autoresearch-failure-message">${escapeHtml(failure.message)}</p>
-      ${failure.details?.length ? `<details class="autoresearch-failure-details"><summary>Failure details</summary><ul>${failure.details.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></details>` : ""}
+      ${failure.details?.length ? `<details class="autoresearch-failure-details"><summary>Troubleshooting details</summary><ul>${failure.details.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></details>` : ""}
     </article>
   `;
 }
@@ -9614,7 +9766,7 @@ function trialProgressForIteration(iteration, report = null) {
 
 function trialProgressSummaryText(progress, fallback = "") {
   const summary = cleanText(progress?.summary, "");
-  if (summary) return summary;
+  if (summary) return summary.replace(/\b0*(\d+)_[a-z][\w-]*\b/g, (_, number) => `Trial ${Number(number)}`);
   const label = cleanText(progress?.stage_label, "");
   const reviewerCount = Number(progress?.reviewer_count || 0);
   const reviewerTotal = Number(progress?.reviewer_total || 0);
@@ -9638,15 +9790,18 @@ function trialProgressStepperHtml(progress) {
   const currentIndex = Math.max(1, Math.min(Number(progress.stage_index || 0), totalStages || TRIAL_PROGRESS_STAGES.length));
   if (!currentIndex) return "";
   const stages = Array.isArray(progress.stages) && progress.stages.length ? progress.stages : TRIAL_PROGRESS_STAGES;
+  const currentLabel = progress.gate_updated === true
+    ? "Trial complete"
+    : cleanText(progress.stage_label, cleanText(stages[currentIndex - 1]?.label, `Stage ${currentIndex}`));
   return `
-    <div class="trial-progress-stepper" aria-label="Trial progress">
+    <div class="trial-progress-stepper" aria-label="Trial progress" data-current-stage="${escapeHtml(currentLabel)}" style="--trial-step-count: ${stages.length}">
       ${stages
         .map((stage, index) => {
           const step = index + 1;
           const state = progress.gate_updated === true || step < currentIndex ? "complete" : step === currentIndex ? "current" : "pending";
           const label = cleanText(stage?.label, `Stage ${step}`);
           return `
-            <span class="trial-progress-step is-${state}" title="${escapeHtml(label)}">
+            <span class="trial-progress-step is-${state}" title="${escapeHtml(label)}"${state === "current" ? ' aria-current="step"' : ""}>
               <span class="trial-progress-marker" aria-hidden="true">${state === "complete" ? "✓" : escapeHtml(step)}</span>
               <span>${escapeHtml(label)}</span>
             </span>
@@ -9787,6 +9942,9 @@ function comparableTrialReportText(value) {
 
 function researchDiagnosticText(value) {
   const text = String(value || "");
+  if (text.startsWith("Research is disabled because package-managed project files are out of date.")) {
+    return "Update this project's template from Project options, then try again.";
+  }
   if (text === "Publish research results before generating a paper.") {
     return "No reviewed results have been recorded yet. Start or resume research, then return here after a trial has been reviewed and recorded.";
   }
@@ -9800,13 +9958,26 @@ function researchDiagnosticText(value) {
   return `Revisions requested for ${names.map((name) => labels[name] || name.replaceAll("_", " ")).join(", ")}. Resume to address the review findings.`;
 }
 
-function resumePhaseIssuesHtml(v2) {
+function resumePhaseIssues(v2) {
   const errors = Array.isArray(v2?.errors) ? v2.errors.map((error) => cleanText(error, "")).filter((error) => (
     error && !/^(?:Agent phase was interrupted by|V2 \w+ phase was not started after) (?:stopped_by_user|paused_by_user|server_shutdown)\.$/.test(error)
   )) : [];
-  if (!errors.length || v2.phase === "terminal") return "";
-  const technical = errors.filter((error) => researchDiagnosticText(error) !== error);
-  return `<section class="resume-trial-warning" aria-label="Before resuming"><strong>Before resuming</strong><p>The current phase needs a correction before research can continue. Resume returns to this phase with the issues below.</p><ul>${errors.map((error) => `<li>${escapeHtml(researchDiagnosticText(error))}</li>`).join("")}</ul>${technical.length ? `<details><summary>Technical details</summary><ul>${technical.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></details>` : ""}</section>`;
+  return v2?.phase === "terminal" ? [] : errors;
+}
+
+function resumePhaseMessage(v2) {
+  const errors = resumePhaseIssues(v2);
+  if (!errors.length) return "";
+  if (errors.some((error) => /package-managed project files are out of date/i.test(error))) {
+    return "Update the project template from Project options, then resume autoresearch.";
+  }
+  return "Research is paused. Resume to continue checking and correcting the research record.";
+}
+
+function resumePhaseIssuesHtml(v2) {
+  const errors = resumePhaseIssues(v2);
+  if (!errors.length) return "";
+  return `<section class="resume-trial-warning" aria-label="Research paused"><p>${escapeHtml(resumePhaseMessage(v2))}</p><details class="autoresearch-failure-details"><summary>Troubleshooting details</summary><ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></details></section>`;
 }
 
 function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
@@ -9845,7 +10016,7 @@ function trialReportSummaryHtml(iteration, entries, reportOverride = null) {
         </div>
       </div>
       ${trialProgressStepperHtml(progress)}
-      ${progressSummary ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
+      ${progressSummary && !resumeIssues ? `<p class="trial-progress-summary">${escapeHtml(progressSummary)}</p>` : ""}
       ${resumeIssues}
       ${trialHumanResponseHtml(iteration)}
       ${trialHumanTasksHtml(iteration)}
@@ -10021,7 +10192,7 @@ function isPendingExpectedTrialReport(trial) {
 }
 
 function trialStatusLabel(iteration, trial) {
-  if (autoresearchFailureInfo()?.iteration === Number(iteration)) return "Failed";
+  if (autoresearchFailureInfo()?.iteration === Number(iteration)) return "Needs attention";
   if (isTrialLive(iteration, trial)) return "Running";
   if (isPendingExpectedTrialReport(trial)) return "Pending";
   const reportStatus = cleanText(trial?.status, "");
@@ -10168,12 +10339,10 @@ function scrollTrialStripToChip(strip, chip, options = {}) {
   if (!options.force && chipRect.left >= stripRect.left + pad && chipRect.right <= stripRect.right - pad) {
     return false;
   }
-  const stripWidth = Number(strip.clientWidth || 0);
-  const chipWidth = Number(chip.offsetWidth || chipRect.width || 0);
-  const offsetLeft = Number(chip.offsetLeft);
-  const nextLeft = Number.isFinite(offsetLeft) && stripWidth
-    ? offsetLeft - Math.max(0, (stripWidth - chipWidth) / 2)
-    : strip.scrollLeft + chipRect.left - stripRect.left - Math.max(0, (stripWidth - chipWidth) / 2);
+  // offsetLeft can be relative to an ancestor outside the scrolling strip.
+  // Use the two viewport rectangles so history selection centers correctly too.
+  const nextLeft = strip.scrollLeft + chipRect.left - stripRect.left
+    - Math.max(0, (stripRect.width - chipRect.width) / 2);
   strip.scrollLeft = clampTrialStripScrollLeft(strip, nextLeft);
   return true;
 }
@@ -10270,12 +10439,16 @@ function trialHistoryStatusModel(trials, activeTrial, activeTrialData, runningTr
   const latest = trials[trials.length - 1] || null;
   const collapsed = autoresearchPanelCollapsed();
   const running = Boolean(runningTrialData);
+  const preparing = isV2TrialAdmissionPending();
   const failure = autoresearchFailureInfo();
+  const continuation = !running ? autoresearchContinuationInfo() : null;
   const miniTrialData = activeTrialData || latest || null;
   const iteration = failure?.iteration || miniTrialData?.iteration || activeTrial || 0;
   const report = miniTrialData?.report || null;
-  const label = failure ? "Failed" : iteration ? trialHeaderStatusLabel(iteration, report) : "Active";
-  const entrySource = failure ? sessionTranscriptEntries() : (runningTrialData || miniTrialData)?.entries;
+  const label = failure ? "Needs attention" : iteration ? trialHeaderStatusLabel(iteration, report) : "Active";
+  const entrySource = failure && String(sessionState().mode || "").toLowerCase() !== "chat"
+    ? sessionTranscriptEntries()
+    : (runningTrialData || miniTrialData)?.entries;
   const rawEntries = Array.isArray(entrySource) ? entrySource : [];
   const activity = trialActivityEntries(rawEntries);
   const durationText = running
@@ -10283,9 +10456,11 @@ function trialHistoryStatusModel(trials, activeTrial, activeTrialData, runningTr
     : activityEntriesDurationText(activity);
   const v2 = currentV2TrialState(iteration, report);
   const stoppedError = !running && sessionState().status === "interrupted" && Array.isArray(v2?.errors)
-    ? v2.errors.map((error) => cleanText(error, "")).find(Boolean)
+    ? resumePhaseMessage(v2)
     : "";
-  const latestUpdate = failure?.message || stoppedError || latestTrialUpdateText(activeTrialData || latest, runningTrialData)
+  const recordedSummary = !running && label === "Done" ? cleanText(report?.report_summary, "") : "";
+  const latestUpdate = (preparing ? "Preparing the next trial." : "")
+    || failure?.message || continuation?.message || stoppedError || recordedSummary || latestTrialUpdateText(activeTrialData || latest, runningTrialData)
     || (running ? "Waiting for agent update." : cleanText(report?.report_summary, "No saved agent update for this trial."));
   const v2Action = String(sessionState()?.v2?.expected_action?.action_type || "").trim().toLowerCase();
   const v2Primary = running && activeRunMode() === "v2_trial"
@@ -10298,13 +10473,15 @@ function trialHistoryStatusModel(trials, activeTrial, activeTrialData, runningTr
   });
   return {
     collapsed,
-    running,
+    running: running || preparing,
     iteration,
     label,
     failure,
-    primaryText: failure?.header || v2Primary,
+    continuation,
+    primaryText: preparing ? "Autoresearch · Preparing" : failure?.header || (continuation ? "Autoresearch · Paused" : v2Primary),
     latestUpdate,
-    workingOnHtml: failure ? "" : trialWorkingOnHtml(report),
+    updateLabel: preparing || stoppedError ? "Status" : continuation ? "Paused" : recordedSummary ? "Result" : "Agent update",
+    workingOnHtml: failure || preparing ? "" : trialWorkingOnHtml(report),
     activityButton,
     collapsedCompleteBadge: collapsed ? autoresearchCompleteBadgeHtml() : "",
   };
@@ -10340,7 +10517,9 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
   const lifecycleActions = model.failure
     ? autoresearchFailureActionsHtml(model.failure)
     : activeTrialData ? trialLifecycleActionButtonsHtml(activeTrialData.iteration, activeTrialData.report, Boolean(runningTrialData)) : "";
-  const controls = runControlButtonsHtml() || (lifecycleActions ? `<div class="trial-report-control-actions">${lifecycleActions}</div>` : "");
+  const updateAction = model.continuation?.requiresProjectUpdate
+    ? `<button class="secondary-button small-button" type="button" data-project-upgrade-reviewers="${escapeHtml(activeProjectId)}">Update project template</button>` : "";
+  const controls = runControlButtonsHtml() || (lifecycleActions || updateAction ? `<div class="trial-report-control-actions">${updateAction}${lifecycleActions}</div>` : "");
   return `
     <section class="trial-history-card ${model.collapsed ? "is-collapsed" : "is-expanded"} ${model.running ? "is-running" : ""} ${model.failure ? "is-failed" : ""}" aria-label="Autoresearch trials" data-autoresearch-panel-collapsed="${model.collapsed ? "true" : "false"}">
       <header class="trial-history-head">
@@ -10363,7 +10542,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
               ${model.workingOnHtml}
             </span>
             <span class="trial-history-latest-update trial-live-update">
-              <span>Agent update</span>
+              <span>${escapeHtml(model.updateLabel)}</span>
               <em>${escapeHtml(researchDiagnosticText(model.latestUpdate))}</em>
             </span>
           </button>
@@ -10377,6 +10556,7 @@ function trialHistoryHtml(trials, activeTrial, activeTrialData, runningTrialData
       <div class="trial-history-body">
         ${iterationNavHtml(trials, activeTrial)}
         ${model.failure ? autoresearchFailureHtml(model.failure) : runningTrialData ? runningTrialStatusHtml(runningTrialData) : ""}
+        ${model.continuation ? `<div class="trial-report-card" role="status"><p>${escapeHtml(model.continuation.message)}</p><details class="autoresearch-failure-details"><summary>Last startup error</summary><p>${escapeHtml(researchDiagnosticText(model.continuation.error))}</p></details></div>` : ""}
         ${!model.failure && shouldShowActiveTrialReport ? trialReportSummaryHtml(activeTrialData.iteration, activeTrialData.entries, activeTrialData.report) : ""}
       </div>
     </section>
@@ -10509,7 +10689,16 @@ function fallbackPlanActivityEntries(message, userMessage, entries) {
 function transcriptRunStart(entry) {
   const rawType = String(entry?.raw_type || "").toLowerCase();
   const role = String(entry?.role || "").toLowerCase();
-  return role === "user" && ["ui.framing", "ui.chat", "ui.plan", "ui.research", "ui.goal"].includes(rawType);
+  return role === "user" && ["ui.framing", "ui.chat", "ui.plan", "ui.research", "ui.goal", "ui.v2_trial"].includes(rawType);
+}
+
+function isPreviousTranscriptRun(entry) {
+  const entryRun = String(entry?.run_id || "");
+  const currentRun = String(sessionState().id || "");
+  if (entryRun && currentRun && entryRun !== currentRun) return true;
+  const savedSession = appState?.research_session;
+  return Boolean(entryRun && optimisticResearchSession && savedSession?.id === entryRun
+    && ["completed", "failed", "interrupted"].includes(savedSession.status));
 }
 
 function normalizedTranscriptText(value) {
@@ -10529,7 +10718,7 @@ function transcriptRunGroups(entries) {
     if (current) current.entries.push(entry);
   });
   groups.forEach((group, index) => {
-    group.completed = index < groups.length - 1 || !isSessionRunning();
+    group.completed = index < groups.length - 1 || !isSessionRunning() || isPreviousTranscriptRun(group.userEntry);
   });
   return groups.filter((group) => group.userEntry && group.entries.length);
 }
@@ -11168,7 +11357,28 @@ function list(items, emptyText = "Nothing here yet.") {
 }
 
 function renderResourcesPanel() {
-  return `<p class="muted">Research materials and sources. Add files or folders using + in the research session.</p>${renderFileManager("Resources", "resources/", appState.trees?.resources, "Attach files or link a folder from the research session. Your research materials will appear here.")}`;
+  const reports = [];
+  const visit = (node) => {
+    if (!node || ["history", "_TEMPLATE"].includes(node.name)) return;
+    if (node.type === "file" && node.name === "RESOURCE_SCOUT_REPORT.md") {
+      const match = String(node.path || "").match(/^research_trajectory\/trials\/(\d+)[^/]*\/artifacts\/resource_scout\//);
+      if (match) reports.push({ path: node.path, trial: Number(match[1]) });
+    }
+    (node.children || []).forEach(visit);
+  };
+  visit(appState.trees?.trials);
+  const sourceReports = reports.length ? `
+    <section>
+      <h2>Research source reports</h2>
+      <p class="muted">Sources found during research, inspection notes, and remaining gaps. These search notes inform trial review; discovery alone does not validate a claim.</p>
+      ${reports.map((report, index) => contextCard(
+        `Trial ${report.trial} · Source report`,
+        `<details><summary>Report details</summary><p class="muted">${escapeHtml(report.path)}</p></details>`,
+        "",
+        previewButton(report.path, `Read source report ${index + 1}`)
+      )).join("")}
+    </section>` : "";
+  return `<p class="muted">Research materials and sources. Add files or folders using + in the research session.</p>${sourceReports}${renderFileManager("Resources", "resources/", appState.trees?.resources, "Attach files or link a folder from the research session. Your research materials will appear here.")}`;
 }
 
 function v2Trials() {
@@ -12220,15 +12430,25 @@ function figureSpecCaption(fields) {
   );
 }
 
-function firstArtifactPath(value) {
+function firstArtifactPath(value, provenance = appState?.summaries?.manuscript?.provenance || appState?.summaries?.manuscript?.traceability || "") {
   const text = String(value || "");
+  // The manuscript keeps full evidence paths in its audit index. Resolve only
+  // explicit, unambiguous abbreviation definitions from the current project.
+  const aliases = new Map();
+  for (const match of String(provenance).matchAll(/`([^`\n]+)`\s*:\s*`([^`\n]+)`/g)) {
+    const alias = match[1].trim();
+    const path = match[2].trim();
+    if (!/^(?:manuscript|research_trajectory|resources|data|analysis|figures|outputs)\//.test(path) || path.split("/").includes("..")) continue;
+    aliases.set(alias, aliases.has(alias) && aliases.get(alias) !== path ? null : path);
+  }
   const candidates = [];
   for (const match of text.matchAll(/`([^`]+)`/g)) candidates.push(match[1]);
   for (const match of text.matchAll(/\b(?:manuscript|research_trajectory|resources|data|analysis|figures|outputs)\/[^\s`"')\]}>,;]+/g)) {
     candidates.push(match[0]);
   }
   for (const candidate of candidates) {
-    const normalized = repoRelativePath(String(candidate || "").replace(/[.,;:)]+$/, ""));
+    const resolved = aliases.has(candidate) ? aliases.get(candidate) : candidate;
+    const normalized = repoRelativePath(String(resolved || "").replace(/[.,;:)]+$/, ""));
     if (!normalized || normalized.includes("*")) continue;
     if (/\.[A-Za-z0-9]{2,8}$/.test(normalized)) return normalized;
   }
@@ -16821,65 +17041,25 @@ function confirmResumeTrialSend(context, text, attachments) {
   });
 }
 
-function pendingInterventionSummaryItems() {
-  const marker = expectedTrialMarker();
-  const ids = Array.isArray(marker.pending_intervention_ids)
-    ? marker.pending_intervention_ids.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  const paths = Array.isArray(marker.pending_intervention_paths)
-    ? marker.pending_intervention_paths.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  return ids.map((id, index) => ({ id, path: paths[index] || "" }));
-}
-
-function breakableCodeHtml(value) {
-  return `<code class="breakable-code">${escapeHtml(value)}</code>`;
-}
-
 function resumeAutoresearchSummaryHtml() {
   const session = sessionState();
-  const trajectory = session.trajectory && typeof session.trajectory === "object" ? session.trajectory : {};
-  const expected = pendingExpectedTrialIteration();
-  const trials = visibleTrials();
-  const latest = trials[trials.length - 1] || null;
-  const latestReported = [...trials].reverse().find((trial) => trial?.report_path || trial?.report?.report_path) || null;
-  const latestReportedLabel = cleanText(latestReported?.id || latestReported?.report?.id, "");
-  const latestLabel = cleanText(latest?.id, "");
-  const baseTrial = cleanText(trajectory.base_trial, "");
-  const latestActive = cleanText(trajectory.latest_active_trial, "");
-  const queuedCount = Number(session.queued_chat_count || 0);
-  const queuedAt = cleanText(session.queued_chat_latest_at, "");
-  const pendingItems = pendingInterventionSummaryItems();
-  const pendingHtml = pendingItems.length
-    ? `<ul>${pendingItems.map((item) => `<li>${breakableCodeHtml(item.id)}${item.path ? ` · ${breakableCodeHtml(item.path)}` : ""}</li>`).join("")}</ul>`
-    : "<p>No pending interventions are currently queued.</p>";
-  const boundaryParts = [];
+  const trajectory = session.trajectory || {};
   const v2 = activeRunMode() === "v2_trial" ? session.v2 : null;
+  const resumesCurrentTrial = Boolean(v2?.stage_id && v2.phase && v2.phase !== "terminal");
+  const currentTrial = Number.parseInt(v2?.trial_id, 10) || activeRunTrialIteration();
   const nextTrial = v2
-    ? (v2.phase === "terminal" && v2.status === "published" && activeRunTrialIteration() > 0 ? activeRunTrialIteration() + 1 : 0)
+    ? (v2.phase === "terminal" && v2.status === "published" && currentTrial > 0 ? currentTrial + 1 : 0)
     : v2Trials().length
       ? Math.max(...v2Trials().map((trial) => Number.parseInt(trial.trial_id, 10) || 0)) + 1
-      : expected || Number(trajectory.next_trial_number || 0) || 0;
-  const resumesCurrentStage = Boolean(v2?.stage_id && v2.phase && v2.phase !== "terminal");
-  if (resumesCurrentStage) {
-    boundaryParts.push(`current trial ${breakableCodeHtml(v2.trial_id)} · ${escapeHtml(activeRunProgress().stage_label)} · ${escapeHtml(session.loop_stop_reason === "paused_by_user" && !isSessionRunning() ? "Paused" : v2StatusLabel(v2.status || session.status))}`);
-  } else {
-    if (latestReportedLabel) boundaryParts.push(`latest reported ${breakableCodeHtml(latestReportedLabel)}`);
-    if (latestActive && latestActive !== latestReportedLabel) boundaryParts.push(`active boundary ${breakableCodeHtml(latestActive)}`);
-    if (!boundaryParts.length && latestLabel) boundaryParts.push(`latest visible trial ${breakableCodeHtml(latestLabel)}`);
-  }
+      : pendingExpectedTrialIteration() || Number(trajectory.next_trial_number || 0);
+  const queuedCount = Number(session.queued_chat_count || 0);
+  const pendingCount = (expectedTrialMarker().pending_intervention_ids || []).filter(Boolean).length;
   return `
-    <p>Resume will continue the current autoresearch trajectory. It will not restart, archive, or renumber existing trials.</p>
-    <ul>
-      ${resumesCurrentStage ? "" : `<li><strong>Next boundary:</strong> ${nextTrial ? `Trial ${escapeHtml(nextTrial)}` : "computed from current project state"}</li>`}
-      <li><strong>Current boundary:</strong> ${boundaryParts.join(" · ") || "current closed trajectory boundary"}</li>
-      ${baseTrial ? `<li><strong>Fork base:</strong> ${breakableCodeHtml(baseTrial)}</li>` : ""}
-      <li><strong>Queued chat:</strong> ${queuedCount ? `${escapeHtml(queuedCount)} message${queuedCount === 1 ? "" : "s"}${queuedAt ? `, latest ${escapeHtml(formatTimestamp(queuedAt))}` : ""}` : "none"}</li>
-    </ul>
-    <p><strong>Pending interventions for this resume:</strong></p>
-    ${pendingHtml}
-    ${resumesCurrentStage ? "<p>For this unfinished trial, leaving the instruction blank retains any previous resume guidance. Enter new guidance to replace it.</p>" : ""}
-    ${resumesCurrentStage ? resumePhaseIssuesHtml(v2) : ""}
+    <p>${resumesCurrentTrial ? `Continue Trial ${escapeHtml(currentTrial)} from where it paused.` : nextTrial ? `Continue research with Trial ${escapeHtml(nextTrial)}.` : "Continue research from the current project record."} Existing trials and recorded results are kept.</p>
+    ${queuedCount ? `<p>${escapeHtml(queuedCount)} queued message${queuedCount === 1 ? "" : "s"} awaiting a response.</p>` : ""}
+    ${pendingCount ? `<p>${escapeHtml(pendingCount)} submitted research suggestion${pendingCount === 1 ? "" : "s"} will be included when research resumes.</p>` : ""}
+    ${resumesCurrentTrial ? "<p>Leave the instruction blank to keep your previous guidance, or enter new guidance to replace it.</p>" : ""}
+    ${resumesCurrentTrial ? resumePhaseIssuesHtml(v2) : ""}
   `;
 }
 
@@ -18136,6 +18316,7 @@ document.addEventListener("change", (event) => {
     updateBriefDockGeometry();
     updateFramingScrollButton();
     fitComposerSelectWidths();
+    requestAnimationFrame(restoreTrialStripScroll);
     if ($("#settings-dialog")?.open) applySettingsDialogSize();
   });
   window.addEventListener("scroll", () => {
@@ -18311,6 +18492,12 @@ document.addEventListener("change", (event) => {
     if (queueActionMenuOpen && !event.target.closest("#queue-action-menu") && !event.target.closest("#queue-action-menu-toggle")) {
       queueActionMenuOpen = false;
       renderQueueActionMenu();
+    }
+    const queueDispatch = event.target.closest("[data-queue-dispatch]");
+    if (queueDispatch) {
+      event.preventDefault();
+      sendQueuedChatMessages().catch((error) => showToast(researchDiagnosticText(error.message), true));
+      return;
     }
     const queueMove = event.target.closest("[data-queue-move]");
     if (queueMove) {

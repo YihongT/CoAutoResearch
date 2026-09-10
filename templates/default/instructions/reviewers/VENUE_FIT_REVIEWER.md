@@ -23,6 +23,23 @@ Assess whether the active research line, evidence package, manuscript architectu
 
 ## Review criteria
 
+### Apply the configured scope first
+
+When `TARGET_VENUE.target_venue` is null, there is no venue-specific admission
+standard to satisfy. For a declared general research report, assess the explicit
+audience, article type, research question, evidence standard, claim scope, and
+readable manuscript architecture. Do not require choosing a conference, creating
+a venue profile, or collecting venue seed papers solely to pass this review.
+This matches the service's unconfigured-venue readiness rule. A missing or
+ambiguous audience/article type, unsupported claim, or unsuitable architecture
+still requires correction. Report the reviewed scope; do not return
+`not_applicable` or infer submission readiness.
+
+When a venue is configured, including an exploratory or preferred target, apply
+the venue/profile and representative-source requirements below. A configured
+venue is not optional merely because it is unlocked. Do not remove or change it
+to avoid review, or substitute a general report for a requested submission.
+
 ### Venue-state integrity
 
 - Is target venue, audience, article type, lock level, and profile path explicit?
@@ -60,7 +77,7 @@ Assess whether the active research line, evidence package, manuscript architectu
 
 ### Representative-source standard
 
-When venue fit is material, ground the judgment in an inspected representative
+When a configured venue's fit is material, ground the judgment in an inspected representative
 set, normally three to five recent relevant papers or primary venue guidance.
 Missing seed papers, an uncertain article type, or generic plausibility is not a
 pass. Compare contribution framing, evidence standard, architecture, display
@@ -69,4 +86,4 @@ source's content or ideas.
 
 ## Pass Standard
 
-`pass` requires a defensible venue/contribution match, venue-appropriate evidence and architecture for the reviewed scope, no silent locked-venue change, and no untracked venue-critical gap. Final pass requires the complete profile and all venue-required campaigns to be satisfied.
+`pass` requires a defensible audience/contribution match, appropriate evidence and architecture for the reviewed scope, no silent locked-venue change, and no untracked applicable gap. For a configured venue, this includes a defensible venue match; final pass requires the complete profile and all venue-required campaigns to be satisfied. Without a configured venue, the general-report scope above applies; all evidence, manuscript, reference, and other required reviews remain in force.

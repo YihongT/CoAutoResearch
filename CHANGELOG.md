@@ -2,6 +2,22 @@
 
 ## 2.0.0 — Unreleased
 
+### Reliability and example papers
+
+- Added bounded recovery for verified execution-directory placement errors within
+  the same Trial, preserving evidence and computation budgets before fresh review.
+- Preserved receipt-backed historical references and separated current repair
+  diagnostics from human guidance when research resumes.
+- Generated migration candidates from validated JSON while preserving original
+  historical files and enforcing publication checks.
+- Reduced initial project and settings loading work and improved retained-run,
+  queued-message, and recovery controls.
+- Strengthened paper figure-overlap checks, focused revisions, claim-scope review,
+  and portable source exports without rerunning frozen experiments.
+- Added two reviewed example-paper layouts from developer-operated Digits and
+  Ising projects, with explicit scientific limitations. Their PDFs and previews
+  are included in the documentation repository and excluded from the npm package.
+
 ### Research experience and documentation
 
 - Unified research-session, research-guidance, pause and evidence terminology.

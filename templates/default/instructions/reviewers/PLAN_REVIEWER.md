@@ -94,6 +94,12 @@ that postpones required Scout until execution is not ready for approval.
 
 ### Resource Scout
 
+- Does the Scout decision assess missing method, comparison, dataset, and
+  interpretation support, rather than only missing executable inputs? When
+  sources affect the plan, does the report identify inspected content and its
+  decision impact? Metadata-only or style-only inspection cannot support
+  detailed scientific claims. Reuse sufficient prior inspection; do not
+  require a new search or a source-count quota without a concrete gap.
 - Is `required` versus `skipped` justified by current resource availability, freshness, date sensitivity, and research criticality?
 - The plan includes the required `Resource Scout Brief`.
 - It gives a concrete `Decision reason:` grounded in the overall goal and local question.

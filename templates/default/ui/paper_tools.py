@@ -40,7 +40,7 @@ def toolchain() -> dict:
     for name in SKILLS:
         if not (root / "skills" / name / "SKILL.md").is_file():
             raise ValueError(f"Missing paper skill: {name}. Run the paper setup again.")
-    return {"root": root, "python": str(python_path(root)), "latexmk": executable("latexmk"), "pdftoppm": executable("pdftoppm"), "pdfinfo": executable("pdfinfo"), "pdffonts": executable("pdffonts")}
+    return {"root": root, "python": str(python_path(root)), "latexmk": executable("latexmk"), "pdftoppm": executable("pdftoppm"), "pdfinfo": executable("pdfinfo"), "pdffonts": executable("pdffonts"), "pdftotext": executable("pdftotext")}
 
 
 def setup() -> dict:
@@ -53,6 +53,7 @@ def setup() -> dict:
     latexmk, pdftoppm = executable("latexmk"), executable("pdftoppm")
     executable("pdfinfo")
     executable("pdffonts")
+    executable("pdftotext")
     if not all((root / "skills" / name / "SKILL.md").is_file() for name in SKILLS):
         with tempfile.TemporaryDirectory(dir=root, prefix="install-") as temporary:
             staging = Path(temporary)

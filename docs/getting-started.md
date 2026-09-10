@@ -49,6 +49,12 @@ In the research brief, explain:
 - limits on time, compute, data access and scope;
 - what would count as useful evidence, including a negative result.
 
+You can request a general research report without choosing a conference or
+journal. Its review follows the audience, article type and evidence requirements
+in your brief. If you specify a venue, its official guidance and representative
+papers become additional review inputs; a general report is not a claim of
+submission readiness.
+
 Use **+** to attach materials. Uploads copy files into the project. Linked
 folders remain at their original location and must stay accessible to the
 server. A path on another computer is not automatically available to a remote
@@ -104,7 +110,26 @@ for the current turn. Adding a draft alone does not apply a suggestion.
 
 When resuming an unfinished trial, leaving the new instruction blank keeps any
 previous resume guidance; entering new guidance replaces it. The resume dialog
-explains this rule before you continue.
+explains this rule before you continue. Resuming an unfinished v2 trial also
+preserves its scheduled human review checkpoint. Changing the checkpoint interval
+explicitly starts a new window; a pause by itself does not extend that window.
+
+If a recorded trial cannot start the next trial because of a setup error, the
+panel shows **Paused** and the last startup error. Resolve that error (for example,
+use **Update project template**), then **Resume**. The completed trial stays
+recorded, and this technical recovery preserves the existing checkpoint unless
+you change its interval.
+
+An unambiguous execution-directory delimiter error can be repaired within the
+same unfrozen Trial. The service checks the assignment, quarantined bytes and
+destination conflicts before restoring files, then asks the agent to reconcile
+references and cumulative computation before fresh validation and review. This
+placement recovery is limited to two attempts per Trial. It does not approve
+rejected results, repeat experiments, or reset the research budget. A retained
+eligible error offers **Repair and resume**; ambiguous writes, changed protected
+files, conflicts or exhausted recovery attempts show **Needs attention** with
+details. Earlier recorded results remain available. A template update may retain
+this pending correction, but does not start the agent; use **Resume** when ready.
 
 Editing an earlier message is different from sending a follow-up. Read the
 confirmation for that message: resending can replace later conversation or

@@ -14,7 +14,7 @@ Before substantive autoresearch work, read in order:
 4. `research_trajectory/CURRENT_FINDINGS.json` and `CURRENT_FINDINGS.md`
 5. `research_trajectory/lines/ACTIVE_LINE.json` when present
 6. `research_trajectory/campaigns/INDEX.json` when present
-7. `research_trajectory/HUMAN_TASKS.json`
+7. `research_trajectory/HUMAN_TASKS.json` when present; otherwise read the existing `HUMAN_TASKS.md`
 8. pending formal human interventions
 9. `resources/target_venue/TARGET_VENUE.json` when present
 

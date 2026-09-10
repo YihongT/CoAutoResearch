@@ -6143,7 +6143,7 @@ body.is-project-loading .cold-card > :not(.project-loading-state) {
 .resume-autoresearch-summary p,
 .resume-autoresearch-summary ul {
   margin: 0 0 12px;
-  color: rgba(32, 31, 27, 0.74);
+  color: var(--panel-ink, var(--ink));
   line-height: 1.55;
 }
 
@@ -6169,6 +6169,13 @@ body.is-project-loading .cold-card > :not(.project-loading-state) {
 
 .resume-autoresearch-summary code {
   overflow-wrap: anywhere;
+}
+
+.resume-trial-summary .resume-trial-warning p,
+.resume-trial-summary .resume-trial-warning ul,
+.resume-autoresearch-summary .resume-trial-warning p,
+.resume-autoresearch-summary .resume-trial-warning ul {
+  color: inherit;
 }
 
 @media (max-width: 980px) {
@@ -9022,6 +9029,7 @@ textarea:focus {
 
 .markdown-preview th,
 .markdown-preview td {
+  min-width: 4em;
   padding: 10px 12px;
   border-right: 1px solid rgba(34, 39, 32, 0.1);
   border-bottom: 1px solid rgba(34, 39, 32, 0.1);
@@ -11956,6 +11964,7 @@ html[data-theme] .activity-open-button:hover strong {
 
 .queue-panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -12483,6 +12492,7 @@ body.has-brief-dock #cold-start-workspace.has-framing-thread .framing-thread {
 
 .trial-history-card {
   width: min(900px, 100%);
+  container: research-panel / inline-size;
   justify-self: start;
   overflow: hidden;
   border: none;
@@ -13685,24 +13695,25 @@ html[data-theme] .trial-human-response.is-blocked p {
 /* Unified file viewer. Keep this late in the file to override older split editor rules. */
 .inline-editor-shell {
   overflow: hidden;
-  border: 1px solid rgba(34, 39, 32, 0.12);
+  border: 1px solid var(--panel-border, var(--line));
   border-radius: 16px;
-  background: rgba(255, 253, 247, 0.92);
+  background: var(--surface);
   box-shadow: 0 18px 44px rgba(38, 43, 37, 0.08);
 }
 
 .inline-editor-head {
   min-height: 56px;
   padding: 10px 14px 10px 18px;
-  background: rgba(255, 253, 247, 0.96);
+  background: var(--surface);
   font-family: var(--sans);
   font-size: 13px;
 }
 
 .inline-editor-head > span {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
-  color: rgba(32, 31, 27, 0.64);
+  color: var(--muted);
   font-family: var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -13851,9 +13862,30 @@ html[data-theme] .trial-human-response.is-blocked p {
   padding: 16px 22px 24px 16px;
 }
 
-.file-viewer-body .inline-editor-shell {
-  min-height: 100%;
+.file-viewer-body > .inline-editor-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   border-radius: 16px;
+}
+
+.file-viewer-body > .inline-editor-shell > .inline-editor-head {
+  flex: 0 0 auto;
+}
+
+.file-viewer-body > .inline-editor-shell > .inline-editor-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.file-viewer-body > .inline-editor-shell > .inline-editor-grid > :is(.inline-editor, .inline-preview, .file-code-preview) {
+  min-height: 0;
+}
+
+.file-viewer-body > .inline-editor-shell > .inline-editor-grid > .inline-editor {
+  height: 100%;
 }
 
 .file-viewer-body .inline-fullscreen-button {
@@ -14073,6 +14105,10 @@ html[data-theme] .trial-human-response.is-blocked p {
   min-height: 0;
 }
 
+.file-viewer-body .blueprint-inspector-main .inline-editor {
+  height: 100%;
+}
+
 .blueprint-structured-preview {
   display: grid;
   gap: 18px;
@@ -14166,15 +14202,17 @@ body.is-resizing-file-viewer .file-viewer-body {
 
 .inline-view-switch {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 2px;
   padding: 3px;
-  border: 1px solid rgba(34, 39, 32, 0.1);
+  border: 1px solid var(--control-border);
   border-radius: 999px;
-  background: rgba(245, 242, 233, 0.9);
+  background: var(--surface-soft);
 }
 
 .inline-view-switch button {
+  white-space: nowrap;
   min-height: 30px;
   padding: 4px 12px;
   border: 0;
@@ -14776,11 +14814,13 @@ html[data-theme] .project-menu-popover button.is-danger {
 
   .inline-editor-actions {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: space-between;
   }
 
   .blueprint-inspector {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .blueprint-inspector-sidebar {
@@ -16861,11 +16901,6 @@ html[data-theme] .file-manager-head p {
     min-width: 0;
   }
 
-  html[data-theme] .file-viewer-body {
-    display: grid;
-    grid-template-columns: 1fr !important;
-  }
-
   html[data-theme] .brief-editor-shell.is-framing-dock {
     left: calc(var(--main-stage-left, 0px) + 12px) !important;
     right: 12px !important;
@@ -18593,6 +18628,45 @@ html[data-theme] .trial-progress-stepper {
 html[data-theme] .trial-progress-stepper::-webkit-scrollbar {
   display: none;
 }
+@container research-panel (max-width: 780px) {
+  html[data-theme] .trial-progress-stepper {
+    grid-template-columns: repeat(var(--trial-step-count, 6), minmax(0, 1fr));
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    row-gap: 8px;
+    overflow: visible;
+  }
+
+  html[data-theme] .trial-progress-stepper::after {
+    content: attr(data-current-stage);
+    grid-column: 1 / -1;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    line-height: 1.2;
+    text-align: center;
+    text-transform: uppercase;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-theme] .trial-progress-stepper .trial-progress-step {
+    grid-template-rows: 16px;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  html[data-theme] .trial-progress-stepper .trial-progress-step > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 html[data-theme] .trial-progress-step {
   position: relative;
   display: grid;
@@ -19194,6 +19268,8 @@ html[data-theme] .trial-live-primary.trial-history-kicker-status::before {
 }
 
 html[data-theme] .trial-live-primary.trial-history-kicker-status > span:first-child {
+  flex: 0 0 auto;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   color: color-mix(in srgb, var(--ink) 72%, var(--soft));
@@ -19980,8 +20056,11 @@ html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
     padding: 8px 10px;
   }
 
+}
+
+@container research-panel (max-width: 900px) {
   html[data-theme] .trial-live-strip {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 8px;
   }
 
@@ -20011,6 +20090,7 @@ html[data-theme] .brief-editor-shell.is-framing-dock .composer-stop-square {
   }
 
   html[data-theme] .trial-live-actions {
+    grid-column: 2;
     align-self: start;
     gap: 6px;
     padding-top: 5px;
@@ -20317,8 +20397,8 @@ html[data-theme] body.has-brief-dock #cold-start-workspace.has-framing-thread .f
   background-clip: content-box !important;
 }
 
-/* Dialogs must never rely on horizontal scrolling: every confirmation,
-   settings branch, and runtime setup panel shares these final constraints. */
+/* Keep dialog controls within the viewport. Wide research tables scroll
+   inside their own wrappers without widening the dialog. */
 html[data-theme] :is(.project-dialog, .launch-dialog, .settings-dialog, .file-viewer-dialog, .local-browser) {
   max-width: calc(100vw - 24px) !important;
   max-height: calc(100dvh - 24px) !important;
@@ -20369,28 +20449,14 @@ html[data-theme] .resume-autoresearch-summary li {
   overflow-wrap: anywhere;
 }
 
-html[data-theme] :is(.project-dialog, .launch-dialog, .settings-dialog, .file-viewer-dialog, .local-browser) .markdown-preview table {
+html[data-theme] :is(.project-dialog, .launch-dialog, .settings-dialog, .local-browser) .markdown-preview table {
   min-width: 0 !important;
   table-layout: fixed;
 }
 
-html[data-theme] :is(.project-dialog, .launch-dialog, .settings-dialog, .file-viewer-dialog, .local-browser) .markdown-preview :is(th, td) {
+html[data-theme] :is(.project-dialog, .launch-dialog, .settings-dialog, .local-browser) .markdown-preview :is(th, td) {
   white-space: normal !important;
   overflow-wrap: anywhere;
-}
-
-.file-viewer-dialog .markdown-preview table,
-.file-viewer-body .markdown-preview table,
-.file-viewer-dialog .markdown-table-wrap table,
-.file-viewer-body .markdown-table-wrap table {
-  min-width: 0 !important;
-  table-layout: fixed !important;
-}
-
-.file-viewer-dialog .markdown-preview :is(th, td),
-.file-viewer-body .markdown-preview :is(th, td) {
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
 }
 
 @media (max-width: 560px) {

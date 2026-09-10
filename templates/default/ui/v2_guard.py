@@ -559,7 +559,7 @@ def capture_agent_retry_baseline(
     return baseline
 
 
-def load_agent_baseline(run_dir: str | Path) -> AgentBaseline:
+def _read_baseline_manifest(run_dir: str | Path) -> tuple[Path, Path, dict[str, Any]]:
     safe_run_dir = Path(run_dir).resolve(strict=True)
     manifest_path = safe_run_dir / "baseline.json"
     try:
@@ -571,6 +571,51 @@ def load_agent_baseline(run_dir: str | Path) -> AgentBaseline:
     root = Path(str(payload["project_root"])).resolve(strict=True)
     if _is_within(root, safe_run_dir):
         raise GuardError("agent baseline is stored inside the project")
+    return safe_run_dir, root, payload
+
+
+def baseline_matches_files(
+    run_dir: str | Path, project_root: str | Path, files: dict[str, bytes],
+    *, trial_id: str, attempt_id: str, guard_root: str | Path,
+) -> bool:
+    """Check exact file bindings for display without loading the whole guard.
+
+    This does not admit a run or audit a write boundary; those operations still
+    use load_agent_baseline and the complete snapshot.
+    """
+    safe_run_dir, root, payload = _read_baseline_manifest(run_dir)
+    registry = PathRegistry.from_dict(payload["registry"])
+    if (
+        root != Path(project_root).resolve(strict=True)
+        or registry.trial_id != trial_id
+        or registry.attempt_id != attempt_id
+        or not _is_within(Path(guard_root).resolve(strict=True), safe_run_dir)
+    ):
+        return False
+    for relative, contents in files.items():
+        relative = normalize_relative_path(relative)
+        recorded = payload["entries"].get(relative)
+        if not recorded:
+            return False
+        entry = TreeEntry.from_dict(recorded)
+        if entry.path != relative or entry.kind != "file" or not entry.backup_path:
+            return False
+        locator = normalize_relative_path(entry.backup_path)
+        backup = safe_run_dir / locator
+        if (
+            not locator.startswith("baseline/files/")
+            or not _is_within(safe_run_dir, backup.resolve(strict=False))
+            or backup.is_symlink()
+            or entry.size != len(contents)
+            or entry.sha256 != hashlib.sha256(contents).hexdigest()
+            or backup.read_bytes() != contents
+        ):
+            return False
+    return True
+
+
+def load_agent_baseline(run_dir: str | Path) -> AgentBaseline:
+    safe_run_dir, root, payload = _read_baseline_manifest(run_dir)
     registry = PathRegistry.from_dict(payload["registry"])
     entries = {path: TreeEntry.from_dict(value) for path, value in payload["entries"].items()}
     for entry in entries.values():

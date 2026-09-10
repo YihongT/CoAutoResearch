@@ -110,6 +110,16 @@ Required machine fields include:
 - evidence checked;
 - exact stage ID and manifest hash for post-stage/final review.
 
+For `post_stage` and `final`, also supply `extensions.card_eligibility` for
+exactly the cards requested by the reviewed Merge Request, following
+`instructions/REVIEW_POLICY.md` (Closure) and the reviewer-output example.
+Use `v2_artifacts.reviewer_card_eligibility_errors(reviews, merge_request)`
+alongside exact-stage closure validation before yielding. Its decisions and
+reasons are reviewer judgments; the service does not infer them. Pre-execution
+Plan Review must not assess post-stage cards. A missing or malformed assessment
+is a reviewer-output correction on the same immutable stage, not a reason to
+replan or repeat completed experiments.
+
 Every path in `reviewed_inputs` and every non-external path in
 `evidence_checked` must preserve the exact on-disk identifier (including
 underscores), resolve to a regular project file, and use the SHA-256 of those

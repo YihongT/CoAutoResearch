@@ -31,6 +31,7 @@ try:
         render_markdown,
         result_card_immutability_errors,
         result_card_payload_hash,
+        reviewer_card_eligibility_errors,
         scope_boundary_errors,
         validate_artifact,
     )
@@ -40,6 +41,7 @@ try:
         default_schema_dir,
         normalize_relative_path,
         require_id,
+        valid_id,
         utc_z_timestamp,
     )
     from .v2_critical_path import derive_critical_path
@@ -76,6 +78,7 @@ except ImportError:  # Direct imports from templates/default/ui.
         render_markdown,
         result_card_immutability_errors,
         result_card_payload_hash,
+        reviewer_card_eligibility_errors,
         scope_boundary_errors,
         validate_artifact,
     )
@@ -85,6 +88,7 @@ except ImportError:  # Direct imports from templates/default/ui.
         default_schema_dir,
         normalize_relative_path,
         require_id,
+        valid_id,
         utc_z_timestamp,
     )
     from v2_critical_path import derive_critical_path  # type: ignore
@@ -3505,8 +3509,10 @@ class V2Runtime:
             # A line/campaign candidate can change the Critical Path even when
             # the worker omitted STATE.  Start from canonical state and create
             # a service-derived candidate only when the projection differs.
+            # Migration preserves legacy Markdown. This projection reads only
+            # validated JSON; any changed candidate gets a newly rendered pair.
             state = self._load_artifact(
-                "research_trajectory/STATE.json", "project_state", paired=True
+                "research_trajectory/STATE.json", "project_state"
             )
         if state.get("critical_path") != critical_path:
             state["critical_path"] = critical_path
@@ -3711,12 +3717,17 @@ class V2Runtime:
             )
             candidate_errors.extend(cross_artifact_errors(
                 list(self._load_material(trial_id, stage_id).values())))
+            result_cards = self._load_artifact(f"{trial_root}/RESULT_CARDS.json", "result_cards")
             proposal = prepare_card_decisions(
                 merge_request=request,
-                result_cards=self._load_artifact(f"{trial_root}/RESULT_CARDS.json", "result_cards"),
+                result_cards=result_cards,
                 operations=stage.get("operations", ()), candidate_files=self._candidate_files(stage),
                 base_projection=self._base_projection(stage), trial_id=trial_id,
                 project_id=self.project_id,
+                prior_card_ids=self._verified_prior_card_ids(
+                    trial_id, stage["base_revision"],
+                    result_cards,
+                ),
             )
             candidate_errors.extend(proposal["errors"])
             if candidate_errors:
@@ -4068,8 +4079,10 @@ class V2Runtime:
                     artifact_type,
                 )
             elif canonical_path.exists() or canonical_path.is_symlink():
+                # The canonical JSON is authoritative, including immediately
+                # after migration when its legacy Markdown is retained intact.
                 value = self._load_artifact(
-                    canonical_relative, artifact_type, paired=True
+                    canonical_relative, artifact_type
                 )
             else:
                 continue
@@ -4217,6 +4230,81 @@ class V2Runtime:
                 for error in paired_markdown_errors(value, markdown)
             )
         return errors
+
+    def _verified_prior_card_ids(
+        self, trial_id: str, base_revision: int, result_cards: Mapping[str, Any],
+    ) -> set[str]:
+        """Resolve supersession targets in receipt-bound, earlier Trial history.
+
+        Deferred cards are historical identities, not accepted findings. Their
+        presence here permits correction links only, never active promotion.
+        """
+
+        requested = {
+            str(card_id) for card in result_cards.get("cards", ())
+            for card_id in card.get("supersedes", ())
+        }
+        requested_numbers = {
+            int(card_id.split("-")[1]) for card_id in requested
+            if valid_id("result_card", card_id)
+        }
+        if not requested_numbers:
+            return set()
+        found: set[str] = set()
+        trials = self._path("research_trajectory/trials")
+        for directory in sorted(trials.iterdir()):
+            prior = directory.name
+            if (directory.is_symlink() or not directory.is_dir()
+                    or not valid_id("trial", prior)
+                    or int(prior[:6]) not in requested_numbers
+                    or int(prior[:6]) >= int(trial_id[:6])):
+                continue
+            prefix = f"research_trajectory/trials/{prior}"
+            receipt_path = self._path(f"{prefix}/PUBLISH_RECEIPT.json")
+            if not receipt_path.exists():
+                continue
+            receipt = self._load_artifact(f"{prefix}/PUBLISH_RECEIPT.json", "publish_receipt")
+            if (receipt.get("trial_id") != prior
+                    or receipt.get("project_id") != self.project_id
+                    or receipt["published_revision"] > base_revision):
+                raise V2RuntimeError(f"Historical card receipt is outside this base revision: {prior}")
+            stage_id = str(receipt["stage_id"])
+            decision_relative = f"{prefix}/MERGE_DECISION.json"
+            decision_bytes = self._path(decision_relative, must_exist=True).read_bytes()
+            if not any(
+                item.get("path") == decision_relative and item.get("sha256") == _digest(decision_bytes)
+                for item in receipt.get("published_files", ())
+            ):
+                raise V2RuntimeError(f"Historical merge decision failed receipt verification: {prior}")
+            decision = self._load_artifact(decision_relative, "merge_decision")
+            stage = self._load_artifact(
+                f"research_trajectory/.staging/{prior}/{stage_id}/STAGED_UPDATE_MANIFEST.json",
+                "staged_update_manifest",
+            )
+            if (any(value.get("project_id") != self.project_id
+                    or value.get("trial_id") != prior or value.get("stage_id") != stage_id
+                    for value in (decision, stage))
+                    or decision.get("overall_status") not in {"approved", "needs_human"}
+                    or stage.get("base_revision") != receipt.get("base_revision")
+                    or stage.get("stage_content_hash") != compute_stage_content_hash(stage)
+                    or decision.get("stage_manifest_hash") != stage.get("stage_content_hash")):
+                raise V2RuntimeError(f"Historical card stage identity or hash is invalid: {prior}")
+            cards_relative = f"{prefix}/RESULT_CARDS.json"
+            card_bytes = self._path(cards_relative, must_exist=True).read_bytes()
+            if not any(
+                item.get("path") == cards_relative and item.get("role") == "result_cards"
+                and item.get("sha256") == _digest(card_bytes)
+                for item in stage.get("material_inputs", ())
+            ):
+                raise V2RuntimeError(f"Historical result cards failed their recorded stage hash: {prior}")
+            cards = self._load_artifact(cards_relative, "result_cards")
+            if cards.get("trial_id") != prior or cards.get("project_id") != self.project_id:
+                raise V2RuntimeError(f"Historical result cards have a different owner: {prior}")
+            found.update(
+                card["id"] for card in cards.get("cards", ())
+                if card.get("source_trial_id") == prior and card.get("id") in requested
+            )
+        return found
 
     def _base_projection(self, stage: Mapping[str, Any]) -> dict[str, bytes]:
         paths = set((*_CANONICAL_JSON, *_MANUSCRIPT_PATHS))
@@ -4956,6 +5044,24 @@ class V2Runtime:
                     publishable=False,
                 )
             material = self._load_material(trial_id, stage_id)
+            eligibility_errors = reviewer_card_eligibility_errors(
+                outputs, material["merge_request"]
+            )
+            if eligibility_errors and not any(
+                error.startswith("Merge Request ") for error in eligibility_errors
+            ):
+                # Reviewer-output defects do not change the immutable proposal.
+                # Repair these on the same stage before cross-artifact merge checks.
+                closure["errors"].extend(eligibility_errors)
+                closure["closed"] = False
+                return _status(
+                    "needs_review",
+                    trial_id=trial_id,
+                    stage_id=stage_id,
+                    review_closure=closure,
+                    errors=eligibility_errors,
+                    publishable=False,
+                )
             input_bundle = [stage, review, *outputs, *material.values()]
             input_errors = cross_artifact_errors(input_bundle)
             if input_errors:
@@ -4991,6 +5097,9 @@ class V2Runtime:
                 result_cards=material["result_cards"],
                 candidate_files=candidates,
                 base_projection=base,
+                prior_card_ids=self._verified_prior_card_ids(
+                    trial_id, stage["base_revision"], material["result_cards"]
+                ),
                 created_at=created_at,
             )
             decision = merge["decision"]

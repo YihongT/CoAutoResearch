@@ -36,7 +36,9 @@ This repository contains the product and its documentation. Development test
 suites, fixtures, and local verification artifacts are not distributed here.
 The packaging workflow builds a tarball; it is not an end-to-end quality gate.
 Do not include research data, credentials, generated papers, logs, or local
-verification projects in a contribution.
+verification projects in a contribution. A curated documentation example may
+include a reviewed paper and selected figures when agreed with the maintainer;
+keep its raw project, data, logs, and verification records outside the repository.
 
 ## Documentation
 

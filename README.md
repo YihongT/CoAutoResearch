@@ -9,62 +9,43 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
+An open-source research system built around your coding agent, with a browser workspace for autonomous investigation, ongoing discussion, and paper generation.
+
 CoAutoResearch brings autonomous investigation and human–AI collaboration into one research workflow. Define a question, discuss emerging findings, guide the next step, and build a manuscript from evidence you can trace.
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html">Walkthrough</a> ·
-  <a href="https://yihongt.github.io/CoAutoResearch/index.html">Documentation</a>
+  <a href="#co--auto">Co + Auto</a> ·
+  <a href="#example-papers">Example papers</a> ·
+  <a href="https://yihongt.github.io/CoAutoResearch/">Documentation</a>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="License: Apache 2.0"></a>
-  <a href="https://yihongt.github.io/CoAutoResearch/index.html"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a>
+  <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a>
 </p>
 
-## News
+![The browser workspace: define a research question, attach material, and choose an agent before starting.](assets/workspace.png)
 
-- **2026-09-07** — The 2.0 source update brings parallel research discussion, clearer research controls, and in-product paper generation. See the [changelog](CHANGELOG.md) and [GitHub Releases](https://github.com/YihongT/CoAutoResearch/releases) for versioned downloads.
-
-## Co + Auto
-
-**Co — Research together.** Ask why a result looks convincing, discuss an alternative, or prepare a change in direction. Send the suggestions you choose into the research session.
-
-**Auto — Keep research moving.** Let the agent plan, execute, interpret and review bounded research steps within your question and constraints. Pause to reconsider, then continue with new guidance.
-
-**Research — Build on evidence.** Keep proposals, observations, reviewed results and limitations distinct. Follow how the research changes, and carry its supporting evidence into the manuscript.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
-  <img src="assets/co-auto-light.svg" alt="Human direction and autonomous research exchange reviewed suggestions and findings. A shared record preserves evidence and limitations, informs the next question, and supports a manuscript and paper.">
-</picture>
-
-Discussion does not silently change a project. **Add to research draft** prepares a suggestion; you review it and send it to guide the main research. The shared record preserves what was tried, what was learned and what remains uncertain.
-
-## What you can do
-
-- **Start with a question.** Describe what you want to understand, attach relevant material and set practical limits before starting research.
-- **Continue existing work.** Bring a proposal, code, notes or prior results. The agent inspects their context before building on them.
-- **Discuss while research runs.** Use a separate chat to examine findings and prepare suggestions alongside the autonomous session.
-- **Guide the next iteration.** Review a plan, send an instruction, request a pause or resume with a different emphasis.
-- **Inspect the evidence.** Read trials, reviews, resource records and limitations behind the current conclusions.
-- **Build a paper.** Generate an evidence-grounded draft, figures, references and PDF from the product, then inspect its review notes.
-
-![The CoAutoResearch workspace invites a research question, materials and constraints before any research starts.](assets/workspace.png)
+**Your question. Your coding-agent login. A shared research record.** Start from a new idea, a proposal, or existing work. Discuss findings while autoresearch runs, then carry recorded evidence into a manuscript and PDF.
 
 ## Quick start
 
-Give your coding agent one instruction:
+Give your coding agent this instruction:
 
-> Set up and launch CoAutoResearch from https://github.com/YihongT/CoAutoResearch. Follow docs/agent-setup.md, reuse my existing coding-agent login, configure paper generation, verify the setup, and open the dashboard.
+```text
+Set up and launch CoAutoResearch from
+https://github.com/YihongT/CoAutoResearch.
+Follow docs/agent-setup.md, reuse my existing coding-agent login,
+configure paper generation, verify the setup, and open the dashboard.
+```
 
-The [setup contract](https://yihongt.github.io/CoAutoResearch/agent-setup.html) checks the environment, reuses your existing Codex or Claude Code authentication, prepares paper tools and verifies the dashboard. Complete any interactive provider login yourself. Dashboard readiness and PDF-tool readiness are reported separately; installation time depends on the dependencies already available.
+Setup reuses your **Codex or Claude Code** authentication and checks dashboard and paper-tool readiness separately. Complete any interactive provider login yourself. Model access and usage limits depend on your account; research may need additional scientific dependencies.
 
 <details>
 <summary>Manual setup from source</summary>
 
-You need Node.js 20+, Python 3.10+, Git and an authenticated Codex or Claude Code CLI.
+You need Node.js 20+, Python 3.10+, Git, and an installed, authenticated Codex or Claude Code CLI.
 
 ```bash
 git clone https://github.com/YihongT/CoAutoResearch.git
@@ -73,48 +54,101 @@ node bin/auto-research.js doctor
 node bin/auto-research.js ui
 ```
 
-Open the printed URL and keep the server terminal running. The dashboard has no application dependencies or build step. Choose `--projects-dir /path/to/projects` for a different research folder.
+Open the printed URL and keep the server terminal running. The dashboard has no application dependencies or build step. Use `--projects-dir /path/to/projects` to choose where research projects live.
 
-For PDF generation, follow [paper-tool setup](https://yihongt.github.io/CoAutoResearch/paper-generation.html): it additionally prepares Python 3.12+, four pinned scientific skills, LaTeX and Poppler. Research projects can have their own scientific dependencies. Compare the npm version with the checkout before choosing an installation source.
+PDF generation additionally needs Python 3.12+, four pinned scientific skills, LaTeX, and Poppler. Follow the [agent setup guide](docs/agent-setup.md) for installation and verification. You can use this source checkout without an npm release.
 
 </details>
 
-Create a project, send a research brief and review the proposed direction. Choose **Start autoresearch** when you are ready. Creating a project alone does not start research. See [Getting started](https://yihongt.github.io/CoAutoResearch/getting-started.html) for the complete first-run guide.
+In the dashboard, **create a project → send a research brief → review the direction → Start autoresearch**. Creating a project alone does not start research. [First-run guide →](https://yihongt.github.io/CoAutoResearch/getting-started.html)
 
-## A research walkthrough
+## Co + Auto
+
+**Co — Research together.** Question a finding, discuss an alternative in a parallel chat, and send the suggestions you choose into the research session.
+
+**Auto — Keep research moving.** Let the agent plan, execute, interpret, and review research iterations within your brief. Follow progress, pause to reconsider, and resume when ready.
+
+**Research — Build on evidence.** Keep proposals, observations, reviewed results, and limitations distinct as the research develops.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/diagrams/workflow-dark.svg">
-  <img src="docs/_static/diagrams/workflow-light.svg" alt="A research brief starts autonomous trials. Parallel discussion becomes guidance after review and sending. Reviewed evidence supports a manuscript and paper draft.">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
+  <img src="assets/co-auto-light.svg" alt="Human direction guides autonomous research through reviewed and sent suggestions. Findings return to the researcher and accumulate in a shared record supporting the next question, manuscript, and paper.">
 </picture>
 
-Define a question and practical limits, review the prepared brief, then start research. Use a separate chat to discuss emerging findings while the agent works.
+**Add to research draft** prepares a suggestion for your review; sending it guides the main research. Discussion does not silently change project files. **Pause after current turn** requests a stop at an agent-turn boundary, which can fall inside an unfinished Trial. [Controls and workflow →](https://yihongt.github.io/CoAutoResearch/walkthrough.html)
 
-Choose **Add to research draft** when a discussion produces a useful suggestion. Review the wording and send it. At the next applicable boundary, inspect how the research addresses it. Request a pause to reconsider the direction, or resume with a precise instruction.
+## Example papers
 
-The [workflow walkthrough](https://yihongt.github.io/CoAutoResearch/walkthrough.html) follows these controls through to reviewing evidence and generating a paper. It explains what each action does without claiming a particular research outcome.
+Research drafts generated through CoAutoResearch, from recorded evidence to a PDF.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/_static/examples/digits-paper.pdf"><img src="docs/_static/examples/digits-preview.png" width="360" alt="First page of the Digits report on covariance shrinkage in linear discriminant analysis"></a>
+      <p><strong>Digits · Statistical learning</strong></p>
+      <p>Covariance shrinkage for small-sample handwritten-digit classification.</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/_static/examples/ising-paper.pdf"><img src="docs/_static/examples/ising-preview.png" width="360" alt="First page of the Ising report on critical-temperature estimation and implementation diagnostics"></a>
+      <p><strong>Ising · Statistical physics</strong></p>
+      <p>Critical-temperature estimation and implementation diagnostics under a CPU budget.</p>
+    </td>
+  </tr>
+  <tr>
+    <td><a href="docs/_static/examples/digits-paper.pdf"><strong>Read paper · 11 pages</strong></a></td>
+    <td><a href="docs/_static/examples/ising-paper.pdf"><strong>Read paper · 10 pages</strong></a></td>
+  </tr>
+</table>
+
+Generated through CoAutoResearch in developer-operated evaluations. These research
+drafts include human intervention and retain their limitations. Human scientific
+review is required before publication. [About the papers →](https://yihongt.github.io/CoAutoResearch/example-papers.html)
 
 ## From findings to a paper
 
-**Manuscript** brings the evolving research story together with its evidence and gaps. Once reviewed results are recorded and project agents are idle, choose **Generate paper**. Specify a venue and year, or request a general research report, then review the model settings.
+**Manuscript** brings the developing research story together with evidence and gaps. Once reviewed results are recorded and project agents are idle, choose **Generate paper**, select a general report or target venue, and check the writing model.
 
-The internal agent uses four scientific skills for writing, visualization, citations and venue templates. It works from a frozen evidence snapshot, creates figures from saved results and compiles a PDF. It does not run new experiments during writing.
+The internal agent uses four scientific skills for **writing, visualization, citations, and venue templates**. It writes from a frozen evidence snapshot, prepares figures from saved results, and compiles a PDF without running new experiments.
 
-Follow progress, cancel if needed, and open **Paper** when the draft is ready. Preview its pages, download the PDF and source, and inspect review notes. A previous draft remains available if a replacement fails. A compiled PDF still needs human review of claims, references, authorship and submission requirements. [Paper generation details →](https://yihongt.github.io/CoAutoResearch/paper-generation.html)
+Open **Paper** to zoom, scroll, and download the PDF and source. Review the accompanying notes; a previous draft remains available while its replacement is generated. Human review of scientific claims, authorship, and publication requirements remains part of the workflow.
+
+[Paper setup and generation →](https://yihongt.github.io/CoAutoResearch/paper-generation.html)
 
 ## How it works
 
-Each **Trial** is a focused research iteration. The agent prepares a bounded plan, performs the work, interprets the evidence and submits the result to the applicable checks. The service records accepted changes and determines whether to continue, pause or request a human decision.
+Each **Trial** is a focused research iteration: plan the work, execute it, interpret the evidence, and submit the result to the applicable checks. The service records accepted changes and determines whether to continue, pause, or request a human decision.
 
-The research record connects directions, resources, results, reviews and manuscript content. Technical contracts distinguish proposed work from recorded changes and support recovery after interruptions. An internal review is a workflow check, not external peer review or proof of scientific correctness. [Architecture and lifecycle →](https://yihongt.github.io/CoAutoResearch/conceptual-framework.html)
+<details>
+<summary>Explore the system architecture</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/diagrams/architecture-dark.svg">
+  <img src="docs/_static/diagrams/architecture.svg" alt="The browser communicates with a local service that supervises coding agents, maintains the research record, and coordinates parallel discussion and paper generation.">
+</picture>
+
+The research record connects directions, resources, results, reviews, and manuscript content. Technical contracts separate proposed work from recorded changes and support recovery after interruptions. Internal review is a workflow check, not external peer review or proof of scientific correctness.
+
+[Architecture and lifecycle](https://yihongt.github.io/CoAutoResearch/conceptual-framework.html)
+
+</details>
+
+## News
+
+- **2026-09-07** — The 2.0 source update adds parallel research discussion, clearer research controls, and in-product paper generation. See the [changelog](CHANGELOG.md) for source changes and [GitHub Releases](https://github.com/YihongT/CoAutoResearch/releases) for published versions.
 
 ## Documentation and community
 
-[FAQ](https://yihongt.github.io/CoAutoResearch/faq.html) · [Setup](https://yihongt.github.io/CoAutoResearch/agent-setup.html) · [CLI](https://yihongt.github.io/CoAutoResearch/cli.html) · [Remote access](https://yihongt.github.io/CoAutoResearch/remote-server.html) · [Platforms](https://yihongt.github.io/CoAutoResearch/platforms.html) · [Upgrades](https://yihongt.github.io/CoAutoResearch/upgrading.html)
+| Start using it | Understand and extend it |
+|---|---|
+| [Setup](https://yihongt.github.io/CoAutoResearch/agent-setup.html) · [Walkthrough](https://yihongt.github.io/CoAutoResearch/walkthrough.html) | [Architecture](https://yihongt.github.io/CoAutoResearch/conceptual-framework.html) · [CLI](https://yihongt.github.io/CoAutoResearch/cli.html) |
+| [Paper generation](https://yihongt.github.io/CoAutoResearch/paper-generation.html) · [FAQ](https://yihongt.github.io/CoAutoResearch/faq.html) | [Platforms](https://yihongt.github.io/CoAutoResearch/platforms.html) · [Remote access](https://yihongt.github.io/CoAutoResearch/remote-server.html) · [Upgrades](https://yihongt.github.io/CoAutoResearch/upgrading.html) |
 
-Report reproducible problems through [Issues](https://github.com/YihongT/CoAutoResearch/issues). See [Contributing](CONTRIBUTING.md), the [Code of conduct](CODE_OF_CONDUCT.md) and [Security](SECURITY.md) for contribution and private vulnerability-reporting guidance.
+Share reproducible bugs and feature requests through [Issues](https://github.com/YihongT/CoAutoResearch/issues). Contributions to the product, documentation, and carefully documented research examples are welcome: read [Contributing](CONTRIBUTING.md), [Code of conduct](CODE_OF_CONDUCT.md), and [Security](SECURITY.md).
 
-If CoAutoResearch contributes to your research, cite the software and record the version used:
+<details>
+<summary>Cite CoAutoResearch</summary>
+
+If you use CoAutoResearch in research, cite the software and record the version or commit used.
 
 ```bibtex
 @software{coautoresearch,
@@ -124,6 +158,8 @@ If CoAutoResearch contributes to your research, cite the software and record the
 }
 ```
 
-Licensed under [Apache 2.0](LICENSE). Upstream tools and scientific skills retain their respective licenses and attribution requirements.
+</details>
+
+Licensed under [Apache 2.0](LICENSE). Upstream tools and skills retain their own licenses and attribution requirements.
 
 Contact: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)

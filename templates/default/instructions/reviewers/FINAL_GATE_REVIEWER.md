@@ -60,7 +60,7 @@ Perform the strict final human-defensibility review of the exact candidate stage
 ### Venue and deliverable readiness
 
 - Target venue constraints and evidence standards are satisfied when applicable.
-- The active venue profile cites current inspected official venue or publisher guidance for the exact article type; a draft, inferred, stale, or unverified profile cannot pass.
+- When a venue is configured, the active venue profile cites current inspected official venue or publisher guidance for the exact article type; a draft, inferred, stale, or unverified profile cannot pass. With no configured venue, assess the declared audience, article type, and deliverable under the Venue Fit Reviewer's general-report scope; do not invent a submission target or waive any other final-readiness criterion.
 - Every installed domain pack required by the project, venue, claims, or risks is routed, and every unavailable required specialization is an explicit blocker or claim limitation.
 - Manuscript/deliverable architecture is coherent and free of reader-facing placeholders.
 - Figures/tables/references are complete for the declared scope.

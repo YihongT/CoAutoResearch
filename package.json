@@ -28,6 +28,7 @@
     "!templates/default/research_trajectory/.transactions/**",
     "templates/default/research_trajectory/.transactions/.gitkeep",
     "docs/",
+    "!docs/_static/examples/**",
     "!docs/**/*.docx",
     "!**/__pycache__/**",
     "!**/*.py[cod]",

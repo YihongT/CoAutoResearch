@@ -4,6 +4,8 @@ This guide follows the product controls from an initial question to a paper
 draft. It describes a workflow, not an experimental result or an external user
 case study. Use your own research question, materials and evaluation criteria.
 
+For product-generated research drafts, open the [example papers](example-papers.md).
+
 ```{image} _static/diagrams/workflow-light.svg
 :alt: From a research brief through autonomous trials, parallel discussion, evidence review and paper generation.
 :class: co-diagram-light

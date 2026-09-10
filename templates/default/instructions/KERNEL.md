@@ -37,6 +37,12 @@ Examples:
 
 Do not write these directly during an agent invocation.
 
+Some projects retain only `HUMAN_TASKS.md`. Read the JSON when it exists;
+otherwise use that existing Markdown task record. Check existence before adding
+a file to an evidence or hash manifest. An `.example.json` file is a template,
+not canonical evidence; do not create a missing control file just to satisfy a
+reading checklist.
+
 ### Trial proposals and audit
 
 The current trial directory may contain:
@@ -57,6 +63,12 @@ hashed as audit material, but reviewers must not infer a pair from the matching
 basename, require it to mirror `TRIAL.json`, or treat disagreement as a v2
 blocker. JSON/Markdown consistency applies only where the artifact registry
 declares `paired_markdown` or `paired_markdown_pattern`.
+
+For large or multi-file JSON writes, construct records in a short local script
+and serialize them with a JSON library instead of hand-assembling a long patch.
+Keep the script in the current phase's allowed scratch area. If a write fails,
+inspect the actual files and retry only missing or invalid writes; do not redo
+scientific work because a patch or serialization step failed.
 
 `PUBLISH_RECEIPT.json` is service-owned. Do not create or modify it. At publish,
 the service atomically finalizes the reviewed `TRIAL.json` lifecycle state,
@@ -148,7 +160,7 @@ Emit semantic trace phase `orient`.
 
 Follow `EXPERT_ROUTER.md`.
 
-Every trial requires `domains/general_research/DOMAIN.md`. Also select each installed pack whose registry trigger matches the project, active venue, local question, or proposed claim. Select exactly one primary move playbook. Include a venue profile when configured. Record unavailable specialized packs honestly. A final candidate cannot pass while required specialized coverage or official venue evidence is missing.
+Every trial requires `domains/general_research/DOMAIN.md`. Also select each installed pack whose registry trigger matches the project, active venue, local question, or proposed claim. Select exactly one primary move playbook. Include a venue profile when configured. Record unavailable specialized packs honestly. A final candidate cannot pass while required specialized coverage or official evidence for a configured venue is missing.
 
 Write `EXPERT_ROUTE.json` before finalizing the plan. The service generates its registered Markdown view before approval.
 
@@ -185,7 +197,12 @@ Emit semantic trace phase `charter`.
 
 ### Resource Scout
 
-Use `RESOURCE_SCOUT.md` when the plan depends on an unavailable, uncertain, date-sensitive, or research-critical external resource. If skipped, state a concrete reason.
+Read `RESOURCE_SCOUT.md` before deciding whether Scout is required. Assess gaps
+in the sources supporting the current question, method, comparison, dataset,
+and interpretation, not just whether the experiment's files are available.
+Follow its required/skip criteria; a local runnable experiment alone does not
+establish adequate research grounding. Reuse already inspected sources when
+they cover this move, and give a concrete scoped reason when skipping.
 
 ### Review manifest preview
 
@@ -200,6 +217,26 @@ Emit semantic trace phase `preflight`.
 ## 9. Phase 6: Execute
 
 Execute only the chartered work. Use small smoke tests before expensive work. Preserve commands, configurations, inputs, outputs, hashes, and failure logs required for another person to inspect or reproduce the result.
+
+When executing project code, preserve the actual code and relevant configuration
+as versioned artifacts in the current trial, and execute that preserved version.
+Reference these files and their SHA-256 values in `REPORT.artifacts`. Retain the
+versions used by failed and successful attempts; a mutable workspace path alone
+is not an execution record. For reused evidence, cite its existing immutable
+implementation record or disclose that implementation verification is unavailable;
+do not reconstruct a historical source version from current code.
+
+### Reuse after a protocol correction
+
+A replacement stage for an unfinished trial is not a new experiment. Inspect the
+retained successful computation and smoke checks before planning another run.
+When only stage identity, plan revision, provenance or record formatting changes,
+reuse valid outputs. Cite their original paths, hashes and execution-time plan
+binding, and explain their adoption in a new current-stage record; never rewrite
+history to imply the original computation ran under the new plan. Repeat
+computation only when an approved scientific change or a specific invalid result
+makes reuse inappropriate. State that reason before running, and charge every
+attempt across all stages to the same trial's cumulative budget.
 
 Stop when:
 
@@ -298,6 +335,12 @@ versioned artifact or source.
 ### MERGE_REQUEST
 
 Propose card decisions and canonical changes. State conflicts, qualifications, exclusions, and human implications. Never omit materially relevant conflicting evidence.
+
+Use `conflicts` for material conflicts requiring resolution, not ordinary method
+tradeoffs or the absence of an existing research line. Put such limitations in
+card caveats and qualifications. A declared conflict requires an explicit human
+decision or a qualified/superseding card decision with its resolution recorded;
+do not erase contrary evidence merely to satisfy merge validation.
 
 Before yielding, set the agent-authored `TRIAL.json` lifecycle proposal to
 `distilled`. The agent may use `preflight_passed`, `executing`, or `distilled`

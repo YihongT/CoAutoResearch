@@ -292,6 +292,7 @@ def _projection_errors(
     after: Mapping[str, Any],
     result_cards: Mapping[str, Any] | Iterable[Mapping[str, Any]],
     card_decisions: Iterable[Mapping[str, Any]],
+    prior_card_ids: Iterable[str] = (),
 ) -> list[str]:
     errors: list[str] = []
     before = _decoded_projection(before)
@@ -350,7 +351,9 @@ def _projection_errors(
         )
 
     superseded = _field_card_ids(after, {"superseded_card_ids"})
-    if unknown := superseded - old_known - set(cards_by_id):
+    # Recorded historical proposals may be corrected without promoting them
+    # to active evidence. Only the service supplies these verified identities.
+    if unknown := superseded - old_known - set(cards_by_id) - set(prior_card_ids):
         errors.append(
             f"effective projection references unknown superseded cards: {sorted(unknown)}"
         )
@@ -483,11 +486,12 @@ def build_effective_projection(
 
 
 def prepare_card_decisions(*, merge_request, result_cards, operations, candidate_files,
-                           base_projection, trial_id, project_id):
+                           base_projection, trial_id, project_id, prior_card_ids=()):
     """Check proposal structure before review and again at final merge.
 
     This does not approve evidence or derive a publishable Merge Decision.
     """
+    prior_card_ids = set(prior_card_ids)
     errors: list[str] = []
     cards = _result_card_list(result_cards)
     card_by_id: dict[str, Mapping[str, Any]] = {}
@@ -540,7 +544,7 @@ def prepare_card_decisions(*, merge_request, result_cards, operations, candidate
             f"Merge Request repeats card decisions: {sorted(duplicate_requests)}"
         )
     try:
-        old_card_ids = _all_card_ids(_decoded_projection(base_projection))
+        old_card_ids = _all_card_ids(_decoded_projection(base_projection)) | set(prior_card_ids)
     except (TypeError, ValueError) as exc:
         old_card_ids = set()
         errors.append(str(exc))
@@ -625,6 +629,23 @@ def prepare_card_decisions(*, merge_request, result_cards, operations, candidate
             "in the result's qualifications rather than declaring them as conflicts."
         )
 
+    if not errors and not needs_human:
+        try:
+            proposed_projection = build_effective_projection(
+                base_projection,
+                {"operations": operations},
+                {"canonical_update_decisions": [
+                    {"path": operation["path"], "decision": "apply"}
+                    for operation in operations
+                ]},
+                candidate_files,
+            )
+            errors.extend(_projection_errors(
+                base_projection, proposed_projection, result_cards, preliminary, prior_card_ids
+            ))
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(str(exc))
+
     return {
         "errors": errors, "requests": request_by_id,
         "decisions": preliminary, "needs_human": needs_human,
@@ -647,9 +668,11 @@ class MergeEvaluator:
         result_cards: Mapping[str, Any] | Iterable[Mapping[str, Any]],
         candidate_files: Mapping[str, Any],
         base_projection: Mapping[str, Any],
+        prior_card_ids: Iterable[str] = (),
         created_at: str | None = None,
         updated_at: str | None = None,
     ) -> dict[str, Any]:
+        prior_card_ids = set(prior_card_ids)
         errors: list[str] = []
         trial_id = str(stage_manifest.get("trial_id", ""))
         project_id = str(stage_manifest.get("project_id", ""))
@@ -775,6 +798,7 @@ class MergeEvaluator:
             merge_request=merge_request, result_cards=result_cards,
             operations=operations, candidate_files=candidate_files,
             base_projection=base_projection, trial_id=trial_id, project_id=project_id,
+            prior_card_ids=prior_card_ids,
         )
         errors.extend(proposal["errors"])
         request_by_id = proposal["requests"]
@@ -918,7 +942,7 @@ class MergeEvaluator:
                 base_projection, stage_manifest, decision, candidate_files
             )
             projection_errors = _projection_errors(
-                base_projection, projection, result_cards, decision["card_decisions"]
+                base_projection, projection, result_cards, decision["card_decisions"], prior_card_ids
             )
         except (KeyError, TypeError, ValueError) as exc:
             projection = None

@@ -426,6 +426,18 @@ def _jsonschema_errors(
     return result
 
 
+@lru_cache(maxsize=512)
+def _cached_jsonschema_errors(
+    value_json: str, schema_name: str, schemas_json: str, schema_dir: str,
+) -> tuple[str, ...] | None:
+    # Only cache this pure schema check. File bindings, timestamps, and
+    # cross-artifact admission checks still run against their current inputs.
+    result = _jsonschema_errors(
+        json.loads(value_json), schema_name, json.loads(schemas_json), Path(schema_dir)
+    )
+    return tuple(result) if result is not None else None
+
+
 def schema_errors(
     value: Any,
     schema_name: str,
@@ -441,7 +453,19 @@ def schema_errors(
     if schema_name not in schemas:
         raise KeyError(f"unknown schema: {schema_name}")
     if engine != "fallback":
-        result = _jsonschema_errors(value, schema_name, schemas, root)
+        try:
+            _require_json_value(value)
+            value_json = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError):
+            value_json = None
+        if value_json is not None and len(value_json) <= 256_000:
+            # Include the full schema contents, not just a path or modification
+            # time. Preserve key order so diagnostics match uncached validation.
+            schemas_json = json.dumps(schemas, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            cached = _cached_jsonschema_errors(value_json, schema_name, schemas_json, str(root))
+            result = list(cached) if cached is not None else None
+        else:
+            result = _jsonschema_errors(value, schema_name, schemas, root)
         if result is not None:
             return result
         if engine == "jsonschema":

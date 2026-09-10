@@ -59,6 +59,8 @@ auto-research-test*/
 # Large local research materials accidentally created while testing
 *.zip
 *.pdf
+!docs/_static/examples/digits-paper.pdf
+!docs/_static/examples/ising-paper.pdf
 *.docx
 *.pptx
 *.xlsx

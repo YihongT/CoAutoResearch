@@ -28,7 +28,17 @@ Review source provenance, citation accuracy, coverage, recency where relevant, a
   details where applicable?
 - Does every cited source exist and match author/title/date/venue/identifier?
 - Are URLs, DOIs, arXiv IDs, report versions, dataset/model versions, and access dates accurate where applicable?
+- Do precise page/section/line locators resolve in the original source?
+  Extraction-tool line numbers cannot be used as GitHub source-line anchors;
+  a reachable file URL does not by itself validate its fragment. A valid line
+  range must also contain the statements supporting the claim, not just a
+  nearby declaration/docstring. If the native line range is unverified, use
+  the versioned file URL with the inspected function or section name.
 - Was the source actually inspected, or only mentioned by another source?
+- Does the recorded inspection depth support the specific use? Metadata or an
+  abstract alone cannot establish detailed methods, results, or article
+  architecture. Check the relevant original section or versioned source when
+  needed, and distinguish an inaccessible lead from inspected evidence.
 - Are uploaded, discovered, and externally linked resources distinguished?
 
 ### Citation-to-claim accuracy
@@ -45,6 +55,9 @@ Review source provenance, citation accuracy, coverage, recency where relevant, a
 - Is the literature set appropriate to the project scope, contribution type, and venue?
 - Is recency handled when the question is date-sensitive?
 - Are seed papers representative rather than cherry-picked?
+- Have relevant Scout findings been considered in the research interpretation
+  and manuscript, with reasons for material exclusions? Judge coverage of the
+  actual claims and alternatives, not the number or age of references alone.
 
 ### Reference-list integrity
 
@@ -68,5 +81,11 @@ entry is cited or intentionally documented in a resource appendix, and duplicate
 placeholder, fabricated, dead, or orphan records require revision.
 
 ## Pass Standard
+
+Compare author names/initials, title, year and identifier with the original
+publisher or repository record. A resolving DOI/arXiv link or a reused local
+literature note is not proof that the displayed bibliographic fields are correct.
+Preserve the distinction between metadata actually checked and metadata merely
+copied from prior notes.
 
 `pass` requires accurate, inspectable, balanced, and complete references for the reviewed scope. Missing source inspection, unsupported citation, orphan entry, fabricated metadata, or unresolved locator requires `revise`.

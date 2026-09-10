@@ -4,7 +4,10 @@ A release contains the CLI, reusable research template, dashboard, runtime
 schemas and protocol contracts, documentation, assets, and license. Research
 projects, credentials, installed skills, generated papers, caches, development
 test suites, fixtures, and verification reports are not part of the repository
-or npm package. The four optional paper skills are installed at a pinned
+or npm package, except for curated paper PDFs and previews agreed for the
+repository's documentation. Those examples live in `docs/_static/examples/`
+and are excluded from the npm archive. Their source projects, data, logs, and
+verification records remain outside the repository. The four optional paper skills are installed at a pinned
 revision by the product's paper-tools setup command.
 
 ## Prepare the release

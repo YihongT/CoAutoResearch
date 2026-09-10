@@ -30,6 +30,13 @@ V2.0 enables only `general_research` by default and ships optional installed pac
 
 The service independently derives required installed packs from stable project and venue signals. Omitting a required installed pack, inventing a pack path, or omitting its registered evidence and safety standards invalidates plan approval.
 
+Read the installed `domains/*/registry.json` triggers first, then read
+`DOMAIN.md` only for general research and the packs that match this trial.
+Do not read every optional domain's full instructions just to decide that its
+trigger does not apply. Batch independent registry reads and retain the selected
+route while its inputs remain unchanged. This limits reading, not required
+specialist coverage or review standards.
+
 ## Move selection
 
 Choose one primary playbook:
@@ -47,7 +54,11 @@ If a trial appears to need two primary playbooks, narrow the local question or s
 
 ## Route output
 
-Write `EXPERT_ROUTE.json` and `EXPERT_ROUTE.md` with:
+Write `EXPERT_ROUTE.json` with the fields below. The service generates its
+registered `EXPERT_ROUTE.md` view before plan approval; do not repeatedly draft
+or validate that derived Markdown during planning.
+
+Include:
 
 - move pack;
 - enabled domain packs;
