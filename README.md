@@ -47,9 +47,13 @@ CoAutoResearch brings autonomous investigation and human–AI collaboration into
 **Trace findings to evidence.** Keep proposals, observations, reviewed results, and limitations distinct as the research develops.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
-  <img src="assets/co-auto-light.svg" alt="Human direction guides autonomous research through reviewed and sent suggestions. Findings return to the researcher and accumulate in a shared record supporting the next question, manuscript, and paper.">
+  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
+  <source media="(prefers-reduced-motion: reduce)" srcset="assets/co-auto-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.gif">
+  <img src="assets/co-auto-light.gif" alt="Human direction guides autonomous research through reviewed and sent suggestions. Findings return to the researcher and accumulate in a shared record supporting the next question, manuscript, and paper.">
 </picture>
+
+Illustrated workflow; timing is schematic. [Static diagram](assets/co-auto-light.svg) · [Dark version](assets/co-auto-dark.svg)
 
 Use your existing **Codex or Claude Code** login in an open-source browser workspace. Start from a question, a proposal, or existing work. Keep the research direction, discussions, evidence, and writing together as the project develops.
 

@@ -25,15 +25,28 @@ brief, review the direction, and choose **Start autoresearch** when ready.
 
 ## Features
 
+```{image} ../assets/co-auto-light.gif
+:alt: Illustrated workflow: define a brief, start autonomous research, optionally discuss and send suggestions, record results, then generate a paper for human review.
+:class: co-diagram-light co-loop-motion
+```
+
+```{image} ../assets/co-auto-dark.gif
+:alt: Illustrated workflow: define a brief, start autonomous research, optionally discuss and send suggestions, record results, then generate a paper for human review.
+:class: co-diagram-dark co-loop-motion
+```
+
 ```{image} ../assets/co-auto-light.svg
-:alt: Human direction, autonomous research and a shared evidence record.
-:class: co-diagram-light
+:alt: Human direction, autonomous research and a shared evidence record. Suggestions enter research only after review and sending; paper generation is a user action.
+:class: co-diagram-light co-loop-static
 ```
 
 ```{image} ../assets/co-auto-dark.svg
-:alt: Human direction, autonomous research and a shared evidence record.
-:class: co-diagram-dark
+:alt: Human direction, autonomous research and a shared evidence record. Suggestions enter research only after review and sending; paper generation is a user action.
+:class: co-diagram-dark co-loop-static
 ```
+
+Illustrated workflow; timing is schematic. The static diagram is shown when
+reduced motion is enabled and when printing. [Open static diagram](../assets/co-auto-light.svg).
 
 **Discuss and guide.** Discuss a finding while the agent works. Prepare a
 suggestion, review it, and send it into the research session.

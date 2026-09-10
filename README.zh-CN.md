@@ -47,9 +47,13 @@ CoAutoResearch 将自主研究与人机协作融入同一工作流。从定义�
 **证据追溯。** 随着研究推进，清楚区分提议、观察、经过检查的结果和局限。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
-  <img src="assets/co-auto-light.svg" alt="研究者审阅并发送建议，指导自主研究；研究发现反馈给研究者，并进入共享记录，为后续问题、研究稿和论文提供依据。">
+  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
+  <source media="(prefers-reduced-motion: reduce)" srcset="assets/co-auto-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.gif">
+  <img src="assets/co-auto-light.gif" alt="研究者审阅并发送建议，指导自主研究；研究发现反馈给研究者，并进入共享记录，为后续问题、研究稿和论文提供依据。">
 </picture>
+
+流程示意动画，不代表实际运行速度。[静态图](assets/co-auto-light.svg) · [深色版本](assets/co-auto-dark.svg)
 
 在开源的网页工作区中，使用你已有的 **Codex 或 Claude Code** 登录。从一个问题、提案或已有工作开始，将研究方向、讨论、证据和写作保留在同一项目中。
 

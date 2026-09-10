@@ -107,3 +107,17 @@ footer { color: var(--co-muted); font-size: 13px; margin-top: 40px; }
   .co-theme-toggle { display: none; }
   .wy-nav-content { background: white; color: black; padding: 0; }
 }
+
+/* Keep the workflow readable without animation when motion is reduced. */
+:root[data-docs-theme] .co-loop-static { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-docs-theme] .co-loop-motion { display: none !important; }
+  :root[data-docs-theme] .co-loop-static.co-diagram-light { display: block !important; }
+  :root[data-docs-theme="dark"] .co-loop-static.co-diagram-light { display: none !important; }
+  :root[data-docs-theme="dark"] .co-loop-static.co-diagram-dark { display: block !important; }
+}
+@media print {
+  :root[data-docs-theme] .co-loop-motion { display: none !important; }
+  :root[data-docs-theme] .co-loop-static.co-diagram-light { display: block !important; }
+  :root[data-docs-theme] .co-loop-static.co-diagram-dark { display: none !important; }
+}
