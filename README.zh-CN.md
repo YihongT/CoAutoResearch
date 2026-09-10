@@ -17,7 +17,7 @@ CoAutoResearch 将自主研究与人机协作融入同一工作流。从定义�
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
-  <a href="#co--auto">Co + Auto</a> ·
+  <a href="#功能特点">功能特点</a> ·
   <a href="#示例论文">示例论文</a> ·
   <a href="https://yihongt.github.io/CoAutoResearch/">文档</a>
 </p>
@@ -38,13 +38,13 @@ CoAutoResearch 将自主研究与人机协作融入同一工作流。从定义�
 
 [更新记录](CHANGELOG.md) · [已发布版本](https://github.com/YihongT/CoAutoResearch/releases)
 
-## Co + Auto
+## 功能特点
 
-**Co — 一起研究。** 质疑一个发现，在并行聊天中讨论其他方案，再将你选定的建议发送到主研究会话。
+**讨论与指导。** 质疑一个发现，在并行聊天中讨论其他方案，再将你选定的建议发送到主研究会话。
 
-**Auto — 持续推进。** Agent 根据研究要求规划、执行、解释和审查每轮工作。你可以查看进展，暂停思考，再继续研究。
+**自主研究。** Agent 根据研究要求规划、执行、解释和审查每轮工作。你可以查看进展，暂停思考，再继续研究。
 
-**Research — 以证据积累成果。** 随着研究推进，清楚区分提议、观察、经过检查的结果和局限。
+**证据追溯。** 随着研究推进，清楚区分提议、观察、经过检查的结果和局限。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">

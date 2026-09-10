@@ -23,7 +23,7 @@ Setup reuses your Codex or Claude Code login and checks dashboard and paper-tool
 readiness separately. Creating a project does not start research: send your
 brief, review the direction, and choose **Start autoresearch** when ready.
 
-## Co + Auto
+## Features
 
 ```{image} ../assets/co-auto-light.svg
 :alt: Human direction, autonomous research and a shared evidence record.
@@ -35,13 +35,13 @@ brief, review the direction, and choose **Start autoresearch** when ready.
 :class: co-diagram-dark
 ```
 
-**Co — Research together.** Discuss a finding while the agent works. Prepare a
+**Discuss and guide.** Discuss a finding while the agent works. Prepare a
 suggestion, review it, and send it into the research session.
 
-**Auto — Keep research moving.** The agent plans, executes, interprets and reviews
+**Run autonomous research.** The agent plans, executes, interprets and reviews
 bounded research steps within your direction and constraints.
 
-**Research — Build on evidence.** Follow the question, results, limitations and
+**Trace findings to evidence.** Follow the question, results, limitations and
 remaining decisions through a shared research record and into a manuscript.
 
 ## Example papers

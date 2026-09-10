@@ -17,7 +17,7 @@ CoAutoResearch brings autonomous investigation and human–AI collaboration into
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
-  <a href="#co--auto">Co + Auto</a> ·
+  <a href="#features">Features</a> ·
   <a href="#example-papers">Example papers</a> ·
   <a href="https://yihongt.github.io/CoAutoResearch/">Documentation</a>
 </p>
@@ -38,13 +38,13 @@ CoAutoResearch brings autonomous investigation and human–AI collaboration into
 
 [Changelog](CHANGELOG.md) · [Published releases](https://github.com/YihongT/CoAutoResearch/releases)
 
-## Co + Auto
+## Features
 
-**Co — Research together.** Question a finding, discuss an alternative in a parallel chat, and send the suggestions you choose into the research session.
+**Discuss and guide.** Question a finding, discuss an alternative in a parallel chat, and send the suggestions you choose into the research session.
 
-**Auto — Keep research moving.** Let the agent plan, execute, interpret, and review research iterations within your brief. Follow progress, pause to reconsider, and resume when ready.
+**Run autonomous research.** Let the agent plan, execute, interpret, and review research iterations within your brief. Follow progress, pause to reconsider, and resume when ready.
 
-**Research — Build on evidence.** Keep proposals, observations, reviewed results, and limitations distinct as the research develops.
+**Trace findings to evidence.** Keep proposals, observations, reviewed results, and limitations distinct as the research develops.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
