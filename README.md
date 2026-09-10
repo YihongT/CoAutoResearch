@@ -27,9 +27,9 @@ CoAutoResearch brings autonomous investigation and human–AI collaboration into
   <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a>
 </p>
 
-![CoAutoResearch research workspace with recorded findings and research controls.](assets/workspace.png)
+![CoAutoResearch homepage with research brief input and workspace navigation.](assets/homepage.png)
 
-*Digits example: recorded findings, evidence, and limitations. Cropped from the live dashboard.*
+*Start with a question, a proposal, or work already in progress.*
 
 ## News
 

@@ -27,9 +27,9 @@ CoAutoResearch 将自主研究与人机协作融入同一工作流。从定义�
   <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="文档"></a>
 </p>
 
-![CoAutoResearch 研究工作区中的已记录发现和研究控制入口。](assets/workspace.png)
+![CoAutoResearch 系统首页：研究输入与工作区导航。](assets/homepage.png)
 
-*Digits 示例的研究发现、证据与局限，截取自实际网页工作区。*
+*从一个问题、提案或已有工作开始。*
 
 ## 最新动态
 
