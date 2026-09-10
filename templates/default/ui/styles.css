@@ -17011,8 +17011,8 @@ html[data-theme] .brief-editor-shell:not(.is-framing-dock) .brief-composer-row #
   min-height: 44px !important;
   max-height: min(34vh, 320px) !important;
   margin: 0 !important;
-  line-height: 24px !important;
-  padding-block: 10px !important;
+  line-height: var(--conversation-line-height) !important;
+  padding-block: calc((44px - var(--conversation-text-size) * var(--conversation-line-height)) / 2) !important;
   padding-inline: 0 !important;
   white-space: pre-wrap !important;
   overflow-wrap: anywhere !important;
@@ -17023,7 +17023,7 @@ html[data-theme] .brief-editor-shell:not(.is-framing-dock) .brief-composer-row #
 }
 
 html[data-theme] .brief-editor-shell:not(.is-framing-dock) .brief-composer-row #cold-file-editor::placeholder {
-  line-height: 24px !important;
+  line-height: var(--conversation-line-height) !important;
 }
 
 html[data-theme="dark-glass"] .scroll-bottom-button {
@@ -20535,6 +20535,7 @@ html[data-theme] :is(
 html[data-theme] #chat-form textarea::placeholder,
 html[data-theme] .brief-editor-shell #cold-file-editor::placeholder,
 html[data-theme] .brief-editor-shell:not(.is-framing-dock) .brief-composer-row #cold-file-editor::placeholder {
+  font-size: inherit !important;
   line-height: var(--conversation-line-height) !important;
 }
 
@@ -20620,8 +20621,8 @@ html[data-theme] .brief-editor-shell.is-framing-dock #cold-file-editor.is-compac
   height: 44px !important;
   min-height: 44px !important;
   max-height: 44px !important;
-  padding-block: 11px !important;
-  line-height: 22px !important;
+  padding-block: calc((44px - var(--conversation-text-size) * var(--conversation-line-height)) / 2) !important;
+  line-height: var(--conversation-line-height) !important;
   overflow-y: hidden !important;
 }
 
