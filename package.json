@@ -34,6 +34,7 @@
     "!**/*.py[cod]",
     "assets/",
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
     "LICENSE",
     "SECURITY.md",

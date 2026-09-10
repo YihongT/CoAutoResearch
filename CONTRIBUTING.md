@@ -52,8 +52,14 @@ python -m http.server 4027 --directory /tmp/coauto-docs-site
 
 ## Product language
 
-Use English for public documentation and interface text. Agent replies follow the
-user’s language. Explain the action and its consequence: adding to a draft is
+English is the source of truth for public documentation and interface text.
+The README is also available in Simplified Chinese (`README.zh-CN.md`). Keep both
+versions aligned when changing setup steps, capabilities, limitations, or news;
+reuse the same assets and preserve CLI commands and visible button names. New
+translations should cover the complete README and have a maintainer who can
+review subsequent updates. Agent replies follow the user’s language.
+
+Explain the action and its consequence: adding to a draft is
 not sending, requesting a pause is not yet being paused, and recording a result
 is not external publication. Preserve API fields, enums, event markers and
 recovery-matched diagnostics when polishing visible text. Keep research claims
