@@ -25,10 +25,7 @@
 
 ## 📰 Новости
 
-- **2026-09-09** — Добавлены статьи Digits и Ising, улучшено восстановление исследований и усилены проверки генерации статей.
-- **2026-09-07** — Обновление исходного кода 2.0 добавляет параллельные обсуждения, понятные элементы управления и создание статей в продукте.
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) выпущен.
 
 <a id="features"></a>
 

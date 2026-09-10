@@ -25,10 +25,7 @@
 
 ## 📰 새 소식
 
-- **2026-09-09** — Digits와 Ising 예시 논문, 연구 복구 개선, 논문 생성 검사 강화를 추가했습니다.
-- **2026-09-07** — 2.0 소스 업데이트에는 병렬 연구 토론, 명확한 제어, 제품 내 논문 생성이 포함됩니다.
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) 출시.
 
 <a id="features"></a>
 

@@ -31,12 +31,9 @@
 
 <div dir="rtl">
 
-- **2026-09-09** — أُضيفت ورقتا Digits وIsing، وتحسينات استعادة البحث، وفحوص أقوى لتوليد الأوراق.
-- **2026-09-07** — يضيف تحديث المصدر 2.0 نقاشات بحث متوازية، وأدوات تحكم أوضح، وتوليد الأوراق داخل المنتج.
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) تم إصداره.
 
 </div>
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
 
 <a id="features"></a>
 

@@ -25,10 +25,7 @@
 
 ## 📰 ニュース
 
-- **2026-09-09** — Digits と Ising の論文例、研究の復旧改善、論文生成のチェック強化を追加しました。
-- **2026-09-07** — 2.0 のソース更新で、並行した研究討論、明確な操作、製品内での論文生成が加わりました。
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) リリース.
 
 <a id="features"></a>
 

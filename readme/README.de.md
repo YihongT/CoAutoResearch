@@ -25,10 +25,7 @@
 
 ## 📰 Neuigkeiten
 
-- **2026-09-09** — Beispielberichte zu Digits und Ising, verbesserte Wiederaufnahme und strengere Prüfungen bei der Berichtserstellung wurden ergänzt.
-- **2026-09-07** — Das Quellcode-Update 2.0 ergänzt parallele Forschungsdiskussionen, klarere Bedienelemente und die Berichtserstellung im Produkt.
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) veröffentlicht.
 
 <a id="features"></a>
 

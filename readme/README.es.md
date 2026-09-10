@@ -25,10 +25,7 @@
 
 ## 📰 Novedades
 
-- **2026-09-09** — Se añadieron artículos de ejemplo de Digits e Ising, mejoras de recuperación y comprobaciones más rigurosas al generar artículos.
-- **2026-09-07** — La actualización del código 2.0 incorpora debates paralelos, controles más claros y generación de artículos dentro del producto.
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) publicado.
 
 <a id="features"></a>
 

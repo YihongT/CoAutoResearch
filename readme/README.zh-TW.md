@@ -25,10 +25,7 @@
 
 ## 📰 最新動態
 
-- **2026-09-09** — 新增 Digits 和 Ising 範例論文，改善研究恢復流程與論文生成檢查。
-- **2026-09-07** — 2.0 原始碼更新加入平行研究討論、更清楚的控制及產品內論文生成。
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) 發布.
 
 <a id="features"></a>
 

@@ -25,10 +25,7 @@
 
 ## 📰 Actualités
 
-- **2026-09-09** — Ajout des articles Digits et Ising, d’améliorations de la reprise de recherche et de contrôles renforcés lors de la génération d’articles.
-- **2026-09-07** — La mise à jour des sources 2.0 ajoute des discussions parallèles, des commandes plus claires et la génération d’articles dans le produit.
-
-[Changelog](../CHANGELOG.md) · [Releases](https://github.com/YihongT/CoAutoResearch/releases)
+- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) publié.
 
 <a id="features"></a>
 
