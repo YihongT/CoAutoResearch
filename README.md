@@ -47,7 +47,6 @@ CoAutoResearch brings autonomous investigation and human–AI collaboration into
 **Trace findings to evidence.** Keep proposals, observations, reviewed results, and limitations distinct as the research develops.
 
 <picture>
-  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/co-auto-light.svg">
   <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.gif">
   <img src="assets/co-auto-light.gif" alt="Human direction guides autonomous research through reviewed and sent suggestions. Findings return to the researcher and accumulate in a shared record supporting the next question, manuscript, and paper.">

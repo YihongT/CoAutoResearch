@@ -47,7 +47,6 @@ CoAutoResearch 将自主研究与人机协作融入同一工作流。从定义�
 **证据追溯。** 随着研究推进，清楚区分提议、观察、经过检查的结果和局限。
 
 <picture>
-  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="assets/co-auto-dark.svg">
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/co-auto-light.svg">
   <source media="(prefers-color-scheme: dark)" srcset="assets/co-auto-dark.gif">
   <img src="assets/co-auto-light.gif" alt="研究者审阅并发送建议，指导自主研究；研究发现反馈给研究者，并进入共享记录，为后续问题、研究稿和论文提供依据。">
