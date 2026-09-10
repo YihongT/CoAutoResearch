@@ -6,15 +6,9 @@
 
 <p align="center"><strong>An autonomous research partner that self-improves recursively and works with you.</strong></p>
 
-<p align="center" dir="rtl">نظام بحث مفتوح المصدر يجمع الاستقصاء المستقل والتحسين الذاتي التكراري (recursive self-improvement) والتعاون بين الإنسان والذكاء الاصطناعي. نفّذ التجارب، وحسّن طرق البحث بالأدلة والملاحظات، وأنشئ مسودات أوراق علمية من سجل بحث قابل للتتبع.</p>
+<p align="center" dir="rtl">حدّد سؤالًا. أجرِ التجارب. ناقش النتائج. حسّن الخطوة التالية.<br>ابنِ مسودة بحث ومقال علمي انطلاقًا من أدلة قابلة للتتبع.</p>
 
 <p align="center"><a href="#quick-start"><strong>البدء السريع →</strong></a> · <a href="#features">الميزات</a> · <a href="#example-papers">أمثلة الأوراق</a> · <a href="https://yihongt.github.io/CoAutoResearch/">التوثيق</a></p>
-
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
-
-<p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a> · <strong>العربية</strong></p>
-
-<p align="center"><sub>هذه ترجمات لملف README. الواجهة والتوثيق الكامل بالإنجليزية، ويجيب الوكيل بلغتك.</sub></p>
 
 ![ابدأ بسؤال أو مقترح أو عمل جارٍ.](../assets/homepage.png)
 
@@ -23,6 +17,17 @@
 *ابدأ بسؤال أو مقترح أو عمل جارٍ.*
 
 </div>
+
+<details>
+<summary>🌐 Languages</summary>
+
+<p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a> · <strong>العربية</strong></p>
+
+<p align="center"><sub>هذه ترجمات لملف README. الواجهة والتوثيق الكامل بالإنجليزية، ويجيب الوكيل بلغتك.</sub></p>
+
+</details>
+
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <a id="news"></a>
 

@@ -6,19 +6,24 @@
 
 <p align="center"><strong>An autonomous research partner that self-improves recursively and works with you.</strong></p>
 
-<p align="center">自律的な研究、再帰的な自己改善（recursive self-improvement）、人間と AI の協働を統合するオープンソース研究システムです。実験を行い、証拠とフィードバックから研究方法を改善し、追跡可能な研究記録から論文草稿を作成します。</p>
+<p align="center">問いを定め、実験し、結果を議論し、次の一歩を改善する。<br>追跡可能な根拠から研究原稿と論文草稿を作成します。</p>
 
 <p align="center"><a href="#quick-start"><strong>クイックスタート →</strong></a> · <a href="#features">機能</a> · <a href="#example-papers">論文の例</a> · <a href="https://yihongt.github.io/CoAutoResearch/">ドキュメント</a></p>
 
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
+![問い、提案、または進行中の研究から始めましょう。](../assets/homepage.png)
+
+*問い、提案、または進行中の研究から始めましょう。*
+
+<details>
+<summary>🌐 Languages</summary>
 
 <p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <strong>日本語</strong> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a> · <a href="README.ar.md">العربية</a></p>
 
 <p align="center"><sub>ここで提供するのは README の翻訳です。画面と詳細ドキュメントは英語ですが、agent はユーザーの言語で応答します。</sub></p>
 
-![問い、提案、または進行中の研究から始めましょう。](../assets/homepage.png)
+</details>
 
-*問い、提案、または進行中の研究から始めましょう。*
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <a id="news"></a>
 

@@ -6,19 +6,24 @@
 
 <p align="center"><strong>An autonomous research partner that self-improves recursively and works with you.</strong></p>
 
-<p align="center">Un sistema de investigación de código abierto que combina investigación autónoma, automejora recursiva (recursive self-improvement) y colaboración humano–IA. Ejecuta experimentos, perfecciona métodos mediante evidencia y comentarios, y construye borradores de artículos a partir de un registro de investigación trazable.</p>
+<p align="center">Define una pregunta. Experimenta. Discute los hallazgos. Mejora el siguiente paso.<br>Elabora un manuscrito y un borrador de artículo con evidencias trazables.</p>
 
 <p align="center"><a href="#quick-start"><strong>Inicio rápido →</strong></a> · <a href="#features">Funciones</a> · <a href="#example-papers">Artículos de ejemplo</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Documentación</a></p>
 
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
+![Empieza con una pregunta, una propuesta o un trabajo en curso.](../assets/homepage.png)
+
+*Empieza con una pregunta, una propuesta o un trabajo en curso.*
+
+<details>
+<summary>🌐 Languages</summary>
 
 <p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <strong>Español</strong><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a> · <a href="README.ar.md">العربية</a></p>
 
 <p align="center"><sub>Estas son traducciones del README. La interfaz y la documentación completa están en inglés; el agente responde en tu idioma.</sub></p>
 
-![Empieza con una pregunta, una propuesta o un trabajo en curso.](../assets/homepage.png)
+</details>
 
-*Empieza con una pregunta, una propuesta o un trabajo en curso.*
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <a id="news"></a>
 

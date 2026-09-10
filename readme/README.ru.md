@@ -6,19 +6,24 @@
 
 <p align="center"><strong>An autonomous research partner that self-improves recursively and works with you.</strong></p>
 
-<p align="center">Открытая исследовательская система, объединяющая автономные исследования, рекурсивное самосовершенствование (recursive self-improvement) и сотрудничество человека с ИИ. Проводите эксперименты, уточняйте методы на основе свидетельств и обратной связи и создавайте черновики статей из прослеживаемых исследовательских записей.</p>
+<p align="center">Сформулируйте вопрос. Проведите эксперименты. Обсудите результаты. Уточните следующий шаг.<br>Создайте рукопись и черновик статьи на основе прослеживаемых свидетельств.</p>
 
 <p align="center"><a href="#quick-start"><strong>Быстрый старт →</strong></a> · <a href="#features">Возможности</a> · <a href="#example-papers">Примеры статей</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Документация</a></p>
 
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
+![Начните с вопроса, предложения или уже начатой работы.](../assets/homepage.png)
+
+*Начните с вопроса, предложения или уже начатой работы.*
+
+<details>
+<summary>🌐 Languages</summary>
 
 <p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <strong>Русский</strong> · <a href="README.ar.md">العربية</a></p>
 
 <p align="center"><sub>Это переводы README. Интерфейс и полная документация — на английском; агент отвечает на вашем языке.</sub></p>
 
-![Начните с вопроса, предложения или уже начатой работы.](../assets/homepage.png)
+</details>
 
-*Начните с вопроса, предложения или уже начатой работы.*
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <a id="news"></a>
 
