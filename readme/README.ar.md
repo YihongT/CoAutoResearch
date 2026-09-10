@@ -10,14 +10,6 @@
 
 <p align="center"><a href="#quick-start"><strong>البدء السريع →</strong></a> · <a href="#features">الميزات</a> · <a href="#example-papers">أمثلة الأوراق</a> · <a href="https://yihongt.github.io/CoAutoResearch/">التوثيق</a></p>
 
-![ابدأ بسؤال أو مقترح أو عمل جارٍ.](../assets/homepage.png)
-
-<div dir="rtl">
-
-*ابدأ بسؤال أو مقترح أو عمل جارٍ.*
-
-</div>
-
 <details>
 <summary>🌐 Languages</summary>
 

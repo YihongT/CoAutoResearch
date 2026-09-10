@@ -10,10 +10,6 @@
 
 <p align="center"><a href="#quick-start"><strong>Quick start →</strong></a> · <a href="#features">Features</a> · <a href="#example-papers">Example papers</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Documentation</a></p>
 
-![Start with a question, a proposal, or work already in progress.](assets/homepage.png)
-
-*Start with a question, a proposal, or work already in progress.*
-
 <details>
 <summary>🌐 Languages</summary>
 

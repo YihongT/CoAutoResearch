@@ -10,10 +10,6 @@
 
 <p align="center"><a href="#quick-start"><strong>Démarrage rapide →</strong></a> · <a href="#features">Fonctionnalités</a> · <a href="#example-papers">Exemples d’articles</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Documentation</a></p>
 
-![Commencez par une question, une proposition ou un travail déjà engagé.](../assets/homepage.png)
-
-*Commencez par une question, une proposition ou un travail déjà engagé.*
-
 <details>
 <summary>🌐 Languages</summary>
 

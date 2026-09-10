@@ -10,10 +10,6 @@
 
 <p align="center"><a href="#quick-start"><strong>快速開始 →</strong></a> · <a href="#features">功能特色</a> · <a href="#example-papers">範例論文</a> · <a href="https://yihongt.github.io/CoAutoResearch/">文件</a></p>
 
-![從一個問題、提案或既有工作開始。](../assets/homepage.png)
-
-*從一個問題、提案或既有工作開始。*
-
 <details>
 <summary>🌐 Languages</summary>
 

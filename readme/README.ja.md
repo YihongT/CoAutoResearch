@@ -10,10 +10,6 @@
 
 <p align="center"><a href="#quick-start"><strong>クイックスタート →</strong></a> · <a href="#features">機能</a> · <a href="#example-papers">論文の例</a> · <a href="https://yihongt.github.io/CoAutoResearch/">ドキュメント</a></p>
 
-![問い、提案、または進行中の研究から始めましょう。](../assets/homepage.png)
-
-*問い、提案、または進行中の研究から始めましょう。*
-
 <details>
 <summary>🌐 Languages</summary>
 
