@@ -6,7 +6,7 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<p align="center">Eine quelloffene Forschungsumgebung auf Basis von Codex oder Claude Code. Beginne mit einer Frage, lass den Agenten recherchieren und Experimente ausführen, diskutiere laufend die Ergebnisse und erstelle aus dokumentierten Belegen einen Berichtsentwurf.</p>
+<p align="center">Ein Open-Source-Forschungssystem für autonome Untersuchungen, rekursive Selbstverbesserung (recursive self-improvement) und die Zusammenarbeit zwischen Mensch und KI. Führe Experimente durch, verfeinere Forschungsmethoden anhand von Belegen und Feedback und erstelle Artikelentwürfe aus nachvollziehbaren Forschungsaufzeichnungen.</p>
 
 <p align="center"><a href="#quick-start"><strong>Schnellstart →</strong></a> · <a href="#features">Funktionen</a> · <a href="#example-papers">Beispielberichte</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Dokumentation</a></p>
 
@@ -35,7 +35,7 @@
 
 **Diskutiere während der Forschung.** Prüfe Ideen in einem separaten Chat. Lies einen Vorschlag durch und sende ihn, wenn er die Forschung leiten soll.
 
-**Verfolge eine Frage über mehrere Versuche.** Der Agent plant, führt aus, interpretiert und prüft innerhalb deiner Vorgaben und deines Budgets. Pausiere zum Nachdenken und setze später fort.
+**Rekursive Selbstverbesserung.** Beziehe dokumentierte Ergebnisse, Prüfungsfeedback und wiederverwendbare Erkenntnisse in den nächsten Versuch ein. Überarbeite Hypothesen, Methoden und Entscheidungen innerhalb deiner Vorgaben und deines Budgets; bewahre negative Befunde und beende die Untersuchung, wenn die Belege dafür sprechen.
 
 **Prüfe die Belege.** Verfolge Erkenntnisse, Prüfungen und Grenzen bis zum Manuskript und Berichtsentwurf.
 
@@ -62,6 +62,8 @@ Erkunde ein abgeschlossenes Digits-Projekt: Forschungsprotokoll, Manuskript und 
 <a id="quick-start"></a>
 
 ## 🚀 Schnellstart
+
+**Unterstützte Coding-Agenten:** ✓ Codex CLI · ✓ Claude Code
 
 Gib deinem Coding-Agenten diese Anweisung:
 

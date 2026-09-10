@@ -6,7 +6,7 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<p align="center">由 Codex 或 Claude Code 驅動的開源研究工作區。從一個問題開始，讓 agent 查找資料、執行實驗，在研究推進時討論發現，並將已記錄的證據整理成論文草稿。</p>
+<p align="center">一個融合自主研究、遞迴自我改進（recursive self-improvement）與人機協作的開源研究系統。執行實驗，依據證據與回饋改進研究方法，並從可追溯的研究紀錄建立論文草稿。</p>
 
 <p align="center"><a href="#quick-start"><strong>快速開始 →</strong></a> · <a href="#features">功能特色</a> · <a href="#example-papers">範例論文</a> · <a href="https://yihongt.github.io/CoAutoResearch/">文件</a></p>
 
@@ -35,7 +35,7 @@
 
 **邊研究，邊討論。** 在獨立對話中探索想法；希望建議影響研究時，先審閱再傳送。
 
-**圍繞問題持續迭代。** Agent 按研究要求與預算規劃、執行、解釋及審查。你可以暫停思考，準備好後繼續。
+**遞迴自我改進。** 將已記錄的結果、審查回饋與可重用經驗帶入下一輪，在研究要求和預算內持續修訂假設、方法與研究決策；保留負面發現，並在證據顯示應當停止時收尾。
 
 **檢查證據。** 沿著發現、檢查紀錄與限制，逐步形成研究稿及論文草稿。
 
@@ -62,6 +62,8 @@
 <a id="quick-start"></a>
 
 ## 🚀 快速開始
+
+**支援的 coding agent:** ✓ Codex CLI · ✓ Claude Code
 
 將下面這段指令交給你的 coding agent：
 

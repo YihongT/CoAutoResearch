@@ -6,7 +6,7 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<p align="center">Un espace de recherche open source animé par Codex ou Claude Code. Partez d’une question, laissez l’agent enquêter et exécuter des expériences, discutez des résultats au fil du travail et transformez les éléments enregistrés en un brouillon d’article.</p>
+<p align="center">Un système de recherche open source associant investigation autonome, auto-amélioration récursive (recursive self-improvement) et collaboration humain–IA. Menez des expériences, affinez les méthodes grâce aux preuves et aux retours, et rédigez des brouillons d’articles à partir d’un historique de recherche traçable.</p>
 
 <p align="center"><a href="#quick-start"><strong>Démarrage rapide →</strong></a> · <a href="#features">Fonctionnalités</a> · <a href="#example-papers">Exemples d’articles</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Documentation</a></p>
 
@@ -35,7 +35,7 @@
 
 **Discutez pendant la recherche.** Explorez des idées dans un échange séparé. Relisez puis envoyez une suggestion lorsque vous souhaitez orienter la recherche.
 
-**Approfondissez une question sur plusieurs essais.** L’agent planifie, exécute, interprète et vérifie dans les limites de vos consignes et de votre budget. Faites une pause, puis reprenez quand vous le souhaitez.
+**Auto-amélioration récursive.** Intégrez les résultats enregistrés, les retours de revue et les enseignements réutilisables à l’essai suivant. Révisez hypothèses, méthodes et décisions dans les limites de vos consignes et de votre budget ; conservez les résultats négatifs et concluez lorsque les preuves le justifient.
 
 **Examinez les éléments probants.** Suivez les résultats, les vérifications et les limites jusqu’au manuscrit et au brouillon d’article.
 
@@ -62,6 +62,8 @@ Parcourez un projet Digits terminé : historique de recherche, manuscrit et PDF.
 <a id="quick-start"></a>
 
 ## 🚀 Démarrage rapide
+
+**Agents de programmation compatibles:** ✓ Codex CLI · ✓ Claude Code
 
 Confiez cette instruction à votre coding agent :
 

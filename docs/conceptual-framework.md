@@ -9,6 +9,33 @@ In v2.0, Markdown remains useful for people, but typed JSON and service-owned
 receipts determine control flow. An agent may propose work; it may not publish
 its own claims as canonical truth.
 
+(recursive-self-improvement)=
+## Recursive self-improvement
+
+CoAutoResearch uses a recursive research loop: the record produced by one
+iteration becomes input to the next. The agent can revise its hypotheses,
+experimental methods and research decisions using recorded evidence, review
+feedback and reusable lessons. Human guidance can enter the same loop after
+the researcher reviews and sends it.
+
+The design separates three forms of improvement:
+
+| What changes | How it carries forward |
+|---|---|
+| Research methods and decisions | Recorded findings, limitations and comparisons inform subsequent plans and trials. |
+| Research process memory | Focused notes retain reusable method, resource, process and human-preference lessons; stale notes can be superseded. |
+| Workflow instructions | Recurring defects can produce instruction patch proposals with evidence, benefits, risks and proposed checks. Applying them requires explicit review and a managed template release. |
+
+This is recursive self-improvement of the research process, not automatic
+training of the underlying model weights or unrestricted rewriting of the
+system. Each proposed improvement still needs evidence: a negative result,
+revised claim or decision to stop can be the right outcome. The original
+resource limits and human approval conditions continue to apply.
+
+The implementation rules live in `NOTES_AND_SELF_IMPROVEMENT.md`, with knowledge
+capture checked by the process reviewer. Managed instructions are not silently
+rewritten during a research trial.
+
 ## System architecture
 
 ```{image} _static/diagrams/architecture.gif

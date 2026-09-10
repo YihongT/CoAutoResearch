@@ -6,7 +6,7 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<p align="center">An open-source research workspace powered by Codex or Claude Code. Start with a question, let the agent investigate and run experiments, discuss findings as work progresses, and turn recorded evidence into a paper draft.</p>
+<p align="center">An open-source research system for autonomous investigation, recursive self-improvement, and human–AI collaboration. Run experiments, refine research methods through evidence and feedback, and build paper drafts from a traceable research record.</p>
 
 <p align="center"><a href="#quick-start"><strong>Quick start →</strong></a> · <a href="#features">Features</a> · <a href="#example-papers">Example papers</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Documentation</a></p>
 
@@ -35,7 +35,7 @@
 
 **Discuss while research runs.** Explore ideas in a separate chat. Review and send a suggestion when you want it to guide the research.
 
-**Carry a question through multiple trials.** The agent plans, executes, interprets and reviews work within your brief and budget. Pause to reconsider; resume when ready.
+**Recursive self-improvement.** Feed recorded results, review feedback and reusable lessons into the next trial. Refine hypotheses, methods and research decisions within your brief and budget; keep negative findings and stop when the evidence calls for it.
 
 **Inspect the evidence.** Follow findings, checks and limitations into a manuscript and a paper draft.
 
@@ -62,6 +62,8 @@ Browse a completed Digits project: research records, manuscript and PDF. This ed
 <a id="quick-start"></a>
 
 ## 🚀 Quick start
+
+**Supported coding agents:** ✓ Codex CLI · ✓ Claude Code
 
 Give your coding agent this instruction:
 

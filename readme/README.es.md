@@ -6,7 +6,7 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<p align="center">Un espacio de investigación de código abierto impulsado por Codex o Claude Code. Parte de una pregunta, deja que el agente investigue y ejecute experimentos, debate los hallazgos durante el proceso y convierte la evidencia registrada en un borrador de artículo.</p>
+<p align="center">Un sistema de investigación de código abierto que combina investigación autónoma, automejora recursiva (recursive self-improvement) y colaboración humano–IA. Ejecuta experimentos, perfecciona métodos mediante evidencia y comentarios, y construye borradores de artículos a partir de un registro de investigación trazable.</p>
 
 <p align="center"><a href="#quick-start"><strong>Inicio rápido →</strong></a> · <a href="#features">Funciones</a> · <a href="#example-papers">Artículos de ejemplo</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Documentación</a></p>
 
@@ -35,7 +35,7 @@
 
 **Debate mientras se investiga.** Explora ideas en un chat independiente. Revisa y envía una sugerencia cuando quieras que oriente la investigación.
 
-**Desarrolla una pregunta en varios ensayos.** El agente planifica, ejecuta, interpreta y revisa dentro de tus instrucciones y presupuesto. Puedes pausar y reanudar cuando estés listo.
+**Automejora recursiva.** Incorpora resultados registrados, comentarios de revisión y lecciones reutilizables en el siguiente ensayo. Revisa hipótesis, métodos y decisiones dentro de tus instrucciones y presupuesto; conserva los resultados negativos y concluye cuando la evidencia lo indique.
 
 **Examina la evidencia.** Sigue los hallazgos, las comprobaciones y las limitaciones hasta el manuscrito y el borrador del artículo.
 
@@ -62,6 +62,8 @@ Recorre un proyecto Digits terminado: registros, manuscrito y PDF. Este recorrid
 <a id="quick-start"></a>
 
 ## 🚀 Inicio rápido
+
+**Agentes de programación compatibles:** ✓ Codex CLI · ✓ Claude Code
 
 Entrega esta instrucción a tu coding agent:
 

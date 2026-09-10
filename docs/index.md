@@ -2,9 +2,12 @@
 
 **An autonomous research partner you can question, guide, and build with.**
 
-An open-source research workspace powered by Codex or Claude Code. Start with a
-question, let the agent investigate and run experiments, discuss findings as work
-progresses, and turn recorded evidence into a paper draft.
+CoAutoResearch is an open-source research system for autonomous investigation,
+recursive self-improvement, and human–AI collaboration. Run experiments, refine
+research methods through evidence and feedback, and build paper drafts from a
+traceable research record.
+
+**Supported coding agents:** ✓ Codex CLI · ✓ Claude Code
 
 ## Start here
 
@@ -48,8 +51,10 @@ reduced motion is enabled and when printing. [Open static diagram](../assets/co-
 **Discuss and guide.** Discuss a finding while the agent works. Prepare a
 suggestion, review it, and send it into the research session.
 
-**Run autonomous research.** The agent plans, executes, interprets and reviews
-bounded research steps within your direction and constraints.
+**Recursive self-improvement.** Recorded results, review feedback and reusable
+lessons shape the next trial. The agent revises hypotheses, methods and research
+decisions within your direction and budget.
+{ref}`How the improvement loop works <recursive-self-improvement>`.
 
 **Trace findings to evidence.** Follow the question, results, limitations and
 remaining decisions through a shared research record and into a manuscript.

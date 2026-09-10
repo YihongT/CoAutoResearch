@@ -4,6 +4,18 @@ Use CoAutoResearch to advance work you can understand, question and revise.
 The agent can carry out a sequence of research steps; you bring context,
 decide what matters and remain responsible for interpreting the result.
 
+## Give recursive self-improvement a clear target
+
+Define what a better method or research decision would mean before comparing
+alternatives. Keep evaluation rules, resource limits and approval conditions
+explicit. Let the agent use recorded outcomes and review feedback to revise the
+next step, including abandoning an unsupported hypothesis.
+
+Capture reusable lessons where they can inform later work; a repeated log of
+completed commands adds little value. Discuss questionable assumptions in a
+parallel chat and send guidance when you want it applied. The improvement loop
+should accumulate useful knowledge, not merely additional trials.
+
 ## Start with a useful brief
 
 An initial question is enough to begin a conversation. A stronger brief explains

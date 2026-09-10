@@ -6,7 +6,7 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<p align="center">Codex 또는 Claude Code로 구동되는 오픈소스 연구 작업 공간입니다. 질문에서 출발해 agent가 조사와 실험을 수행하도록 하고, 연구 중에 결과를 논의하며, 기록된 근거로 논문 초안을 만들 수 있습니다.</p>
+<p align="center">자율 연구, 재귀적 자기 개선(recursive self-improvement), 인간–AI 협업을 통합하는 오픈소스 연구 시스템입니다. 실험을 수행하고 근거와 피드백으로 연구 방법을 개선하며, 추적 가능한 연구 기록에서 논문 초안을 만듭니다.</p>
 
 <p align="center"><a href="#quick-start"><strong>빠른 시작 →</strong></a> · <a href="#features">기능</a> · <a href="#example-papers">예시 논문</a> · <a href="https://yihongt.github.io/CoAutoResearch/">문서</a></p>
 
@@ -35,7 +35,7 @@
 
 **연구 중에도 토론하세요.** 별도 채팅에서 아이디어를 검토하고, 연구에 반영할 제안을 확인한 뒤 전송합니다.
 
-**여러 차례의 시도로 질문을 탐구하세요.** Agent가 연구 지침과 예산 안에서 계획, 실행, 해석, 검토합니다. 잠시 멈춰 생각하고 준비되면 재개할 수 있습니다.
+**재귀적 자기 개선.** 기록된 결과, 검토 피드백, 재사용 가능한 교훈을 다음 시도에 반영합니다. 연구 지침과 예산 안에서 가설·방법·판단을 수정하고, 부정적 결과도 보존하며 근거에 따라 연구를 마무리합니다.
 
 **근거를 확인하세요.** 발견, 검사 기록, 한계를 따라 연구 원고와 논문 초안을 만듭니다.
 
@@ -62,6 +62,8 @@
 <a id="quick-start"></a>
 
 ## 🚀 빠른 시작
+
+**지원하는 코딩 에이전트:** ✓ Codex CLI · ✓ Claude Code
 
 다음 지시를 coding agent에 전달하세요:
 

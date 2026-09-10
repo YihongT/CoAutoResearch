@@ -6,7 +6,7 @@
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<p align="center">Um ambiente de pesquisa de código aberto baseado em Codex ou Claude Code. Comece com uma pergunta, deixe o agente investigar e executar experimentos, discuta os resultados durante o trabalho e transforme as evidências registradas em um rascunho de artigo.</p>
+<p align="center">Um sistema de pesquisa de código aberto que combina investigação autônoma, autoaperfeiçoamento recursivo (recursive self-improvement) e colaboração humano–IA. Execute experimentos, refine métodos com evidências e feedback e produza rascunhos de artigos a partir de um registro de pesquisa rastreável.</p>
 
 <p align="center"><a href="#quick-start"><strong>Início rápido →</strong></a> · <a href="#features">Recursos</a> · <a href="#example-papers">Artigos de exemplo</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Documentação</a></p>
 
@@ -35,7 +35,7 @@
 
 **Discuta enquanto a pesquisa avança.** Explore ideias em um chat separado. Revise e envie uma sugestão quando quiser que ela oriente a pesquisa.
 
-**Investigue uma pergunta ao longo de várias rodadas.** O agente planeja, executa, interpreta e revisa dentro das suas instruções e do orçamento. Pause para refletir e retome quando estiver pronto.
+**Autoaperfeiçoamento recursivo.** Leve resultados registrados, feedback de revisão e lições reutilizáveis para a próxima rodada. Revise hipóteses, métodos e decisões dentro das suas instruções e orçamento; preserve resultados negativos e encerre quando as evidências indicarem.
 
 **Examine as evidências.** Acompanhe resultados, verificações e limitações até o manuscrito e o rascunho do artigo.
 
@@ -62,6 +62,8 @@ Explore um projeto Digits concluído: registros, manuscrito e PDF. Este tour edi
 <a id="quick-start"></a>
 
 ## 🚀 Início rápido
+
+**Agentes de programação compatíveis:** ✓ Codex CLI · ✓ Claude Code
 
 Dê esta instrução ao seu coding agent:
 

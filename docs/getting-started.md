@@ -1,9 +1,13 @@
 # Start your first research project
 
 CoAutoResearch is a research system for working with an autonomous agent over
-multiple iterations. Bring a question, a proposal, or work already in progress.
+multiple iterations. Its recursive self-improvement loop uses recorded results,
+review feedback and reusable lessons to refine subsequent research decisions.
+Bring a question, a proposal, or work already in progress.
 You can discuss findings as the research runs and decide which suggestions to
 send back into the research session.
+
+**Supported coding agents:** ✓ Codex CLI · ✓ Claude Code
 
 ## Set up with your coding agent
 

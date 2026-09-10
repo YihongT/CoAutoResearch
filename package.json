@@ -1,7 +1,7 @@
 {
   "name": "co-auto-research",
   "version": "2.0.0",
-  "description": "Autonomous research and human\u2013AI collaboration, from a question to a manuscript built on traceable evidence.",
+  "description": "An open-source research system for autonomous investigation, recursive self-improvement, and human–AI collaboration. Run experiments, refine methods through evidence and feedback, and turn traceable research into paper drafts.",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "npm@11.15.0",
@@ -52,12 +52,25 @@
     "pack:dry-run": "npm pack --dry-run"
   },
   "keywords": [
-    "ai-research",
-    "human-ai-collaboration",
+    "ai-scientist",
+    "ai-for-science",
+    "autoresearch",
+    "autonomous-research",
+    "recursive-self-improvement",
+    "self-improvement",
+    "agentic-ai",
+    "ai-agents",
+    "llm-agents",
+    "agent-skills",
+    "research-agent",
     "research-automation",
-    "autonomous-agents",
+    "human-ai-collaboration",
+    "human-in-the-loop",
     "codex",
     "claude-code",
-    "scientific-writing"
+    "scientific-research",
+    "scientific-writing",
+    "paper-generation",
+    "reproducible-research"
   ]
 }

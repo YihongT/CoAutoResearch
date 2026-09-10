@@ -59,6 +59,42 @@ Packaging, syntax checks, and successful startup alone do not establish that
 all research and provider workflows are ready. Resolve release-blocking issues
 before publication; do not present unverified flows as passed.
 
+## Repository description and topics
+
+Use the package description for GitHub About so the positioning stays consistent:
+
+> An open-source research system for autonomous investigation, recursive self-improvement, and human–AI collaboration. Run experiments, refine methods through evidence and feedback, and turn traceable research into paper drafts.
+
+Recommended GitHub topics (20):
+
+```text
+ai-scientist
+ai-for-science
+autoresearch
+autonomous-research
+recursive-self-improvement
+self-improvement
+agentic-ai
+ai-agents
+llm-agents
+agent-skills
+research-agent
+research-automation
+human-ai-collaboration
+human-in-the-loop
+codex
+claude-code
+scientific-research
+scientific-writing
+paper-generation
+reproducible-research
+```
+
+Present Codex CLI and Claude Code as supported coding agents in compatibility
+and setup information. Recursive self-improvement describes the evidence,
+feedback and process-memory loop; instruction changes follow the reviewed
+release path described in the architecture guide.
+
 ## Publish
 
 Publish the reviewed archive using the package owner's authenticated npm
