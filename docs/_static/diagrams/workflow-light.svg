@@ -12,7 +12,7 @@
 <text x="52" y="202" fill="#686256" font-size="17" >Constraints and approvals</text>
 <text x="52" y="227" fill="#686256" font-size="17" >Review before starting</text>
 <rect x="344" y="80" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
-<text x="364" y="110" fill="#826528" font-size="13" letter-spacing="1.5">AUTO</text>
+<text x="364" y="110" fill="#826528" font-size="13" letter-spacing="1.5">RESEARCH</text>
 <text x="364" y="143" fill="#26241f" font-size="23" >Autonomous trials</text>
 <text x="364" y="177" fill="#686256" font-size="17" >Plan · Execute · Interpret</text>
 <text x="364" y="202" fill="#686256" font-size="17" >Review proposed findings</text>
@@ -26,7 +26,7 @@
 <path d="M304 166 H334" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path d="M616 166 H646" fill="none" stroke="#826528" stroke-width="1.5" marker-end="url(#arrow)"/>
 <rect x="32" y="314" width="272" height="174" rx="12" fill="#ffffff" stroke="#ddd7c9"/>
-<text x="52" y="344" fill="#826528" font-size="13" letter-spacing="1.5">CO · PARALLEL CHAT</text>
+<text x="52" y="344" fill="#826528" font-size="13" letter-spacing="1.5">PARALLEL CHAT</text>
 <text x="52" y="377" fill="#26241f" font-size="23" >Discuss findings</text>
 <text x="52" y="411" fill="#686256" font-size="17" >Question an assumption</text>
 <text x="52" y="436" fill="#686256" font-size="17" >Explore another approach</text>

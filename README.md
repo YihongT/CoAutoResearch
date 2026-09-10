@@ -105,9 +105,12 @@ You can discuss findings in a parallel chat while research runs. **Add to resear
 <summary>Explore the system architecture</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/diagrams/architecture-dark.svg">
-  <img src="docs/_static/diagrams/architecture.svg" alt="The browser communicates with a local service that supervises coding agents, maintains the research record, and coordinates parallel discussion and paper generation.">
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/_static/diagrams/architecture.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/diagrams/architecture-dark.gif">
+  <img src="docs/_static/diagrams/architecture.gif" alt="The browser communicates with a local service that supervises coding agents, maintains the research record, and coordinates parallel discussion and paper generation.">
 </picture>
+
+Illustrated workflow; timing is schematic. [Static diagram](docs/_static/diagrams/architecture.svg)
 
 The research record connects directions, resources, results, reviews, and manuscript content. Technical contracts separate proposed work from recorded changes and support recovery after interruptions. Internal review is a workflow check, not external peer review or proof of scientific correctness.
 

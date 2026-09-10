@@ -6,15 +6,28 @@ case study. Use your own research question, materials and evaluation criteria.
 
 For product-generated research drafts, open the [example papers](example-papers.md).
 
+```{image} _static/diagrams/workflow-light.gif
+:alt: Research brief, autonomous trials, optional parallel discussion, reviewed guidance, evidence and user-requested paper generation.
+:class: co-diagram-light co-loop-motion
+```
+
+```{image} _static/diagrams/workflow-dark.gif
+:alt: Research brief, autonomous trials, optional parallel discussion, reviewed guidance, evidence and user-requested paper generation.
+:class: co-diagram-dark co-loop-motion
+```
+
 ```{image} _static/diagrams/workflow-light.svg
-:alt: From a research brief through autonomous trials, parallel discussion, evidence review and paper generation.
-:class: co-diagram-light
+:alt: Research brief, autonomous trials, optional parallel discussion, reviewed guidance, evidence and user-requested paper generation.
+:class: co-diagram-light co-loop-static
 ```
 
 ```{image} _static/diagrams/workflow-dark.svg
-:alt: From a research brief through autonomous trials, parallel discussion, evidence review and paper generation.
-:class: co-diagram-dark
+:alt: Research brief, autonomous trials, optional parallel discussion, reviewed guidance, evidence and user-requested paper generation.
+:class: co-diagram-dark co-loop-static
 ```
+
+Illustrated workflow; timing is schematic. [Static diagram](_static/diagrams/workflow-light.svg).
+
 
 ## 1. Define the question and its boundaries
 

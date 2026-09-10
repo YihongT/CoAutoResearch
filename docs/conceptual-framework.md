@@ -11,15 +11,28 @@ its own claims as canonical truth.
 
 ## System architecture
 
+```{image} _static/diagrams/architecture.gif
+:alt: The browser sends actions to the service, which supervises agents, validates changes and separates discussion from paper writing.
+:class: co-diagram-light co-loop-motion
+```
+
+```{image} _static/diagrams/architecture-dark.gif
+:alt: The browser sends actions to the service, which supervises agents, validates changes and separates discussion from paper writing.
+:class: co-diagram-dark co-loop-motion
+```
+
 ```{image} _static/diagrams/architecture.svg
-:alt: The browser uses a local service to coordinate coding agents, preserve the research record, supervise read-only discussion and generate papers from isolated evidence snapshots.
-:class: co-diagram-light
+:alt: The browser sends actions to the service, which supervises agents, validates changes and separates discussion from paper writing.
+:class: co-diagram-light co-loop-static
 ```
 
 ```{image} _static/diagrams/architecture-dark.svg
-:alt: The browser uses a local service to coordinate coding agents, preserve the research record, supervise read-only discussion and generate papers from isolated evidence snapshots.
-:class: co-diagram-dark
+:alt: The browser sends actions to the service, which supervises agents, validates changes and separates discussion from paper writing.
+:class: co-diagram-dark co-loop-static
 ```
+
+Illustrated workflow; timing is schematic. [Static diagram](_static/diagrams/architecture.svg).
+
 
 The browser sends controls to the local service. The service supervises the
 selected coding-agent CLI and records accepted research changes. Discussion
@@ -29,31 +42,28 @@ selected model is processed by that provider.
 
 ## Research Loop
 
-```{mermaid}
-flowchart TD
-  H["Human brief or intervention"] --> O["Observe coherent canonical revision"]
-  O --> T["One bounded trial proposal"]
-  T --> S["Stage candidate files and material hash"]
-  S --> R["Derive review route and close reviews"]
-  R --> M["Service derives merge decision"]
-  M --> G["Service evaluates goal gate"]
-  G -->|publishable| X["Recoverable transaction"]
-  X --> P["Publish receipt + next canonical revision"]
-  P --> B["Research Board"]
-  B --> O
-  G -->|needs_human| H
-  G -->|blocked or terminal| B
-
-  classDef human fill:#26241f,color:#faf8f1,stroke:#826528;
-  classDef truth fill:#faf8f1,stroke:#826528,color:#26241f;
-  classDef trial fill:#ffffff,stroke:#ddd7c9,color:#26241f;
-  classDef output fill:#f1ead8,stroke:#826528,color:#26241f;
-
-  class H human;
-  class O,P,B truth;
-  class T,S,R,M,G trial;
-  class X output;
+```{image} _static/diagrams/research-loop-light.gif
+:alt: A staged proposal passes required reviews and the service goal gate. Publishable work is recorded; needs-human asks for direction; blocked or terminal stops advancement.
+:class: co-diagram-light co-loop-motion
 ```
+
+```{image} _static/diagrams/research-loop-dark.gif
+:alt: A staged proposal passes required reviews and the service goal gate. Publishable work is recorded; needs-human asks for direction; blocked or terminal stops advancement.
+:class: co-diagram-dark co-loop-motion
+```
+
+```{image} _static/diagrams/research-loop-light.svg
+:alt: A staged proposal passes required reviews and the service goal gate. Publishable work is recorded; needs-human asks for direction; blocked or terminal stops advancement.
+:class: co-diagram-light co-loop-static
+```
+
+```{image} _static/diagrams/research-loop-dark.svg
+:alt: A staged proposal passes required reviews and the service goal gate. Publishable work is recorded; needs-human asks for direction; blocked or terminal stops advancement.
+:class: co-diagram-dark co-loop-static
+```
+
+Illustrated workflow; timing is schematic. [Static diagram](_static/diagrams/research-loop-light.svg).
+
 
 ## What the Diagram Means
 

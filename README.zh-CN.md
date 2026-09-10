@@ -107,9 +107,12 @@ node bin/auto-research.js ui
 <summary>了解系统架构</summary>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/diagrams/architecture-dark.svg">
-  <img src="docs/_static/diagrams/architecture.svg" alt="浏览器连接本地服务，由服务管理 coding agent、研究记录、并行讨论和论文生成。">
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/_static/diagrams/architecture.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/diagrams/architecture-dark.gif">
+  <img src="docs/_static/diagrams/architecture.gif" alt="浏览器连接本地服务，由服务管理 coding agent、研究记录、并行讨论和论文生成。">
 </picture>
+
+流程示意，动画时长不代表实际运行速度。 [静态图](docs/_static/diagrams/architecture.svg)
 
 研究记录连接方向、资源、结果、审查和研究稿。技术契约区分拟议工作与已记录修改，并支持中断恢复。内部审查属于工作流检查，不等于外部同行评审，也不能证明科学结论正确。
 
