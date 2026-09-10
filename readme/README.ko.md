@@ -1,24 +1,20 @@
 <!-- Translation basis is tracked in readme/translations.json. -->
 <p align="center"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/logo.svg">
-  <img src="../assets/logo-white.svg" width="88" alt="CoAutoResearch">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/readme-hero-dark.svg">
+  <img src="../assets/readme-hero-light.svg" width="1200" alt="CoAutoResearch — autonomous research and human–AI collaboration">
 </picture></p>
-
-<h1 align="center">CoAutoResearch</h1>
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-Codex 또는 Claude Code로 구동되는 오픈소스 연구 작업 공간입니다. 질문에서 출발해 agent가 조사와 실험을 수행하도록 하고, 연구 중에 결과를 논의하며, 기록된 근거로 논문 초안을 만들 수 있습니다.
+<p align="center">Codex 또는 Claude Code로 구동되는 오픈소스 연구 작업 공간입니다. 질문에서 출발해 agent가 조사와 실험을 수행하도록 하고, 연구 중에 결과를 논의하며, 기록된 근거로 논문 초안을 만들 수 있습니다.</p>
 
-연구는 자율적으로 진행하고, 판단이 필요한 순간에는 계속 참여하세요.
+<p align="center"><a href="#quick-start"><strong>빠른 시작 →</strong></a> · <a href="#features">기능</a> · <a href="#example-papers">예시 논문</a> · <a href="https://yihongt.github.io/CoAutoResearch/">문서</a></p>
+
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <strong>한국어</strong> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a> · <a href="README.ar.md">العربية</a></p>
 
-<small>여기서는 README 번역을 제공합니다. 인터페이스와 전체 문서는 영어이며, agent는 사용자의 언어로 답합니다.</small>
-
-<p align="center"><a href="#quick-start">빠른 시작</a> · <a href="#features">기능</a> · <a href="#example-papers">예시 논문</a> · <a href="https://yihongt.github.io/CoAutoResearch/">문서</a></p>
-
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
+<p align="center"><sub>여기서는 README 번역을 제공합니다. 인터페이스와 전체 문서는 영어이며, agent는 사용자의 언어로 답합니다.</sub></p>
 
 ![질문, 제안서 또는 진행 중인 연구에서 시작하세요.](../assets/homepage.png)
 

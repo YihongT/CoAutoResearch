@@ -1,32 +1,20 @@
 <!-- Translation basis is tracked in readme/translations.json. -->
 <p align="center"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/logo.svg">
-  <img src="../assets/logo-white.svg" width="88" alt="CoAutoResearch">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/readme-hero-dark.svg">
+  <img src="../assets/readme-hero-light.svg" width="1200" alt="CoAutoResearch — autonomous research and human–AI collaboration">
 </picture></p>
-
-<h1 align="center">CoAutoResearch</h1>
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-<div dir="rtl">
+<p align="center" dir="rtl">مساحة بحث مفتوحة المصدر تعمل باستخدام Codex أو Claude Code. ابدأ بسؤال، ودع الوكيل يبحث وينفذ التجارب، وناقش النتائج أثناء تقدم العمل، ثم حوّل الأدلة المسجلة إلى مسودة ورقة علمية.</p>
 
-مساحة بحث مفتوحة المصدر تعمل باستخدام Codex أو Claude Code. ابدأ بسؤال، ودع الوكيل يبحث وينفذ التجارب، وناقش النتائج أثناء تقدم العمل، ثم حوّل الأدلة المسجلة إلى مسودة ورقة علمية.
+<p align="center"><a href="#quick-start"><strong>البدء السريع →</strong></a> · <a href="#features">الميزات</a> · <a href="#example-papers">أمثلة الأوراق</a> · <a href="https://yihongt.github.io/CoAutoResearch/">التوثيق</a></p>
 
-</div>
-
-<div dir="rtl">
-
-يتقدم البحث بصورة مستقلة، وتشارك كلما احتاج العمل إلى حكمك.
-
-</div>
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a> · <strong>العربية</strong></p>
 
-<small>هذه ترجمات لملف README. الواجهة والتوثيق الكامل بالإنجليزية، ويجيب الوكيل بلغتك.</small>
-
-<p align="center"><a href="#quick-start">البدء السريع</a> · <a href="#features">الميزات</a> · <a href="#example-papers">أمثلة الأوراق</a> · <a href="https://yihongt.github.io/CoAutoResearch/">التوثيق</a></p>
-
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
+<p align="center"><sub>هذه ترجمات لملف README. الواجهة والتوثيق الكامل بالإنجليزية، ويجيب الوكيل بلغتك.</sub></p>
 
 ![ابدأ بسؤال أو مقترح أو عمل جارٍ.](../assets/homepage.png)
 

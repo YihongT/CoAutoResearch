@@ -1,24 +1,20 @@
 <!-- Translation basis is tracked in readme/translations.json. -->
 <p align="center"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/logo.svg">
-  <img src="../assets/logo-white.svg" width="88" alt="CoAutoResearch">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/readme-hero-dark.svg">
+  <img src="../assets/readme-hero-light.svg" width="1200" alt="CoAutoResearch — autonomous research and human–AI collaboration">
 </picture></p>
-
-<h1 align="center">CoAutoResearch</h1>
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-Eine quelloffene Forschungsumgebung auf Basis von Codex oder Claude Code. Beginne mit einer Frage, lass den Agenten recherchieren und Experimente ausführen, diskutiere laufend die Ergebnisse und erstelle aus dokumentierten Belegen einen Berichtsentwurf.
+<p align="center">Eine quelloffene Forschungsumgebung auf Basis von Codex oder Claude Code. Beginne mit einer Frage, lass den Agenten recherchieren und Experimente ausführen, diskutiere laufend die Ergebnisse und erstelle aus dokumentierten Belegen einen Berichtsentwurf.</p>
 
-Die Forschung läuft selbstständig weiter, und du greifst ein, wenn dein Urteil gefragt ist.
+<p align="center"><a href="#quick-start"><strong>Schnellstart →</strong></a> · <a href="#features">Funktionen</a> · <a href="#example-papers">Beispielberichte</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Dokumentation</a></p>
+
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <strong>Deutsch</strong> · <a href="README.ru.md">Русский</a> · <a href="README.ar.md">العربية</a></p>
 
-<small>Dies sind Übersetzungen der README. Oberfläche und vollständige Dokumentation sind auf Englisch; der Agent antwortet in deiner Sprache.</small>
-
-<p align="center"><a href="#quick-start">Schnellstart</a> · <a href="#features">Funktionen</a> · <a href="#example-papers">Beispielberichte</a> · <a href="https://yihongt.github.io/CoAutoResearch/">Dokumentation</a></p>
-
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
+<p align="center"><sub>Dies sind Übersetzungen der README. Oberfläche und vollständige Dokumentation sind auf Englisch; der Agent antwortet in deiner Sprache.</sub></p>
 
 ![Starte mit einer Frage, einem Vorschlag oder einer laufenden Arbeit.](../assets/homepage.png)
 

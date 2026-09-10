@@ -1,24 +1,20 @@
 <!-- Translation basis is tracked in readme/translations.json. -->
 <p align="center"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/logo.svg">
-  <img src="../assets/logo-white.svg" width="88" alt="CoAutoResearch">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/readme-hero-dark.svg">
+  <img src="../assets/readme-hero-light.svg" width="1200" alt="CoAutoResearch — autonomous research and human–AI collaboration">
 </picture></p>
-
-<h1 align="center">CoAutoResearch</h1>
 
 <p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
 
-由 Codex 或 Claude Code 驅動的開源研究工作區。從一個問題開始，讓 agent 查找資料、執行實驗，在研究推進時討論發現，並將已記錄的證據整理成論文草稿。
+<p align="center">由 Codex 或 Claude Code 驅動的開源研究工作區。從一個問題開始，讓 agent 查找資料、執行實驗，在研究推進時討論發現，並將已記錄的證據整理成論文草稿。</p>
 
-讓研究自主推進，在需要你的判斷時持續參與。
+<p align="center"><a href="#quick-start"><strong>快速開始 →</strong></a> · <a href="#features">功能特色</a> · <a href="#example-papers">範例論文</a> · <a href="https://yihongt.github.io/CoAutoResearch/">文件</a></p>
+
+<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
 
 <p align="center"><a href="../README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <strong>繁體中文</strong> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a><br><a href="README.pt-BR.md">Português brasileiro</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.ru.md">Русский</a> · <a href="README.ar.md">العربية</a></p>
 
-<small>這裡提供的是 README 翻譯。介面與完整文件使用英文；agent 的回覆跟隨你的語言。</small>
-
-<p align="center"><a href="#quick-start">快速開始</a> · <a href="#features">功能特色</a> · <a href="#example-papers">範例論文</a> · <a href="https://yihongt.github.io/CoAutoResearch/">文件</a></p>
-
-<p align="center"><a href="../LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-d7b775" alt="Apache 2.0"></a> <a href="https://yihongt.github.io/CoAutoResearch/"><img src="https://img.shields.io/badge/docs-get_started-737269" alt="Documentation"></a></p>
+<p align="center"><sub>這裡提供的是 README 翻譯。介面與完整文件使用英文；agent 的回覆跟隨你的語言。</sub></p>
 
 ![從一個問題、提案或既有工作開始。](../assets/homepage.png)
 
