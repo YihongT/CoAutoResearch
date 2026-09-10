@@ -32,7 +32,7 @@ Illustrated workflow; timing is schematic. [Static diagram](_static/diagrams/wor
 ## Browse an existing research project
 
 ```{image} ../assets/browser-tour.gif
-:alt: Recorded Digits project: completed Trial, parallel discussion, manuscript evidence and PDF.
+:alt: Recorded Digits project: completed Trial, manuscript evidence and PDF.
 :class: co-loop-motion
 ```
 
@@ -46,11 +46,10 @@ Illustrated workflow; timing is schematic. [Static diagram](_static/diagrams/wor
 :class: co-loop-static co-diagram-dark
 ```
 
-This four-view, 48-second tour uses cropped screenshots from real browser
+This three-view, 36-second tour uses cropped screenshots from real browser
 navigation through an existing developer-operated Digits project. It is an edited
 slideshow, not a continuous recording or a measurement of research speed. No new
-experiments were run. The original discussion is in Chinese; the interface is in
-English. Suggestions in chat require review and sending before they guide research.
+experiments were run. All views shown in the tour are in English.
 
 (screenshots)=
 ## Screenshots
@@ -59,7 +58,6 @@ Open a PNG to read the original-resolution capture. The tour above moves through
 cropped portions of these still images; it does not depict live agent execution.
 
 - [Completed research trial](../assets/browser-trial.png)
-- [Parallel research discussion](../assets/browser-discussion.png)
 - [Manuscript and development evidence](../assets/browser-manuscript.png)
 - [Paper in the native PDF viewer](../assets/browser-paper.png)
 

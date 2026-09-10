@@ -70,13 +70,13 @@
 <a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
-  <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
+  <img src="../assets/browser-tour.gif" alt="Digits: Trial → Manuscript → Paper">
 </picture>
 </a>
 
 <div dir="rtl">
 
-تصفح مشروع Digits مكتملًا: سجلات البحث والنقاش والمخطوطة وPDF. تعرض هذه الجولة المحررة والمقتصة من المتصفح سجلًا موجودًا، لا تشغيلًا جديدًا ولا سرعة البحث الفعلية. المحادثة الأصلية بالصينية.
+تصفح مشروع Digits مكتملًا: سجلات البحث والمخطوطة وPDF. تعرض هذه الجولة المحررة والمقتصة من المتصفح سجلًا موجودًا، لا تشغيلًا جديدًا ولا سرعة البحث الفعلية.
 
 </div>
 

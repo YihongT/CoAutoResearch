@@ -42,11 +42,11 @@
 <a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
-  <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
+  <img src="../assets/browser-tour.gif" alt="Digits: Trial → Manuscript → Paper">
 </picture>
 </a>
 
-完了済みの Digits プロジェクトで、研究記録、議論、原稿、PDF を閲覧します。編集・トリミングしたブラウザー案内であり、新規実行や実際の研究速度を示すものではありません。元の会話は中国語です。
+完了済みの Digits プロジェクトで、研究記録、原稿、PDF を閲覧します。編集・トリミングしたブラウザー案内であり、新規実行や実際の研究速度を示すものではありません。
 
 <details>
 <summary>三つの始め方</summary>

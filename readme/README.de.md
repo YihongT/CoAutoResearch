@@ -42,11 +42,11 @@
 <a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
-  <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
+  <img src="../assets/browser-tour.gif" alt="Digits: Trial → Manuscript → Paper">
 </picture>
 </a>
 
-Erkunde ein abgeschlossenes Digits-Projekt: Forschungsprotokoll, Diskussion, Manuskript und PDF. Diese geschnittene und zugeschnittene Browser-Tour zeigt vorhandene Aufzeichnungen, keinen neuen Lauf und keine tatsächliche Forschungsgeschwindigkeit. Das ursprüngliche Gespräch ist auf Chinesisch.
+Erkunde ein abgeschlossenes Digits-Projekt: Forschungsprotokoll, Manuskript und PDF. Diese geschnittene und zugeschnittene Browser-Tour zeigt vorhandene Aufzeichnungen, keinen neuen Lauf und keine tatsächliche Forschungsgeschwindigkeit.
 
 <details>
 <summary>Drei Einstiegsmöglichkeiten</summary>

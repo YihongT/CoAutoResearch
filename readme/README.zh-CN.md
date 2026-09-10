@@ -42,11 +42,11 @@
 <a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
-  <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
+  <img src="../assets/browser-tour.gif" alt="Digits: Trial → Manuscript → Paper">
 </picture>
 </a>
 
-浏览已完成的 Digits 项目：研究记录、讨论、研究稿与 PDF。这段经剪辑、裁切的网页导览展示已有历史，不是新一轮运行，也不代表实际研究速度。原始对话为中文。
+浏览已完成的 Digits 项目：研究记录、研究稿与 PDF。这段经剪辑、裁切的网页导览展示已有历史，不是新一轮运行，也不代表实际研究速度。
 
 <details>
 <summary>三种开始方式</summary>

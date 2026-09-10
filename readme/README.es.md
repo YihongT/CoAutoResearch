@@ -42,11 +42,11 @@
 <a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
-  <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
+  <img src="../assets/browser-tour.gif" alt="Digits: Trial → Manuscript → Paper">
 </picture>
 </a>
 
-Recorre un proyecto Digits terminado: registros, conversación, manuscrito y PDF. Este recorrido de navegador editado y recortado muestra el historial existente, no una nueva ejecución ni la velocidad real de investigación. La conversación original está en chino.
+Recorre un proyecto Digits terminado: registros, manuscrito y PDF. Este recorrido de navegador editado y recortado muestra el historial existente, no una nueva ejecución ni la velocidad real de investigación.
 
 <details>
 <summary>Tres formas de empezar</summary>
