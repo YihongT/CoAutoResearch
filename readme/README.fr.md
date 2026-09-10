@@ -43,10 +43,12 @@ Faites avancer la recherche de façon autonome tout en intervenant lorsque votre
 
 **Examinez les éléments probants.** Suivez les résultats, les vérifications et les limites jusqu’au manuscrit et au brouillon d’article.
 
+<a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
   <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
 </picture>
+</a>
 
 Parcourez un projet Digits terminé : historique de recherche, discussion, manuscrit et PDF. Cette visite du navigateur, montée et recadrée, présente un historique existant, pas une nouvelle exécution ni la vitesse réelle de recherche. La conversation d’origine est en chinois.
 

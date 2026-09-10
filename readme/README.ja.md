@@ -43,10 +43,12 @@ Codex または Claude Code を使うオープンソースの研究ワークス�
 
 **証拠を確認できます。** 発見、検証記録、限界をたどり、研究原稿と論文草稿につなげます。
 
+<a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
   <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
 </picture>
+</a>
 
 完了済みの Digits プロジェクトで、研究記録、議論、原稿、PDF を閲覧します。編集・トリミングしたブラウザー案内であり、新規実行や実際の研究速度を示すものではありません。元の会話は中国語です。
 

@@ -43,10 +43,12 @@ A pesquisa avança de forma autônoma, e você participa quando seu julgamento �
 
 **Examine as evidências.** Acompanhe resultados, verificações e limitações até o manuscrito e o rascunho do artigo.
 
+<a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
   <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
 </picture>
+</a>
 
 Explore um projeto Digits concluído: registros, discussão, manuscrito e PDF. Este tour editado e recortado do navegador mostra um histórico existente, não uma nova execução nem a velocidade real da pesquisa. A conversa original está em chinês.
 

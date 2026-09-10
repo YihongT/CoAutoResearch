@@ -43,10 +43,12 @@ Codex 또는 Claude Code로 구동되는 오픈소스 연구 작업 공간입니
 
 **근거를 확인하세요.** 발견, 검사 기록, 한계를 따라 연구 원고와 논문 초안을 만듭니다.
 
+<a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
   <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
 </picture>
+</a>
 
 완료된 Digits 프로젝트의 연구 기록, 토론, 원고, PDF를 살펴봅니다. 편집하고 화면 일부를 잘라낸 브라우저 안내이며, 새 실행이나 실제 연구 속도를 보여 주지 않습니다. 원래 대화는 중국어입니다.
 

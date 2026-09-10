@@ -43,10 +43,12 @@
 
 **检查证据。** 沿着发现、检查记录和局限，逐步形成研究稿与论文草稿。
 
+<a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
   <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
 </picture>
+</a>
 
 浏览已完成的 Digits 项目：研究记录、讨论、研究稿与 PDF。这段经剪辑、裁切的网页导览展示已有历史，不是新一轮运行，也不代表实际研究速度。原始对话为中文。
 

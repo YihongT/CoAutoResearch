@@ -52,6 +52,17 @@ slideshow, not a continuous recording or a measurement of research speed. No new
 experiments were run. The original discussion is in Chinese; the interface is in
 English. Suggestions in chat require review and sending before they guide research.
 
+(screenshots)=
+## Screenshots
+
+Open a PNG to read the original-resolution capture. The tour above moves through
+cropped portions of these still images; it does not depict live agent execution.
+
+- [Completed research trial](../assets/browser-trial.png)
+- [Parallel research discussion](../assets/browser-discussion.png)
+- [Manuscript and development evidence](../assets/browser-manuscript.png)
+- [Paper in the native PDF viewer](../assets/browser-paper.png)
+
 ## 1. Define the question and its boundaries
 
 Choose **Create project**. In the research brief, explain what you want to

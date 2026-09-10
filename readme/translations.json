@@ -3,52 +3,52 @@
   "translations": {
     "zh-CN": {
       "path": "readme/README.zh-CN.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "zh-TW": {
       "path": "readme/README.zh-TW.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "ja": {
       "path": "readme/README.ja.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "ko": {
       "path": "readme/README.ko.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "es": {
       "path": "readme/README.es.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "pt-BR": {
       "path": "readme/README.pt-BR.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "fr": {
       "path": "readme/README.fr.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "de": {
       "path": "readme/README.de.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "ru": {
       "path": "readme/README.ru.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     },
     "ar": {
       "path": "readme/README.ar.md",
-      "source_sha256": "89e1cf0dc84b112ec973e9b88d9f33a8fe6fa097d90996d6e6e0b157ed8f74bc",
+      "source_sha256": "2768be353592dcb2e450d42eb11069860371d35e7415cd4cb960795fd2d06503",
       "native_review": "pending"
     }
   }

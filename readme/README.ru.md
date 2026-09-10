@@ -43,10 +43,12 @@
 
 **Проверяйте основания выводов.** Прослеживайте результаты, проверки и ограничения до рукописи и черновика статьи.
 
+<a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../assets/browser-tour.png">
   <img src="../assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
 </picture>
+</a>
 
 Обзор завершённого проекта Digits: записи, обсуждение, рукопись и PDF. Этот смонтированный обзор с обрезанными кадрами браузера показывает существующую историю, а не новый запуск или реальную скорость исследования. Исходный разговор — на китайском.
 

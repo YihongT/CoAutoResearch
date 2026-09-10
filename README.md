@@ -43,10 +43,12 @@ Keep research moving autonomously, and stay involved whenever your judgment matt
 
 **Inspect the evidence.** Follow findings, checks and limitations into a manuscript and a paper draft.
 
+<a href="https://yihongt.github.io/CoAutoResearch/walkthrough.html#screenshots">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/browser-tour.png">
   <img src="assets/browser-tour.gif" alt="Digits: Trial → discussion → Manuscript → Paper">
 </picture>
+</a>
 
 Browse a completed Digits project: research records, discussion, manuscript and PDF. This edited, cropped browser tour shows existing history, not a new run or actual research speed. The original conversation is in Chinese.
 
