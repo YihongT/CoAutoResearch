@@ -1,6 +1,6 @@
 # CoAutoResearch
 
-**An autonomous research partner you can question, guide, and build with.**
+**A research partner built for recursive self-improvement—with you in the loop.**
 
 CoAutoResearch is an open-source research system for autonomous investigation,
 recursive self-improvement, and human–AI collaboration. Run experiments, refine

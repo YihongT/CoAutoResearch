@@ -4,7 +4,7 @@
   <img src="../assets/readme-hero-light.svg" width="1200" alt="CoAutoResearch — autonomous research and human–AI collaboration">
 </picture></p>
 
-<p align="center"><strong>An autonomous research partner you can question, guide, and build with.</strong></p>
+<p align="center"><strong>A research partner built for recursive self-improvement—with you in the loop.</strong></p>
 
 <p align="center">Ein Open-Source-Forschungssystem für autonome Untersuchungen, rekursive Selbstverbesserung (recursive self-improvement) und die Zusammenarbeit zwischen Mensch und KI. Führe Experimente durch, verfeinere Forschungsmethoden anhand von Belegen und Feedback und erstelle Artikelentwürfe aus nachvollziehbaren Forschungsaufzeichnungen.</p>
 

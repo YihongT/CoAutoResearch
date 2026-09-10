@@ -41,7 +41,7 @@ const REQUIRED_REVIEWER_OUTPUTS = {
 
 function usage() {
   return `CoAutoResearch
-An autonomous research partner you can question, guide, and build with.
+A research partner built for recursive self-improvement—with you in the loop.
 
 Usage:
   co-auto-research init <dir>
