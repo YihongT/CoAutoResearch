@@ -4,7 +4,7 @@
   <img src="../assets/readme-hero-light.svg" width="1200" alt="CoAutoResearch — autonomous research and human–AI collaboration">
 </picture></p>
 
-<p align="center"><strong>A research partner built for recursive self-improvement—with you in the loop.</strong></p>
+<p align="center"><strong>An autonomous research partner that self-improves recursively and works with you.</strong></p>
 
 <p align="center">一個融合自主研究、遞迴自我改進（recursive self-improvement）與人機協作的開源研究系統。執行實驗，依據證據與回饋改進研究方法，並從可追溯的研究紀錄建立論文草稿。</p>
 

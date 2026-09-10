@@ -4,7 +4,7 @@
   <img src="../assets/readme-hero-light.svg" width="1200" alt="CoAutoResearch — autonomous research and human–AI collaboration">
 </picture></p>
 
-<p align="center"><strong>A research partner built for recursive self-improvement—with you in the loop.</strong></p>
+<p align="center"><strong>An autonomous research partner that self-improves recursively and works with you.</strong></p>
 
 <p align="center">자율 연구, 재귀적 자기 개선(recursive self-improvement), 인간–AI 협업을 통합하는 오픈소스 연구 시스템입니다. 실험을 수행하고 근거와 피드백으로 연구 방법을 개선하며, 추적 가능한 연구 기록에서 논문 초안을 만듭니다.</p>
 
