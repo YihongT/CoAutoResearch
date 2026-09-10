@@ -53,11 +53,12 @@ python -m http.server 4027 --directory /tmp/coauto-docs-site
 ## Product language
 
 English is the source of truth for public documentation and interface text.
-The README is also available in Simplified Chinese (`README.zh-CN.md`). Keep both
-versions aligned when changing setup steps, capabilities, limitations, or news;
-reuse the same assets and preserve CLI commands and visible button names. New
-translations should cover the complete README and have a maintainer who can
-review subsequent updates. Agent replies follow the user’s language.
+Complete README translations are maintained in `readme/`. Keep every language
+aligned when changing setup, capabilities, limitations or news; preserve commands
+and visible button names. Follow [translation maintenance](readme/TRANSLATING.md)
+and update the source hash only after synchronizing the content. The README
+workflow checks freshness and links, not linguistic quality. Native review of the
+initial AI-assisted translations is pending. Agent replies follow the user’s language.
 
 Explain the action and its consequence: adding to a draft is
 not sending, requesting a pause is not yet being paused, and recording a result

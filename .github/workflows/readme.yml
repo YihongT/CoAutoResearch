@@ -1,0 +1,49 @@
+name: README consistency
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Check translation freshness, commands and local links
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, re
+          from pathlib import Path
+          from urllib.parse import unquote, urlsplit
+          root = Path.cwd()
+          manifest = json.loads(Path('readme/translations.json').read_text())
+          source = Path(manifest['source'])
+          english = source.read_text()
+          digest = hashlib.sha256(source.read_bytes()).hexdigest()
+          expected = {'zh-CN','zh-TW','ja','ko','es','pt-BR','fr','de','ru','ar'}
+          assert set(manifest['translations']) == expected
+          commands = re.findall(r'```(?:text|bash|bibtex)\n(.*?)```', english, re.S)
+          files = [source]
+          for lang, item in manifest['translations'].items():
+              assert item['source_sha256'] == digest, f'{lang}: synchronize with English README'
+              path = Path(item['path'])
+              text = path.read_text()
+              assert re.findall(r'```(?:text|bash|bibtex)\n(.*?)```', text, re.S) == commands, lang
+              files.append(path)
+          files.extend([Path('README.zh-CN.md'), Path('readme/TRANSLATING.md')])
+          for path in files:
+              text = path.read_text()
+              refs = re.findall(r'\]\(([^\s)]+)\)', text)
+              refs += re.findall(r'(?:href|src|srcset)="([^"]+)"', text)
+              for ref in refs:
+                  url = urlsplit(ref)
+                  if url.scheme or url.netloc:
+                      continue
+                  target = path.parent / unquote(url.path) if url.path else path
+                  assert target.exists(), f'{path}: missing {ref}'
+                  if url.fragment and target.suffix == '.md' and url.path == '':
+                      assert f'id="{url.fragment}"' in text, f'{path}: missing anchor {ref}'
+          print('11 README languages: freshness, shared commands and local links passed.')
+          PY

@@ -29,6 +29,29 @@ For product-generated research drafts, open the [example papers](example-papers.
 Illustrated workflow; timing is schematic. [Static diagram](_static/diagrams/workflow-light.svg).
 
 
+## Browse an existing research project
+
+```{image} ../assets/browser-tour.gif
+:alt: Recorded Digits project: completed Trial, parallel discussion, manuscript evidence and PDF.
+:class: co-loop-motion
+```
+
+```{image} ../assets/browser-tour.png
+:alt: A completed Digits research trial in the dashboard.
+:class: co-loop-static co-diagram-light
+```
+
+```{image} ../assets/browser-tour.png
+:alt: A completed Digits research trial in the dashboard.
+:class: co-loop-static co-diagram-dark
+```
+
+This four-view, 48-second tour uses cropped screenshots from real browser
+navigation through an existing developer-operated Digits project. It is an edited
+slideshow, not a continuous recording or a measurement of research speed. No new
+experiments were run. The original discussion is in Chinese; the interface is in
+English. Suggestions in chat require review and sending before they guide research.
+
 ## 1. Define the question and its boundaries
 
 Choose **Create project**. In the research brief, explain what you want to

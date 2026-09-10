@@ -1,7 +1,7 @@
 {
   "name": "co-auto-research",
   "version": "2.0.0",
-  "description": "Autonomous research and human–AI collaboration, from a question to a manuscript built on traceable evidence.",
+  "description": "Autonomous research and human\u2013AI collaboration, from a question to a manuscript built on traceable evidence.",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "npm@11.15.0",
@@ -35,6 +35,7 @@
     "assets/",
     "README.md",
     "README.zh-CN.md",
+    "readme/",
     "CHANGELOG.md",
     "LICENSE",
     "SECURITY.md",

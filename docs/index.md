@@ -2,12 +2,9 @@
 
 **An autonomous research partner you can question, guide, and build with.**
 
-An open-source research system built around your coding agent, with a browser
-workspace for autonomous investigation, ongoing discussion, and paper generation.
-
-CoAutoResearch brings autonomous investigation and human–AI collaboration into
-one research workflow. Define a question, discuss emerging findings, guide the
-next step, and build a manuscript from evidence you can trace.
+An open-source research workspace powered by Codex or Claude Code. Start with a
+question, let the agent investigate and run experiments, discuss findings as work
+progresses, and turn recorded evidence into a paper draft.
 
 ## Start here
 
