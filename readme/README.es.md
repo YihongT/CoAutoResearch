@@ -26,7 +26,7 @@ La investigación avanza de forma autónoma y tú participas cuando hace falta t
 
 <a id="news"></a>
 
-## Novedades
+## 📰 Novedades
 
 - **2026-09-09** — Se añadieron artículos de ejemplo de Digits e Ising, mejoras de recuperación y comprobaciones más rigurosas al generar artículos.
 - **2026-09-07** — La actualización del código 2.0 incorpora debates paralelos, controles más claros y generación de artículos dentro del producto.
@@ -35,7 +35,7 @@ La investigación avanza de forma autónoma y tú participas cuando hace falta t
 
 <a id="features"></a>
 
-## Funciones
+## ✨ Funciones
 
 **Debate mientras se investiga.** Explora ideas en un chat independiente. Revisa y envía una sugerencia cuando quieras que oriente la investigación.
 
@@ -65,7 +65,7 @@ Recorre un proyecto Digits terminado: registros, conversación, manuscrito y PDF
 
 <a id="quick-start"></a>
 
-## Inicio rápido
+## 🚀 Inicio rápido
 
 Entrega esta instrucción a tu coding agent:
 
@@ -104,7 +104,7 @@ Primera sesión: **Create project → enviar las instrucciones de investigación
 
 <a id="how-it-works"></a>
 
-## Cómo funciona
+## 🔄 Cómo funciona
 
 Cada **Trial** es una iteración de investigación acotada. El servicio comprueba los cambios propuestos, registra los resultados aceptados y decide si continuar, pausar o solicitar una decisión humana. La revisión interna no es revisión externa por pares ni prueba de una afirmación científica.
 
@@ -118,8 +118,8 @@ Cada **Trial** es una iteración de investigación acotada. El servicio comprueb
 
 Flujo ilustrativo; el tiempo es esquemático. Hay alternativas estáticas. [SVG](../assets/co-auto-light.svg)
 
-<details>
-<summary>Explorar la arquitectura del sistema</summary>
+<details open>
+<summary>🏗️ Explorar la arquitectura del sistema</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../docs/_static/diagrams/architecture.svg">
@@ -133,7 +133,7 @@ Flujo ilustrativo; el tiempo es esquemático. Hay alternativas estáticas. [SVG]
 
 <a id="example-papers"></a>
 
-## Artículos de ejemplo
+## 📄 Artículos de ejemplo
 
 <table>
 <tr>
@@ -152,7 +152,7 @@ Abre **Paper** para ampliar, desplazarte y descargar el PDF y el código fuente.
 
 <a id="documentation"></a>
 
-## Documentación
+## 📚 Documentación
 
 Las guías enlazadas están en inglés. Empieza por Setup o Walkthrough; consulta FAQ para dudas frecuentes y Platforms para los límites de compatibilidad.
 
@@ -167,7 +167,7 @@ Las guías enlazadas están en inglés. Empieza por Setup o Walkthrough; consult
 
 <a id="community"></a>
 
-## Comunidad
+## 🤝 Comunidad
 
 Ayuda a verificar instalaciones, informar de errores reproducibles, mejorar flujos de investigación, mantener traducciones o compartir resultados documentados. Usa Issues y lee la guía de contribución; comunica problemas de seguridad en privado.
 

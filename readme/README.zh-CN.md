@@ -26,7 +26,7 @@
 
 <a id="news"></a>
 
-## 最新动态
+## 📰 最新动态
 
 - **2026-09-09** — 新增 Digits 和 Ising 示例论文，改进研究恢复流程与论文生成检查。
 - **2026-09-07** — 2.0 源码更新加入并行研究讨论、更清晰的控制和产品内论文生成。
@@ -35,7 +35,7 @@
 
 <a id="features"></a>
 
-## 功能特点
+## ✨ 功能特点
 
 **边研究，边讨论。** 在独立聊天中探索想法；希望建议影响研究时，先审阅再发送。
 
@@ -65,7 +65,7 @@
 
 <a id="quick-start"></a>
 
-## 快速开始
+## 🚀 快速开始
 
 把下面这段指令交给你的 coding agent：
 
@@ -104,7 +104,7 @@ node bin/auto-research.js ui
 
 <a id="how-it-works"></a>
 
-## 工作原理
+## 🔄 工作原理
 
 每个 **Trial** 是一次有边界的研究迭代。服务检查拟议修改、记录已接纳的结果，并判断继续、暂停或请求人工决定。内部审查不等于外部同行评审，也不能证明科学结论正确。
 
@@ -118,8 +118,8 @@ node bin/auto-research.js ui
 
 流程示意，动画时长不代表实际运行速度；可查看静态版本。 [SVG](../assets/co-auto-light.svg)
 
-<details>
-<summary>了解系统架构</summary>
+<details open>
+<summary>🏗️ 了解系统架构</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../docs/_static/diagrams/architecture.svg">
@@ -133,7 +133,7 @@ node bin/auto-research.js ui
 
 <a id="example-papers"></a>
 
-## 示例论文
+## 📄 示例论文
 
 <table>
 <tr>
@@ -152,7 +152,7 @@ node bin/auto-research.js ui
 
 <a id="documentation"></a>
 
-## 文档
+## 📚 文档
 
 链接文档为英文。从 Setup 或 Walkthrough 开始；常见问题见 FAQ，平台支持边界见 Platforms。
 
@@ -167,7 +167,7 @@ node bin/auto-research.js ui
 
 <a id="community"></a>
 
-## 社区
+## 🤝 社区
 
 欢迎验证不同平台的安装、报告可复现问题、改进研究流程、维护翻译，或分享有记录的研究成果。请使用 Issues 并阅读贡献指南；安全问题请私下报告。
 

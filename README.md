@@ -26,7 +26,7 @@ Keep research moving autonomously, and stay involved whenever your judgment matt
 
 <a id="news"></a>
 
-## News
+## 📰 News
 
 - **2026-09-09** — Added Digits and Ising example papers, research recovery improvements, and stronger paper-generation checks.
 - **2026-09-07** — The 2.0 source update adds parallel research discussion, clearer controls, and in-product paper generation.
@@ -35,7 +35,7 @@ Keep research moving autonomously, and stay involved whenever your judgment matt
 
 <a id="features"></a>
 
-## Features
+## ✨ Features
 
 **Discuss while research runs.** Explore ideas in a separate chat. Review and send a suggestion when you want it to guide the research.
 
@@ -65,7 +65,7 @@ Browse a completed Digits project: research records, discussion, manuscript and 
 
 <a id="quick-start"></a>
 
-## Quick start
+## 🚀 Quick start
 
 Give your coding agent this instruction:
 
@@ -104,7 +104,7 @@ Your first session: **Create project → send a research brief → review the di
 
 <a id="how-it-works"></a>
 
-## How it works
+## 🔄 How it works
 
 Each **Trial** is a bounded research iteration. The service checks proposed changes, records accepted results and determines whether to continue, pause or request a human decision. Internal review is not external peer review or proof of a scientific claim.
 
@@ -118,8 +118,8 @@ Each **Trial** is a bounded research iteration. The service checks proposed chan
 
 Illustrated workflow; timing is schematic. Static alternatives are available. [SVG](assets/co-auto-light.svg)
 
-<details>
-<summary>Explore the system architecture</summary>
+<details open>
+<summary>🏗️ Explore the system architecture</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/_static/diagrams/architecture.svg">
@@ -133,7 +133,7 @@ Illustrated workflow; timing is schematic. Static alternatives are available. [S
 
 <a id="example-papers"></a>
 
-## Example papers
+## 📄 Example papers
 
 <table>
 <tr>
@@ -152,7 +152,7 @@ Open **Paper** to zoom, scroll and download the PDF and source. A previous draft
 
 <a id="documentation"></a>
 
-## Documentation
+## 📚 Documentation
 
 The linked guides are in English. Start with Setup or Walkthrough; consult FAQ for common questions and Platforms for support boundaries.
 
@@ -167,7 +167,7 @@ The linked guides are in English. Start with Setup or Walkthrough; consult FAQ f
 
 <a id="community"></a>
 
-## Community
+## 🤝 Community
 
 Help verify installation on your platform, report reproducible bugs, improve research workflows, maintain translations, or share documented research outcomes. Use Issues and read the contribution guide; report security issues privately.
 

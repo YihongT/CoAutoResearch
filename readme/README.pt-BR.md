@@ -26,7 +26,7 @@ A pesquisa avança de forma autônoma, e você participa quando seu julgamento �
 
 <a id="news"></a>
 
-## Novidades
+## 📰 Novidades
 
 - **2026-09-09** — Foram adicionados artigos de exemplo de Digits e Ising, melhorias na recuperação da pesquisa e verificações mais rigorosas na geração de artigos.
 - **2026-09-07** — A atualização do código 2.0 inclui discussões paralelas, controles mais claros e geração de artigos no produto.
@@ -35,7 +35,7 @@ A pesquisa avança de forma autônoma, e você participa quando seu julgamento �
 
 <a id="features"></a>
 
-## Recursos
+## ✨ Recursos
 
 **Discuta enquanto a pesquisa avança.** Explore ideias em um chat separado. Revise e envie uma sugestão quando quiser que ela oriente a pesquisa.
 
@@ -65,7 +65,7 @@ Explore um projeto Digits concluído: registros, discussão, manuscrito e PDF. E
 
 <a id="quick-start"></a>
 
-## Início rápido
+## 🚀 Início rápido
 
 Dê esta instrução ao seu coding agent:
 
@@ -104,7 +104,7 @@ Primeira sessão: **Create project → enviar as instruções de pesquisa → re
 
 <a id="how-it-works"></a>
 
-## Como funciona
+## 🔄 Como funciona
 
 Cada **Trial** é uma iteração de pesquisa delimitada. O serviço verifica alterações propostas, registra resultados aceitos e decide se deve continuar, pausar ou pedir uma decisão humana. A revisão interna não é revisão externa por pares nem prova de uma afirmação científica.
 
@@ -118,8 +118,8 @@ Cada **Trial** é uma iteração de pesquisa delimitada. O serviço verifica alt
 
 Fluxo ilustrativo; a duração é esquemática. Versões estáticas estão disponíveis. [SVG](../assets/co-auto-light.svg)
 
-<details>
-<summary>Explorar a arquitetura do sistema</summary>
+<details open>
+<summary>🏗️ Explorar a arquitetura do sistema</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../docs/_static/diagrams/architecture.svg">
@@ -133,7 +133,7 @@ Fluxo ilustrativo; a duração é esquemática. Versões estáticas estão dispo
 
 <a id="example-papers"></a>
 
-## Artigos de exemplo
+## 📄 Artigos de exemplo
 
 <table>
 <tr>
@@ -152,7 +152,7 @@ Abra **Paper** para ampliar, rolar e baixar o PDF e o código-fonte. O rascunho 
 
 <a id="documentation"></a>
 
-## Documentação
+## 📚 Documentação
 
 Os guias vinculados estão em inglês. Comece por Setup ou Walkthrough; consulte FAQ para dúvidas comuns e Platforms para os limites de suporte.
 
@@ -167,7 +167,7 @@ Os guias vinculados estão em inglês. Comece por Setup ou Walkthrough; consulte
 
 <a id="community"></a>
 
-## Comunidade
+## 🤝 Comunidade
 
 Ajude a verificar instalações, relatar erros reproduzíveis, melhorar os fluxos de pesquisa, manter traduções ou compartilhar resultados documentados. Use Issues e leia o guia de contribuição; relate problemas de segurança em particular.
 

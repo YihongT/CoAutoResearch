@@ -26,7 +26,7 @@ Codex 또는 Claude Code로 구동되는 오픈소스 연구 작업 공간입니
 
 <a id="news"></a>
 
-## 새 소식
+## 📰 새 소식
 
 - **2026-09-09** — Digits와 Ising 예시 논문, 연구 복구 개선, 논문 생성 검사 강화를 추가했습니다.
 - **2026-09-07** — 2.0 소스 업데이트에는 병렬 연구 토론, 명확한 제어, 제품 내 논문 생성이 포함됩니다.
@@ -35,7 +35,7 @@ Codex 또는 Claude Code로 구동되는 오픈소스 연구 작업 공간입니
 
 <a id="features"></a>
 
-## 기능
+## ✨ 기능
 
 **연구 중에도 토론하세요.** 별도 채팅에서 아이디어를 검토하고, 연구에 반영할 제안을 확인한 뒤 전송합니다.
 
@@ -65,7 +65,7 @@ Codex 또는 Claude Code로 구동되는 오픈소스 연구 작업 공간입니
 
 <a id="quick-start"></a>
 
-## 빠른 시작
+## 🚀 빠른 시작
 
 다음 지시를 coding agent에 전달하세요:
 
@@ -104,7 +104,7 @@ PDF 생성에는 Python 3.12+, 버전이 고정된 과학 스킬 네 개, LaTeX,
 
 <a id="how-it-works"></a>
 
-## 작동 방식
+## 🔄 작동 방식
 
 각 **Trial**은 범위가 정해진 연구 반복입니다. 서비스가 변경 제안을 검사하고 채택된 결과를 기록하며 계속, 일시 정지, 사람의 판단 요청을 결정합니다. 내부 검토는 외부 동료 심사나 과학적 주장에 대한 증명이 아닙니다.
 
@@ -118,8 +118,8 @@ PDF 생성에는 Python 3.12+, 버전이 고정된 과학 스킬 네 개, LaTeX,
 
 개념적인 흐름입니다. 애니메이션 시간은 실제 실행 시간이 아니며 정적 그림도 제공됩니다. [SVG](../assets/co-auto-light.svg)
 
-<details>
-<summary>시스템 구조 보기</summary>
+<details open>
+<summary>🏗️ 시스템 구조 보기</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../docs/_static/diagrams/architecture.svg">
@@ -133,7 +133,7 @@ PDF 생성에는 Python 3.12+, 버전이 고정된 과학 스킬 네 개, LaTeX,
 
 <a id="example-papers"></a>
 
-## 예시 논문
+## 📄 예시 논문
 
 <table>
 <tr>
@@ -152,7 +152,7 @@ PDF 생성에는 Python 3.12+, 버전이 고정된 과학 스킬 네 개, LaTeX,
 
 <a id="documentation"></a>
 
-## 문서
+## 📚 문서
 
 링크된 가이드는 영어입니다. Setup이나 Walkthrough에서 시작하고, 일반 질문은 FAQ, 지원 범위는 Platforms를 확인하세요.
 
@@ -167,7 +167,7 @@ PDF 생성에는 Python 3.12+, 버전이 고정된 과학 스킬 네 개, LaTeX,
 
 <a id="community"></a>
 
-## 커뮤니티
+## 🤝 커뮤니티
 
 플랫폼별 설치 확인, 재현 가능한 버그 보고, 연구 흐름 개선, 번역 유지, 기록이 있는 연구 결과 공유를 환영합니다. Issues와 기여 가이드를 이용하고 보안 문제는 비공개로 보고하세요.
 

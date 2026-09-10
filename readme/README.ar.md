@@ -40,7 +40,7 @@
 
 <div dir="rtl">
 
-## الأخبار
+## 📰 الأخبار
 
 </div>
 
@@ -57,7 +57,7 @@
 
 <div dir="rtl">
 
-## الميزات
+## ✨ الميزات
 
 </div>
 
@@ -119,7 +119,7 @@
 
 <div dir="rtl">
 
-## البدء السريع
+## 🚀 البدء السريع
 
 </div>
 
@@ -186,7 +186,7 @@ node bin/auto-research.js ui
 
 <div dir="rtl">
 
-## آلية العمل
+## 🔄 آلية العمل
 
 </div>
 
@@ -214,8 +214,8 @@ node bin/auto-research.js ui
 
 </div>
 
-<details>
-<summary>استكشاف بنية النظام</summary>
+<details open>
+<summary>🏗️ استكشاف بنية النظام</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../docs/_static/diagrams/architecture.svg">
@@ -231,7 +231,7 @@ node bin/auto-research.js ui
 
 <div dir="rtl">
 
-## أمثلة الأوراق
+## 📄 أمثلة الأوراق
 
 </div>
 
@@ -270,7 +270,7 @@ node bin/auto-research.js ui
 
 <div dir="rtl">
 
-## التوثيق
+## 📚 التوثيق
 
 </div>
 
@@ -293,7 +293,7 @@ node bin/auto-research.js ui
 
 <div dir="rtl">
 
-## المجتمع
+## 🤝 المجتمع
 
 </div>
 

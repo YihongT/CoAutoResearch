@@ -26,7 +26,7 @@ Faites avancer la recherche de façon autonome tout en intervenant lorsque votre
 
 <a id="news"></a>
 
-## Actualités
+## 📰 Actualités
 
 - **2026-09-09** — Ajout des articles Digits et Ising, d’améliorations de la reprise de recherche et de contrôles renforcés lors de la génération d’articles.
 - **2026-09-07** — La mise à jour des sources 2.0 ajoute des discussions parallèles, des commandes plus claires et la génération d’articles dans le produit.
@@ -35,7 +35,7 @@ Faites avancer la recherche de façon autonome tout en intervenant lorsque votre
 
 <a id="features"></a>
 
-## Fonctionnalités
+## ✨ Fonctionnalités
 
 **Discutez pendant la recherche.** Explorez des idées dans un échange séparé. Relisez puis envoyez une suggestion lorsque vous souhaitez orienter la recherche.
 
@@ -65,7 +65,7 @@ Parcourez un projet Digits terminé : historique de recherche, discussion, manus
 
 <a id="quick-start"></a>
 
-## Démarrage rapide
+## 🚀 Démarrage rapide
 
 Confiez cette instruction à votre coding agent :
 
@@ -104,7 +104,7 @@ Première session : **Create project → envoyer les consignes de recherche → 
 
 <a id="how-it-works"></a>
 
-## Fonctionnement
+## 🔄 Fonctionnement
 
 Chaque **Trial** est une itération de recherche délimitée. Le service vérifie les modifications proposées, enregistre les résultats acceptés et décide de poursuivre, de suspendre ou de demander une décision humaine. La vérification interne n’est ni une évaluation externe par les pairs ni la preuve d’une affirmation scientifique.
 
@@ -118,8 +118,8 @@ Chaque **Trial** est une itération de recherche délimitée. Le service vérifi
 
 Schéma de fonctionnement animé ; la durée est illustrative. Des versions statiques sont disponibles. [SVG](../assets/co-auto-light.svg)
 
-<details>
-<summary>Explorer l’architecture du système</summary>
+<details open>
+<summary>🏗️ Explorer l’architecture du système</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../docs/_static/diagrams/architecture.svg">
@@ -133,7 +133,7 @@ Schéma de fonctionnement animé ; la durée est illustrative. Des versions stat
 
 <a id="example-papers"></a>
 
-## Exemples d’articles
+## 📄 Exemples d’articles
 
 <table>
 <tr>
@@ -152,7 +152,7 @@ Ouvrez **Paper** pour zoomer, faire défiler et télécharger le PDF et les sour
 
 <a id="documentation"></a>
 
-## Documentation
+## 📚 Documentation
 
 Les guides liés sont en anglais. Commencez par Setup ou Walkthrough ; consultez FAQ pour les questions courantes et Platforms pour les limites de prise en charge.
 
@@ -167,7 +167,7 @@ Les guides liés sont en anglais. Commencez par Setup ou Walkthrough ; consultez
 
 <a id="community"></a>
 
-## Communauté
+## 🤝 Communauté
 
 Contribuez en vérifiant une installation, signalant des bugs reproductibles, améliorant les parcours de recherche, maintenant les traductions ou partageant des résultats documentés. Utilisez Issues et lisez le guide de contribution ; signalez les problèmes de sécurité en privé.
 

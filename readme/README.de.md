@@ -26,7 +26,7 @@ Die Forschung läuft selbstständig weiter, und du greifst ein, wenn dein Urteil
 
 <a id="news"></a>
 
-## Neuigkeiten
+## 📰 Neuigkeiten
 
 - **2026-09-09** — Beispielberichte zu Digits und Ising, verbesserte Wiederaufnahme und strengere Prüfungen bei der Berichtserstellung wurden ergänzt.
 - **2026-09-07** — Das Quellcode-Update 2.0 ergänzt parallele Forschungsdiskussionen, klarere Bedienelemente und die Berichtserstellung im Produkt.
@@ -35,7 +35,7 @@ Die Forschung läuft selbstständig weiter, und du greifst ein, wenn dein Urteil
 
 <a id="features"></a>
 
-## Funktionen
+## ✨ Funktionen
 
 **Diskutiere während der Forschung.** Prüfe Ideen in einem separaten Chat. Lies einen Vorschlag durch und sende ihn, wenn er die Forschung leiten soll.
 
@@ -65,7 +65,7 @@ Erkunde ein abgeschlossenes Digits-Projekt: Forschungsprotokoll, Diskussion, Man
 
 <a id="quick-start"></a>
 
-## Schnellstart
+## 🚀 Schnellstart
 
 Gib deinem Coding-Agenten diese Anweisung:
 
@@ -104,7 +104,7 @@ Erste Sitzung: **Create project → Forschungsauftrag senden → Richtung prüfe
 
 <a id="how-it-works"></a>
 
-## Funktionsweise
+## 🔄 Funktionsweise
 
 Jeder **Trial** ist eine begrenzte Forschungsiteration. Der Dienst prüft vorgeschlagene Änderungen, dokumentiert akzeptierte Ergebnisse und entscheidet über Fortsetzung, Pause oder eine menschliche Entscheidung. Interne Prüfung ist weder externe Begutachtung noch ein Beweis wissenschaftlicher Aussagen.
 
@@ -118,8 +118,8 @@ Jeder **Trial** ist eine begrenzte Forschungsiteration. Der Dienst prüft vorges
 
 Schematischer Ablauf; die Animationsdauer entspricht nicht der Laufzeit. Statische Alternativen sind verfügbar. [SVG](../assets/co-auto-light.svg)
 
-<details>
-<summary>Systemarchitektur ansehen</summary>
+<details open>
+<summary>🏗️ Systemarchitektur ansehen</summary>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="../docs/_static/diagrams/architecture.svg">
@@ -133,7 +133,7 @@ Schematischer Ablauf; die Animationsdauer entspricht nicht der Laufzeit. Statisc
 
 <a id="example-papers"></a>
 
-## Beispielberichte
+## 📄 Beispielberichte
 
 <table>
 <tr>
@@ -152,7 +152,7 @@ Unter **Paper** kannst du zoomen, scrollen sowie PDF und Quellen herunterladen. 
 
 <a id="documentation"></a>
 
-## Dokumentation
+## 📚 Dokumentation
 
 Die verlinkten Anleitungen sind auf Englisch. Beginne mit Setup oder Walkthrough; FAQ beantwortet häufige Fragen, Platforms beschreibt die Supportgrenzen.
 
@@ -167,7 +167,7 @@ Die verlinkten Anleitungen sind auf Englisch. Beginne mit Setup oder Walkthrough
 
 <a id="community"></a>
 
-## Community
+## 🤝 Community
 
 Hilf bei Installationsprüfungen, reproduzierbaren Fehlermeldungen, besseren Forschungsabläufen, Übersetzungen oder dokumentierten Forschungsergebnissen. Nutze Issues und lies den Beitragsleitfaden; Sicherheitsprobleme bitte vertraulich melden.
 
