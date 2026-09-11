@@ -25,7 +25,7 @@
 
 ## 📰 Новости
 
-- **2026-06-23** — [CoAutoResearch v0.1.1](https://github.com/YihongT/CoAutoResearch/releases/tag/v0.1.1) выпущен.
+- **2026-09-11** — [CoAutoResearch v2.0.0](https://github.com/YihongT/CoAutoResearch/releases/tag/v2.0.0) выпущен.
 
 <a id="features"></a>
 
