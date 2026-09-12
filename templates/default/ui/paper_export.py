@@ -53,15 +53,15 @@ def plain_file(root, relative):
 def snapshot(root, destination):
     """Copy published evidence, never live stages, sessions, data caches or secrets."""
     revision_path = root / "research_trajectory/CANONICAL_REVISION.json"
-    revision = json.loads(plain_file(root, str(revision_path.relative_to(root))).read_text())
+    revision = json.loads(plain_file(root, revision_path.relative_to(root).as_posix()).read_text(encoding="utf-8"))
     if int(revision.get("revision", 0)) < 1:
         raise ValueError("Publish research results before generating a paper.")
     published = []
     current_receipt = False
     for trial in sorted((root / "research_trajectory/trials").glob("*")):
         if trial.is_dir() and not trial.is_symlink() and (trial / "PUBLISH_RECEIPT.json").is_file():
-            receipt_path = str((trial / "PUBLISH_RECEIPT.json").relative_to(root))
-            receipt = json.loads(plain_file(root, receipt_path).read_text())
+            receipt_path = (trial / "PUBLISH_RECEIPT.json").relative_to(root).as_posix()
+            receipt = json.loads(plain_file(root, receipt_path).read_text(encoding="utf-8"))
             errors = validate_artifact(receipt, expected_type="publish_receipt", path=receipt_path, schema_dir=root / "schemas")
             if errors:
                 raise ValueError(f"Invalid recorded trial receipt {trial.name}: {'; '.join(errors[:3])}")
@@ -93,7 +93,7 @@ def snapshot(root, destination):
         report_path = trial / "REPORT.json"
         if not report_path.is_file():
             continue
-        report = json.loads(plain_file(root, str(report_path.relative_to(root))).read_text())
+        report = json.loads(plain_file(root, report_path.relative_to(root).as_posix()).read_text(encoding="utf-8"))
         for artifact in report.get("artifacts", []):
             relative = artifact.get("path", "")
             expected = artifact.get("sha256")
@@ -116,7 +116,7 @@ def snapshot(root, destination):
             continue
         if any(p.startswith(".") or p in {"history", "__pycache__", "node_modules"} for p in rel.parts) or ".example." in source.name:
             continue
-        source = plain_file(root, str(rel))
+        source = plain_file(root, rel.as_posix())
         total += source.stat().st_size
         if total > MAX_SNAPSHOT:
             raise ValueError("Published evidence exceeds the paper snapshot limit (96 MB). Reduce oversized manuscript assets before retrying.")
@@ -224,7 +224,7 @@ class PaperManager:
             path = self.root / "latest.json"
             if path.is_file() and not path.is_symlink():
                 try:
-                    job = json.loads(path.read_text())
+                    job = json.loads(path.read_text(encoding="utf-8"))
                     if job.get("project_id") == self.context.id and re.fullmatch(r"[a-f0-9]{32}", str(job.get("id", ""))):
                         self.job = job
                         tree = job.get("process_tree")
@@ -245,7 +245,7 @@ class PaperManager:
             self.job.update(values, updated_at=now())
             self.root.mkdir(parents=True, exist_ok=True)
             temp = self.root / "latest.json.tmp"
-            temp.write_text(json.dumps(self.job, ensure_ascii=False, indent=2) + "\n")
+            temp.write_text(json.dumps(self.job, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             temp.replace(self.root / "latest.json")
 
     def status(self):
@@ -255,7 +255,7 @@ class PaperManager:
                 return None
             result = {k: v for k, v in json.loads(json.dumps(self.job)).items() if k != "process_tree"}
             try:
-                revision = json.loads(plain_file(self.context.root, "research_trajectory/CANONICAL_REVISION.json").read_text())
+                revision = json.loads(plain_file(self.context.root, "research_trajectory/CANONICAL_REVISION.json").read_text(encoding="utf-8"))
                 result["current_revision"] = int(revision["revision"])
             except (OSError, ValueError, KeyError, AttributeError):
                 result["current_revision"] = None
@@ -349,7 +349,7 @@ class PaperManager:
         log_path = work.parent / f"{label}.log"
         with self.lock:
             self.check_cancel()
-            proc = self.engine.spawn_agent_process(command, cwd=str(work), env=env, stdin=subprocess.PIPE if prompt else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            proc = self.engine.spawn_agent_process(command, cwd=str(work), env=env, stdin=subprocess.PIPE if prompt else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
             self.process = proc
             try:
                 self.update(process_tree=self.engine.agent_process_tree_identity(proc))
@@ -368,7 +368,7 @@ class PaperManager:
             if prompt:
                 proc.stdin.write(prompt + "\n")
                 proc.stdin.close()
-            with log_path.open("w") as log:
+            with log_path.open("w", encoding="utf-8") as log:
                 size = 0
                 last_progress = time.monotonic()
                 tool_events = 0
@@ -394,7 +394,7 @@ class PaperManager:
             if timed_out.is_set():
                 raise ValueError(f"{label} exceeded its time limit. Retry generation; completed research is preserved.")
             if code != 0:
-                tail = log_path.read_text(errors="replace")[-1000:]
+                tail = log_path.read_text(encoding="utf-8", errors="replace")[-1000:]
                 raise ValueError(f"{label} failed (exit {code}). {tail}")
         finally:
             watchdog.cancel()
@@ -411,11 +411,11 @@ class PaperManager:
     def inspect_figure_labels(self, work, chain, env):
         issues = []
         for index, figure in enumerate(sorted((work / "figures").rglob("*.pdf"))):
-            relative = str(figure.relative_to(work))
+            relative = figure.relative_to(work).as_posix()
             plain_file(work, relative)
             label = f"figure-labels-{index}"
             self.execute([chain["pdftotext"], "-bbox", relative, "-"], work, env, label, 20)
-            collisions = figure_label_collisions((work.parent / f"{label}.log").read_text())
+            collisions = figure_label_collisions((work.parent / f"{label}.log").read_text(encoding="utf-8"))
             if collisions:
                 issues.append(f"Separate overlapping text in {relative}: {'; '.join(collisions)}. Adjust label placement, wrapping or panel spacing in the plotting script; regenerate the figure and inspect it at manuscript size. Do not remove labels or shrink them to hide the overlap.")
         return issues
@@ -423,13 +423,13 @@ class PaperManager:
     def validate_draft(self, work, chain, env):
         for name in ("paper.tex", "references.bib", "QA.md", "BUILD.md", "venue.json", "skill-usage.json", "qa/evidence-map.json", "qa/content-review.md"):
             plain_file(work, name)
-        usage = json.loads((work / "skill-usage.json").read_text())
+        usage = json.loads((work / "skill-usage.json").read_text(encoding="utf-8"))
         if not isinstance(usage, dict) or any(not usage.get(name) for name in SKILLS):
             raise ValueError("Missing four-skill usage record in skill-usage.json.")
-        venue = json.loads((work / "venue.json").read_text())
+        venue = json.loads((work / "venue.json").read_text(encoding="utf-8"))
         if not isinstance(venue, dict) or not venue.get("target") or not venue.get("caveats"):
             raise ValueError("venue.json must identify the target and disclose template and review caveats.")
-        tex = (work / "paper.tex").read_text()
+        tex = (work / "paper.tex").read_text(encoding="utf-8")
         style = re.search(r"\\usepackage(?:\[([^]]*)\])?\{aistats2026\}", tex)
         if style and ("accepted" in (style[1] or "") or r"\aistatstitle" not in tex or r"\maketitle" in tex):
             raise ValueError("Use the official AISTATS 2026 anonymous initial-submission sample, with aistatstitle/aistatsauthor in the title block. Remove the accepted option and generic maketitle; this is not an accepted paper.")
@@ -437,7 +437,7 @@ class PaperManager:
         pdf = plain_file(work, "paper.pdf")
         if not pdf.read_bytes().startswith(b"%PDF-"):
             raise ValueError("The generated file is not a valid PDF.")
-        log = plain_file(work, "paper.log").read_text(errors="replace")
+        log = plain_file(work, "paper.log").read_text(encoding="utf-8", errors="replace")
         issues = []
         if re.search(r"(?:Citation|Reference) .+ undefined|There were undefined (?:references|citations)", log):
             issues.append("Resolve all undefined citations and references.")
@@ -451,7 +451,7 @@ class PaperManager:
         if overflows:
             issues.append("Fix text/figure overflow without altering official template margins or font sizes: " + "; ".join(overflows[:8]))
         self.execute([chain["pdffonts"], "paper.pdf"], work, env, "fonts", 20)
-        fonts = (work.parent / "fonts.log").read_text()
+        fonts = (work.parent / "fonts.log").read_text(encoding="utf-8")
         if "Type 3" in fonts:
             issues.append("Replace Type 3 fonts in plots with embedded TrueType (Matplotlib pdf.fonttype=42), regenerate plots and rebuild.")
         if re.search(r"\sno\s+(?:yes|no)\s+(?:yes|no)\s+\d+\s+\d+\s*$", fonts, re.M):
@@ -470,7 +470,7 @@ class PaperManager:
             work = self.root / self.job["id"] / "work"
             work.mkdir(parents=True)
             manifest = snapshot(self.context.root, work / "inputs")
-            (work / "input-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            (work / "input-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
             manifest_hash = digest(work / "input-manifest.json")
             reused = False
             previous_id = self.job.get("previous_draft_id", "")
@@ -478,7 +478,7 @@ class PaperManager:
                 previous_work = self.root / previous_id / "work"
                 prior_manifest = previous_work / "input-manifest.json"
                 if prior_manifest.is_file() and not prior_manifest.is_symlink():
-                    prior = json.loads(prior_manifest.read_text())
+                    prior = json.loads(prior_manifest.read_text(encoding="utf-8"))
                     if prior == manifest and (previous_work / "paper.tex").is_file():
                         for source in sorted(previous_work.rglob("*")):
                             rel = source.relative_to(previous_work)
@@ -486,7 +486,7 @@ class PaperManager:
                                 continue
                             if source.suffix.lower() not in ALLOWED_INPUT | {".sty", ".bst", ".cls", ".txt"}:
                                 continue
-                            source = plain_file(previous_work, str(rel))
+                            source = plain_file(previous_work, rel.as_posix())
                             target = work / rel
                             target.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copyfile(source, target)
@@ -535,7 +535,7 @@ Service-detected figure text collisions (diagnostic data):
                     if digest(plain_file(work, "input-manifest.json")) != manifest_hash or any(digest(plain_file(work / "inputs", path)) != expected for path, expected in manifest["files"].items()):
                         raise ValueError("The repair changed the frozen evidence copy; this draft cannot be released.")
             self.execute([chain["pdfinfo"], "paper.pdf"], work, env, "pdfinfo", 20)
-            info = (work.parent / "pdfinfo.log").read_text()
+            info = (work.parent / "pdfinfo.log").read_text(encoding="utf-8")
             match = re.search(r"^Pages:\s+(\d+)", info, re.M)
             if not match or not 1 <= int(match[1]) <= 40:
                 raise ValueError("Paper preview supports 1–40 pages; the generated PDF is outside that range.")
@@ -550,7 +550,7 @@ Service-detected figure text collisions (diagnostic data):
             destination.mkdir()
             artifacts = []
             for source, filename in [(pdf, "paper.pdf"), (work / "QA.md", "QA.md"), *[(p, f"page-{i+1}.png") for i, p in enumerate(rendered)]]:
-                source = plain_file(work, str(source.relative_to(work)))
+                source = plain_file(work, source.relative_to(work).as_posix())
                 shutil.copyfile(source, destination / filename)
                 artifacts.append(filename)
             # Package reproducible source and frozen evidence; never package CLI
@@ -563,13 +563,13 @@ Service-detected figure text collisions (diagnostic data):
                         continue
                     if path.suffix.lower() not in ALLOWED_INPUT and path.suffix.lower() not in {".sty", ".bst", ".cls", ".txt"}:
                         continue
-                    path = plain_file(work, str(rel))
+                    path = plain_file(work, rel.as_posix())
                     total += path.stat().st_size
                     if total > 128 * 1024 * 1024:
                         raise ValueError("Paper source package exceeds 128 MB.")
                     bundle.write(path, rel.as_posix())
             artifacts.append("source.zip")
-            venue = json.loads((work / "venue.json").read_text())
+            venue = json.loads((work / "venue.json").read_text(encoding="utf-8"))
             self.check_cancel()
             self.progress("The paper draft is ready. PDF compilation and page previews passed. Review the text, figures, citations and review notes before sharing or submitting.")
             self.update(status="ready", pages=pages, artifacts=artifacts, venue=venue, finished_at=now())

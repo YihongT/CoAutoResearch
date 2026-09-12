@@ -30,6 +30,8 @@ V2.0 enables only `general_research` by default and ships optional installed pac
 
 The service independently derives required installed packs from stable project and venue signals. Omitting a required installed pack, inventing a pack path, or omitting its registered evidence and safety standards invalidates plan approval.
 
+Populate `required_standards` by loading each selected domain registry's `evidence_standards` and `safety_constraints` and copying those strings verbatim, deduplicated. Do not paraphrase or omit registered entries; explain their applicability or limits separately in the plan and review.
+
 Read the installed `domains/*/registry.json` triggers first, then read
 `DOMAIN.md` only for general research and the packs that match this trial.
 Do not read every optional domain's full instructions just to decide that its

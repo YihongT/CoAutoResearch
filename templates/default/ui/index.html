@@ -180,7 +180,7 @@
                   </div>
 
                   <div class="material-quick-actions" aria-label="Attachment hint">
-                    <span class="material-actions-label">Drag files here, or use + to upload files/link folders</span>
+                    <span class="material-actions-label">Drag files here, or use + to upload files/add folders</span>
                   </div>
 
                   <div id="brief-editor-anchor"></div>
@@ -210,7 +210,7 @@
                               </button>
                               <button type="button" role="menuitem" data-attachment-action="link-folders">
                                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4.1c.7 0 1.3.3 1.8.8l1.1 1.2h4A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/></svg>
-                                <span>Link folders/files</span>
+                                <span>Add local files/folders</span>
                               </button>
                             </div>
 	                          <textarea id="cold-file-editor" rows="1" wrap="soft" spellcheck="false" aria-label="Research brief" placeholder="Research topic, problem, scope, and data or materials to use..."></textarea>
@@ -603,7 +603,7 @@
         <section class="browser-resource-tools" aria-label="Attachment options">
           <div>
             <h3>Attach material</h3>
-            <p>Choose what this material is. Folders are symlinked when possible; files are copied into this repo.</p>
+            <p>Choose what this material is. Files and folders are copied into this project when you send. The originals stay unchanged. Folder limit: 50 MiB; symbolic links and junctions are not supported.</p>
           </div>
           <div class="selected-material-type" id="selected-material-type">Material type: Ongoing work</div>
           <div class="resource-selections" id="resource-selections" aria-live="polite">
@@ -623,7 +623,7 @@
           <input id="browser-search" type="search" placeholder="Search or paste a path..." autocomplete="off" aria-label="Search current folder or paste a path" />
           <button class="mini-button browser-jump-button" id="browser-jump" type="button">Go</button>
         </div>
-        <div class="browser-note" id="browser-note">Choose a folder or file. Folders are symlinked when possible; files are copied into this repo.</div>
+        <div class="browser-note" id="browser-note">Choose a folder or file. Files and folders are copied into this project when you send. The originals stay unchanged. Folder limit: 50 MiB; symbolic links and junctions are not supported.</div>
         <div class="browser-entries" id="browser-entries"></div>
       </section>
     </dialog>

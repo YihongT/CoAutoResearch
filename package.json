@@ -1,6 +1,6 @@
 {
   "name": "co-auto-research",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "An open-source research system for autonomous investigation, recursive self-improvement, and human–AI collaboration. Run experiments, refine methods through evidence and feedback, and turn traceable research into paper drafts.",
   "license": "Apache-2.0",
   "type": "module",

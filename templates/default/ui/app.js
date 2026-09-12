@@ -991,6 +991,12 @@ function markdownMathHtml(formula, display, source) {
 function markdownLinkDestination(source, start) {
   let depth = 0;
   const angled = source[start] === "<";
+  // Some agent replies omit the closing angle bracket around a local path.
+  // Recover only an explicit path; link rendering still enforces project scope.
+  if (angled && !source.slice(start).split(/[\r\n]/, 1)[0].includes(">")) {
+    const recovered = markdownLinkDestination(source, start + 1);
+    if (recovered && /^(?:\/|[A-Za-z]:[\\/]|\\\\|\[project\]\/)/.test(recovered.href)) return recovered;
+  }
   for (let index = start; index < source.length; index += 1) {
     const char = source[index];
     if (char === "\n" || char === "\r") return null;
@@ -1260,29 +1266,40 @@ function markdownToHtml(text, options = {}) {
 
 function showToast(message, isError = false) {
   const toast = $("#toast");
-  toast.textContent = message;
+  // Modal dialogs make the rest of the document inert, regardless of z-index.
+  const host = document.activeElement?.closest("dialog[open]")
+    || Array.from(document.querySelectorAll("dialog[open]")).at(-1)
+    || document.body;
+  if (toast.parentElement !== host) host.append(toast);
+  toast.textContent = isError && String(message).startsWith("Another project already owns the v2.0 agent-worker slot.")
+    ? "Another project is running. Wait for it to finish, or pause that run before starting work here."
+    : message;
   const needsTemplateUpdate = isError && activeProjectId && /package-managed project files are out of date/i.test(String(message));
-  toast.classList.toggle("is-actionable", Boolean(needsTemplateUpdate));
-  if (needsTemplateUpdate) {
-    const update = document.createElement("button");
-    update.type = "button";
-    update.className = "secondary-button small-button";
-    update.dataset.projectUpgradeReviewers = activeProjectId;
-    update.textContent = "Update project template";
+  toast.classList.toggle("is-actionable", isError);
+  toast.setAttribute("role", isError ? "alert" : "status");
+  if (isError) {
+    const actions = document.createElement("div");
+    actions.className = "toast-actions";
+    if (needsTemplateUpdate) {
+      const update = document.createElement("button");
+      update.type = "button";
+      update.className = "secondary-button small-button";
+      update.dataset.projectUpgradeReviewers = activeProjectId;
+      update.textContent = "Update project template";
+      actions.append(update);
+    }
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.className = "text-button";
     dismiss.textContent = "Dismiss";
     dismiss.addEventListener("click", () => toast.classList.remove("is-visible"));
-    const actions = document.createElement("div");
-    actions.className = "toast-actions";
-    actions.append(update, dismiss);
+    actions.append(dismiss);
     toast.append(actions);
   }
   toast.style.borderColor = isError ? "var(--danger)" : "var(--line-strong)";
   toast.classList.add("is-visible");
   clearTimeout(toastTimer);
-  if (!needsTemplateUpdate) toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 3600);
+  if (!isError) toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 3600);
 }
 
 function setButtonFeedback(button, state, label) {
@@ -3334,7 +3351,6 @@ async function loadProjects(options = {}) {
 async function upgradeProjectReviewers(projectId) {
   const id = String(projectId || activeProjectId || "").trim();
   if (!id) return;
-  const project = projectById(id) || {};
   closeProjectMenu();
   showToast("Updating project template...");
   const payload = await api("/api/projects/upgrade-reviewers", {
@@ -3356,7 +3372,8 @@ async function upgradeProjectReviewers(projectId) {
     setProjectLoadPhase("overview");
     await loadOverview(true);
   }
-  showToast(`Updated package-managed files for ${project.display_name || project.title || "project"}.`);
+  const copiedMaterials = Array.isArray(payload.result?.copied_materials) ? payload.result.copied_materials.length : 0;
+  showToast(`Project template updated.${copiedMaterials ? ` Copied ${copiedMaterials} previously linked material ${copiedMaterials === 1 ? "folder" : "folders"}; source folders are unchanged.` : ""}`);
 }
 
 function openProjectCreateDialog() {
@@ -4391,8 +4408,18 @@ function activeRunStatusLabel() {
   return `${provider} is working`;
 }
 
+function agentConnectionRetryText(wait) {
+  const summary = String(wait?.last_event_summary || "");
+  if (!["active", "idle"].includes(String(wait?.kind || ""))) return "";
+  return /^\d{4}-\d{2}-\d{2}T\S+\s+WARN\s+codex_core::responses_retry:.*stream disconnected.*retrying sampling request/i.test(summary)
+    ? "The model connection was interrupted. The agent is reconnecting automatically."
+    : "";
+}
+
 function agentWaitStateText(waitState = activeRunWaitState()) {
   const wait = waitState && typeof waitState === "object" ? waitState : {};
+  const connectionRetry = agentConnectionRetryText(wait);
+  if (connectionRetry) return connectionRetry;
   const kind = String(wait.kind || "").toLowerCase();
   const age = Number(wait.last_event_age_seconds);
   const ageText = Number.isFinite(age) ? formatWorkedDuration(age) : "";
@@ -4417,8 +4444,9 @@ function agentWaitStateText(waitState = activeRunWaitState()) {
 function agentWaitStateHtml(waitState = activeRunWaitState(), options = {}) {
   const wait = waitState && typeof waitState === "object" ? waitState : {};
   const kind = String(wait.kind || "").toLowerCase();
-  if (!["idle", "rate_limited"].includes(kind)) return "";
-  if (kind === "idle" && options.suppressIdle) return "";
+  const connectionRetry = agentConnectionRetryText(wait);
+  if (!["idle", "rate_limited"].includes(kind) && !connectionRetry) return "";
+  if (kind === "idle" && options.suppressIdle && !connectionRetry) return "";
   const text = agentWaitStateText(wait);
   if (!text) return "";
   return `<p class="run-waiting is-${escapeHtml(kind)}">${escapeHtml(text)}</p>`;
@@ -4597,7 +4625,7 @@ function renderQueuedChatPanel() {
           <strong>${escapeHtml(items.length)} message${items.length === 1 ? "" : "s"}</strong>
           ${canDispatch ? `<button class="secondary-button small-button" type="button" data-queue-dispatch${dispatchPending || editingQueuedChatId ? " disabled" : ""}>${dispatchPending ? "Sending…" : "Send queued messages"}</button>` : ""}
         </div>
-        ${canDispatch ? `<div class="queue-more" role="status">${dispatchError ? `Last send failed: ${escapeHtml(researchDiagnosticText(dispatchError))}` : "Replies will be sent in order. Autoresearch waits for Resume."}</div>` : ""}
+        ${canDispatch ? `<div class="queue-more" role="status">${dispatchError ? projectTemplateRepairConfirmed(dispatchError) ? "The project template is up to date. Send queued messages to retry." : `Last send failed: ${escapeHtml(researchDiagnosticText(dispatchError))}` : "Replies will be sent in order. Autoresearch waits for Resume."}</div>` : ""}
         <div class="queue-list">
           ${visible.map((item, index) => queuedChatItemHtml(item, index, items)).join("")}
         </div>
@@ -4690,8 +4718,14 @@ function isPrelaunchPhase() {
   return true;
 }
 
+function hasUnsavedLaunchFraming() {
+  const notice = sessionState().agent_notice;
+  return notice?.kind === "framing_not_saved"
+    || (notice?.kind === "writes_reverted" && notice.paths?.includes("PROJECT.md"));
+}
+
 function prelaunchBlockReason() {
-  if (sessionState().agent_notice?.kind === "framing_not_saved") {
+  if (hasUnsavedLaunchFraming()) {
     return "Ask the agent to correct and save the research brief before starting autoresearch.";
   }
   if (hasBlockingResourceImports()) return blockingResourceImportMessage();
@@ -6999,7 +7033,7 @@ function currentRunActivitySource(entries = currentProgressEntries()) {
   const eventLabel = currentRunActivityEventLabel(count);
   const session = sessionState();
   const run = activeRun();
-  const started = currentRunStartedAtString(run.started_at || session.started_at || "");
+  const started = currentRunStartedAtString(isSessionRunning() ? (run.started_at || session.started_at || "") : "");
   const durationText = isRunVisiblyPending() ? workingDurationText(started, { serverClock: Boolean(started) }) : activityEntriesDurationText(entries);
   registerActivityPanelSource(key, {
     title: "Activity",
@@ -7060,7 +7094,7 @@ function terminalChatRunStatusHtml(unansweredUser) {
 
 function projectDraftReferenceHtml(message, options = {}) {
   const label = options.label === undefined
-    ? (sessionState().agent_notice?.kind === "framing_not_saved" ? "Not saved" : "Research brief")
+    ? (hasUnsavedLaunchFraming() ? "Not saved" : "Research brief")
     : String(options.label || "");
   const draft = String(message?.artifact?.text || currentProjectDraft());
   cacheProjectDraftInlinePayload(draft);
@@ -9521,17 +9555,26 @@ function pendingExpectedTrialReport(iteration = pendingExpectedTrialIteration())
   };
 }
 
+function projectTemplateRepairConfirmed(error) {
+  const project = currentProject();
+  return /package-managed project files are out of date/i.test(String(error))
+    && Boolean(projectReviewerStatus(project).latest_baseline_version)
+    && !projectReviewerInstructionsOutdated(project);
+}
+
 function autoresearchContinuationInfo(session = sessionState()) {
   const v2 = session?.v2 || {};
   if (session?.loop_stop_reason !== "next_trial_admission_failed"
       || v2.phase !== "terminal" || v2.status !== "published") return null;
   const error = cleanText(v2.continuation_error, "The next trial could not start.");
   return {
-    message: /package-managed project files are out of date/i.test(error)
+    message: projectTemplateRepairConfirmed(error)
+      ? "The project template is up to date. Resume autoresearch to continue."
+      : /package-managed project files are out of date/i.test(error)
       ? "The last trial is recorded. Update the project template, then resume autoresearch."
       : "The last trial is recorded, but the next trial could not start. Resume autoresearch to try again.",
     error,
-    requiresProjectUpdate: /package-managed project files are out of date/i.test(error),
+    requiresProjectUpdate: /package-managed project files are out of date/i.test(error) && !projectTemplateRepairConfirmed(error),
   };
 }
 
@@ -9574,7 +9617,8 @@ function autoresearchFailureInfo(session = sessionState()) {
   const v2Phase = String(v2?.phase || "").trim().toLowerCase();
   const placementRecovery = v2Status === "protocol_violation" && v2.output_recovery_available === true;
   const requiresNewerCodex = /requires a newer version of Codex/i.test(currentError);
-  const requiresProjectUpdate = /package-managed project files are out of date/i.test(currentError);
+  const templateRepaired = projectTemplateRepairConfirmed(currentError);
+  const requiresProjectUpdate = /package-managed project files are out of date/i.test(currentError) && !templateRepaired;
   const message = requiresNewerCodex
     ? `${modelLabel || "The selected model"} requires a newer Codex CLI. Update Codex, then ${isRestart ? "retry Restart" : "retry the run"}.`
     : placementRecovery
@@ -9585,6 +9629,8 @@ function autoresearchFailureInfo(session = sessionState()) {
         : "Research stopped because some changes could not be recorded safely. Automatic repair is unavailable. Earlier recorded results remain available. Please report this problem with the troubleshooting details."
     : ["stage_resolution_required", "recovery_required"].includes(v2Status)
       ? "Research could not continue safely. Please report this problem with the troubleshooting details."
+    : templateRepaired
+      ? "The project template is up to date. Resume autoresearch to continue this trial."
     : requiresProjectUpdate
       ? "Update the project template, then try again."
     : v2Phase !== "terminal" && ["agent_failed", "interrupted"].includes(v2Status)
@@ -9969,6 +10015,9 @@ function resumePhaseMessage(v2) {
   const errors = resumePhaseIssues(v2);
   if (!errors.length) return "";
   if (errors.some((error) => /package-managed project files are out of date/i.test(error))) {
+    if (errors.every((error) => projectTemplateRepairConfirmed(error))) {
+      return "The project template is up to date. Resume autoresearch to continue this trial.";
+    }
     return "Update the project template from Project options, then resume autoresearch.";
   }
   return "Research is paused. Resume to continue checking and correcting the research record.";
@@ -10715,7 +10764,18 @@ function transcriptRunGroups(entries) {
       groups.push(current);
       return;
     }
-    if (current) current.entries.push(entry);
+    if (current) {
+      const groupRunId = String(current.userEntry?.run_id || "");
+      const entryRunId = String(entry?.run_id || "");
+      // Polling may deliver the next run's events before its user marker.
+      // Never attribute those events or their elapsed time to a prior reply.
+      if (groupRunId && entryRunId && groupRunId !== entryRunId) {
+        current.endIndex = index;
+        current = null;
+      } else {
+        current.entries.push(entry);
+      }
+    }
   });
   groups.forEach((group, index) => {
     group.completed = index < groups.length - 1 || !isSessionRunning() || isPreviousTranscriptRun(group.userEntry);
@@ -11378,7 +11438,7 @@ function renderResourcesPanel() {
         previewButton(report.path, `Read source report ${index + 1}`)
       )).join("")}
     </section>` : "";
-  return `<p class="muted">Research materials and sources. Add files or folders using + in the research session.</p>${sourceReports}${renderFileManager("Resources", "resources/", appState.trees?.resources, "Attach files or link a folder from the research session. Your research materials will appear here.")}`;
+  return `<p class="muted">Research materials and sources. Add files or folders using + in the research session.</p>${sourceReports}${renderFileManager("Resources", "resources/", appState.trees?.resources, "Attach files or add a local folder from the research session. Your research materials will appear here.")}`;
 }
 
 function v2Trials() {
@@ -11602,7 +11662,7 @@ function v2CardStatus(card, trial) {
     accepted_with_qualification: "qualified",
     reject: "rejected",
     rejected: "rejected",
-    supersede: "superseded",
+    supersede: "supersedes earlier results",
     superseded: "superseded",
     defer: "deferred",
     deferred: "deferred",
@@ -12277,9 +12337,10 @@ const manuscriptArtifactFieldLabels = new Set([
   "Provenance links", "Provenance links to findings, trials, or source files",
   "Local evidence, results, or artifacts",
 ]);
+const normalizedManuscriptArtifactFieldLabels = new Set([...manuscriptArtifactFieldLabels].map(normalizeFieldLabel));
 const inlineManuscriptArtifactFieldBoundary = new RegExp(
   `([.;])[\\t ]+(?=(?:${[...manuscriptArtifactFieldLabels].map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}):)`,
-  "g",
+  "gi",
 );
 
 function markdownFieldValue(body, label) {
@@ -12288,7 +12349,7 @@ function markdownFieldValue(body, label) {
   let collecting = false;
   const looksLikeLabel = (candidate) => {
     if (!candidate) return false;
-    if (manuscriptArtifactFieldLabels.has(candidate)) return true;
+    if (normalizedManuscriptArtifactFieldLabels.has(normalizeFieldLabel(candidate))) return true;
     if (candidate.length > 70) return false;
     // Real field labels never contain prose punctuation in the label part.
     if (/[.,;!?]/.test(candidate)) return false;
@@ -14606,7 +14667,7 @@ function uploadToChip(item, index) {
 }
 
 function linkToChip(item) {
-  const mode = item.alreadyImported ? "copied" : "linked";
+  const mode = item.alreadyImported ? "copied" : "local material";
   return `
     <div class="attachment-chip">
       <span class="attachment-icon">${escapeHtml(shortFileType(item.path))}</span>
@@ -14691,7 +14752,7 @@ function messageResumeContextHtml(message) {
 function messageAttachmentChip(item) {
   const isLink = item.kind === "link";
   const name = isLink ? basename(item.path) : item.name;
-  const label = `${resourceLabel(item.category)} · ${isLink ? item.alreadyImported ? "copied" : "linked" : item.kind === "retained" ? "retained" : "upload"}`;
+  const label = `${resourceLabel(item.category)} · ${isLink ? item.alreadyImported ? "copied" : "local material" : item.kind === "retained" ? "retained" : "upload"}`;
   return `
     <div class="message-attachment-chip">
       <span class="attachment-icon">${escapeHtml(shortFileType(name, item.type))}</span>
@@ -14780,7 +14841,7 @@ function editDraftAttachments(id) {
 function editAttachmentChip(item, index, group) {
   const isLink = item.kind === "link";
   const name = isLink ? basename(item.path) : item.name;
-  const source = isLink ? item.alreadyImported ? "copied" : "linked" : item.kind === "retained" ? "retained" : "upload";
+  const source = isLink ? item.alreadyImported ? "copied" : "local material" : item.kind === "retained" ? "retained" : "upload";
   return `
     <div class="message-attachment-chip is-editable">
       <span class="attachment-icon">${escapeHtml(shortFileType(name, item.type))}</span>
@@ -14805,7 +14866,7 @@ function editAttachmentsHtml(messageId) {
       <div class="message-attachments">${chips || `<span class="attachment-empty">No resources attached.</span>`}</div>
       <div class="framing-edit-attachment-actions">
         <button class="secondary-button small-button" type="button" data-edit-upload="${escapeHtml(messageId)}">Upload files</button>
-        <button class="secondary-button small-button" type="button" data-edit-link="${escapeHtml(messageId)}">Link files/folders</button>
+        <button class="secondary-button small-button" type="button" data-edit-link="${escapeHtml(messageId)}">Add local files/folders</button>
       </div>
     </div>
   `;
@@ -14831,7 +14892,7 @@ function addEditResourcePath(messageId, path, options = {}) {
     alreadyImported: Boolean(options.alreadyImported || isProjectResourcePath(value)),
   });
   renderFramingConversation();
-  showToast(`${resourceLabel(category)} linked to edited message.`);
+  showToast(`${resourceLabel(category)} added to edited message.`);
 }
 
 function addEditUploadFile(messageId, file, options = {}) {
@@ -15209,7 +15270,7 @@ function addFilesFromList(files, source = "file", options = {}) {
   } else if (errors.length === 1) {
     showToast(errors[0].message, true);
   } else if (errors.length > 1) {
-    showToast(`${errors.length} files were not attached. Use Browse resources and select local files or folders so CoAutoResearch can copy or symlink them.`, true);
+    showToast(`${errors.length} files were not attached. Use Add local files/folders to copy materials into the project.`, true);
   }
   return accepted;
 }
@@ -15228,7 +15289,7 @@ function handleAttachmentDrop(event) {
   event.preventDefault();
   document.body.classList.remove("is-dragging-file");
   if (hasDroppedDirectory(event.dataTransfer)) {
-    showToast("Folder drag-and-drop cannot expose a stable local path. Use the file browser for folders so they can be symlinked.", true);
+    showToast("To add a folder, select it in the file browser. Its contents will be copied when you send.", true);
     showResourceBrowser();
     return;
   }
@@ -15254,7 +15315,7 @@ function setResourceCategory(category) {
   const selectedType = $("#selected-material-type");
   if (selectedType) selectedType.textContent = `Material type: ${resourceLabel(activeResourceCategory)}`;
   const note = $("#browser-note");
-  if (note) note.textContent = `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Folders are symlinked when possible; files are copied into this repo.`;
+  if (note) note.textContent = `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Files and folders are copied into this project when you send. The originals stay unchanged. Folder limit: 50 MiB; symbolic links and junctions are not supported.`;
 }
 
 function isRemoteUi() {
@@ -15295,7 +15356,7 @@ function ensureAttachmentMenu() {
     </button>
     <button type="button" role="menuitem" data-attachment-action="link-folders">
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4.1c.7 0 1.3.3 1.8.8l1.1 1.2h4A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/></svg>
-      <span>Link folders/files</span>
+      <span>Add local files/folders</span>
     </button>
   `;
   button.setAttribute("aria-haspopup", "menu");
@@ -15483,7 +15544,7 @@ function renderBrowserEntries(payload) {
       : "Choose a file that already exists on the server. Folders can be opened here but only files can be attached from Upload files.")
     : (payload.truncated
       ? "Showing the first files in this folder. Choose a more specific folder if needed."
-      : `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Folders are symlinked when possible; files are copied into this repo.`);
+      : `Selected material will be attached as ${resourceLabel(activeResourceCategory)}. Files and folders are copied into this project when you send. The originals stay unchanged. Folder limit: 50 MiB; symbolic links and junctions are not supported.`);
 
   const query = browserSearchQuery.trim().toLowerCase();
   const entries = (payload.entries || []).filter((entry) => {
@@ -17807,34 +17868,28 @@ async function resendConversationMessage(id, text) {
   }
   const resourceLinks = collectEditResourceLinks(id);
   const retainedAttachments = collectEditRetainedAttachments(id);
-  message.edited_at = new Date().toISOString();
-  message.text = displayText;
-  if (editAttachments.length) message.attachments = editAttachments;
-  else delete message.attachments;
-  editingFramingId = "";
-  if (index >= 0) {
-    localMessages.splice(index + 1, localMessages.length - index - 1);
-  }
-  setHiddenProjectDraft("");
-  projectDraftDirty = false;
-  if (useFramingRun) framingDraftPending = true;
-  else framingReplyPending = true;
-  beginFramingPending(id);
-  renderFramingConversation();
-  scrollFramingToBottomSoon();
+  // Keep the saved conversation and edit draft intact until launch is accepted.
+  const revisedMessage = { ...message, text: displayText, edited_at: new Date().toISOString() };
+  if (editAttachments.length) revisedMessage.attachments = editAttachments;
+  else delete revisedMessage.attachments;
+  const revisedMessages = [...localMessages.slice(0, index), revisedMessage];
+  const form = document.querySelector(`[data-framing-edit-form="${CSS.escape(id)}"]`);
+  if (form?.dataset.submitting === "true") return;
+  if (form) form.dataset.submitting = "true";
+  const submitButton = form?.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  let response;
   try {
-    await persistFramingMessages();
-    if (requestedProjectId !== String(activeProjectId || "")) return;
     const files = await collectUploadFiles(editAttachmentDraftForMessage(id).uploads);
     if (requestedProjectId !== String(activeProjectId || "")) return;
     if (useFramingRun) {
-      await startFramingRun(displayText, { files, resourceLinks });
+      response = await startFramingRun(displayText, { files, resourceLinks, conversationHistory: conversationHistoryForRequest(revisedMessages) });
       if (requestedProjectId !== String(activeProjectId || "")) return;
     } else {
       const body = {
         message: displayText,
         clientMessageId: message.id,
-        conversationHistory: conversationHistoryForRequest(localMessages),
+        conversationHistory: conversationHistoryForRequest(revisedMessages),
         targetVenue: String($("#target-venue")?.value || "").trim(),
         resendContext: {
           editedMessageId: message.id,
@@ -17851,15 +17906,22 @@ async function resendConversationMessage(id, text) {
       if (files.length) body.files = files;
       if (resourceLinks.length) body.resourceLinks = resourceLinks;
       if (retainedAttachments.length) body.retainedAttachments = retainedAttachments;
-      const response = await api(usePlanRun ? "/api/research/plan" : "/api/research/chat", {
+      response = await api(usePlanRun ? "/api/research/plan" : "/api/research/chat", {
         method: "POST",
         body: JSON.stringify(body),
       });
       if (requestedProjectId !== String(activeProjectId || "")) return;
-      mergeSessionFromApiResponse(response);
-      await notifyResourceHandlingFromResponse(response);
-      if (requestedProjectId !== String(activeProjectId || "")) return;
     }
+    localMessages.splice(0, localMessages.length, ...revisedMessages);
+    editingFramingId = "";
+    setHiddenProjectDraft("");
+    projectDraftDirty = false;
+    framingReplyPending = true;
+    beginFramingPending(id);
+    if (!useFramingRun) mergeSessionFromApiResponse(response);
+    await persistFramingMessages();
+    if (requestedProjectId !== String(activeProjectId || "")) return;
+    if (!useFramingRun) await notifyResourceHandlingFromResponse(response);
     editAttachmentDrafts.delete(id);
     framingDraftPending = false;
     if (!useFramingRun && !isSessionRunning()) framingReplyPending = false;
@@ -17876,7 +17938,12 @@ async function resendConversationMessage(id, text) {
     framingReplyPending = false;
     reconcileFramingPending(localMessages);
     renderFramingConversation();
+    const editor = document.querySelector(`[data-framing-edit-form="${CSS.escape(id)}"] textarea`);
+    if (editor) editor.value = text;
     showToast(error.message, true);
+  } finally {
+    if (form) delete form.dataset.submitting;
+    if (submitButton) submitButton.disabled = false;
   }
 }
 
@@ -18123,6 +18190,10 @@ document.addEventListener("change", (event) => {
   });
   $("#open-settings").addEventListener("click", () => openSettingsDialog("general"));
   $$("dialog").forEach((dialog) => {
+    dialog.addEventListener("close", () => {
+      const toast = $("#toast");
+      if (toast?.parentElement === dialog) document.body.append(toast);
+    });
     dialog.addEventListener("click", (event) => {
       if (event.target !== dialog) return;
       const rect = dialog.getBoundingClientRect();

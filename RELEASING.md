@@ -41,7 +41,7 @@ Use a temporary folder outside the source checkout and an isolated installation
 prefix. Substitute the absolute path of the archive just built:
 
 ```bash
-npm install --prefix ./installed --ignore-scripts /absolute/path/co-auto-research-2.0.0.tgz
+npm install --prefix ./installed --ignore-scripts /absolute/path/co-auto-research-2.0.1.tgz
 ./installed/node_modules/.bin/co-auto-research version
 ./installed/node_modules/.bin/co-auto-research doctor
 ./installed/node_modules/.bin/co-auto-research ui --projects-dir ./projects --no-open

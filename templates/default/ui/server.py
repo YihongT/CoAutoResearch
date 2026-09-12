@@ -4899,6 +4899,9 @@ def agent_process_env(backend: str = "", provider_settings: dict[str, Any] | Non
     # Agent-invoked project validators must not create __pycache__ outside the
     # phase write boundary merely by importing the project's Python modules.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # Read-only Git inspection must not refresh an attached repository's index.
+    # Required locks for deliberate Git writes still work normally.
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     if backend == "codex":
         for key in CLAUDE_ENV_KEYS:
             env.pop(key, None)
@@ -8672,7 +8675,7 @@ def parse_reference_table(references_text: str) -> list[dict[str, str]]:
     list_entry: dict[str, str] | None = None
     for line in references_text.splitlines():
         stripped = line.strip()
-        list_match = re.match(r"^(?:[-*+]\s+|\d+[.)]\s+|\[(\d+)\]\s+)(.+)$", stripped)
+        list_match = re.match(r"^(?:[-*+]\s+|\d+[.)]\s+|\[([A-Za-z0-9][A-Za-z0-9_.:-]*)\]\s+)(.+)$", stripped)
         if list_match:
             reference = list_match.group(2).strip()
             list_entry = None
@@ -8733,6 +8736,38 @@ def blueprint_artifact_kind(title: str, body: str = "") -> str:
     return ""
 
 
+def inline_blueprint_tables(section: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose explicitly numbered, populated tables without requiring a heading."""
+    body = section["body"]
+    starts = []
+    seen = set()
+    for match in re.finditer(r"^Table\s+(\d+)\s+(?:placement|title|number/title)\s*:", body, re.I | re.M):
+        if match[1] not in seen:
+            starts.append(match)
+            seen.add(match[1])
+    tables = []
+    for index, match in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(body)
+        content = body[match.start():end].strip()
+        # Metadata or a prose mention alone is not a rendered table.
+        if not re.search(r"^\s*\|[^\n]+\|\s*\n\s*\|\s*:?-{3,}:?\s*\|", content, re.M):
+            continue
+        content = re.sub(rf"^Table\s+{match[1]}\s+", "", content, flags=re.I | re.M)
+        content = re.sub(r"^number/title\s*:", "Table number/title:", content, flags=re.I | re.M)
+        title_match = re.search(r"^(?:title|Table number/title)\s*:\s*(.+)$", content, re.I | re.M)
+        title = f"Table {match[1]}"
+        if title_match:
+            supplied_title = title_match[1].strip()
+            title = supplied_title if re.match(rf"^Table\s+{match[1]}\b", supplied_title, re.I) else f"{title}: {supplied_title}"
+        parents = [*section["parents"], section["title"]]
+        tables.append({
+            "level": min(6, section["level"] + 1), "title": title, "body": content,
+            "parents": parents, "path": " / ".join([*parents, title]),
+            "kind": "table", "is_artifact": True,
+        })
+    return tables
+
+
 def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
     sections = extract_sections(blueprint_text)
     stub = blueprint_is_stub(blueprint_text)
@@ -8771,6 +8806,8 @@ def manuscript_summary(blueprint_text: str, figure_text: str) -> dict[str, Any]:
                 "is_artifact": bool(kind),
             }
             blocks.append(block)
+            if not kind:
+                blocks.extend(inline_blueprint_tables(block))
             stack.append({"level": level, "title": title})
         return [block for block in blocks if real_section(block)]
 
@@ -12916,6 +12953,74 @@ def prepare_payload_resources(payload: dict[str, Any], texts: list[str]) -> dict
     return enriched
 
 
+def copy_resource_folder(source: Path, destination: Path) -> None:
+    """Copy a bounded, self-contained material snapshot without external links."""
+    source = source.resolve(strict=True)
+    if (source == REPO_ROOT.resolve() or source in REPO_ROOT.resolve().parents
+            or source == destination.resolve() or source in destination.resolve().parents):
+        raise ValueError("Choose a material folder that does not contain the current research project.")
+
+    def scan_error(error: OSError) -> None:
+        raise error
+
+    def validate_tree(root: Path) -> None:
+        total = 0
+        for directory, folders, files in os.walk(root, followlinks=False, onerror=scan_error):
+            for name in folders + files:
+                entry = Path(directory) / name
+                metadata = entry.lstat()
+                if (stat.S_ISLNK(metadata.st_mode)
+                        or getattr(metadata, "st_file_attributes", 0)
+                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+                    raise ValueError(f"Folder contains a linked entry: {entry.relative_to(root)}. Choose a self-contained folder without symbolic links or junctions.")
+                if stat.S_ISREG(metadata.st_mode):
+                    total += metadata.st_size
+                elif not stat.S_ISDIR(metadata.st_mode):
+                    raise ValueError(f"Folder contains an unsupported special file: {entry.relative_to(root)}.")
+                if total > MAX_UPLOAD_BYTES:
+                    raise ValueError("Folder exceeds the 50 MiB material limit. Choose a smaller subfolder or selected files.")
+
+    validate_tree(source)
+    staging = destination.parent / f".resource-{uuid.uuid4().hex}"
+    try:
+        shutil.copytree(source, staging, symlinks=True)
+        validate_tree(staging)
+        staging.rename(destination)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def copy_legacy_linked_materials() -> list[str]:
+    """Replace old external directory links with independent material snapshots."""
+    root = REPO_ROOT.resolve()
+    copied = []
+    for directory, folders, _files in os.walk(root / "resources", followlinks=False):
+        for name in folders:
+            link = Path(directory) / name
+            if not link.is_symlink():
+                continue
+            source = link.resolve(strict=True)
+            if source == root or root in source.parents:
+                continue
+            snapshot = link.parent / f".material-{uuid.uuid4().hex}"
+            backup = link.parent / f".material-link-{uuid.uuid4().hex}"
+            try:
+                copy_resource_folder(source, snapshot)
+                link.rename(backup)
+                try:
+                    snapshot.rename(link)
+                except OSError:
+                    backup.rename(link)
+                    raise
+                backup.unlink()
+                copied.append(rel_path(link))
+            finally:
+                if snapshot.exists():
+                    shutil.rmtree(snapshot)
+    return copied
+
+
 def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
     saved: list[dict[str, str]] = []
     links = payload.get("resourceLinks", [])
@@ -12944,17 +13049,10 @@ def save_resource_links(payload: dict[str, Any]) -> list[dict[str, str]]:
             target = RESOURCE_LINK_TARGETS[category]
         destination = unique_resource_destination(REPO_ROOT / target, source)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        mode = "copy"
         if source.is_dir():
-            mode = "symlink"
-            try:
-                os.symlink(source, destination, target_is_directory=True)
-            except OSError:
-                mode = "copy"
-                if destination.exists() or destination.is_symlink():
-                    raise
-                shutil.copytree(source, destination)
+            copy_resource_folder(source, destination)
         else:
-            mode = "copy"
             shutil.copy2(source, destination)
         saved.append({
             "mode": mode,
@@ -14169,7 +14267,16 @@ def paragraph_plan_complete(section_body: str) -> bool:
         row = [cell.strip() for cell in lines[index + 2].strip().strip("|").split("|")]
         if len(row) == len(headers) and all(row):
             return True
-    return False
+    rows = re.findall(r"^\s*(?:[-*+]\s+)?[PM]\d+\s*[—–:.-]\s*(.+)$", section_body, re.I | re.M)
+    required = set(expected_headers[1:])
+    for row in rows:
+        fields = {
+            normalized_header(key): value.strip()
+            for key, value in re.findall(r"(?:^|;)\s*([^:;]+):\s*([^;]*)", row)
+        }
+        if not all(fields.get(key) for key in required):
+            return False
+    return bool(rows)
 
 
 def markdown_has_table(text: str) -> bool:
@@ -14323,8 +14430,6 @@ def final_blueprint_consistency_blockers() -> list[str]:
         return ["manuscript/BLUEPRINT.md is empty."]
     if blueprint_is_stub(text):
         blockers.append("BLUEPRINT.md is still the pre-results stub; use PAPER_PLAN.md until real results are promoted.")
-    if re.search(r"\bdeferred\b", text, re.IGNORECASE):
-        blockers.append("BLUEPRINT.md contains `deferred`; planned, missing, or deferred content belongs in PAPER_PLAN.md.")
     if re.search(r"Remaining\s+blocker\s*:", text, re.IGNORECASE):
         blockers.append("BLUEPRINT.md contains per-block blocker fields; blockers belong in PAPER_PLAN.md and STATE.md Critical Path.")
     if len(text.encode("utf-8")) > 100_000:
@@ -14368,6 +14473,8 @@ def final_blueprint_consistency_blockers() -> list[str]:
         if kind:
             inline_artifacts.append((title, body, kind))
             continue
+        for table in inline_blueprint_tables({"body": body, "title": title, "level": len(match.group(1)), "parents": []}):
+            inline_artifacts.append((table["title"], table["body"], "table"))
         for label in (
             "Target-venue role:",
             "Reader question answered:",
@@ -14376,10 +14483,13 @@ def final_blueprint_consistency_blockers() -> list[str]:
             "Local evidence, results, or artifacts:",
             "Transition job:",
         ):
-            if label not in body:
+            aliases = (label,)
+            if label == "Local evidence, results, or artifacts:":
+                aliases += ("Local evidence, results, or artifacts in plain language:",)
+            if not any(candidate in body for candidate in aliases):
                 blockers.append(f"`{title}` is missing `{label}`.")
         if not paragraph_plan_complete(body):
-            blockers.append(f"`{title}` is missing a complete paragraph plan table.")
+            blockers.append(f"`{title}` is missing a complete paragraph plan (table or labeled rows).")
 
     def active_block(body: str) -> bool:
         return bool(re.search(r"Inclusion status:\s*active\b", body, re.IGNORECASE)) or not re.search(r"Inclusion status:\s*(candidate|deprecated|supplement)\b", body, re.IGNORECASE)
@@ -14387,8 +14497,9 @@ def final_blueprint_consistency_blockers() -> list[str]:
     def block_has_label(body: str, label: str) -> bool:
         label = label.rstrip(":")
         aliases = {
-            "Caption draft or current caption": ("Exact caption draft or current caption",),
-            "Table notes / definitions / abbreviations": ("Table notes, definitions, or abbreviations when needed", "Table notes, definitions, or abbreviations"),
+            "Caption draft or current caption": ("Exact caption draft or current caption", "Caption"),
+            "Table number/title": ("Table title", "Title"),
+            "Table notes / definitions / abbreviations": ("Table notes, definitions, or abbreviations when needed", "Table notes, definitions, or abbreviations", "Notes"),
             "Source artifact or spec path": ("Source artifact path or source specification path", "Source artifact path"),
             "Provenance links": ("Provenance links to findings, trials, or source files",),
             "Inputs": ("Inputs and outputs",),
@@ -14427,6 +14538,10 @@ def final_blueprint_consistency_blockers() -> list[str]:
     table_blocks = [(title, body) for title, body, kind in inline_artifacts if kind == "table"]
     algorithm_blocks = [(title, body) for title, body, kind in inline_artifacts if kind == "algorithm"]
     result_blocks = [(title, body) for title, body, kind in inline_artifacts if kind == "result"]
+
+    for title, body, kind in inline_artifacts:
+        if kind != "result" and re.search(r"^\s*Inclusion status:\s*deferred\b", body, re.I | re.M):
+            blockers.append(f"Inline artifact `{title}` is marked `deferred`; unfinished artifacts belong in PAPER_PLAN.md.")
 
     for title, body in result_blocks:
         if re.search(r"Inclusion status:\s*deferred\b", body, re.IGNORECASE):
@@ -15597,6 +15712,8 @@ Use the assigned trial/stage IDs as variables when constructing artifact paths. 
 
 Give the human concise, plain-language progress updates at meaningful milestones: what research action you are taking, what the evidence shows so far, and what happens next. During tool-heavy work, give a fresh update after about five completed tool calls or before a long drafting/checking block: say what is complete and what remains to be checked, without repeating unchanged status. Explain observed delays when relevant. Keep schema keys, hashes, internal artifact filenames, and command syntax in technical activity unless they are needed for a human decision; do not make the progress message a list of internal files. Never invent a result or an estimated completion time. Before the first project-status update, check recorded trial reports and publication receipts alongside current findings. Empty accepted findings, no active line, or migration metadata do not mean the project is new or has no experiments or results. Until you have checked that history, say you are checking prior work; distinguish recorded or deferred results from accepted findings. Frame updates around the scientific question rather than the protocol: for example, "I am checking that both methods use the same training and validation splits" or "The comparison is complete; I am checking whether the difference is consistent across classes." Do not lead with kernel loading, stage routing, canonical revisions, JSON bindings, or lists of required artifacts. When technical validation delays progress, explain its practical effect briefly and keep diagnostics in the tool record. This is a concise action summary, not private reasoning.
 
+Batch independent file reads and read-only checks into a small number of tool calls. Inspect the required sections or structured fields instead of repeatedly dumping entire files. Reuse the inspected schemas, manifests, and unchanged prior-phase results within this run; reread them when their bytes or the required scope changed. This is an execution-efficiency instruction, not permission to omit required checks or trust an unverified binding.
+
 Build evidence references from paths discovered on disk and SHA-256 values computed in code. Reuse those exact reference objects when writing JSON; do not manually retype paths, identifiers or hashes. This avoids transcription errors without relaxing any evidence or review checks.
 
 Read the actual system UTC clock for new event timestamps; do not guess times or copy an older artifact's time, and do not backdate new events to pass validation. Preserve existing `created_at` and approval timestamps. For a portable current UTC timestamp, use Python `datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")` after importing `datetime` and `timezone` from `datetime`. Do not use `date` with `%N` or `%3N`; macOS can return those specifiers literally, which is not a valid timestamp. Disclose any discovered historical timestamp error in new material permitted by this phase; never rewrite frozen records.
@@ -15614,13 +15731,16 @@ Read `AGENTS.md`, then follow `instructions/KERNEL.md` as the authoritative life
     if phase == "plan":
         return common + f"""
 
+When continuing an existing unapproved plan, start from its authoritative JSON and the specific current validation findings. Check which inputs actually changed; preserve valid work and reuse the existing Resource Scout evidence when it remains applicable and its hashes still match. Do not restart the complete source inventory or rewrite unaffected artifacts merely because this is a new agent turn. Refresh affected evidence when needed, keep immutable history, and perform a fresh Plan Review bound to the final current inputs. This does not waive any required check or permit execution.
+
 Complete only Observe, Orient, Route, Charter, and plan-time Preflight for `{trial_id}`. Write only `TRIAL.json`, `PLAN.json`, `EXPERT_ROUTE.json`, pre-execution `reviews/PLAN_REVIEW.json`, and any explicitly required Resource Scout outputs under this trial's `artifacts/resource_scout/` root. Use the assigned `{stage_id}` in a new TRIAL charter; preserve the service-updated stage identity when a charter already exists. `TRIAL.json` is JSON-only. The service generates missing/inconsistent registered Markdown for PLAN, EXPERT_ROUTE, and PLAN_REVIEW; inspect their authoritative JSON during planning. Every path cited by a frozen result card is immutable: never overwrite an existing cited artifact or Scout output; put refreshed material in a new stage/revision-specific subdirectory and bind that exact new destination in PLAN and PLAN_REVIEW. PLAN_REVIEW must read plan-time inputs only, bind the current PLAN byte hash and revision, and pass before execution can open. Any line or campaign whose JSON or Markdown may appear in the later candidate snapshot must be declared in PLAN `active_line_ids` or `campaign_ids`; these fields authorize staged operations even when no active-line marker exists. Do not create or change REPORT, RESULT_CARDS, MERGE_REQUEST, HUMAN_BRIEF, GATE_EVIDENCE, candidate canonical files, routing inputs, staged manifests, post-stage reviews, or publication artifacts. Yield after the current plan passes its pre-execution review; the service will independently audit it and issue the execution boundary."""
 
     if phase in {"prepare", "repair"}:
         common += "\nFor local computations, use the packaged external supervisor instead of writing a new timeout/exit-status wrapper: `python -B ui/compute_runner.py --wall-seconds <approved-wall-seconds> --output-dir <new-stage-specific-evidence-directory> -- <worker-executable> <arguments...>` (use the available Python executable). It persists events.jsonl, stdout.log and stderr.log, distinguishes nonzero exits/signals/timeouts from success, and drains the isolated process group on POSIX or Job on Windows. Workers and their children must not daemonize or create detached sessions; the recorded cleanup_scope states this boundary. Read the final execution_finished record; only status=succeeded with exit_code=0 and cleanup_complete=true is an execution success, and scientific output still requires its own validation. The output directory must not exist before launch: compute_runner creates it. Do not pre-create it with mkdir or write worker files or diagnostics inside it before invoking the runner; keep those in a separate scratch path. Choose a new nonexistent output path for each attempt so previous evidence cannot be overwritten. This helper enforces wall time only; do not relabel it as CPU time or silently substitute it for an approved CPU budget. If a separate CPU limit is required, use an appropriate externally enforced mechanism and validate it on synthetic data. Persist and flush an execution-start record before work begins and milestone logs as work proceeds. A supervising process must record the worker's exit code or terminating signal even when the worker cannot catch the failure; do not keep all evidence only in memory until success. Do not use ITIMER_PROF, SIGPROF, or asynchronous Python signal exceptions inside numerical workers to enforce computation budgets; use external supervision and preserve the distinction between wall time and CPU time. Validate any new timeout or CPU-budget mechanism on synthetic inputs, including its termination path, before using reserved evaluation data. Preserve the approved resource limits and distinguish an execution failure from evidence against the research hypothesis.\n"
 
     if phase in {"prepare", "repair"}:
-        common += f"\nBefore yielding, confirm the complete required JSON bundle: REPORT.json, RESULT_CARDS.json and MERGE_REQUEST.json under research_trajectory/trials/{trial_id}/; HUMAN_BRIEF.json and GATE_EVIDENCE.json under research_trajectory/.staging/{trial_id}/{stage_id}/; and every candidate artifact required by the approved plan and proposed card decisions. Preserve valid existing outputs during corrections and do not rerun successful computations to complete records.\n"
+        common += "\nBuild multi-artifact outputs incrementally with small, complete edits instead of one monolithic patch. Inspect the actual keys and types in computation outputs before constructing dependent records; do not guess a result structure from memory. After a patch or serialization error, correct only the failed portion and preserve valid files and successful computation evidence. Do not rerun completed computations merely to finish the writing bundle.\n"
+        common += f"\nBefore yielding, confirm the complete required JSON bundle: REPORT.json, RESULT_CARDS.json and MERGE_REQUEST.json under research_trajectory/trials/{trial_id}/; HUMAN_BRIEF.json and GATE_EVIDENCE.json under research_trajectory/.staging/{trial_id}/{stage_id}/; and every candidate artifact required by the approved plan and proposed card decisions.\n"
 
     if phase == "prepare":
         return common + f"""
@@ -16770,6 +16890,13 @@ def audit_v2_aux_guard() -> AuxGuardOutcome:
             notice_message = (
                 "Project writes were safely restored, but the proposed launch "
                 "framing did not contain a complete PROJECT/venue candidate."
+            )
+        elif eligible_prelaunch and "PROJECT.md" in candidate_path_set:
+            notice_kind = "framing_not_saved"
+            notice_message = (
+                "The research brief was not saved because this turn also changed protected files. "
+                "Those changes were restored. Ask the agent to prepare the brief again without "
+                "modifying source materials."
             )
         else:
             notice_kind = "writes_reverted"
@@ -18867,8 +18994,19 @@ def start_v2_repair(errors: list[Any]) -> None:
         return
     clean_errors = list(dict.fromkeys(redact_sensitive_text(item) for item in errors))
     original = v2_initial_service_instruction(str(state.get("instruction") or ""))
+    prior_stage_id = str(state.get("stage_id") or "")
+    reuse_instruction = (
+        f"Read the concrete blockers and required_actions in archived post-stage "
+        f"reviews under research_trajectory/trials/{trial_id}/reviews/history/{prior_stage_id}/. "
+        f"The reviewed candidate and evidence remain under "
+        f"research_trajectory/.staging/{trial_id}/{prior_stage_id}/. "
+        "Use these retained bytes to scope the repair; do not rediscover the archive "
+        "layout by searching runtime implementation. Preserve unaffected content and "
+        "completed computation. A new stage alone is not a reason to repeat research. "
+        "The new plan approval and full exact-stage review are still required."
+    )
     repair_instruction = v2_append_service_findings(
-        original, "Service-required repair findings", clean_errors
+        original, "Service-required repair findings", clean_errors + [reuse_instruction]
     )
     update_v2_session(
         stage_id=stage_id,
@@ -21462,6 +21600,12 @@ def _agent_spawn_kwargs(
 
     tree_id = process_tree_id or uuid.uuid4().hex
     kwargs = dict(popen_kwargs)
+    # Agent prompts and event streams use UTF-8, independently of the host locale.
+    if kwargs.get("text") or kwargs.get("universal_newlines"):
+        if kwargs.get("encoding") is None:
+            kwargs["encoding"] = "utf-8"
+            if kwargs.get("errors") is None:
+                kwargs["errors"] = "replace"
     inherited = kwargs.get("env")
     environment = dict(os.environ if inherited is None else inherited)
     environment[PROCESS_TREE_ID_ENV] = tree_id
@@ -25351,6 +25495,9 @@ def start_research_chat(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             "Wait for the active auxiliary agent or figure-image job before starting chat."
         )
+    ensure_project_agents_idle(
+        "Wait for the current agent run to finish before starting chat.", allow_discussions=True
+    )
     ensure_project_protocol_runnable()
     settings = preflight_agent_settings(
         payload.get("settings"), implementation=True, force_refresh=True
@@ -27254,7 +27401,9 @@ button{{background:#171717;border:0;color:white;cursor:pointer;margin-top:.8rem}
                     )
                     def upgrade_reviewers() -> dict[str, Any]:
                         context = current_project_context()
+                        copied_materials = copy_legacy_linked_materials()
                         result = sync_project_template(context.root)
+                        result["copied_materials"] = copied_materials
                         context.refresh_metadata()
                         if PROJECT_REGISTRY:
                             PROJECT_REGISTRY.refresh()

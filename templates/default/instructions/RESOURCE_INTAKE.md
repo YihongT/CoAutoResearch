@@ -168,7 +168,7 @@ implications, but it must not convert those implications into accepted findings.
 ## Copy And Symlink Rules
 
 - Small files should normally be copied.
-- Folders should normally be symlinked when possible; copy only if symlinks fail or are inappropriate.
+- Copy selected folder contents into the project; do not create symbolic links or junctions to external locations. The execution boundary rejects links that escape the project. For large folders, record the source location and acquire a bounded subset instead.
 - Keep original repos and prior work read-only under `resources/`; migrate only selected working artifacts into `workspace/`, such as executable pieces, prototypes, configs, evaluation harnesses, design/system implementation materials, or derived data needed for future work.
 - Do not copy `.git/`, `node_modules/`, virtual environments, caches, `__pycache__/`, build outputs, secrets, credentials, or large generated artifacts unless there is a specific reason.
 - For large or restricted resources, record the external location and acquisition instructions instead of copying blindly.

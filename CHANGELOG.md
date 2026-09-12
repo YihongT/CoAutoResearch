@@ -1,5 +1,52 @@
 # Changelog
 
+## 2.0.1 — Unreleased
+
+### Fixes
+
+- Preserve conversation history and edit drafts when a resend is rejected; update
+  history only after the service accepts the request.
+- Keep activity events and elapsed times attached to the correct run, including
+  the accessible label shown immediately after sending a message.
+- Check whether a project can accept a run before importing attachments, and
+  preserve drafts when the project is busy.
+- Copy local material folders into bounded, independent snapshots; reject nested
+  links, junctions, special files and recursive copies. Migrate legacy external
+  folder links through the dashboard template update with per-folder rollback.
+- Avoid optional Git index refreshes during read-only agent inspection, and stop
+  treating ordinary empty-directory cleanup as an unauthorized plan file change.
+- Keep external URL evidence bound to its JSON record without requiring a local
+  file; retain path and hash validation for local evidence.
+- Recognize labeled references and populated inline manuscript tables. Correct
+  false readiness warnings for supported paragraph plans and field names while
+  continuing to reject missing evidence and unfinished artifacts.
+- Separate table titles from lowercase metadata and label replacement findings
+  as superseding earlier results rather than being superseded themselves.
+- Use UTF-8 for agent text streams and paper files, and portable relative paths
+  for paper snapshots and source archives.
+- Improve recoverable error visibility and distinguish rejected research briefs
+  from successfully saved ones.
+
+### Recovery guidance
+
+- Point repair runs to retained reviews and candidate material, encourage batched
+  reads and incremental edits, and preserve successful computation evidence.
+  New plan approval and exact-stage review remain required.
+
+### Upgrade and validation scope
+
+- Stop at a safe point before updating. In each existing project, choose
+  **Project options → Update project template** before starting another run.
+  Legacy external material folders become independent copies; later edits to
+  their source folders are not automatically reflected in the project.
+- The fixes were exercised in macOS Chrome with Codex/Luna. Additional checks
+  covered non-UTF-8 environments and Windows-style path serialization, not native
+  Windows or Linux execution. API fields, protocol versions and review standards
+  are unchanged.
+- This patch does not claim to eliminate model/provider delays or guarantee
+  generated-paper correctness. Browser-policy-blocked downloads and retention of
+  an older ready PDF during regeneration were not fully validated in this pass.
+
 ## 2.0.0 — 2026-09-11
 
 ### Reliability and example papers

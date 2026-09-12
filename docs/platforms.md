@@ -213,10 +213,16 @@ Avoid working from `/mnt/c/...` for large projects when possible.
 
 ## File Attachment Behavior
 
-The UI can attach local files and folders into a generated project. Files are
-copied. Folders are symlinked when possible and copied if symlinks are not
-available. This fallback matters on Windows, where symlink permission can vary
-by user policy.
+The UI copies selected local files and folders into the project when you send.
+The originals stay unchanged. Each folder is limited to 50 MiB and must not
+contain symbolic links, Windows junctions, or other reparse points. No symlink
+permission is required. For larger materials, attach a selected subset or provide
+a source location for the agent to assess.
+
+For projects created by older versions, **Update project template** also copies
+previously linked external folders into project snapshots. The same folder limits
+apply, and the source folders remain unchanged. If a copy cannot finish, its
+original link is retained so that the material is not lost.
 
 ## Remote Servers
 

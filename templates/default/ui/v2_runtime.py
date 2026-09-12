@@ -2375,10 +2375,12 @@ class V2Runtime:
             non_material_changes: list[str] = []
             for change in agent_write_changes(plan_guard_dir):
                 after_kind = change.get("after_kind")
-                # Creating ordinary parent directories is structural, not
-                # hidden plan material.  Deletions, symlinks, and type changes
-                # cannot be represented by the approval's file-hash contract.
-                if after_kind == "directory" and change.get("action") == "create":
+                # Ordinary directory creation/removal is structural. Every
+                # contained file has its own change record, so deleting data
+                # still fails below; symlinks and non-file replacements fail.
+                if ((after_kind == "directory" and change.get("action") == "create")
+                        or (change.get("before_kind") == "directory"
+                            and after_kind is None and change.get("action") == "delete")):
                     continue
                 if after_kind != "file":
                     non_material_changes.append(str(change.get("path") or ""))

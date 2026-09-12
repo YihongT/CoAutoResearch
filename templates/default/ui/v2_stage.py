@@ -274,6 +274,7 @@ def _material_role(path: str, trial_root: str) -> str:
 def _evidence_references(
     artifacts: Mapping[str, Mapping[str, Any]]
 ) -> list[tuple[str, str | None]]:
+    """Collect local byte inputs; external URLs stay bound inside their JSON records."""
     references: list[tuple[str, str | None]] = []
     report = artifacts.get("report", {})
     references.extend(
@@ -287,13 +288,13 @@ def _evidence_references(
             references.extend(
                 (str(item.get("path", "")), item.get("sha256"))
                 for item in card.get("evidence", ())
-                if isinstance(item, Mapping)
+                if isinstance(item, Mapping) and item.get("source_kind") != "external_url"
             )
     brief = artifacts.get("human_brief", {})
     references.extend(
         (str(item.get("path", "")), item.get("sha256"))
         for item in brief.get("evidence", ())
-        if isinstance(item, Mapping)
+        if isinstance(item, Mapping) and item.get("source_kind") != "external_url"
     )
     venue_profile = artifacts.get("expert_route", {}).get("venue_profile")
     if venue_profile:
