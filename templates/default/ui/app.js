@@ -14670,7 +14670,7 @@ function linkToChip(item) {
   const mode = item.alreadyImported ? "copied" : "local material";
   return `
     <div class="attachment-chip">
-      <span class="attachment-icon">${escapeHtml(shortFileType(item.path))}</span>
+      <span class="attachment-icon">LOCAL</span>
       <span class="attachment-copy">
         <strong>${escapeHtml(basename(item.path))}</strong>
         <small>${escapeHtml(resourceLabel(item.category))} · ${escapeHtml(mode)}</small>
@@ -14755,7 +14755,7 @@ function messageAttachmentChip(item) {
   const label = `${resourceLabel(item.category)} · ${isLink ? item.alreadyImported ? "copied" : "local material" : item.kind === "retained" ? "retained" : "upload"}`;
   return `
     <div class="message-attachment-chip">
-      <span class="attachment-icon">${escapeHtml(shortFileType(name, item.type))}</span>
+      <span class="attachment-icon">${isLink ? "LOCAL" : escapeHtml(shortFileType(name, item.type))}</span>
       <span class="attachment-copy">
         <strong>${escapeHtml(name)}</strong>
         <small>${escapeHtml(label)}</small>
@@ -14844,7 +14844,7 @@ function editAttachmentChip(item, index, group) {
   const source = isLink ? item.alreadyImported ? "copied" : "local material" : item.kind === "retained" ? "retained" : "upload";
   return `
     <div class="message-attachment-chip is-editable">
-      <span class="attachment-icon">${escapeHtml(shortFileType(name, item.type))}</span>
+      <span class="attachment-icon">${isLink ? "LOCAL" : escapeHtml(shortFileType(name, item.type))}</span>
       <span class="attachment-copy">
         <strong>${escapeHtml(name || "Attachment")}</strong>
         <small>${escapeHtml(resourceLabel(item.category))} · ${escapeHtml(source)}</small>
