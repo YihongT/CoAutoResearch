@@ -20,23 +20,59 @@ on:
       - ".github/workflows/paper-contracts.yml"
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
+  materialize-production-fixes:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/paper-contracts-validation'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: paper-contracts-validation
+      - name: Materialize reviewed fixes into source
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=0
+          for patch in \
+            .github/patches/paper-contracts/0001-tighten-evidence-admission.patch \
+            .github/patches/paper-contracts/0002-validate-critical-path-target.patch
+          do
+            if git apply --check "$patch"; then
+              git apply "$patch"
+              changed=1
+            fi
+          done
+          if [ "$changed" -eq 1 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add templates/default/ui/v2_merge.py templates/default/ui/v2_runtime.py
+            git commit -m "Apply paper contract production fixes"
+            git push origin HEAD:paper-contracts-validation
+          fi
+
   contracts:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Apply validated production patches
+      - name: Apply validated production patches for pre-materialization CI
+        shell: bash
         run: |
-          git apply --check .github/patches/paper-contracts/0001-tighten-evidence-admission.patch
-          git apply .github/patches/paper-contracts/0001-tighten-evidence-admission.patch
-          git apply --check .github/patches/paper-contracts/0002-validate-critical-path-target.patch
-          git apply .github/patches/paper-contracts/0002-validate-critical-path-target.patch
+          set -euo pipefail
+          for patch in \
+            .github/patches/paper-contracts/0001-tighten-evidence-admission.patch \
+            .github/patches/paper-contracts/0002-validate-critical-path-target.patch
+          do
+            if git apply --check "$patch"; then
+              git apply "$patch"
+            fi
+          done
       - name: Run paper-facing contract tests
         run: python -m unittest discover -s tests/paper_contracts -p 'test_*.py' -v
