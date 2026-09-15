@@ -43,18 +43,20 @@
      accepted_now = {
          str(item["card_id"])
          for item in card_decisions
-@@ -341,19 +368,11 @@
+@@ -341,19 +368,19 @@
      cards_by_id = {
          str(card.get("id")): card for card in _result_card_list(result_cards)
      }
 -    known = old_known | accepted_now
--    referenced = _field_card_ids(
--        after, _CARD_REFERENCE_FIELDS - {"superseded_card_ids"}
--    )
++    known_active = old_effective | accepted_now
+     referenced = _field_card_ids(
+         after, _CARD_REFERENCE_FIELDS - {"superseded_card_ids"}
+     )
 -    if unknown := referenced - known:
--        errors.append(
--            f"effective projection references unknown/unaccepted cards: {sorted(unknown)}"
--        )
++    if unknown := referenced - known_active:
+         errors.append(
+             f"effective projection references unknown/unaccepted cards: {sorted(unknown)}"
+         )
  
      superseded = _field_card_ids(after, {"superseded_card_ids"})
 -    # Recorded historical proposals may be corrected without promoting them
@@ -66,7 +68,7 @@
          errors.append(
              f"effective projection references unknown superseded cards: {sorted(unknown)}"
          )
-@@ -362,7 +381,8 @@
+@@ -362,7 +389,8 @@
          for card_id in accepted_now
          for prior_id in cards_by_id.get(card_id, {}).get("supersedes", ())
      }
@@ -76,7 +78,7 @@
          errors.append(
              "effective projection marks cards superseded without an accepted "
              f"superseding card: {sorted(unjustified)}"
-@@ -381,6 +401,19 @@
+@@ -381,6 +409,19 @@
          None,
      )
      if old_findings and findings:
@@ -96,7 +98,7 @@
          old_canonical = (
              set(old_findings.get("accepted_card_ids", ()))
              | set(old_findings.get("qualified_card_ids", ()))
-@@ -544,7 +577,13 @@
+@@ -544,7 +585,13 @@
              f"Merge Request repeats card decisions: {sorted(duplicate_requests)}"
          )
      try:
