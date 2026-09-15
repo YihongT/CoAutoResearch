@@ -7,14 +7,16 @@ on:
       - "templates/default/schemas/**"
       - "templates/default/research_trajectory/**/*.example.json"
       - "tests/paper_contracts/**"
+      - ".github/patches/paper-contracts/**"
       - ".github/workflows/paper-contracts.yml"
   push:
-    branches: [main]
+    branches: [main, paper-contracts-validation]
     paths:
       - "templates/default/ui/v2_*.py"
       - "templates/default/schemas/**"
       - "templates/default/research_trajectory/**/*.example.json"
       - "tests/paper_contracts/**"
+      - ".github/patches/paper-contracts/**"
       - ".github/workflows/paper-contracts.yml"
   workflow_dispatch:
 
@@ -30,5 +32,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Apply validated production patches
+        run: |
+          git apply --check .github/patches/paper-contracts/0001-tighten-evidence-admission.patch
+          git apply .github/patches/paper-contracts/0001-tighten-evidence-admission.patch
+          git apply --check .github/patches/paper-contracts/0002-validate-critical-path-target.patch
+          git apply .github/patches/paper-contracts/0002-validate-critical-path-target.patch
       - name: Run paper-facing contract tests
         run: python -m unittest discover -s tests/paper_contracts -p 'test_*.py' -v
