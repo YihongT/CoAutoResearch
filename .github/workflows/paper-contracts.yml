@@ -1,0 +1,34 @@
+name: Paper contracts
+
+on:
+  pull_request:
+    paths:
+      - "templates/default/ui/v2_*.py"
+      - "templates/default/schemas/**"
+      - "templates/default/research_trajectory/**/*.example.json"
+      - "tests/paper_contracts/**"
+      - ".github/workflows/paper-contracts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "templates/default/ui/v2_*.py"
+      - "templates/default/schemas/**"
+      - "templates/default/research_trajectory/**/*.example.json"
+      - "tests/paper_contracts/**"
+      - ".github/workflows/paper-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run paper-facing contract tests
+        run: python -m unittest discover -s tests/paper_contracts -p 'test_*.py' -v
