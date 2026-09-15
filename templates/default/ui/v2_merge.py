@@ -368,6 +368,14 @@ def _projection_errors(
     cards_by_id = {
         str(card.get("id")): card for card in _result_card_list(result_cards)
     }
+    known_active = old_effective | accepted_now
+    referenced = _field_card_ids(
+        after, _CARD_REFERENCE_FIELDS - {"superseded_card_ids"}
+    )
+    if unknown := referenced - known_active:
+        errors.append(
+            f"effective projection references unknown/unaccepted cards: {sorted(unknown)}"
+        )
 
     superseded = _field_card_ids(after, {"superseded_card_ids"})
     # Receipt-verified deferred cards may be named only as supersession targets;
