@@ -1,0 +1,52 @@
+--- a/templates/default/ui/v2_runtime.py
++++ b/templates/default/ui/v2_runtime.py
+@@ -2202,6 +2202,41 @@
+             )
+         return sorted(set(outputs))
+ 
++    def _validate_plan_critical_path_target(
++        self, plan: Mapping[str, Any]
++    ) -> None:
++        """Bind the Plan to one current service-derived Critical Path item.
++
++        The JSON schema can only require a non-empty identifier.  This runtime
++        check supplies the relational invariant: the target must name an item
++        in the currently published project state for the current canonical
++        revision.  Scientific move selection remains agent reasoning; this
++        check validates only the Plan-to-control-state reference.
++        """
++
++        state = self._load_artifact(
++            "research_trajectory/STATE.json", "project_state"
++        )
++        if state.get("project_id") != self.project_id:
++            raise V2RuntimeError("published project state belongs to another project")
++        current_revision = self.transactions.current_revision()
++        if state.get("canonical_revision") != current_revision:
++            raise V2RuntimeError(
++                "published project state revision differs from the current canonical revision"
++            )
++        target = str(plan.get("critical_path_target") or "").strip()
++        current = {
++            str(item.get("id")): item
++            for item in state.get("critical_path", ())
++            if isinstance(item, Mapping) and item.get("status") != "complete"
++        }
++        if target not in current:
++            available = sorted(current)
++            raise V2RuntimeError(
++                "PLAN critical_path_target does not reference a current actionable "
++                f"Critical Path item: {target or '<empty>'}; available={available}"
++            )
++
+     def _plan_context(
+         self,
+         trial_id: str,
+@@ -2216,6 +2251,7 @@
+         route_relative = f"{trial_root}/EXPERT_ROUTE.json"
+         review_relative = f"{trial_root}/reviews/PLAN_REVIEW.json"
+         plan = self._load_artifact(plan_relative, "plan", paired=True)
++        self._validate_plan_critical_path_target(plan)
+         route = self._load_artifact(route_relative, "expert_route", paired=True)
+         self._validate_expert_route(route, plan)
+         review = self._load_artifact(
