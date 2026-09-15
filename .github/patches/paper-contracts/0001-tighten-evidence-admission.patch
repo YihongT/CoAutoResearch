@@ -1,0 +1,113 @@
+--- a/templates/default/ui/v2_merge.py
++++ b/templates/default/ui/v2_merge.py
+@@ -287,6 +287,31 @@
+     }
+ 
+ 
++def _canonical_card_status_sets(projection: Mapping[str, Any]) -> dict[str, set[str]]:
++    """Return service-canonical card identities by effective findings status.
++
++    Merely mentioning a card ID elsewhere in canonical state (for example in a
++    material exclusion) does not make that card accepted evidence.
++    """
++
++    decoded = _decoded_projection(projection)
++    findings = next(
++        (
++            value
++            for value in _projection_json_values(decoded)
++            if value.get("artifact_type") == "current_findings"
++        ),
++        None,
++    )
++    if not findings:
++        return {"accepted": set(), "qualified": set(), "superseded": set()}
++    return {
++        "accepted": set(findings.get("accepted_card_ids", ())),
++        "qualified": set(findings.get("qualified_card_ids", ())),
++        "superseded": set(findings.get("superseded_card_ids", ())),
++    }
++
++
+ def _projection_errors(
+     before: Mapping[str, Any],
+     after: Mapping[str, Any],
+@@ -332,7 +357,9 @@
+     if removed := old_evidence - new_evidence:
+         errors.append(f"negative/conflicting evidence was removed: {sorted(removed)}")
+ 
+-    old_known = _all_card_ids(before)
++    old_status = _canonical_card_status_sets(before)
++    old_effective = old_status["accepted"] | old_status["qualified"]
++    old_history = old_effective | old_status["superseded"]
+     accepted_now = {
+         str(item["card_id"])
+         for item in card_decisions
+@@ -341,19 +368,11 @@
+     cards_by_id = {
+         str(card.get("id")): card for card in _result_card_list(result_cards)
+     }
+-    known = old_known | accepted_now
+-    referenced = _field_card_ids(
+-        after, _CARD_REFERENCE_FIELDS - {"superseded_card_ids"}
+-    )
+-    if unknown := referenced - known:
+-        errors.append(
+-            f"effective projection references unknown/unaccepted cards: {sorted(unknown)}"
+-        )
+ 
+     superseded = _field_card_ids(after, {"superseded_card_ids"})
+-    # Recorded historical proposals may be corrected without promoting them
+-    # to active evidence. Only the service supplies these verified identities.
+-    if unknown := superseded - old_known - set(cards_by_id) - set(prior_card_ids):
++    # Receipt-verified deferred cards may be named only as supersession targets;
++    # an arbitrary historical mention does not establish a valid identity.
++    if unknown := superseded - old_history - set(cards_by_id) - set(prior_card_ids):
+         errors.append(
+             f"effective projection references unknown superseded cards: {sorted(unknown)}"
+         )
+@@ -362,7 +381,8 @@
+         for card_id in accepted_now
+         for prior_id in cards_by_id.get(card_id, {}).get("supersedes", ())
+     }
+-    if unjustified := superseded - old_known - declared_superseded:
++    newly_superseded = superseded - old_status["superseded"]
++    if unjustified := newly_superseded - declared_superseded:
+         errors.append(
+             "effective projection marks cards superseded without an accepted "
+             f"superseding card: {sorted(unjustified)}"
+@@ -381,6 +401,19 @@
+         None,
+     )
+     if old_findings and findings:
++        old_effective_findings = (
++            set(old_findings.get("accepted_card_ids", ()))
++            | set(old_findings.get("qualified_card_ids", ()))
++        )
++        new_effective_findings = (
++            set(findings.get("accepted_card_ids", ()))
++            | set(findings.get("qualified_card_ids", ()))
++        )
++        if unauthorized := (new_effective_findings - old_effective_findings) - accepted_now:
++            errors.append(
++                "canonical findings promote cards without an accepted current decision: "
++                f"{sorted(unauthorized)}"
++            )
+         old_canonical = (
+             set(old_findings.get("accepted_card_ids", ()))
+             | set(old_findings.get("qualified_card_ids", ()))
+@@ -544,7 +577,13 @@
+             f"Merge Request repeats card decisions: {sorted(duplicate_requests)}"
+         )
+     try:
+-        old_card_ids = _all_card_ids(_decoded_projection(base_projection)) | set(prior_card_ids)
++        old_status = _canonical_card_status_sets(base_projection)
++        old_card_ids = (
++            old_status["accepted"]
++            | old_status["qualified"]
++            | old_status["superseded"]
++            | set(prior_card_ids)
++        )
+     except (TypeError, ValueError) as exc:
+         old_card_ids = set()
+         errors.append(str(exc))
