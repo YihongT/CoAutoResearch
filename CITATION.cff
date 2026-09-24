@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use CoAutoResearch in your research, please cite the software and record the version or commit used."
+title: "CoAutoResearch"
+type: software
+authors:
+  - name: "CoAutoResearch contributors"
+version: "2.0.0"
+date-released: "2026-09-11"
+repository-code: "https://github.com/YihongT/CoAutoResearch"
+url: "https://yihongt.github.io/CoAutoResearch/"
+license: "Apache-2.0"
+keywords:
+  - "autonomous research"
+  - "AI agents"
+  - "human-AI collaboration"
+  - "recursive self-improvement"
+  - "research automation"
