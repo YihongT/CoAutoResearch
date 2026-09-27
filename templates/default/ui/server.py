@@ -3594,9 +3594,7 @@ def _windows_read_runtime_file(target: Path) -> bytes | None:
             _windows_close_handle(handle)
 
 
-def _windows_rename_runtime_handle(
-    handle: Any, runtime_handle: Any, target_name: str
-) -> None:
+def _windows_rename_runtime_handle(handle: Any, target_name: str) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -3618,7 +3616,11 @@ def _windows_rename_runtime_handle(
     buffer = ctypes.create_string_buffer(buffer_size)
     information = FileRenameInformation.from_buffer(buffer)
     information.ReplaceIfExists = 1
-    information.RootDirectory = runtime_handle
+    # The temporary file already lives in the pinned target directory. A simple
+    # name with no RootDirectory performs a same-directory rename; supplying the
+    # directory handle makes Windows reopen it for write access, conflicting
+    # with the directory lock's deliberately read-only sharing mode.
+    information.RootDirectory = None
     information.FileNameLength = len(encoded_filename)
     ctypes.memmove(
         ctypes.addressof(buffer) + FileRenameInformation.FileName.offset,
@@ -3694,7 +3696,7 @@ def _windows_write_runtime_file(
             or written["size"] != len(data)
         ):
             raise ValueError("Project runtime session changed while writing.")
-        _windows_rename_runtime_handle(native_handle, runtime_handle, target_name)
+        _windows_rename_runtime_handle(native_handle, target_name)
         published = _windows_runtime_file_information(native_handle)
         named = _windows_runtime_information_for_path(target)
         if (

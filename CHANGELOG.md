@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Fix native Windows project runtime writes failing with sharing violation 32
+  during atomic rename; retain directory locks and file identity checks.
 - Preserve conversation history and edit drafts when a resend is rejected; update
   history only after the service accepts the request.
 - Keep activity events and elapsed times attached to the correct run, including
@@ -43,6 +45,10 @@
   covered non-UTF-8 environments and Windows-style path serialization, not native
   Windows or Linux execution. API fields, protocol versions and review standards
   are unchanged.
+- The Windows runtime rename fix was separately verified on native Windows with
+  project loading and creation, settings persistence across server restart, and
+  retained directory locks. Research execution and paper generation were not run
+  as part of that verification.
 - This patch does not claim to eliminate model/provider delays or guarantee
   generated-paper correctness. Browser-policy-blocked downloads and retention of
   an older ready PDF during regeneration were not fully validated in this pass.
