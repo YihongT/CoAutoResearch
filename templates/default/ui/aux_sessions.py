@@ -630,6 +630,7 @@ class AuxSession:
         normalizer: Any = None
         try:
             env = engine.agent_process_env(self.backend, self.settings)
+            prompt = engine.agent_prompt_with_credentials(prompt, env)
             command = list(self.manager.agent_command(self, resume))
             if not command:
                 raise ValueError("Agent command is empty.")
@@ -903,6 +904,7 @@ class AuxSession:
                 force_refresh=False,
             )
             env = engine.agent_process_env("codex", settings)
+            prompt = engine.agent_prompt_with_credentials(prompt, env)
             command = engine.codex_app_server_command(settings)
             if self.manager.is_read_only_discussion(self):
                 command[1:1] = engine.aux_discussion_codex_args(settings)
@@ -1146,6 +1148,7 @@ class AuxSession:
             if read_only:
                 plan_settings = engine.aux_discussion_settings(plan_settings)
             env = engine.agent_process_env("claude", plan_settings)
+            prompt = engine.agent_prompt_with_credentials(prompt, env)
             executable = engine.resolve_agent_executable("claude", env)
             normalizer = engine.make_research_trace_normalizer("claude", "exec", plan_settings)
             with self.lock:

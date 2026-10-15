@@ -4887,6 +4887,11 @@ def agent_process_env(backend: str = "", provider_settings: dict[str, Any] | Non
     env = os.environ.copy()
     settings = load_ui_settings()
     env.update(settings.get("env", {}))
+    # gh gives GH_TOKEN precedence over GITHUB_TOKEN. A saved project PAT must
+    # override an unrelated host login for this child process only.
+    github_token = settings.get("env", {}).get("GITHUB_TOKEN")
+    if github_token:
+        env["GH_TOKEN"] = github_token
     normalize_agent_process_locale(env)
     # A managed project may itself live below an unrelated Git checkout (for
     # example, the dashboard's source tree during local development).  Keep
@@ -4960,6 +4965,22 @@ def agent_process_env(backend: str = "", provider_settings: dict[str, Any] | Non
 
 def codex_process_env() -> dict[str, str]:
     return agent_process_env("codex")
+
+
+def agent_prompt_with_credentials(prompt: str, env: dict[str, str]) -> str:
+    """Describe injected credential names without exposing values or storage."""
+    names = [key for key in ("GITHUB_TOKEN", "GH_TOKEN", "HF_TOKEN") if env.get(key)]
+    if not names:
+        return prompt
+    return prompt + "\n\nRuntime credentials:\n" + (
+        "- Available in the agent process environment: " + ", ".join(names) + ".\n"
+        "- Project Settings inject these credentials as environment variables, not as a credential file in the project. "
+        "Use the inherited variables for authenticated tools or API requests; gh reads GH_TOKEN before GITHUB_TOKEN.\n"
+        "- Check presence only before reporting a credential missing. Never print token values, put them in commands or URLs, "
+        "write them to project files, or search the service's settings/credential storage.\n"
+        "- If a tool cannot see a variable because of its environment policy or sandbox, report that restriction; "
+        "do not infer that a credential file is missing. Existing task, approval and sandbox restrictions still apply."
+    )
 
 
 def agent_executable_names(backend: str, windows: bool | None = None) -> list[str]:
@@ -22637,6 +22658,7 @@ def start_research_run(
     )
     emit_research_event("session", {"session_patch": session_patch})
 
+    prompt = agent_prompt_with_credentials(prompt, process_env)
     wrapper_path: Path | None = None
     proc: subprocess.Popen[str] | None = None
     try:
@@ -22812,6 +22834,7 @@ def start_plan_process(
     proc: subprocess.Popen[str] | None = None
     try:
         process_env = agent_process_env(backend, settings)
+        prompt = agent_prompt_with_credentials(prompt, process_env)
         popen_command, use_shell, wrapper_path = popen_command_for_agent(command, settings, process_env)
         proc = spawn_agent_process(
             popen_command,

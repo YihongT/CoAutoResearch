@@ -27,6 +27,10 @@ have your coding agent install and verify it.
 
 CoAutoResearch v2.0 requires Node.js 20 or newer and Python 3.10 or newer.
 
+On Windows, agent write-guard snapshots and recovery use extended-length file
+paths, so nested snapshot copies do not require enabling system long-path support.
+Other tools used by a project may still have their own path-length limits.
+
 ## Commands
 
 | Command | Purpose |
@@ -286,6 +290,8 @@ needs an appropriate external mechanism. No worker-side profiling timer is neede
 | `CODEX_BIN` | Alternate Codex executable path. |
 | `COAUTO_CLAUDE` | Explicit Claude Code executable path. |
 | `CLAUDE_BIN` | Alternate Claude Code executable path. |
+| `GITHUB_TOKEN` / `GH_TOKEN` | A GitHub token saved in project Settings is passed as both variables to that project's agent subprocesses, overriding inherited values. Without a saved project token, existing host environment values are preserved. |
+| `HF_TOKEN` | A Hugging Face token saved in project Settings is passed to agent subprocesses for model or dataset access. |
 | `OPENAI_API_KEY` | Used by the Codex `OpenAI API key` provider when no saved Settings key is present. Not passed to Claude Code runs. |
 | `ANTHROPIC_API_KEY` | Used by the Claude `Anthropic API key` provider when no saved Settings key is present. Not passed to Codex runs. |
 | `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` | Used by Claude gateway providers such as Z.AI GLM or custom Anthropic-compatible gateways. Not passed to Codex runs. |
@@ -301,3 +307,11 @@ needs an appropriate external mechanism. No worker-side profiling timer is neede
 | `COAUTO_REMOTE_AUTH_TOKEN` | Optional fixed remote access key; must contain at least 32 characters. If unset, `--remote` generates one for that process. |
 | `COAUTO_ALLOWED_HOSTS` | Comma-separated Host allowlist for an authenticated reverse-proxy deployment. |
 | `COAUTO_ALLOWED_ORIGINS` | Comma-separated browser Origin allowlist for state-changing requests through a reverse proxy. |
+
+Tokens saved in **Settings → Tokens & keys** remain in the service runtime,
+outside the project. Research, plan and chat agents receive the available
+variable names in their runtime instructions, never the token values. They
+should use inherited environment variables instead of searching for a PAT file.
+This does not configure system Git credentials or grant repository permissions.
+If an agent CLI's shell environment policy filters a token, the agent should
+report that restriction; CoAutoResearch does not override that policy.
