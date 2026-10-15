@@ -34,7 +34,37 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _filesystem_path(path: Path) -> Path:
+    """Use Windows extended paths for I/O, retaining logical guard locators.
+
+    Snapshot paths add several directories to an otherwise valid project path.
+    The extended namespace works without changing LongPathsEnabled. Keep it at
+    I/O boundaries so manifest paths and containment checks stay consistent.
+    """
+    if os.name != "nt":
+        return path
+    absolute = os.path.abspath(os.fspath(path))
+    if absolute.startswith(("\\\\?\\", "\\\\.\\")):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
+
+
+def _resolve_guard_path(path: Path, *, strict: bool) -> Path:
+    """Resolve through the filesystem namespace without changing logical paths."""
+    resolved = _filesystem_path(path).resolve(strict=strict)
+    if os.name == "nt" and not str(path).startswith(("\\\\?\\", "\\\\.\\")):
+        value = str(resolved)
+        if value.startswith("\\\\?\\UNC\\"):
+            return Path("\\\\" + value[8:])
+        if value.startswith("\\\\?\\"):
+            return Path(value[4:])
+    return resolved
+
+
 def _chmod_best_effort(path: Path, mode: int) -> None:
+    path = _filesystem_path(path)
     try:
         path.chmod(mode, follow_symlinks=False)
     except TypeError:
@@ -50,11 +80,13 @@ def _chmod_best_effort(path: Path, mode: int) -> None:
 
 
 def _private_dir(path: Path) -> None:
+    path = _filesystem_path(path)
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     _chmod_best_effort(path, 0o700)
 
 
 def _write_private_bytes(path: Path, data: bytes) -> None:
+    path = _filesystem_path(path)
     _private_dir(path.parent)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
@@ -144,7 +176,7 @@ def _sha256_file(path: Path) -> tuple[str, int]:
         return str(cached["sha256"]), int(cached["size"])
     digest = hashlib.sha256()
     size = 0
-    with path.open("rb") as handle:
+    with _filesystem_path(path).open("rb") as handle:
         while chunk := handle.read(_COPY_CHUNK):
             digest.update(chunk)
             size += len(chunk)
@@ -156,6 +188,8 @@ def _sha256_file(path: Path) -> tuple[str, int]:
 
 
 def _snapshot_file(source: Path, destination: Path) -> tuple[str, int]:
+    source = _filesystem_path(source)
+    destination = _filesystem_path(destination)
     _private_dir(destination.parent)
     identity = _stat_identity(source)
     cached = _cached_hash(identity)
@@ -421,12 +455,12 @@ def _protected_status(registry: PathRegistry, entries: dict[str, TreeEntry]) -> 
 
 def _validate_safe_run_dir(project_root: Path, run_dir: Path) -> Path:
     root = project_root.resolve(strict=True)
-    if run_dir.exists() and run_dir.is_symlink():
+    if _filesystem_path(run_dir).is_symlink():
         raise GuardError("guard run directory must not be a symlink")
-    resolved = run_dir.resolve(strict=False)
+    resolved = _resolve_guard_path(run_dir, strict=False)
     if resolved == root or _is_within(root, resolved):
         raise GuardError("guard run directory must be outside the agent project")
-    if (resolved / "baseline.json").exists():
+    if _filesystem_path(resolved / "baseline.json").exists():
         raise GuardError("guard run directory already contains a baseline")
     _private_dir(resolved)
     return resolved
@@ -506,8 +540,8 @@ def capture_agent_retry_baseline(
         entry = previous.entries.get(relative)
         if entry is None or entry.kind != "file" or not entry.backup_path:
             raise GuardError(f"prior retry anchor is not a recoverable file: {relative}")
-        source = (previous.run_dir / entry.backup_path).resolve(strict=False)
-        if not _is_within(previous.run_dir, source) or not source.is_file():
+        source = _resolve_guard_path(previous.run_dir / entry.backup_path, strict=False)
+        if not _is_within(previous.run_dir, source) or not _filesystem_path(source).is_file():
             raise GuardError(f"prior retry anchor escapes its guard directory: {relative}")
         digest, size = _sha256_file(source)
         if digest != entry.sha256 or size != entry.size:
@@ -519,9 +553,9 @@ def capture_agent_retry_baseline(
         if current_entry is not None:
             with _HASH_CACHE_LOCK:
                 _HASH_CACHE.pop(_entry_stat_identity(current.project_root, current_entry), None)
-        if destination.exists() or destination.is_symlink():
+        if _path_exists(destination):
             _remove_path(destination)
-        _write_private_bytes(destination, source.read_bytes())
+        _write_private_bytes(destination, _filesystem_path(source).read_bytes())
         entries[relative] = TreeEntry(
             path=entry.path,
             kind=entry.kind,
@@ -560,10 +594,10 @@ def capture_agent_retry_baseline(
 
 
 def _read_baseline_manifest(run_dir: str | Path) -> tuple[Path, Path, dict[str, Any]]:
-    safe_run_dir = Path(run_dir).resolve(strict=True)
+    safe_run_dir = _resolve_guard_path(Path(run_dir), strict=True)
     manifest_path = safe_run_dir / "baseline.json"
     try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload = json.loads(_filesystem_path(manifest_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise GuardError("agent baseline is missing or invalid") from exc
     if payload.get("format_version") != BASELINE_FORMAT_VERSION:
@@ -589,7 +623,7 @@ def baseline_matches_files(
         root != Path(project_root).resolve(strict=True)
         or registry.trial_id != trial_id
         or registry.attempt_id != attempt_id
-        or not _is_within(Path(guard_root).resolve(strict=True), safe_run_dir)
+        or not _is_within(_resolve_guard_path(Path(guard_root), strict=True), safe_run_dir)
     ):
         return False
     for relative, contents in files.items():
@@ -604,11 +638,11 @@ def baseline_matches_files(
         backup = safe_run_dir / locator
         if (
             not locator.startswith("baseline/files/")
-            or not _is_within(safe_run_dir, backup.resolve(strict=False))
-            or backup.is_symlink()
+            or not _is_within(safe_run_dir, _resolve_guard_path(backup, strict=False))
+            or _filesystem_path(backup).is_symlink()
             or entry.size != len(contents)
             or entry.sha256 != hashlib.sha256(contents).hexdigest()
-            or backup.read_bytes() != contents
+            or _filesystem_path(backup).read_bytes() != contents
         ):
             return False
     return True
@@ -625,7 +659,7 @@ def load_agent_baseline(run_dir: str | Path) -> AgentBaseline:
                 locator = normalize_relative_path(entry.backup_path)
             except UnsafeProjectPath as exc:
                 raise GuardError("baseline contains an unsafe recoverable-copy locator") from exc
-            backup = (safe_run_dir / locator).resolve(strict=False)
+            backup = _resolve_guard_path(safe_run_dir / locator, strict=False)
             if not _is_within(safe_run_dir, backup) or not locator.startswith("baseline/files/"):
                 raise GuardError("baseline recoverable copy escapes the guard run directory")
         if entry.kind != "file" or not entry.sha256:
@@ -637,7 +671,10 @@ def load_agent_baseline(run_dir: str | Path) -> AgentBaseline:
             continue
         if recorded_identity != current_identity:
             continue
-        if backup is not None and (not backup.is_file() or backup.is_symlink()):
+        if backup is not None and (
+            not _filesystem_path(backup).is_file()
+            or _filesystem_path(backup).is_symlink()
+        ):
             continue
         _remember_hash(
             current_identity,
@@ -744,10 +781,12 @@ def _tree_changes(
 
 
 def _path_exists(path: Path) -> bool:
+    path = _filesystem_path(path)
     return path.exists() or path.is_symlink()
 
 
 def _remove_path(path: Path) -> None:
+    path = _filesystem_path(path)
     if path.is_symlink() or path.is_file():
         path.unlink()
     elif path.is_dir():
@@ -832,7 +871,7 @@ def _restore_baseline_paths(baseline: AgentBaseline, paths: set[str]) -> tuple[l
                 if backup_hash != entry.sha256:
                     raise GuardError("recoverable copy hash mismatch")
                 fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with source.open("rb") as src, os.fdopen(fd, "wb") as dst:
+                with _filesystem_path(source).open("rb") as src, os.fdopen(fd, "wb") as dst:
                     shutil.copyfileobj(src, dst, _COPY_CHUNK)
                     dst.flush()
                     os.fsync(dst.fileno())

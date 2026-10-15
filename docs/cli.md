@@ -27,6 +27,10 @@ have your coding agent install and verify it.
 
 CoAutoResearch v2.0 requires Node.js 20 or newer and Python 3.10 or newer.
 
+On Windows, agent write-guard snapshots and recovery use extended-length file
+paths, so nested snapshot copies do not require enabling system long-path support.
+Other tools used by a project may still have their own path-length limits.
+
 ## Commands
 
 | Command | Purpose |

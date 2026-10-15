@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Support Windows guard snapshot and recovery paths beyond MAX_PATH without
+  requiring a system long-path setting change.
 - Tell research, plan and chat agents which credential environment variables are
   available without revealing their values. Give a saved project GitHub PAT
   precedence over an inherited GH_TOKEN for agent subprocesses.
