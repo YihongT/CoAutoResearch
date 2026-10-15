@@ -509,7 +509,7 @@ const secretKeyLabels = {
 };
 
 const secretKeyHelp = {
-  GITHUB_TOKEN: "Lets the selected agent inspect private repos or GitHub APIs when needed.",
+  GITHUB_TOKEN: "Passed as GITHUB_TOKEN and GH_TOKEN to agent processes for GitHub access; not stored as a project file.",
   HF_TOKEN: "Lets research scripts access private Hugging Face models, datasets, or gated artifacts.",
 };
 

@@ -4,6 +4,9 @@
 
 ### Fixes
 
+- Tell research, plan and chat agents which credential environment variables are
+  available without revealing their values. Give a saved project GitHub PAT
+  precedence over an inherited GH_TOKEN for agent subprocesses.
 - Fix native Windows project runtime writes failing with sharing violation 32
   during atomic rename; retain directory locks and file identity checks.
 - Preserve conversation history and edit drafts when a resend is rejected; update
