@@ -169,8 +169,7 @@ Contribuez en vérifiant une installation, signalant des bugs reproductibles, am
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>Citer CoAutoResearch</summary>
+### Citer CoAutoResearch
 
 Citez le logiciel et indiquez la version ou le commit utilisé.
 
@@ -178,11 +177,12 @@ Citez le logiciel et indiquez la version ou le commit utilisé.
 @software{coautoresearch,
   title = {CoAutoResearch},
   author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
 }
 ```
-
-</details>
 
 Sous licence Apache 2.0. Les outils et compétences tiers conservent leurs licences et obligations d’attribution.
 

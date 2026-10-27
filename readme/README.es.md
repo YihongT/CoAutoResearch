@@ -169,8 +169,7 @@ Ayuda a verificar instalaciones, informar de errores reproducibles, mejorar fluj
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>Citar CoAutoResearch</summary>
+### Citar CoAutoResearch
 
 Cita el software y registra la versión o el commit utilizado.
 
@@ -178,11 +177,12 @@ Cita el software y registra la versión o el commit utilizado.
 @software{coautoresearch,
   title = {CoAutoResearch},
   author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
 }
 ```
-
-</details>
 
 Licencia Apache 2.0. Las herramientas y habilidades de terceros conservan sus licencias y requisitos de atribución.
 

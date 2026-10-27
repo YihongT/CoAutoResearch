@@ -169,8 +169,7 @@ node bin/auto-research.js ui
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>Цитирование CoAutoResearch</summary>
+### Цитирование CoAutoResearch
 
 Цитируйте программу и указывайте использованную версию или commit.
 
@@ -178,11 +177,12 @@ node bin/auto-research.js ui
 @software{coautoresearch,
   title = {CoAutoResearch},
   author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
 }
 ```
-
-</details>
 
 Лицензия Apache 2.0. Сторонние инструменты и навыки сохраняют свои лицензии и требования к указанию авторства.
 

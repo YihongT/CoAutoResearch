@@ -169,8 +169,7 @@ PDF 生成には Python 3.12+、バージョン固定の四つの科学スキル
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>CoAutoResearch の引用</summary>
+### CoAutoResearch の引用
 
 ソフトウェアを引用し、使用したバージョンまたは commit を記録してください。
 
@@ -178,11 +177,12 @@ PDF 生成には Python 3.12+、バージョン固定の四つの科学スキル
 @software{coautoresearch,
   title = {CoAutoResearch},
   author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
 }
 ```
-
-</details>
 
 Apache 2.0 ライセンスです。上流のツールとスキルにはそれぞれのライセンスと帰属表示の条件が適用されます。
 
