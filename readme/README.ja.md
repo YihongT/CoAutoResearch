@@ -169,24 +169,9 @@ PDF 生成には Python 3.12+、バージョン固定の四つの科学スキル
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>CoAutoResearch の引用</summary>
+### CoAutoResearch の引用
 
 ソフトウェアを引用し、使用したバージョンまたは commit を記録してください。
-
-```bibtex
-@software{coautoresearch,
-  title = {CoAutoResearch},
-  author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
-}
-```
-
-</details>
-
-Apache 2.0 ライセンスです。上流のツールとスキルにはそれぞれのライセンスと帰属表示の条件が適用されます。
-
-連絡先: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
 
 ```bibtex
 @software{coautoresearch,
@@ -198,3 +183,7 @@ Apache 2.0 ライセンスです。上流のツールとスキルにはそれぞ
   license = {Apache-2.0}
 }
 ```
+
+Apache 2.0 ライセンスです。上流のツールとスキルにはそれぞれのライセンスと帰属表示の条件が適用されます。
+
+連絡先: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)

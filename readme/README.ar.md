@@ -289,35 +289,11 @@ node bin/auto-research.js ui
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>الاستشهاد بـ CoAutoResearch</summary>
+### الاستشهاد بـ CoAutoResearch
 
 <div dir="rtl">
 
 استشهد بالبرنامج وسجل الإصدار أو commit المستخدم.
-
-</div>
-
-```bibtex
-@software{coautoresearch,
-  title = {CoAutoResearch},
-  author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
-}
-```
-
-</details>
-
-<div dir="rtl">
-
-الترخيص Apache 2.0. تحتفظ الأدوات والمهارات الخارجية بتراخيصها ومتطلبات نسب العمل إلى أصحابه.
-
-</div>
-
-<div dir="rtl">
-
-التواصل: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
-
 
 </div>
 
@@ -331,3 +307,16 @@ node bin/auto-research.js ui
   license = {Apache-2.0}
 }
 ```
+
+<div dir="rtl">
+
+الترخيص Apache 2.0. تحتفظ الأدوات والمهارات الخارجية بتراخيصها ومتطلبات نسب العمل إلى أصحابه.
+
+</div>
+
+<div dir="rtl">
+
+التواصل: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
+
+
+</div>

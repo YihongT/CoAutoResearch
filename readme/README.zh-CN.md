@@ -169,24 +169,9 @@ node bin/auto-research.js ui
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>引用 CoAutoResearch</summary>
+### 引用 CoAutoResearch
 
 引用软件时，请记录使用的版本或 commit。
-
-```bibtex
-@software{coautoresearch,
-  title = {CoAutoResearch},
-  author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
-}
-```
-
-</details>
-
-采用 Apache 2.0 许可证。上游工具与技能保留各自的许可证和署名要求。
-
-联系: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
 
 ```bibtex
 @software{coautoresearch,
@@ -198,3 +183,7 @@ node bin/auto-research.js ui
   license = {Apache-2.0}
 }
 ```
+
+采用 Apache 2.0 许可证。上游工具与技能保留各自的许可证和署名要求。
+
+联系: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)

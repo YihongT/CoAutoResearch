@@ -169,24 +169,9 @@ node bin/auto-research.js ui
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>Цитирование CoAutoResearch</summary>
+### Цитирование CoAutoResearch
 
 Цитируйте программу и указывайте использованную версию или commit.
-
-```bibtex
-@software{coautoresearch,
-  title = {CoAutoResearch},
-  author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
-}
-```
-
-</details>
-
-Лицензия Apache 2.0. Сторонние инструменты и навыки сохраняют свои лицензии и требования к указанию авторства.
-
-Контакты: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
 
 ```bibtex
 @software{coautoresearch,
@@ -198,3 +183,7 @@ node bin/auto-research.js ui
   license = {Apache-2.0}
 }
 ```
+
+Лицензия Apache 2.0. Сторонние инструменты и навыки сохраняют свои лицензии и требования к указанию авторства.
+
+Контакты: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)

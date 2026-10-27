@@ -169,24 +169,9 @@ PDF 생성에는 Python 3.12+, 버전이 고정된 과학 스킬 네 개, LaTeX,
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>CoAutoResearch 인용</summary>
+### CoAutoResearch 인용
 
 소프트웨어를 인용하고 사용한 버전 또는 commit을 기록하세요.
-
-```bibtex
-@software{coautoresearch,
-  title = {CoAutoResearch},
-  author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
-}
-```
-
-</details>
-
-Apache 2.0 라이선스입니다. 상위 도구와 스킬에는 각자의 라이선스와 출처 표기 요건이 적용됩니다.
-
-연락처: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
 
 ```bibtex
 @software{coautoresearch,
@@ -198,3 +183,7 @@ Apache 2.0 라이선스입니다. 상위 도구와 스킬에는 각자의 라이
   license = {Apache-2.0}
 }
 ```
+
+Apache 2.0 라이선스입니다. 상위 도구와 스킬에는 각자의 라이선스와 출처 표기 요건이 적용됩니다.
+
+연락처: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)

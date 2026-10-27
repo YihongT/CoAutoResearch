@@ -169,24 +169,9 @@ Contribuez en vérifiant une installation, signalant des bugs reproductibles, am
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>Citer CoAutoResearch</summary>
+### Citer CoAutoResearch
 
 Citez le logiciel et indiquez la version ou le commit utilisé.
-
-```bibtex
-@software{coautoresearch,
-  title = {CoAutoResearch},
-  author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
-}
-```
-
-</details>
-
-Sous licence Apache 2.0. Les outils et compétences tiers conservent leurs licences et obligations d’attribution.
-
-Contact: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
 
 ```bibtex
 @software{coautoresearch,
@@ -198,3 +183,7 @@ Contact: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
   license = {Apache-2.0}
 }
 ```
+
+Sous licence Apache 2.0. Les outils et compétences tiers conservent leurs licences et obligations d’attribution.
+
+Contact: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)

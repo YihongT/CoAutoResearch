@@ -169,24 +169,9 @@ Hilf bei Installationsprüfungen, reproduzierbaren Fehlermeldungen, besseren For
 
 [Issues](https://github.com/YihongT/CoAutoResearch/issues) · [Contributing](../CONTRIBUTING.md) · [Translations](../readme/TRANSLATING.md) · [Security](../SECURITY.md) · [Code of conduct](../CODE_OF_CONDUCT.md)
 
-<details>
-<summary>CoAutoResearch zitieren</summary>
+### CoAutoResearch zitieren
 
 Zitiere die Software und dokumentiere die verwendete Version oder den Commit.
-
-```bibtex
-@software{coautoresearch,
-  title = {CoAutoResearch},
-  author = {CoAutoResearch contributors},
-  url = {https://github.com/YihongT/CoAutoResearch}
-}
-```
-
-</details>
-
-Lizenziert unter Apache 2.0. Externe Werkzeuge und Skills behalten ihre jeweiligen Lizenzen und Namensnennungspflichten.
-
-Kontakt: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
 
 ```bibtex
 @software{coautoresearch,
@@ -198,3 +183,7 @@ Kontakt: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
   license = {Apache-2.0}
 }
 ```
+
+Lizenziert unter Apache 2.0. Externe Werkzeuge und Skills behalten ihre jeweiligen Lizenzen und Namensnennungspflichten.
+
+Kontakt: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
