@@ -187,3 +187,14 @@ PDF 生成には Python 3.12+、バージョン固定の四つの科学スキル
 Apache 2.0 ライセンスです。上流のツールとスキルにはそれぞれのライセンスと帰属表示の条件が適用されます。
 
 連絡先: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
+
+```bibtex
+@software{coautoresearch,
+  title = {CoAutoResearch},
+  author = {CoAutoResearch contributors},
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
+}
+```

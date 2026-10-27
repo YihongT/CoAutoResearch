@@ -187,3 +187,14 @@ Cite o software e registre a versão ou o commit utilizado.
 Licenciado sob Apache 2.0. Ferramentas e habilidades de terceiros mantêm suas próprias licenças e exigências de atribuição.
 
 Contato: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
+
+```bibtex
+@software{coautoresearch,
+  title = {CoAutoResearch},
+  author = {CoAutoResearch contributors},
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
+}
+```

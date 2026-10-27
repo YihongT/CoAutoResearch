@@ -187,3 +187,14 @@ node bin/auto-research.js ui
 採用 Apache 2.0 授權。上游工具與技能保留各自的授權和署名要求。
 
 聯絡: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
+
+```bibtex
+@software{coautoresearch,
+  title = {CoAutoResearch},
+  author = {CoAutoResearch contributors},
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
+}
+```

@@ -187,3 +187,14 @@ PDF 생성에는 Python 3.12+, 버전이 고정된 과학 스킬 네 개, LaTeX,
 Apache 2.0 라이선스입니다. 상위 도구와 스킬에는 각자의 라이선스와 출처 표기 요건이 적용됩니다.
 
 연락처: [yihong.tang@mail.mcgill.ca](mailto:yihong.tang@mail.mcgill.ca)
+
+```bibtex
+@software{coautoresearch,
+  title = {CoAutoResearch},
+  author = {CoAutoResearch contributors},
+  version = {2.0.0},
+  year = {2026},
+  url = {https://github.com/YihongT/CoAutoResearch},
+  license = {Apache-2.0}
+}
+```
